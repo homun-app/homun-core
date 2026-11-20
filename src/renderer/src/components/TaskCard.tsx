@@ -9,6 +9,8 @@ import type { MessageDescriptor } from '@lingui/core'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 import type { TaskInfo } from '../../../shared/types'
 import { CardShell } from './DecidedRow'
+// P6 (fase uso-permessi): lo stato col SEGNO della barra, niente emoji
+import { StateSign } from './StateSign'
 
 const STATUS_LABEL: Record<TaskInfo['status'], MessageDescriptor> = {
   working: msg`in corso`,
@@ -23,6 +25,15 @@ const STATUS_CLS: Record<TaskInfo['status'], string> = {
   done: 'text-chart-2',
   failed: 'text-destructive',
   cancelled: 'text-muted-foreground'
+}
+
+/** P6 (fase uso-permessi): lo stato della card come stato della BARRA (StateSign, mai emoji). */
+const STATUS_SIGN: Record<TaskInfo['status'], 'lavora' | 'aspetta-te' | 'finito' | 'fermo'> = {
+  working: 'lavora',
+  needs_input: 'aspetta-te',
+  done: 'finito',
+  failed: 'fermo',
+  cancelled: 'fermo'
 }
 
 function fmtAgo(at: number, now: number): MessageDescriptor {
@@ -50,9 +61,10 @@ export function TaskCard({ entry }: { entry: TranscriptEntry }) {
     <CardShell>
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground"><Trans>Task</Trans></span>
-        <span className={`text-[11px] font-medium ${STATUS_CLS[status]}`}>
-          {status === 'working' ? '⏳' : status === 'needs_input' ? '❓' : status === 'done' ? '✓' : status === 'failed' ? '⚠' : '⛔'}
-          {' '}{i18n.t(STATUS_LABEL[status])}
+        {/* P6: il segno della barra accanto alla parola — mai emoji di stato */}
+        <span className={`flex items-center gap-1.5 text-[11px] font-medium ${STATUS_CLS[status]}`} data-testid="task-stato">
+          <StateSign state={STATUS_SIGN[status]} testid="task-segno" />
+          {i18n.t(STATUS_LABEL[status])}
         </span>
       </div>
       <p className="mt-1 text-sm text-foreground">{message.title}</p>

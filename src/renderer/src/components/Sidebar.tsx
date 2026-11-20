@@ -22,6 +22,8 @@ import {
   timeAgoShort, rowStateOf, SIDEBAR_ROW_LIMIT, TEAM_MEMBER_LIMIT,
   type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice, type RowState
 } from '../sidebar-utils'
+// P6 (fase uso-permessi): il segno di stato condiviso con le card della chat
+import { StateSign, rowStateName } from './StateSign'
 // fase 16b correzioni 2 (Q1): il massimo del trascinamento e i limiti della barra
 import { sidebarMaxFor, SIDEBAR_MIN, AUTO_RAIL_BELOW, TRAFFIC_LIGHT_INSET, type LayoutResult } from '../layout'
 import { avatarOf } from '../../../shared/avatar'
@@ -153,60 +155,6 @@ function ApprovalsRow() {
       <span className="min-w-0 flex-1 truncate"><Trans>Da approvare</Trans></span>
       {count > 0 && <span className="shrink-0 text-xs font-semibold tabular-nums text-waiting">{count}</span>}
     </button>
-  )
-}
-
-/** Il nome dello stato della riga, per i suggerimenti e gli aria-label (R2). */
-export function rowStateName(state: RowState): MessageDescriptor {
-  switch (state) {
-    case 'lavora':
-      return msg`lavora`
-    case 'aspetta-te':
-      return msg`aspetta te`
-    case 'finito':
-      return msg`finito`
-    default:
-      return msg`fermo`
-  }
-}
-
-/**
- * R2 (fase barra-sobria): IL SEGNO DI STATO a destra delle righe — gli stati
- * presi dalla mascotte, con i SUOI keyframes (styles.css: bot-dot, bot-wave,
- * bot-hop), solo scalati. lavora: tre puntini blu che saltellano (ritardi
- * 0/.15/.3); aspetta te: pallino arancio con l'onda; finito: arco verde con
- * UN saltello; fermo: nessun segno, solo il tempo. aria-label col nome.
- */
-function StateSign({ state, className, testid }: { state: RowState; className?: string; testid?: string }) {
-  const { i18n } = useLingui()
-  if (state === 'fermo') return null
-  return (
-    <span
-      className={`side-sign ${className ?? ''}`}
-      data-testid={testid}
-      data-state={state}
-      role="img"
-      aria-label={i18n.t(rowStateName(state))}
-    >
-      {state === 'lavora' && (
-        <span className="side-dots" aria-hidden="true">
-          <span className="side-dot" style={{ animationDelay: '0s' }} />
-          <span className="side-dot" style={{ animationDelay: '.15s' }} />
-          <span className="side-dot" style={{ animationDelay: '.3s' }} />
-        </span>
-      )}
-      {state === 'aspetta-te' && (
-        <span className="side-wait" aria-hidden="true">
-          <span className="side-wait-wave" />
-          <span className="side-wait-dot" />
-        </span>
-      )}
-      {state === 'finito' && (
-        <svg className="side-done" width="14" height="10" viewBox="0 0 14 10" aria-hidden="true">
-          <path d="M2 2 Q7 8 12 2" stroke="var(--guide-good)" strokeWidth="2.4" strokeLinecap="round" fill="none" />
-        </svg>
-      )}
-    </span>
   )
 }
 

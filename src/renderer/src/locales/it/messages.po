@@ -1205,7 +1205,7 @@ msgstr "aspetta da {0}"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/Sidebar.tsx
+#: src/renderer/src/components/StateSign.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "aspetta te"
 msgstr "aspetta te"
@@ -1213,6 +1213,10 @@ msgstr "aspetta te"
 #: src/renderer/src/bot/bot-state.ts
 msgid "Aspetta te"
 msgstr "Aspetta te"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "aspetta te: rispondi alle card qui sopra."
+msgstr "aspetta te: rispondi alle card qui sopra."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Aspetto"
@@ -2985,7 +2989,7 @@ msgid "fermato"
 msgstr "fermato"
 
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/Sidebar.tsx
+#: src/renderer/src/components/StateSign.tsx
 msgid "fermo"
 msgstr "fermo"
 
@@ -3076,7 +3080,7 @@ msgid "Finestra di consegna"
 msgstr "Finestra di consegna"
 
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/Sidebar.tsx
+#: src/renderer/src/components/StateSign.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "finito"
 msgstr "finito"
@@ -4017,17 +4021,9 @@ msgstr "In attesa del login nel browser…"
 msgid "notice.turnEndAwaitingUser"
 msgstr "In attesa della risposta dell’utente"
 
-#: src/renderer/src/components/SubagentCard.tsx
-msgid "in attesa della tua conferma"
-msgstr "in attesa della tua conferma"
-
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "in attesa di conferma"
 msgstr "in attesa di conferma"
-
-#: src/renderer/src/components/Chat.tsx
-msgid "In attesa di conferma: rispondi alle card qui sopra."
-msgstr "In attesa di conferma: rispondi alle card qui sopra."
 
 #: src/renderer/src/lib/computer-card.ts
 msgid "In avvio"
@@ -4492,7 +4488,7 @@ msgid "Lasciato passare dal revisore"
 msgstr "Lasciato passare dal revisore"
 
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/Sidebar.tsx
+#: src/renderer/src/components/StateSign.tsx
 msgid "lavora"
 msgstr "lavora"
 

@@ -20,6 +20,8 @@ import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, SubagentInfo
 import { CardShell } from './DecidedRow'
 import { ApprovalCard } from './ApprovalCard'
 import { activityPhrase } from '../lib/activity'
+// P6 (fase uso-permessi): lo stato col SEGNO della barra, niente emoji
+import { StateSign } from './StateSign'
 
 const STATUS_LABEL: Record<SubagentInfo['status'], MessageDescriptor> = {
   queued: msg`in coda`,
@@ -39,6 +41,20 @@ const STATUS_CLS: Record<SubagentInfo['status'], string> = {
   stopped: 'text-muted-foreground',
   'stopped-loop': 'text-destructive',
   expired: 'text-destructive'
+}
+
+/**
+ * P6 (fase uso-permessi): lo stato della card come stato della BARRA — lo
+ * stesso StateSign (lavora / aspetta te / finito / fermo), mai emoji.
+ */
+const STATUS_SIGN: Record<SubagentInfo['status'], 'lavora' | 'aspetta-te' | 'finito' | 'fermo'> = {
+  queued: 'fermo',
+  running: 'lavora',
+  done: 'finito',
+  failed: 'fermo',
+  stopped: 'fermo',
+  'stopped-loop': 'fermo',
+  expired: 'fermo'
 }
 
 function fmtAgo(at: number, now: number): MessageDescriptor {
@@ -81,13 +97,13 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
       <CardShell testid="card-aiutante">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-medium text-muted-foreground"><Trans>Aiutante</Trans></span>
+          {/* P6: il segno della barra accanto alla parola — mai emoji di stato */}
           <span
-            className={`text-[11px] font-medium ${waiting ? 'text-waiting' : STATUS_CLS[status]}`}
+            className={`flex items-center gap-1.5 text-[11px] font-medium ${waiting ? 'text-waiting' : STATUS_CLS[status]}`}
             data-testid="card-aiutante-stato"
           >
-            {waiting
-              ? `✋ ${t`in attesa della tua conferma`}`
-              : `${status === 'done' ? '✓' : status === 'failed' ? '⚠' : status === 'stopped' ? '⛔' : status === 'stopped-loop' ? '⏹' : status === 'expired' ? '⏱' : '⏳'} ${i18n.t(STATUS_LABEL[status])}`}
+            <StateSign state={waiting ? 'aspetta-te' : STATUS_SIGN[status]} testid="card-aiutante-segno" />
+            {waiting ? t`aspetta te` : i18n.t(STATUS_LABEL[status])}
           </span>
         </div>
         <p

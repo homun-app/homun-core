@@ -1205,7 +1205,7 @@ msgstr "waiting for {0}"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/Sidebar.tsx
+#: src/renderer/src/components/StateSign.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "aspetta te"
 msgstr "waiting for you"
@@ -1213,6 +1213,10 @@ msgstr "waiting for you"
 #: src/renderer/src/bot/bot-state.ts
 msgid "Aspetta te"
 msgstr "Waiting for you"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "aspetta te: rispondi alle card qui sopra."
+msgstr "waiting for you: answer the cards above."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Aspetto"
@@ -2985,7 +2989,7 @@ msgid "fermato"
 msgstr "stopped"
 
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/Sidebar.tsx
+#: src/renderer/src/components/StateSign.tsx
 msgid "fermo"
 msgstr "idle"
 
@@ -3076,7 +3080,7 @@ msgid "Finestra di consegna"
 msgstr "Delivery window"
 
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/Sidebar.tsx
+#: src/renderer/src/components/StateSign.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "finito"
 msgstr "done"
@@ -4017,17 +4021,9 @@ msgstr "Waiting for you to log in in the browser…"
 msgid "notice.turnEndAwaitingUser"
 msgstr "Waiting for the user’s reply"
 
-#: src/renderer/src/components/SubagentCard.tsx
-msgid "in attesa della tua conferma"
-msgstr "waiting for your confirmation"
-
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "in attesa di conferma"
 msgstr "waiting for confirmation"
-
-#: src/renderer/src/components/Chat.tsx
-msgid "In attesa di conferma: rispondi alle card qui sopra."
-msgstr "Waiting for confirmation: answer the cards above."
 
 #: src/renderer/src/lib/computer-card.ts
 msgid "In avvio"
@@ -4492,7 +4488,7 @@ msgid "Lasciato passare dal revisore"
 msgstr "Let through by the reviewer"
 
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/Sidebar.tsx
+#: src/renderer/src/components/StateSign.tsx
 msgid "lavora"
 msgstr "working"
 

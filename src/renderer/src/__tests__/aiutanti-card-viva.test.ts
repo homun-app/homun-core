@@ -63,7 +63,7 @@ beforeEach(() => {
 })
 
 describe('AH3: lo stato del figlio si vede senza ricaricare la chat', () => {
-  it('l\'evento subagents aggiorna la card: paused-for-approval → «in attesa della tua conferma»', async () => {
+  it('l\'evento subagents aggiorna la card: paused-for-approval → «aspetta te» (P6: il segno della barra)', async () => {
     // lo store: la card parte «al lavoro»…
     setStoreStateForRender(useStore, {
       activeId: 'bot-padre',
@@ -73,12 +73,12 @@ describe('AH3: lo stato del figlio si vede senza ricaricare la chat', () => {
     })
     const t1 = parseHtml(renderHtml(createElement(SubagentCard, { entry: subEntry })))
     expect(statoOf(t1)).toContain('al lavoro')
-    expect(statoOf(t1)).not.toContain('in attesa della tua conferma')
+    expect(statoOf(t1)).not.toContain('aspetta te')
     // …il daemon dice che il figlio si è fermato: l'evento subagents RICARICA la
     // lista (nessun reload della chat: le entries non si toccano)
     setStoreStateForRender(useStore, { subagents: [subOf({ agentStatus: 'paused-for-approval' })] })
     const t2 = parseHtml(renderHtml(createElement(SubagentCard, { entry: subEntry })))
-    expect(statoOf(t2)).toContain('in attesa della tua conferma')
+    expect(statoOf(t2)).toContain('aspetta te')
   })
 
   it('lo stato «in attesa» si DISTINGUE: classe del colore d\'attesa, non quella del lavoro', () => {

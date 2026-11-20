@@ -43,6 +43,8 @@ import { TaskCard } from './TaskCard'
 import { SubagentCard } from './SubagentCard'
 // P5 (fase uso-permessi): il brief del figlio come card «Compito affidato da <bot>»
 import { BriefCard } from './BriefCard'
+// P6 (fase uso-permessi): la riga di stato del turno col SEGNO della barra
+import { StateSign } from './StateSign'
 import { parseSubagentBrief } from '../../../shared/agent-message'
 // fase chat-limiti (CL3): la galleria delle foto mostrate dal tool show_images
 import { ImageGalleryCard } from './ImageGalleryCard'
@@ -1273,8 +1275,10 @@ function SubagentPanel() {
         </div>
       </div>
       {open && (
-        <p className="px-5 py-2 text-center text-[11px] text-muted-foreground">
-          {sub?.agentStatus === 'paused-for-approval' ? t`In attesa di conferma: rispondi alle card qui sopra.` : t`Al lavoro: le card di approvazione del figlio compaiono qui.`}
+        <p className="flex items-center justify-center gap-1.5 px-5 py-2 text-center text-[11px] text-muted-foreground">
+          {/* P6 (fase uso-permessi): la riga di stato del turno col SEGNO della barra */}
+          <StateSign state={sub?.agentStatus === 'paused-for-approval' ? 'aspetta-te' : 'lavora'} />
+          {sub?.agentStatus === 'paused-for-approval' ? t`aspetta te: rispondi alle card qui sopra.` : t`Al lavoro: le card di approvazione del figlio compaiono qui.`}
         </p>
       )}
     </div>
