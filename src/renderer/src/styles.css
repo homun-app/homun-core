@@ -320,15 +320,53 @@
 /* bot offline: spento e fermo */
 .bot--dimmed { filter: grayscale(1); opacity: .55; }
 
+/* ---------- fase barra-sobria (R2): i segni di stato della barra ----------
+ * Gli STATI, PRESI DALLA MASCOTTE (tavola 6, legenda): stessi keyframes di
+ * prima (bot-dot, bot-wave, bot-hop, il respiro bot-breathe del .bot-svg),
+ * solo SCALATI — nessun keyframe nuovo. Solo CSS/SVG: niente timer JS. */
+
+/* il segno a destra delle righe di bot e membri */
+.side-sign { display: inline-flex; align-items: center; justify-content: flex-end; min-width: 16px; }
+.side-dots { display: inline-flex; align-items: flex-end; gap: 3px; height: 12px; }
+.side-dot { width: 4px; height: 4px; border-radius: 9999px; background: var(--bot-c4); animation: bot-dot 1s ease-in-out infinite; }
+/* aspetta te: pallino arancio con l'onda che si allarga piano */
+.side-wait { position: relative; display: inline-grid; place-items: center; width: 16px; height: 16px; }
+.side-wait-dot { width: 8px; height: 8px; border-radius: 9999px; background: var(--waiting); }
+.side-wait-wave { position: absolute; inset: -2px; border-radius: 9999px; border: 2px solid var(--waiting); opacity: 0; animation: bot-wave 1.6s ease-out infinite; }
+/* finito: arco felice verde con UN saltello, una volta */
+.side-done { animation: bot-hop .7s cubic-bezier(.3,1.6,.5,1) 1; }
+
+/* il robottino della squadra (16 px): gli stati della mascotte, scalati */
+.side-robot { position: relative; display: inline-flex; }
+.side-robot--lavora .bot-svg { animation-duration: 2s; }  /* respiro ~2 s */
+.side-robot--fermo .bot-svg { animation-duration: 4s; }   /* respiro lento */
+.side-robot--finito .bot-svg { animation-iteration-count: 1; } /* un saltello solo */
+/* lavora: tre puntini blu che saltellano in alto a destra del robottino */
+.side-robot-dots { position: absolute; top: -4px; right: -6px; display: inline-flex; gap: 2px; }
+.side-robot-dot { width: 3px; height: 3px; border-radius: 9999px; background: var(--bot-c4); animation: bot-dot 1s ease-in-out infinite; }
+
+/* il segno PICCOLO sull'angolo dei cerchi della rotaia */
+.rail-sign .side-dot { width: 3px; height: 3px; }
+.rail-sign .side-dots { gap: 2px; height: 8px; }
+.rail-sign .side-wait { width: 10px; height: 10px; }
+.rail-sign .side-wait-dot { width: 5px; height: 5px; }
+.rail-sign .side-wait-wave { inset: -1px; }
+.rail-sign svg.side-done { width: 10px; height: 7px; }
+
 /* finestra nascosta (minimizzata o in altro spazio): le animazioni CSS si
    fermano (lo SMIL lo ferma il componente con svg.pauseAnimations()) —
    un'app che resta aperta tutto il giorno non consuma CPU per l'invisibile */
 .bots-paused .bot, .bots-paused .bot * { animation-play-state: paused !important; }
+.bots-paused .side-sign *, .bots-paused .side-robot * { animation-play-state: paused !important; }
 
 @media (prefers-reduced-motion: reduce) {
   .bot *, .bot-svg { animation: none !important; }
   /* il pallino di attenzione resta visibile, solo senza pulsazione */
   .bot-attn { animation: none; opacity: 1; }
+  /* fase barra-sobria (R2): i segni restano e si capiscono da fermi */
+  .side-dot, .side-robot-dot { animation: none !important; }
+  .side-wait-wave { animation: none !important; }
+  .side-done { animation: none !important; }
 }
 
 /*

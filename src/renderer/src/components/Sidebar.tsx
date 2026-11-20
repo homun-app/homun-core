@@ -153,7 +153,7 @@ function ApprovalsRow() {
   )
 }
 
-/** Il nome dello stato della riga, per i suggerimenti (R2 lo riusa per aria-label). */
+/** Il nome dello stato della riga, per i suggerimenti e gli aria-label (R2). */
 export function rowStateName(state: RowState): MessageDescriptor {
   switch (state) {
     case 'lavora':
@@ -167,14 +167,72 @@ export function rowStateName(state: RowState): MessageDescriptor {
   }
 }
 
-/** Il robottino piccolo della squadra: 16 px, famiglia e colore del coordinatore. */
-function TeamRobot({ team, state }: { team: SidebarTeam; state: BotState }) {
+/**
+ * R2 (fase barra-sobria): IL SEGNO DI STATO a destra delle righe — gli stati
+ * presi dalla mascotte, con i SUOI keyframes (styles.css: bot-dot, bot-wave,
+ * bot-hop), solo scalati. lavora: tre puntini blu che saltellano (ritardi
+ * 0/.15/.3); aspetta te: pallino arancio con l'onda; finito: arco verde con
+ * UN saltello; fermo: nessun segno, solo il tempo. aria-label col nome.
+ */
+function StateSign({ state, className, testid }: { state: RowState; className?: string; testid?: string }) {
+  const { i18n } = useLingui()
+  if (state === 'fermo') return null
+  return (
+    <span
+      className={`side-sign ${className ?? ''}`}
+      data-testid={testid}
+      data-state={state}
+      role="img"
+      aria-label={i18n.t(rowStateName(state))}
+    >
+      {state === 'lavora' && (
+        <span className="side-dots" aria-hidden="true">
+          <span className="side-dot" style={{ animationDelay: '0s' }} />
+          <span className="side-dot" style={{ animationDelay: '.15s' }} />
+          <span className="side-dot" style={{ animationDelay: '.3s' }} />
+        </span>
+      )}
+      {state === 'aspetta-te' && (
+        <span className="side-wait" aria-hidden="true">
+          <span className="side-wait-wave" />
+          <span className="side-wait-dot" />
+        </span>
+      )}
+      {state === 'finito' && (
+        <svg className="side-done" width="14" height="10" viewBox="0 0 14 10" aria-hidden="true">
+          <path d="M2 2 Q7 8 12 2" stroke="var(--guide-good)" strokeWidth="2.4" strokeLinecap="round" fill="none" />
+        </svg>
+      )}
+    </span>
+  )
+}
+
+/**
+ * Il robottino piccolo della squadra: 16 px, famiglia e colore del
+ * coordinatore — e lo stato AGGREGATO della squadra (R2): respira ~2 s e ha
+ * i tre puntini blu se lavora; occhi più grandi e pallino arancio con l'onda
+ * se aspetta te (lo stato waiting del Bot); un saltello solo se finito;
+ * respiro lento se fermo. Tutto con i keyframes che la mascotte usa già.
+ */
+function TeamRobot({ team }: { team: SidebarTeam }) {
+  const { i18n } = useLingui()
   const coordInfo = useBotInfo(team.coordinator?.id ?? null)
   if (!coordInfo) {
     return <span className="grid size-4 shrink-0 place-items-center rounded-full bg-muted text-[8px] text-muted-foreground">{team.group.name.slice(0, 1)}</span>
   }
+  const botState: BotState =
+    team.state === 'aspetta-te' ? 'waiting' : team.state === 'finito' ? 'happy' : 'idle'
   return (
-    <Bot family={coordInfo.avatar.family} color={coordInfo.avatar.color} state={state} size={16} track={false} dimmed={coordInfo.dimmed} />
+    <span className={`side-robot side-robot--${team.state}`} role="img" aria-label={i18n.t(rowStateName(team.state))}>
+      <Bot family={coordInfo.avatar.family} color={coordInfo.avatar.color} state={botState} size={16} track={false} dimmed={coordInfo.dimmed} />
+      {team.state === 'lavora' && (
+        <span className="side-robot-dots" aria-hidden="true">
+          <span className="side-robot-dot" style={{ animationDelay: '0s' }} />
+          <span className="side-robot-dot" style={{ animationDelay: '.15s' }} />
+          <span className="side-robot-dot" style={{ animationDelay: '.3s' }} />
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -220,9 +278,10 @@ function MainRow({ agent, childWaiting, preview, state }: { agent: Agent; childW
   )
 }
 
-/** Il tempo a destra della riga: «4m», «1g» (o il segno di stato, in R2). */
-function RightSide({ state, lastAt, now }: { state: BotState; lastAt: number | null; now: number }) {
-  if (rowStateOf(state) !== 'fermo') return null
+/** Il lato destro della riga: il SEGNO di stato (R2), o il tempo se fermo. */
+function RightSide({ state, childWaiting = false, lastAt, now }: { state: BotState; childWaiting?: boolean; lastAt: number | null; now: number }) {
+  const rs = rowStateOf(state, childWaiting)
+  if (rs !== 'fermo') return <StateSign state={rs} />
   const d = timeAgoShort(lastAt, now)
   return <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{i18n.t(d)}</span>
 }
@@ -240,8 +299,6 @@ function TeamRows({ team, states, lastSendAt, now }: { team: SidebarTeam; states
     team.members.map((m) => ({ member: m, waiting: states[m.id] === 'waiting', lastAt: lastSendAt[m.id] ?? m.createdAt }))
   )
   const cut = memberCut(members, allMembers)
-  const botStateOfTeam: BotState =
-    team.state === 'aspetta-te' ? 'waiting' : team.state === 'finito' ? 'happy' : 'idle'
   const tip = team.group.description
     ? `${team.group.name} · ${team.group.description}`
     : team.group.name
@@ -253,7 +310,7 @@ function TeamRows({ team, states, lastSendAt, now }: { team: SidebarTeam; states
           onClick={() => openGroup(team.group.id)}
           title={tip}
         >
-          <TeamRobot team={team} state={botStateOfTeam} />
+          <TeamRobot team={team} />
           <span className="min-w-0 flex-1 truncate text-[15px] leading-tight">{team.group.name}</span>
           {team.waitingCount > 0 && (
             <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-waiting" aria-label={i18n.t(msg`${team.waitingCount} ti aspettano`)}>{team.waitingCount}</span>
@@ -342,7 +399,7 @@ function BotRow({ bot, now }: { bot: SidebarBot; now: number }) {
     >
       <ColorDot agent={bot.agent} />
       <span className="min-w-0 flex-1 truncate text-sm">{bot.agent.name}</span>
-      <RightSide state={bot.state} lastAt={bot.lastAt} now={now} />
+      <RightSide state={bot.state} childWaiting={bot.childWaiting} lastAt={bot.lastAt} now={now} />
     </button>
   )
 }
@@ -488,13 +545,7 @@ function RailBotCircle({ agent, state }: { agent: Agent; state: BotState }) {
         {agent.name.slice(0, 1).toUpperCase()}
       </span>
       {rowStateOf(state) !== 'fermo' && (
-        <span
-          role="img"
-          aria-label={i18n.t(rowStateName(rowStateOf(state)))}
-          data-testid="rail-state-sign"
-          className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-card"
-          style={{ background: rowStateOf(state) === 'aspetta-te' ? 'var(--waiting)' : 'var(--bot-c4)' }}
-        />
+        <StateSign state={rowStateOf(state)} testid="rail-state-sign" className="rail-sign absolute -bottom-1 -right-1 rounded-full bg-card ring-2 ring-card" />
       )}
     </span>
   )
@@ -588,7 +639,7 @@ function CollapsedColumn({
             }}
           >
             {v.kind === 'team' ? (
-              <TeamRobot team={model.teams.find((t) => `g${t.group.id}` === v.key)!} state={model.teams.find((t) => `g${t.group.id}` === v.key)!.state === 'aspetta-te' ? 'waiting' : 'idle'} />
+              <TeamRobot team={model.teams.find((t) => `g${t.group.id}` === v.key)!} />
             ) : (
               <RailBotCircle agent={model.bots.find((b) => b.agent.id === v.key)!.agent} state={states[v.key] ?? 'idle'} />
             )}
