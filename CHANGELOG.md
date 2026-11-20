@@ -5,6 +5,30 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.11] — 2026-11-20
+
+Una barra più pulita per chi ha tanti bot, e l'icona nuova.
+
+### Novità
+
+- **La barra di sinistra è più sobria:** una riga per nome, senza
+  anteprime. Le squadre hanno il loro piccolo robottino, i bot un pallino
+  del loro colore. In alto restano Nuovo, Bot, Da approvare, Attività e
+  Libreria.
+- **Lo stato si vede da un piccolo segno animato**, lo stesso della
+  mascotte: i puntini quando un bot lavora, il pallino arancio quando
+  aspetta te, un saltello quando ha finito. Con «Riduci movimento» del Mac
+  restano fermi.
+- **Chi aspetta te sta in cima** e ogni sezione mostra i più recenti, con
+  «Mostra tutti» per il resto. L'ultimo messaggio lo vedi passandoci
+  sopra con il mouse.
+- **L'icona nuova di Homun,** nel Dock e nella barra dei menu.
+
+### Correzioni
+
+- **«Da approvare» non copre più la chat:** si chiude con «Chiudi» o
+  scegliendo un bot, una squadra, la Libreria o l'Attività.
+
 ## [0.3.1001-beta.10] — 2026-11-20
 
 Squadre di bot più autonome e tutte le richieste in un posto solo, in
