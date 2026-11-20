@@ -83,9 +83,12 @@ describe('Q1: write-file nei turni di squadra', () => {
     expect(v.kind).toBe('ask')
   })
 
-  it('senza squadra il write-file chiede come oggi (GUARDIA)', async () => {
+  it('senza squadra, nel box, il write-file DENTRO passa (P2: libero per ogni bot)', async () => {
+    // P2 (fase uso-permessi): la vecchia guardia «senza squadra chiede» non
+    // vale più — nel box il file dentro la radice è libero anche fuori dalle
+    // squadre; CHIEDE solo se l'autonomia della squadra è ask (test sopra)
     const v = await check('write-file', { path: '/workspace/x.md' }, 'agent_x')
-    expect(v.kind).toBe('ask')
+    expect(v.kind).toBe('allow')
   })
 
   it('una regola blocked dell\'utente NEGA anche nel box della squadra (vincono sempre)', async () => {
@@ -95,6 +98,53 @@ describe('Q1: write-file nei turni di squadra', () => {
     state.rules = [...defaultRules(), { tool: 'write-file', pattern: '/workspace', mode: 'blocked' }]
     const v = await check('write-file', { path: '/workspace/x.md' }, 'agent_x', squadBox)
     expect(v.kind).toBe('deny')
+  })
+})
+
+// ---- P2 (fase uso-permessi): i file dentro il computer isolato sono liberi per TUTTI ----
+
+describe('P2: nel box il write-file dentro la radice passa per OGNI bot e sottoagente', () => {
+  it('bot SINGOLO (niente squadra): /workspace e i relativi della home passano senza card', async () => {
+    for (const path of ['/workspace/torino/01_treni.md', 'appunti.md']) {
+      const v = await check('write-file', { path }, 'agent_x')
+      expect(v.kind, path).toBe('allow')
+    }
+  })
+
+  it('un SOTTOAGENTE (la home del figlio): stesso confine del padre, passa', async () => {
+    const v = await check('write-file', { path: '/workspace/x.md' }, 'sub_figlio')
+    expect(v.kind).toBe('allow')
+  })
+
+  it('fuori dal box (~/... del Mac) la card resta come oggi', async () => {
+    const v = await check('write-file', { path: '/Users/fabio/Desktop/colpo.md' }, 'agent_x')
+    expect(v.kind).toBe('ask')
+  })
+
+  it('in HOST la card resta come oggi (il confine è la modalità box)', async () => {
+    state.sandboxMode = 'host'
+    const v = await check('write-file', { path: '/workspace/x.md' }, 'agent_x')
+    expect(v.kind).toBe('ask')
+  })
+
+  it('copy_to_box / copy_from_box restano nell\'insieme fisso: chiedono sempre', async () => {
+    for (const tool of ['copy_to_box', 'copy_from_box']) {
+      const v = await check(tool, { path: '/workspace/x.md' }, 'agent_x')
+      expect(v.kind, tool).toBe('ask')
+    }
+  })
+
+  it('una regola blocked dell\'utente NEGA anche per il bot singolo nel box', async () => {
+    state.defaultRules = false
+    state.rules = [...defaultRules(), { tool: 'write-file', pattern: '/workspace', mode: 'blocked' }]
+    const v = await check('write-file', { path: '/workspace/x.md' }, 'agent_x')
+    expect(v.kind).toBe('deny')
+  })
+
+  it('la squadra resta COM\'ERA: box passa, autonomy ask chiede, fuori dal box chiede', async () => {
+    expect((await check('write-file', { path: '/workspace/x.md' }, 'agent_x', squadBox)).kind).toBe('allow')
+    expect((await check('write-file', { path: '/workspace/x.md' }, 'agent_x', squadAsk)).kind).toBe('ask')
+    expect((await check('write-file', { path: '/Users/fabio/Desktop/colpo.md' }, 'agent_x', squadBox)).kind).toBe('ask')
   })
 })
 

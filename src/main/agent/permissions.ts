@@ -542,6 +542,22 @@ export async function check(
     return { kind: 'allow', via: 'rule' }
   }
 
+  // P2 (fase uso-permessi): in modalità box (approvazioni in «Chiedi», come
+  // run-command con AH5) il write-file DENTRO la radice del box passa senza
+  // card per OGNI bot e sottoagente — il confine lo fa l'isolamento, con lo
+  // stesso bordo di Q1 (resolveBoxPath). Fuori dal box la card resta;
+  // copy_to_box/copy_from_box restano nell'insieme fisso (ramo loro). Le
+  // SQUADRE restano come Q1: con autonomia «ask» chiede anche qui.
+  if (
+    tool === 'write-file' &&
+    (!turn.squad || turn.squad.autonomy !== 'ask') &&
+    boxCommandNoAsk() &&
+    agentId &&
+    resolveBoxPath(String(input.path ?? ''), boxRoot(), boxDir(agentId), realpathSync).ok
+  ) {
+    return { kind: 'allow', via: 'rule' }
+  }
+
   // C5: in modalità host i tool di lettura sono always_allow (o coperti da
   // grant) SOLO per i path DENTRO il box condiviso (fase 11: la radice è
   // <dir dati>/box e vale per TUTTI i bot — relativi alla home, /workspace
