@@ -3891,8 +3891,22 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
           const { getInstallDeps } = await import('../connectors/install-bridge')
           const reason = String(input.reason ?? '')
+          // E4 (fase mcp-env): per npm: il bot dichiara le variabili richieste
+          // dal pacchetto (name/secret/description) e gli host da raggiungere
+          const envSpec = Array.isArray(input.env)
+            ? (input.env as Array<Record<string, unknown>>)
+                .filter((v) => v && typeof v.name === 'string' && v.name)
+                .map((v) => ({
+                  name: String(v.name),
+                  secret: v.secret === true,
+                  ...(typeof v.description === 'string' && v.description ? { description: v.description } : {})
+                }))
+            : []
+          const allowHosts = Array.isArray(input.allowHosts)
+            ? (input.allowHosts as unknown[]).filter((h): h is string => typeof h === 'string' && h.length > 0)
+            : []
           const built = call.name === 'add_mcp_server'
-            ? await (await import('../connectors/install')).buildMcpServerCard(String(input.id ?? ''), reason, getInstallDeps())
+            ? await (await import('../connectors/install')).buildMcpServerCard(String(input.id ?? ''), reason, getInstallDeps(), envSpec, allowHosts)
             : await (await import('../connectors/install')).buildPluginCard(String(input.id ?? ''), reason, getInstallDeps())
           if (!built.ok) {
             messages.push({ role: 'tool', toolCallId: call.id, content: built.error })

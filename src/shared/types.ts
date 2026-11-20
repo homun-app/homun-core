@@ -181,6 +181,10 @@ export type SendMessagePayload =
       trustDetail?: string
       siteUrl?: string
       runtime: { kind: 'remote'; host: string } | { kind: 'box-npm'; command: string }
+      /** E4 (fase mcp-env): gli host che il server npm potrà raggiungere dal box */
+      allowHosts?: string[]
+      /** E4 (fase mcp-env): i metadati del pacchetto npm per la conferma */
+      npmMeta?: { version: string; author: string | null; maintainers?: string[]; publishedAt: string | null; weeklyDownloads: number }
       needs:
         | { kind: 'oauth' }
         | { kind: 'key'; header: string }
@@ -2092,13 +2096,21 @@ export interface McpServerInfo {
   catalogId?: string
   /** fase 13 (punto 5): per quali bot è abilitato (['*'] = tutti) */
   enabledFor?: string[]
-  /** fase 13: da dove arriva il server (registro, plugin, gateway) */
+  /** fase 13: da dove arriva il server (registro, plugin, gateway, npm) */
   source?:
     | { kind: 'registry'; name: string; version?: string }
     | { kind: 'plugin'; plugin: string; marketplace: string; sha: string }
     | { kind: 'gateway'; preset?: string }
+    /** E4 (fase mcp-env): pacchetto npm proposto dal bot, versione FISSATA */
+    | { kind: 'npm'; package: string; version: string; allowHosts?: string[] }
   /** fase 13: server stdio che gira nel box (docker exec) */
   box?: { workdir: string; command: string; args?: string[]; envKeys?: string[] }
+  /**
+   * E4 (fase mcp-env): l'USCITA DI RETE del server nel box — SOLO gli host
+   * dichiarati (più registry.npmjs.org finché non è installato), dal proxy
+   * per-server. installedAt si segna al primo avvio riuscito.
+   */
+  egress?: { allowHosts: string[]; installedAt?: number }
   /**
    * fase 13 (correzione L1): la DICHIARAZIONE del server di plugin (template
    * pubblici del repository, placeholder NON sostituiti — mai valori dell'utente):

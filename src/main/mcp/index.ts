@@ -29,8 +29,12 @@ import { mcpCallIsRead } from '../connectors/tool-batch'
 import { callMcpWithRetry } from './retry'
 // E1 (fase mcp-env): il PATH dei comandi dei server stdio manuali
 import { lookupServerCommand } from './command-path'
+// E4 (fase mcp-env): l'uscita di rete dei server npm nel box (proxy per-server)
+import { ensureMcpEgressProxy, ensureMcpEgressProxyGateway, mcpEgressEnv, mcpEgressAllowHosts } from './egress-proxy'
 import { COMPOSIO_MULTI_EXECUTE_TOOL, forceSyncResponseToWorkbenchOff } from '../connectors/tool-batch'
 import { boxOwnerOf, ensureBoxContainer, ensureBotHome } from '../sandbox'
+// E4 (fase mcp-env): la rete del box (il gateway Apple decide l'indirizzo del proxy)
+import { sandboxNetwork } from '../sandbox'
 import type { ToolDef } from '../agent/llm'
 // fase 17c (C3/C5): lo stato needs_auth che la UI mostra è nel catalogo UI; trustKind per la vista Installati
 import { uiText } from '../ui-language'
@@ -55,6 +59,8 @@ export interface McpServerConfig {
     | { kind: 'registry'; name: string; version?: string }
     | { kind: 'plugin'; plugin: string; marketplace: string; sha: string }
     | { kind: 'gateway'; preset?: string }
+    /** E4 (fase mcp-env): pacchetto npm proposto dal bot, versione FISSATA */
+    | { kind: 'npm'; package: string; version: string; allowHosts?: string[] }
   /**
    * fase 13 (punto 2): server stdio che gira NEL BOX — docker exec con utente
    * e workdir del bot; `envKeys` passano come `-e NOME` col valore preso
@@ -78,6 +84,12 @@ export interface McpServerConfig {
   envSpec?: Array<{ name: string; secret: boolean }>
   /** E1: i valori NON segreti delle variabili dichiarate in envSpec */
   envValues?: Record<string, string>
+  /**
+   * E4 (fase mcp-env): l'USCITA DI RETE del server nel box — solo gli host
+   * dichiarati (+ registry.npmjs.org finché non installato), dal proxy
+   * per-server; installedAt al primo avvio riuscito.
+   */
+  egress?: { allowHosts: string[]; installedAt?: number }
   /**
    * fase mcp-setup (M1): il template `{var}` dell'URL di un remote del
    * registro (pubblico, dal registro stesso) e i valori NON segreti delle
@@ -294,6 +306,40 @@ function markNeedsAuth(cfg: McpServerConfig, message: string): void {
   setSetting('connectors.state', { ...all, [id]: { ...cur, status: 'needs_auth', error: message } })
 }
 
+/**
+ * E4 (fase mcp-env): l'env di USCITA di un server npm nel box — il proxy
+ * per-server (allowlist letta a OGNI richiesta: registry.npmjs.org sparisce
+ * da solo appena l'installazione è avvenuta), l'indirizzo come lo vede il
+ * box (docker: host.docker.internal; apple: il GATEWAY della rete vmnet) e
+ * la cache npm della cartella DEL SERVER. Col motore Apple senza gateway
+ * noto la connessione fallisce IN PAROLE, mai un proxy irraggiungibile.
+ */
+async function egressEnvOf(cfg: McpServerConfig): Promise<Record<string, string>> {
+  const egress = cfg.egress!
+  const installedNow = (): boolean => listServers().find((s) => s.id === cfg.id)?.egress?.installedAt !== undefined
+  const allow = (): readonly string[] => mcpEgressAllowHosts(egress.allowHosts, installedNow())
+  const port = await ensureMcpEgressProxy(cfg.id, allow)
+  let proxyUrl = `http://host.docker.internal:${port}`
+  if (activeBoxEngine().id === 'apple-container' && sandboxNetwork() === 'bridge') {
+    const { boxNetworkGateway, boxNetworkSubnet, ensureAppleBoxNetwork } = await import('../sandbox/apple-container-engine')
+    const { runDockerRaw } = await import('../sandbox')
+    let gw = boxNetworkGateway()
+    let subnet = boxNetworkSubnet()
+    if (!gw || !subnet) {
+      await ensureAppleBoxNetwork(runDockerRaw, 'bridge').catch(() => undefined)
+      gw = boxNetworkGateway()
+      subnet = boxNetworkSubnet()
+    }
+    if (!gw || !subnet) {
+      throw new Error('the isolated computer network gateway is unknown: this MCP server cannot have a limited network, it does not start')
+    }
+    const listen = await ensureMcpEgressProxyGateway(cfg.id, allow, gw, subnet)
+    proxyUrl = `http://${listen.host}:${listen.port}`
+  }
+  const base = cfg.box?.home ?? cfg.box?.workdir ?? ''
+  return mcpEgressEnv(proxyUrl, `${base}/mcp-npm/${toolSlugOf(cfg)}`)
+}
+
 async function connect(cfg: McpServerConfig): Promise<Client> {
   const client = new Client({ name: 'sandbot', version: '0.1.0' })
   if (cfg.transport === 'stdio') {
@@ -307,10 +353,15 @@ async function connect(cfg: McpServerConfig): Promise<Client> {
       await boxEnsure.ensureBox()
       if (owner) await boxEnsure.ensureHome(boxOwnerOf(owner))
       const a = await authResolver(cfg)
-      const argv = boxStdioArgv(cfg, a.stdioEnv)
+      // E4 (fase mcp-env): i server npm nel box escono SOLO dal proxy con
+      // l'allowlist del server (host dichiarati + registry.npmjs.org finché
+      // installa; HTTPS_PROXY/HTTP_PROXY/NO_PROXY + NODE_USE_ENV_PROXY e la
+      // cache npm della cartella del server)
+      const stdioEnv = cfg.egress ? { ...a.stdioEnv, ...(await egressEnvOf(cfg)) } : a.stdioEnv
+      const argv = boxStdioArgv(cfg, stdioEnv)
       await client.connect(
-        a.stdioEnv && Object.keys(a.stdioEnv).length
-          ? new StdioClientTransport({ command: activeBoxEngine().command(), args: argv, env: { ...activeBoxEngine().childEnv(process.env), ...a.stdioEnv } as Record<string, string> })
+        stdioEnv && Object.keys(stdioEnv).length
+          ? new StdioClientTransport({ command: activeBoxEngine().command(), args: argv, env: { ...activeBoxEngine().childEnv(process.env), ...stdioEnv } as Record<string, string> })
           : new StdioClientTransport({ command: activeBoxEngine().command(), args: argv })
       )
       return client
@@ -367,6 +418,17 @@ async function ensure(cfg: McpServerConfig, force = false): Promise<Cached> {
   // server dichiara tools.listChanged: uno strumento COMPOSIO_* NUOVO, che
   // non è in tabella, NON si offre al modello (fail closed) — lo si
   // classifica prima. I nomi senza prefisso restano come sono.
+  // E4 (fase mcp-env): il primo avvio riuscito di un server npm INSTALLA il
+  // pacchetto nella cache del box — da questo momento il proxy nega anche
+  // registry.npmjs.org (l'aggiornamento di versione è una card NUOVA)
+  if (cfg.egress && cfg.egress.installedAt === undefined) {
+    const all = listServers()
+    const i = all.findIndex((x) => x.id === cfg.id)
+    if (i !== -1 && all[i]!.egress?.installedAt === undefined) {
+      all[i] = { ...all[i]!, egress: { ...all[i]!.egress!, installedAt: Date.now() } }
+      saveServers(all)
+    }
+  }
   const offered = offeredMcpTools(res.tools ?? [])
   const tools: McpToolInfo[] = offered.map((t) => ({
     serverId: cfg.id,

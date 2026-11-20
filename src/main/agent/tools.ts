@@ -396,12 +396,30 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'add_mcp_server',
-    description: 'Proposes adding an MCP server (registry:<name> from search_connectors, or url:https://…): a card with name, trust and what it needs (OAuth, key, variables); added only by the user click.',
+    description: 'Proposes an MCP server: registry:<name>, url:https://…, or npm:<package>[@<version>] (pinned; isolated computer, network only to allowHosts). Card with trust and needs; user clicks to add.',
     parameters: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'registry:<name> (from search_connectors) or url:https://…' },
-        reason: { type: 'string', description: 'Why this server is needed (one sentence, shown in the card)' }
+        id: { type: 'string', description: 'registry:<name> (from search_connectors), url:https://… or npm:<package>[@<version>]' },
+        reason: { type: 'string', description: 'Why this server is needed (one sentence, shown in the card)' },
+        env: {
+          type: 'array',
+          description: 'npm: the environment variables the package needs',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Variable name (e.g. MATTERMOST_TOKEN)' },
+              secret: { type: 'boolean', description: 'true when the value is a secret (stored encrypted)' },
+              description: { type: 'string', description: 'What the variable is for (one line)' }
+            },
+            required: ['name']
+          }
+        },
+        allowHosts: {
+          type: 'array',
+          description: 'npm: the hosts the server must reach (e.g. ["mattermost.example.com"]); everything else is blocked',
+          items: { type: 'string' }
+        }
       },
       required: ['id', 'reason']
     }

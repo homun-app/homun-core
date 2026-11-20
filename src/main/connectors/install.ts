@@ -32,6 +32,8 @@ import {
   findRegistryEntry, registryEnvVars, registryRuntime, registrySiteUrl, registryTitle, registryTrust, registryIconDataUrl,
   type RegistryEntry, type RemoteHeaderRuntime
 } from './registry'
+// E4 (fase mcp-env): il registro npm per i server npm: proposti dal bot
+import { parseNpmServerId, fetchNpmPackageInfo, type NpmPackageInfo } from './npm-registry'
 import {
   argvPlaceholdersOf, dirStats, inspectPlugin, sourceSupported, stagePlugin, substitutePluginRoot, substituteUserConfig, userConfigKeysOf,
   type MarketplacePlugin, type PluginInspection, type PluginMcpServer
@@ -78,7 +80,9 @@ export interface GatewayPreset {
 export const GATEWAY_PRESETS = gatewayPresetsJson as GatewayPreset[]
 
 /** Un'id di server del registro o un URL proposto dal modello. */
-export function parseMcpServerId(id: string): { kind: 'registry'; name: string } | { kind: 'url'; url: string } | { error: string } {
+export function parseMcpServerId(id: string): { kind: 'registry'; name: string } | { kind: 'url'; url: string } | { kind: 'npm'; name: string; version?: string } | { error: string } {
+  // E4 (fase mcp-env): npm:<pacchetto>[@<versione>] — versione fissata dal daemon se manca
+  if (id.startsWith('npm:')) return parseNpmServerId(id)
   if (id.startsWith('registry:')) {
     const name = id.slice('registry:'.length)
     return name ? { kind: 'registry', name } : { error: 'registry id: no name' }
@@ -88,7 +92,7 @@ export function parseMcpServerId(id: string): { kind: 'registry'; name: string }
     if (!/^https:\/\//.test(url)) return { error: `the URL must be https: ${url}` }
     return { kind: 'url', url }
   }
-  return { error: 'invalid id: use registry:<name> (from search_connectors) or url:https://…' }
+  return { error: 'invalid id: use registry:<name> (from search_connectors), url:https://… or npm:<package>[@<version>]' }
 }
 
 /** Le dipendenze dell'installatore (tutto iniettabile per i test). */
@@ -97,6 +101,8 @@ export interface InstallDeps {
   marketplaces: Pick<MarketplaceManager, 'findPlugin' | 'cloneOf' | 'list'>
   /** cerca la voce ESATTA nel registro (fetch iniettabile) */
   findRegistryEntry(name: string): Promise<RegistryEntry | null>
+  /** E4 (fase mcp-env): i metadati del pacchetto npm (fetch iniettabile; default: il registro npm, sola lettura) */
+  findNpmPackage?(name: string, version?: string): Promise<NpmPackageInfo>
   listServers(): McpServerConfig[]
   saveServers(s: McpServerConfig[]): void
   /** connette il server e lista i tool (throwa su 401/errore) */
@@ -128,10 +134,51 @@ export interface InstallDeps {
 export async function buildMcpServerCard(
   id: string,
   reason: string,
-  deps: InstallDeps
+  deps: InstallDeps,
+  // E4 (fase mcp-env): le variabili richieste dal pacchetto npm e gli host
+  // che potrà raggiungere dal box (dichiarati dal bot che propone)
+  envSpec: Array<{ name: string; secret: boolean; description?: string }> = [],
+  allowHosts: string[] = []
 ): Promise<{ ok: true; card: McpServerCard } | { ok: false; error: string }> {
   const parsed = parseMcpServerId(id)
   if ('error' in parsed) return { ok: false, error: parsed.error }
+  // E4 (fase mcp-env): il pacchetto npm — versione FISSATA (se il bot non la
+  // dà, il daemon risolve l'ultima stabile UNA volta), metadati dal registro,
+  // fiducia «non verificato», gli host che potrà raggiungere e il modulo
+  // delle variabili; si installa SOLO al clic dell'utente
+  if (parsed.kind === 'npm') {
+    let info: NpmPackageInfo
+    try {
+      info = await (deps.findNpmPackage ?? fetchNpmPackageInfo)(parsed.name, parsed.version)
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+    const pinned = `npm:${info.name}@${info.version}`
+    return {
+      ok: true,
+      card: {
+        type: 'mcp-server',
+        id: pinned,
+        name: info.name,
+        technicalName: info.name,
+        publisher: info.author ?? info.maintainers[0] ?? info.name,
+        trust: 'unverified',
+        trustKind: 'unverified',
+        runtime: { kind: 'box-npm', command: `npx -y ${info.name}@${info.version}` },
+        allowHosts,
+        npmMeta: {
+          version: info.version,
+          author: info.author,
+          maintainers: info.maintainers,
+          publishedAt: info.publishedAt,
+          weeklyDownloads: info.weeklyDownloads
+        },
+        needs: { kind: 'env', vars: envSpec.map((v) => ({ name: v.name, required: true, ...(v.description ? { description: v.description } : {}) })) },
+        thirdPartyWarning: true,
+        ...(reason ? { reason } : {})
+      }
+    }
+  }
   if (parsed.kind === 'url') {
     const host = new URL(parsed.url).host
     return {
@@ -264,6 +311,8 @@ export type ServerIdSource =
   | { kind: 'url'; url: string }
   | { kind: 'plugin'; marketplace: string; plugin: string; server: string }
   | { kind: 'gateway'; name: string; url: string }
+  /** E4 (fase mcp-env): un aggiornamento di versione è un server DIVERSO */
+  | { kind: 'npm'; name: string; version: string }
 
 /** L'URL normalizzato (href canonico) che identifica una sorgente url/gateway. */
 function normalizedUrl(url: string): string {
@@ -276,7 +325,9 @@ export function serverIdFor(src: ServerIdSource): string {
     ? src.name
     : src.kind === 'plugin'
       ? `${src.marketplace}/${src.plugin}/${src.server}`
-      : normalizedUrl(src.url)
+      : src.kind === 'npm'
+        ? `npm/${src.name}@${src.version}`
+        : normalizedUrl(src.url)
   const label = src.kind === 'registry'
     ? src.name
     : src.kind === 'url'
@@ -418,6 +469,50 @@ export function missingSetupKeys(cfg: McpServerConfig, savedHeaders: Record<stri
  * header isSecret (needs_auth + modulo chiavi), regola 3 npm stdio (solo
  * docker, nel box, env dallo store cifrato).
  */
+/** Gli host dichiarati dalla card npm (E4): vuoti = solo il registro, finché installa. */
+function allowHostsOfCard(card: McpServerCard): string[] {
+  const c = card as { allowHosts?: string[] }
+  return Array.isArray(c.allowHosts) ? c.allowHosts.filter((h) => typeof h === 'string' && h.length > 0) : []
+}
+
+/**
+ * E4 (fase mcp-env): la cfg del server npm — stdio NEL BOX (npx -y
+ * <pacchetto>@<versione FISSATA>, la home del bot come workdir), le envKeys
+ * dalle variabili della card, l'EGRESS con gli host dichiarati e la fiducia
+ * «non verificato» (le regole dei connettori di oggi restano). La cache npm
+ * vive nella cartella DEL SERVER (mcp-npm/<toolSlug>): il primo avvio
+ * scarica dal registro, i successivi no.
+ */
+function npmServerCfg(
+  info: NpmPackageInfo,
+  card: McpServerCard,
+  agentId: string,
+  existing: McpServerConfig[],
+  allowHosts: string[]
+): McpServerConfig {
+  const id = serverIdFor({ kind: 'npm', name: info.name, version: info.version })
+  const vars = (card.needs.kind === 'env' ? card.needs.vars : []).map((v) => v.name)
+  return {
+    id,
+    name: info.name,
+    transport: 'stdio',
+    enabled: true,
+    toolSlug: toolSlugKeeping(existing, id, info.name),
+    box: {
+      workdir: boxHomePath(agentId),
+      home: boxHomePath(agentId),
+      command: 'npx',
+      args: ['-y', `${info.name}@${info.version}`],
+      envKeys: vars
+    },
+    egress: { allowHosts },
+    enabledFor: [agentId],
+    source: { kind: 'npm', package: info.name, version: info.version, ...(allowHosts.length ? { allowHosts } : {}) },
+    trustLabel: 'unverified',
+    trustKind: 'unverified'
+  }
+}
+
 export async function installMcpServer(
   card: McpServerCard,
   agentId: string,
@@ -437,6 +532,35 @@ export async function installMcpServer(
       trustKind: 'unverified'
     }
     return finishRemoteInstall(cfg, deps)
+  }
+  // E4 (fase mcp-env): il pacchetto npm — NEL BOX con l'uscita limitata
+  // agli host dichiarati, MAI sul Mac (niente ripiego silenzioso)
+  if (parsed.kind === 'npm') {
+    if (!deps.dockerMode()) return { ok: false, error: HOST_MODE_DISABLED }
+    let info: NpmPackageInfo
+    try {
+      info = await (deps.findNpmPackage ?? fetchNpmPackageInfo)(parsed.name, parsed.version)
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+    const cfg = npmServerCfg(info, card, agentId, deps.listServers(), allowHostsOfCard(card))
+    const slot = saveServerCfg(cfg, deps)
+    if (slot) return { ok: false, error: slot }
+    const saved = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.env).catch(() => null)) ?? {}
+    const missing = (cfg.box?.envKeys ?? []).filter((k) => !saved[k])
+    if (missing.length) {
+      cfg.needsAuth = { kind: 'env', keys: missing }
+      deps.saveServers([...deps.listServers().filter((x) => x.id !== cfg.id), cfg])
+      deps.onChange()
+      return { ok: true, message: `${cfg.name} added: the user completes the setup in the App window (the variables ${missing.join(', ')}). Do not ask for variables in chat; wait for the system message.` }
+    }
+    deps.onChange()
+    try {
+      const tools = await deps.toolsOfServer(cfg.id)
+      return { ok: true, message: serverInstalledMessage(cfg.name, tools) }
+    } catch (e) {
+      return { ok: false, error: `Server ${cfg.name} registered but does not start: ${e instanceof Error ? e.message : String(e)}` }
+    }
   }
   const entry = await deps.findRegistryEntry(parsed.name)
   if (!entry) return { ok: false, error: `registry entry not found: ${parsed.name}` }

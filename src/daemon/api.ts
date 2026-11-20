@@ -1562,7 +1562,9 @@ export function buildApiMethods(
         const sid = message.serverId
           ?? ('error' in parsed ? null
             : parsed.kind === 'registry' ? serverIdFor({ kind: 'registry', name: parsed.name })
-              : serverIdFor({ kind: 'url', url: parsed.url }))
+              : parsed.kind === 'npm'
+                ? serverIdFor({ kind: 'npm', name: parsed.name, version: parsed.version ?? '' })
+                : serverIdFor({ kind: 'url', url: parsed.url }))
         const cfg = sid ? (await mcp()).listServers().find((s) => s.id === sid) : null
         if (cfg && !cfg.needsAuth) await notifyMcpServerConnected([message.id], cfg, emit, worker)
       }
