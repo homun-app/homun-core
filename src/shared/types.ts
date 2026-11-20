@@ -1425,6 +1425,8 @@ export interface SandbotApi {
   bootStatus(): Promise<{ connected: boolean; restartingForUpdate: boolean }>
   /** W2: il bottone «Riprova» — rifà la connessione (e avvia il daemon se non c'è). */
   bootRetry(): Promise<{ ok: boolean; restarted: boolean }>
+  /** W3: SOLO sonde (SANDBOT_TEST_USER_DATA) — emette l'activate vero, come il clic sul Dock. */
+  testEmitActivate(): Promise<{ ok: boolean }>
   // fase 17a: il renderer avvisa che la lingua dell'interfaccia è cambiata
   // (il main ricostruisce tray e notifiche nella lingua attiva)
   uiLanguageChanged(lang: 'it' | 'en'): Promise<void>

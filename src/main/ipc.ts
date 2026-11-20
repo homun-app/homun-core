@@ -186,6 +186,14 @@ export function registerIpc(
   // «Riprova» rifà la connessione, riavviando il daemon se non c'è)
   ipcMain.handle('boot:status', () => boot?.status() ?? { connected: client.connected, restartingForUpdate: false })
   ipcMain.handle('boot:retry', () => boot?.retry() ?? Promise.resolve({ ok: true, restarted: false }))
+  // W3 (fase avvio-finestra): il gancio di prova delle sonde — il clic sul
+  // Dock non si può simulare altrimenti. SOLO con SANDBOT_TEST_USER_DATA
+  // (fuori dalle prove l'handler rifiuta), emette l'activate VERO
+  ipcMain.handle('test:emit-activate', () => {
+    if (!process.env.SANDBOT_TEST_USER_DATA) throw new Error('test:emit-activate è solo delle sonde (SANDBOT_TEST_USER_DATA)')
+    app.emit('activate')
+    return { ok: true }
+  })
   // fase skill (S4): «Mostra nel Finder» — apre la cartella della skill nella
   // libreria (shell è di Electron, sta qui e non nel daemon RPC)
   ipcMain.handle('skills:show-in-finder', (_e, name: string) => {

@@ -301,6 +301,12 @@ const api: SandbotApi = {
   // il daemon si avvia — canali LOCALI del main
   bootStatus: () => ipcRenderer.invoke('boot:status'),
   bootRetry: () => ipcRenderer.invoke('boot:retry'),
+  /**
+   * W3 (fase avvio-finestra): gancio delle SONDE — emette l'activate vero
+   * (il clic sul Dock non si può simulare altrimenti). Rifiuta fuori dalle
+   * prove (SANDBOT_TEST_USER_DATA).
+   */
+  testEmitActivate: () => ipcRenderer.invoke('test:emit-activate'),
   // fase 17a (L5): il main ricostruisce il tray nella lingua scelta
   uiLanguageChanged: (lang) => ipcRenderer.invoke('ui:language-changed', lang),
   onEvent: (cb) => {
