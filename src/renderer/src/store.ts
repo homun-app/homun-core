@@ -348,6 +348,22 @@ interface Store {
     autonomy?: GroupAutonomy
   }): Promise<void>
   groupDelete(groupId: number): Promise<void>
+  /**
+   * K2 (fase team-bot): archivia/ripristina bot e team, elimina con l'avviso
+   * «Eliminato · Annulla» (10 s) e il recupero in «Archiviati › Eliminati».
+   */
+  archiveAgent(id: string): Promise<void>
+  unarchiveAgent(id: string): Promise<void>
+  restoreAgent(id: string): Promise<void>
+  deleteAgentWithUndo(id: string): Promise<void>
+  groupArchive(groupId: number): Promise<void>
+  groupUnarchive(groupId: number): Promise<void>
+  groupRestore(groupId: number): Promise<void>
+  groupDeleteWithUndo(groupId: number, alsoDeleteMembers?: boolean): Promise<void>
+  undoRemoved(): Promise<void>
+  setSidebarArchivedOpen(v: boolean): void
+  /** K2: dopo archivia/elimina, se il bot attivo non è più vivo si seleziona il primo vivo */
+  selectFallbackAlive(): void
   init(): Promise<void>
   select(agentId: string): Promise<void>
   /**
@@ -500,6 +516,16 @@ interface Store {
   /** G6: segna il passo Pronto raggiunto per la guida corrente (startedAt) */
   setGuideReadyAt: (startedAt: number | null) => void
   sidebarCollapsed: boolean
+  /**
+   * K2 (fase team-bot): la sezione «Archiviati» della barra aperta o chiusa
+   * (chiusa di default; la scelta vive finché la finestra vive).
+   */
+  sidebarArchivedOpen: boolean
+  /**
+   * K2 (fase team-bot): l'avviso «Eliminato · Annulla» — l'elemento appena
+   * eliminato, recuperabile col bottone entro `expiresAt` (10 secondi).
+   */
+  removedUndo: { kind: 'bot' | 'team'; id: string; name: string; expiresAt: number } | null
   sidebarWidth: number
   /** la scheda aperta nel pannello del bot (decide la larghezza wide di Computer) */
   panelTab: PanelTabId
@@ -608,6 +634,9 @@ export const useStore = create<Store>((set, get) => ({
   windowWidth: typeof window !== 'undefined' ? window.innerWidth : 1280,
   guideReadyAt: null,
   sidebarCollapsed: readLS(SIDEBAR_COLLAPSED_KEY) === '1',
+  // K2 (fase team-bot): «Archiviati» chiusa di default; nessun avviso attivo
+  sidebarArchivedOpen: false,
+  removedUndo: null,
   sidebarWidth: (() => {
     const v = Number(readLS(SIDEBAR_WIDTH_KEY))
     return Number.isFinite(v) && v >= SIDEBAR_MIN && v <= SIDEBAR_MAX ? v : 264
@@ -1522,8 +1551,108 @@ export const useStore = create<Store>((set, get) => ({
     const groups = await api.listGroups().catch(() => get().groups)
     // la squadra aperta, se è lei, si chiude
     set({ groups, ...(get().openGroupId === groupId ? { openGroupId: null, groupMessages: [] } : {}) })
+  },
+
+  // ---- K2 (fase team-bot): archiviare, eliminare, ripristinare ----
+
+  setSidebarArchivedOpen(v) {
+    set({ sidebarArchivedOpen: v })
+  },
+
+  /** dopo archivia/elimina: se il bot attivo non è più vivo, si seleziona il primo che lo è */
+  selectFallbackAlive() {
+    const s = get()
+    const live = s.agents.filter((a) => !a.parentId && !a.archivedAt && !a.deletedAt)
+    if (live.some((a) => a.id === s.activeId)) return
+    const fallback = live.find((a) => a.id === s.mainAgentId) ?? live[0]
+    if (fallback) void get().select(fallback.id)
+  },
+
+  async archiveAgent(id) {
+    await api.archiveAgent(id).catch((e) => console.error('archiveAgent:', e instanceof Error ? e.message : e))
+    const agents = (await api.listAgents().catch(() => null)) ?? get().agents
+    set({ agents })
+    get().selectFallbackAlive()
+  },
+
+  async unarchiveAgent(id) {
+    await api.unarchiveAgent(id).catch((e) => console.error('unarchiveAgent:', e instanceof Error ? e.message : e))
+    const agents = (await api.listAgents().catch(() => null)) ?? get().agents
+    set({ agents })
+  },
+
+  async restoreAgent(id) {
+    await api.restoreAgent(id).catch((e) => console.error('restoreAgent:', e instanceof Error ? e.message : e))
+    const agents = (await api.listAgents().catch(() => null)) ?? get().agents
+    set({ agents })
+  },
+
+  async deleteAgentWithUndo(id) {
+    const name = get().agents.find((a) => a.id === id)?.name ?? ''
+    await api.deleteAgent(id).catch((e) => console.error('deleteAgent:', e instanceof Error ? e.message : e))
+    const agents = (await api.listAgents().catch(() => null)) ?? get().agents
+    set({ agents })
+    // l'avviso «Eliminato · Annulla» vive 10 secondi, poi si spegne da sé
+    armRemovedUndo({ kind: 'bot', id, name, expiresAt: Date.now() + 10_000 })
+    get().selectFallbackAlive()
+  },
+
+  async groupArchive(groupId) {
+    await api.groupArchive(groupId).catch((e) => console.error('groupArchive:', e instanceof Error ? e.message : e))
+    const groups = (await api.listGroups().catch(() => null)) ?? get().groups
+    set({ groups, ...(get().openGroupId === groupId ? { openGroupId: null, groupMessages: [] } : {}) })
+  },
+
+  async groupUnarchive(groupId) {
+    await api.groupUnarchive(groupId).catch((e) => console.error('groupUnarchive:', e instanceof Error ? e.message : e))
+    const groups = (await api.listGroups().catch(() => null)) ?? get().groups
+    set({ groups })
+  },
+
+  async groupRestore(groupId) {
+    await api.groupRestore(groupId).catch((e) => console.error('groupRestore:', e instanceof Error ? e.message : e))
+    const groups = (await api.listGroups().catch(() => null)) ?? get().groups
+    set({ groups })
+  },
+
+  async groupDeleteWithUndo(groupId, alsoDeleteMembers = false) {
+    const name = get().groups.find((g) => g.id === groupId)?.name ?? ''
+    await api.groupDelete(groupId, alsoDeleteMembers).catch((e) => console.error('groupDelete:', e instanceof Error ? e.message : e))
+    const [groups, agents] = await Promise.all([
+      api.listGroups().catch(() => null),
+      api.listAgents().catch(() => null)
+    ])
+    set({ groups: groups ?? get().groups, agents: agents ?? get().agents, ...(get().openGroupId === groupId ? { openGroupId: null, groupMessages: [] } : {}) })
+    armRemovedUndo({ kind: 'team', id: String(groupId), name, expiresAt: Date.now() + 10_000 })
+    get().selectFallbackAlive()
+  },
+
+  async undoRemoved() {
+    const u = get().removedUndo
+    if (!u) return
+    clearRemovedUndoTimer()
+    set({ removedUndo: null })
+    if (u.kind === 'bot') await get().restoreAgent(u.id)
+    else await get().groupRestore(Number(u.id))
   }
 }))
+
+/** K2: il timer dell'avviso «Eliminato · Annulla» (10 secondi). */
+let removedUndoTimer: ReturnType<typeof setTimeout> | null = null
+function clearRemovedUndoTimer(): void {
+  if (removedUndoTimer) {
+    clearTimeout(removedUndoTimer)
+    removedUndoTimer = null
+  }
+}
+function armRemovedUndo(u: { kind: 'bot' | 'team'; id: string; name: string; expiresAt: number }): void {
+  clearRemovedUndoTimer()
+  useStore.setState({ removedUndo: u })
+  removedUndoTimer = setTimeout(() => {
+    removedUndoTimer = null
+    useStore.setState({ removedUndo: null })
+  }, 10_000)
+}
 
 export { api }
 

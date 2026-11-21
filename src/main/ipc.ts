@@ -34,6 +34,8 @@ import type { SandbotEvent } from '../shared/types'
 /** Canali inoltrati 1:1 al daemon (nomi = metodi RPC). */
 export const DAEMON_RPC_CHANNELS = [
   'agents:list', 'agents:create', 'agents:update', 'agents:delete', 'agents:set-main',
+  // K2 (fase team-bot): archiviazione ed eliminazione morbide (menu «⋯»)
+  'agents:archive', 'agents:unarchive', 'agents:restore',
   'agents:entries', 'chat:send', 'chat:interrupt',
   // fase 19a: lo schermo del bot (vista dal vivo e presa di controllo)
   'screen:open', 'screen:release', 'screen:status',
@@ -56,6 +58,8 @@ export const DAEMON_RPC_CHANNELS = [
   'groups:list', 'groups:messages', 'groups:send-user',
   // fase 16b (S1.3): squadre create e modificate dalla UI
   'groups:create', 'groups:update', 'groups:delete', 'groups:pending-approvals', 'groups:approval-cards', 'groups:overview',
+  // K2 (fase team-bot): archiviazione ed eliminazione morbide dei team
+  'groups:archive', 'groups:unarchive', 'groups:restore',
   'memory:list', 'memory:delete',
   // fase memoria-engramma (M6): la sezione Memoria sul motore
   'memory:overview', 'memory:search', 'memory:note', 'memory:save', 'memory:confirm', 'memory:discard',

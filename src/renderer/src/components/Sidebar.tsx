@@ -15,8 +15,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon, PanelLeftClose, PanelLeftOpen, ShieldCheck } from 'lucide-react'
-import { useStore, useResolvedModel } from '../store'
+import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon, PanelLeftClose, PanelLeftOpen, ShieldCheck, MoreHorizontal } from 'lucide-react'
+import { useStore, useResolvedModel, api } from '../store'
 import {
   buildSidebarModel, collapsedVoices, teamOpenState, teamAutoOpens, orderRows, cutRows, memberCut,
   timeAgoShort, rowStateOf, SIDEBAR_ROW_LIMIT, TEAM_MEMBER_LIMIT,
@@ -34,6 +34,7 @@ import { botStateFor, isStreaming, type BotState } from '../bot/bot-state'
 import { i18n } from '../lib/i18n'
 import type { UiTheme } from '../theme'
 import { NewBotDialog } from './BotDialogs'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger,
@@ -237,6 +238,142 @@ function RightSide({ state, childWaiting = false, lastAt, now }: { state: BotSta
   return <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{i18n.t(d)}</span>
 }
 
+/**
+ * K2 (fase team-bot): la rinomina IN LINEA — il nome della riga diventa un
+ * campo; Invio salva, Esc (e la sfocatura) annullano. Ci arriva dal
+ * «Rinomina» del menu della riga e dal doppio clic sul nome (K3).
+ */
+function InlineName({ name, testid, onCommit, onCancel }: { name: string; testid: string; onCommit(v: string): void; onCancel(): void }) {
+  const [v, setV] = useState(name)
+  return (
+    <input
+      data-testid={testid}
+      autoFocus
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') onCommit(v.trim() || name)
+        else if (e.key === 'Escape') onCancel()
+      }}
+      onBlur={() => onCancel()}
+      className="no-drag min-w-0 flex-1 rounded-md bg-muted px-1.5 py-0.5 text-[13.5px] leading-none outline-none"
+    />
+  )
+}
+
+/**
+ * K2 (fase team-bot): il menu della riga per bot e team — si apre col
+ * bottone «⋯» (visibile al passaggio del mouse, gruppo `group` sulla riga) e
+ * con il TASTO DESTRO sulla riga stessa (onContextMenu del contenitore, che
+ * comanda questo stato `open`). Voci: Rinomina · Archivia · Elimina; per i
+ * team anche «Apri impostazioni del team» (autonomia e membri). Il bot
+ * PRINCIPALE non lo riceve mai.
+ */
+function RowMenu(props: {
+  open: boolean
+  onOpenChange(v: boolean): void
+  agentId?: string
+  groupId?: number
+  onRename(): void
+  onArchive(): void
+  onDelete(): void
+  /** solo per i team: autonomia e membri */
+  onSettings?: () => void
+}) {
+  const { t } = useLingui()
+  return (
+    <DropdownMenu open={props.open} onOpenChange={props.onOpenChange}>
+      <DropdownMenuTrigger asChild>
+        <button
+          data-testid="row-more"
+          {...(props.agentId !== undefined ? { 'data-agent': props.agentId } : {})}
+          {...(props.groupId !== undefined ? { 'data-group': String(props.groupId) } : {})}
+          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+          aria-label={t`Altre azioni`}
+          title={t`Altre azioni`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <MoreHorizontal className="size-4" aria-hidden="true" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" onCloseAutoFocus={(e) => e.preventDefault()}>
+        {props.onSettings && (
+          <>
+            <DropdownMenuItem onClick={props.onSettings}><Trans>Apri impostazioni del team</Trans></DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem onClick={props.onRename}><Trans>Rinomina</Trans></DropdownMenuItem>
+        <DropdownMenuItem onClick={props.onArchive}><Trans>Archivia</Trans></DropdownMenuItem>
+        <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={props.onDelete}><Trans>Elimina</Trans></DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/**
+ * K2 (fase team-bot): la conferma chiara dell'eliminazione — cosa si
+ * cancella e cosa RESTA, la casella (solo per i team, spenta di default) per
+ * portare via anche i bot creati per quel team. Chi conferma passa dallo
+ * stesso percorso del menu: l'avviso «Eliminato · Annulla» per 10 secondi e
+ * il recupero di 30 giorni.
+ */
+function DeleteConfirmDialog({ target, onClose }: { target: { kind: 'bot'; id: string; name: string } | { kind: 'team'; id: number; name: string }; onClose(): void }) {
+  const [alsoMembers, setAlsoMembers] = useState(false)
+  const isTeam = target.kind === 'team'
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-sm" data-testid="delete-confirm">
+        <DialogHeader>
+          <DialogTitle className="text-lg">
+            {isTeam ? <Trans>Elimina il team {target.name}?</Trans> : <Trans>Elimina {target.name}?</Trans>}
+          </DialogTitle>
+          <DialogDescription className="text-left text-[13px] leading-snug">
+            {isTeam
+              ? <Trans>Si cancellano la timeline del team e le sue impostazioni. I bot restano.</Trans>
+              : <Trans>Si cancellano la sua chat, la memoria e le routine. I documenti nella Libreria restano.</Trans>}
+          </DialogDescription>
+        </DialogHeader>
+        {isTeam && (
+          <label className="flex cursor-pointer items-center gap-2 rounded-[10px] bg-muted px-3 py-2 text-[13px]">
+            <input
+              type="checkbox"
+              checked={alsoMembers}
+              data-testid="delete-confirm-members"
+              onChange={(e) => setAlsoMembers(e.target.checked)}
+            />
+            <Trans>Elimina anche i bot creati per questo team</Trans>
+          </label>
+        )}
+        <DialogFooter>
+          <button
+            className="rounded-[10px] bg-muted px-3.5 py-1.5 text-sm transition hover:bg-accent"
+            data-testid="delete-confirm-cancel"
+            onClick={onClose}
+          >
+            <Trans>Annulla</Trans>
+          </button>
+          <button
+            className="rounded-[10px] bg-destructive/10 px-3.5 py-1.5 text-sm font-medium text-destructive transition hover:bg-destructive/20"
+            data-testid="delete-confirm-ok"
+            onClick={() => {
+              const s = useStore.getState()
+              if (isTeam) void s.groupDeleteWithUndo((target as { id: number }).id, alsoMembers)
+              else void s.deleteAgentWithUndo((target as { id: string }).id)
+              onClose()
+            }}
+          >
+            <Trans>Elimina</Trans>
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 /** La riga UNA della squadra + i membri aperti, rientrati (tavola 6). */
 function TeamRows({ team, states, lastSendAt, now }: { team: SidebarTeam; states: Record<string, BotState>; lastSendAt: Record<string, number>; now: number }) {
   const { i18n } = useLingui()
@@ -255,20 +392,37 @@ function TeamRows({ team, states, lastSendAt, now }: { team: SidebarTeam; states
       lastAt: lastSendAt[m.id] ?? m.createdAt
     }))
   )
+  // K2 (fase team-bot): il menu della riga del team («⋯» e tasto destro),
+  // la rinomina in linea e la conferma dell'eliminazione
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const commitRename = (v: string): void => {
+    setRenaming(false)
+    if (v && v !== team.group.name) {
+      void api.groupUpdate(team.group.id, { name: v }).catch(() => undefined)
+      useStore.setState({ groups: useStore.getState().groups.map((g) => (g.id === team.group.id ? { ...g, name: v } : g)) })
+    }
+  }
   const cut = memberCut(members, allMembers)
   const tip = team.group.description
     ? `${team.group.name} · ${team.group.description}`
     : team.group.name
   return (
     <div>
-      <div className={`flex items-center gap-1 rounded-lg pl-2.5 pr-1 text-left transition ${openGroupId === team.group.id ? 'bg-muted' : 'hover:bg-muted/60'}`}>
+      <div
+        className={`group flex items-center gap-1 rounded-lg pl-2.5 pr-1 text-left transition ${openGroupId === team.group.id ? 'bg-muted' : 'hover:bg-muted/60'}`}
+        onContextMenu={(e) => { e.preventDefault(); setMenuOpen(true) }}
+      >
         <button
           className="flex min-h-[30px] min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
           onClick={() => openGroup(team.group.id)}
           title={tip}
         >
           <TeamRobot team={team} />
-          <span className={`min-w-0 flex-1 truncate text-[13.5px] ${open || openGroupId === team.group.id ? 'font-semibold' : ''}`}>{team.group.name}</span>
+          {renaming
+            ? <InlineName name={team.group.name} testid="team-rename" onCommit={commitRename} onCancel={() => setRenaming(false)} />
+            : <span className={`min-w-0 flex-1 truncate text-[13.5px] ${open || openGroupId === team.group.id ? 'font-semibold' : ''}`}>{team.group.name}</span>}
           {team.waitingCount > 0 && (
             <span className="shrink-0 text-xs font-semibold tabular-nums text-waiting" aria-label={i18n.t(msg`${team.waitingCount} ti aspettano`)}>{team.waitingCount}</span>
           )}
@@ -288,7 +442,17 @@ function TeamRows({ team, states, lastSendAt, now }: { team: SidebarTeam; states
             <ChevronRight className={`size-3.5 transition-transform ${open ? 'rotate-90' : ''}`} />
           </button>
         )}
+        <RowMenu
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          groupId={team.group.id}
+          onRename={() => setRenaming(true)}
+          onArchive={() => void useStore.getState().groupArchive(team.group.id)}
+          onDelete={() => setDeleting(true)}
+          onSettings={() => openGroup(team.group.id)}
+        />
       </div>
+      {deleting && <DeleteConfirmDialog target={{ kind: 'team', id: team.group.id, name: team.group.name }} onClose={() => setDeleting(false)} />}
       {open && (
         <div className="flex flex-col pl-5">
           {cut.visible.map(({ member }) => (
@@ -318,18 +482,45 @@ function MemberRow({ member, state, lastAt, now }: { member: Agent; state: BotSt
   const openGroup = useStore((s) => s.openGroup)
   const select = useStore((s) => s.select)
   const previews = useStore((s) => s.previews)
+  // K2 (fase team-bot): menu, rinomina in linea e conferma dell'eliminazione
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const preview = previews[member.id]
   const tip = [typeof preview === 'string' ? preview : preview ? i18n.t(preview) : '', i18n.t(rowStateName(rowStateOf(state)))].filter(Boolean).join(' · ')
+  const commitRename = (v: string): void => {
+    setRenaming(false)
+    if (v && v !== member.name) {
+      void api.updateAgent(member.id, { name: v }).catch(() => undefined)
+      useStore.setState({ agents: useStore.getState().agents.map((a) => (a.id === member.id ? { ...a, name: v } : a)) })
+    }
+  }
   return (
-    <button
-      className="flex min-h-[28px] items-center gap-2 rounded-lg px-2.5 py-1 text-left text-[13.5px] transition hover:bg-muted/60"
-      onClick={() => { openGroup(null); void select(member.id) }}
-      title={tip || member.name}
+    <div
+      className="group flex items-center gap-1 rounded-lg pr-1 transition hover:bg-muted/60"
+      onContextMenu={(e) => { e.preventDefault(); setMenuOpen(true) }}
     >
-      <ColorDot agent={member} />
-      <span className="min-w-0 flex-1 truncate">{member.name}</span>
-      <RightSide state={state} lastAt={lastAt} now={now} />
-    </button>
+      <button
+        className="flex min-h-[28px] min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1 text-left text-[13.5px]"
+        onClick={() => { openGroup(null); void select(member.id) }}
+        title={tip || member.name}
+      >
+        <ColorDot agent={member} />
+        {renaming
+          ? <InlineName name={member.name} testid="member-rename" onCommit={commitRename} onCancel={() => setRenaming(false)} />
+          : <span className="min-w-0 flex-1 truncate">{member.name}</span>}
+        <RightSide state={state} lastAt={lastAt} now={now} />
+      </button>
+      <RowMenu
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        agentId={member.id}
+        onRename={() => setRenaming(true)}
+        onArchive={() => void useStore.getState().archiveAgent(member.id)}
+        onDelete={() => setDeleting(true)}
+      />
+      {deleting && <DeleteConfirmDialog target={{ kind: 'bot', id: member.id, name: member.name }} onClose={() => setDeleting(false)} />}
+    </div>
   )
 }
 
@@ -340,24 +531,51 @@ function BotRow({ bot, now }: { bot: SidebarBot; now: number }) {
   const activeId = useStore((s) => s.activeId)
   const openGroupId = useStore((s) => s.openGroupId)
   const previews = useStore((s) => s.previews)
+  // K2 (fase team-bot): menu della riga, rinomina in linea, conferma
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   if (!info) return null
   const preview = previews[bot.agent.id]
   const tip = [
     typeof preview === 'string' ? preview : preview ? i18n.t(preview) : i18n.t(info.statusText),
     i18n.t(rowStateName(rowStateOf(bot.state, bot.childWaiting)))
   ].filter(Boolean).join(' · ')
+  const commitRename = (v: string): void => {
+    setRenaming(false)
+    if (v && v !== bot.agent.name) {
+      void api.updateAgent(bot.agent.id, { name: v }).catch(() => undefined)
+      useStore.setState({ agents: useStore.getState().agents.map((a) => (a.id === bot.agent.id ? { ...a, name: v } : a)) })
+    }
+  }
   return (
-    <button
-      onClick={() => void select(bot.agent.id)}
-      className={`${ROW} ${
+    <div
+      className={`group flex items-center gap-1 rounded-lg transition ${
         bot.agent.id === activeId && openGroupId === null ? 'bg-muted' : 'hover:bg-muted/60'
       }`}
-      title={tip}
+      onContextMenu={(e) => { e.preventDefault(); setMenuOpen(true) }}
     >
-      <ColorDot agent={bot.agent} />
-      <span className="min-w-0 flex-1 truncate">{bot.agent.name}</span>
-      <RightSide state={bot.state} childWaiting={bot.childWaiting} lastAt={bot.lastAt} now={now} />
-    </button>
+      <button
+        onClick={() => void select(bot.agent.id)}
+        className="flex min-h-[30px] min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13.5px]"
+        title={tip}
+      >
+        <ColorDot agent={bot.agent} />
+        {renaming
+          ? <InlineName name={bot.agent.name} testid="bot-rename" onCommit={commitRename} onCancel={() => setRenaming(false)} />
+          : <span className="min-w-0 flex-1 truncate">{bot.agent.name}</span>}
+        <RightSide state={bot.state} childWaiting={bot.childWaiting} lastAt={bot.lastAt} now={now} />
+      </button>
+      <RowMenu
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        agentId={bot.agent.id}
+        onRename={() => setRenaming(true)}
+        onArchive={() => void useStore.getState().archiveAgent(bot.agent.id)}
+        onDelete={() => setDeleting(true)}
+      />
+      {deleting && <DeleteConfirmDialog target={{ kind: 'bot', id: bot.agent.id, name: bot.agent.name }} onClose={() => setDeleting(false)} />}
+    </div>
   )
 }
 
@@ -378,6 +596,81 @@ function ShowAllRow({ hidden, feminine, expanded, onToggle }: { hidden: number; 
           ? i18n.t(msg`Mostra tutte (${total})`)
           : i18n.t(msg`Mostra tutti (${total})`)}
     </button>
+  )
+}
+
+/**
+ * K2 (fase team-bot): la sezione «Archiviati» in fondo alla barra — chiusa
+ * di default, col conteggio; dentro, i bot e i team archiviati (col loro
+ * «Ripristina») e la sottosezione «Eliminati» (recuperabili per 30 giorni).
+ */
+function ArchivedSection({ model }: { model: SidebarModel }) {
+  const open = useStore((s) => s.sidebarArchivedOpen)
+  const setOpen = useStore((s) => s.setSidebarArchivedOpen)
+  const r = model.removed
+  const total = r.archivedTeams.length + r.archivedBots.length + r.deletedTeams.length + r.deletedBots.length
+  if (total === 0) return null
+  const restoreRow = (kind: 'agent' | 'group', id: string | number, name: string, deleted: boolean): React.ReactNode => (
+    <div key={`${kind}-${id}`} className="flex min-h-[28px] items-center gap-2 rounded-lg px-2.5 py-1 text-left text-[13px] text-muted-foreground">
+      <span className="min-w-0 flex-1 truncate">{name}</span>
+      <button
+        data-testid={`archived-restore-${kind}-${id}`}
+        className="shrink-0 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+        onClick={() => {
+          const s = useStore.getState()
+          if (kind === 'group') void (deleted ? s.groupRestore(Number(id)) : s.groupUnarchive(Number(id)))
+          else void (deleted ? s.restoreAgent(String(id)) : s.unarchiveAgent(String(id)))
+        }}
+      >
+        <Trans>Ripristina</Trans>
+      </button>
+    </div>
+  )
+  return (
+    <div className="mt-2">
+      <button
+        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-xs text-muted-foreground transition hover:bg-muted/60"
+        aria-expanded={open}
+        data-testid="archived-section"
+        onClick={() => setOpen(!open)}
+      >
+        <ChevronRight className={`size-3.5 transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true" />
+        <Trans>Archiviati</Trans>
+        <span className="tabular-nums">{total}</span>
+      </button>
+      {open && (
+        <div className="flex flex-col pl-2">
+          {r.archivedTeams.map((t) => restoreRow('group', t.id, t.name, false))}
+          {r.archivedBots.map((a) => restoreRow('agent', a.id, a.name, false))}
+          {(r.deletedTeams.length + r.deletedBots.length) > 0 && (
+            <p className="px-2.5 pb-0.5 pt-2 text-[11px] text-muted-foreground/70"><Trans>Eliminati</Trans></p>
+          )}
+          {r.deletedTeams.map((t) => restoreRow('group', t.id, t.name, true))}
+          {r.deletedBots.map((a) => restoreRow('agent', a.id, a.name, true))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * K2 (fase team-bot): l'avviso dell'eliminazione — «Eliminato · <nome>» col
+ * bottone «Annulla», per 10 secondi (lo spegne il timer dello store). Sta
+ * in fondo alla barra, larga o stretta che sia.
+ */
+function RemovedUndoPill() {
+  const undo = useStore((s) => s.removedUndo)
+  if (!undo) return null
+  return (
+    <div data-testid="removed-undo" className="absolute bottom-[76px] left-2 right-2 z-40 flex items-center gap-2 rounded-xl bg-foreground px-3 py-2 text-background shadow-soft">
+      <span className="min-w-0 flex-1 truncate text-xs"><Trans>Eliminato</Trans> · {undo.name}</span>
+      <button
+        className="shrink-0 rounded-full bg-background/15 px-2.5 py-1 text-xs font-semibold transition hover:bg-background/25"
+        onClick={() => void useStore.getState().undoRemoved()}
+      >
+        <Trans>Annulla</Trans>
+      </button>
+    </div>
   )
 }
 
@@ -915,6 +1208,9 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
                 </div>
               )
             })}
+
+            {/* K2 (fase team-bot): «Archiviati» in fondo — chiusa di default */}
+            <ArchivedSection model={model} />
           </nav>
 
           {/* fase barra-sobria (R1): in fondo CHI SEI, il modello e
@@ -924,6 +1220,9 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
           </div>
         </>
       )}
+
+      {/* K2 (fase team-bot): l'avviso «Eliminato · Annulla» (10 secondi) */}
+      <RemovedUndoPill />
 
       {/* fase 16c correzioni (R7): la ricerca della rotaia, sospesa in alto a
           sinistra (sopra le voci); filtra le voci come nella barra larga */}

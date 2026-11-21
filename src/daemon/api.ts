@@ -180,6 +180,75 @@ async function sendAppName(tool: string): Promise<string> {
   return ''
 }
 
+/**
+ * K2 (fase team-bot): il percorso di eliminazione DURA di un bot — righe,
+ * memoria dimenticata in coda, righe di sistema per i gruppi che eleggono
+ * un nuovo coordinatore. È quello che faceva agents:delete; oggi lo chiama
+ * la PULIZIA dei 30 giorni (purgeRemoved), dopo la finestra di recupero.
+ */
+async function hardDeleteAgent(id: string, emit: (e: import('../shared/types').SandbotEvent) => void, worker: { poke(): void }): Promise<void> {
+  loop.interrupt(id)
+  cancelAgentJobs(db(), id)
+  const elections = store.deleteAgent(id)
+  // fase memoria-engramma (M5): memorie e storia del bot eliminato si
+  // purgano IN CODA (job memory-forget-agent: la purga è lenta)
+  const { enqueueForgetAgent } = await import('../main/memory/engine')
+  enqueueForgetAgent(db(), id)
+  worker.poke()
+  // fase 16b (S1.1): i gruppi che hanno eletto un nuovo coordinatore
+  // ricevono la riga di sistema nel gruppo
+  if (elections.length) {
+    const groups = await import('../main/store/groups')
+    const { coordinatorNowText } = await import('../main/agent/group-turns')
+    for (const el of elections) {
+      const name = store.getAgent(el.coordinatorId)?.name ?? el.coordinatorId
+      groups.addGroupMessage({
+        groupId: el.groupId, authorKind: 'system', authorId: null, authorName: 'sistema',
+        text: coordinatorNowText(name)
+      })
+    }
+    emit({ type: 'groups' })
+  }
+  emit({ type: 'agents' })
+}
+
+/** K2: il bot principale non si archivia né si elimina — rifiuto dal daemon. */
+function refuseMainAgent(id: string): void {
+  if (store.getSetting<string | null>('mainAgentId', null) === id) throw uiError(UI.rpcAgentIsMain)
+}
+
+/** K2: la finestra di recupero dell'eliminazione (30 giorni, come il cestino del Mac). */
+export const REMOVED_RETENTION_MS = store.REMOVED_RETENTION_MS
+
+/**
+ * K2: la pulizia dei rimossi — i bot e i team eliminati da più di 30 giorni
+ * si cancellano DAVVERO (percorso duro). Il tempo passa da `now` (orologio
+ * finto nei test); il tick del daemon la chiama ogni 30 s, la SQL è leggera.
+ */
+export async function purgeRemoved(opts: {
+  emit: (e: import('../shared/types').SandbotEvent) => void
+  worker: { poke(): void }
+  now?: number
+}): Promise<{ agents: number; groups: number }> {
+  const now = opts.now ?? Date.now()
+  let agents = 0
+  for (const id of store.expiredRemovedAgentIds(now)) {
+    await hardDeleteAgent(id, opts.emit, opts.worker)
+    agents++
+  }
+  let groups = 0
+  if (true) {
+    const groupsMod = await import('../main/store/groups')
+    for (const gid of groupsMod.expiredRemovedGroupIds(now, REMOVED_RETENTION_MS)) {
+      groupsMod.deleteGroup(db(), gid)
+      groups++
+    }
+  }
+  if (agents) opts.emit({ type: 'agents' })
+  if (groups) opts.emit({ type: 'groups' })
+  return { agents, groups }
+}
+
 export function buildApiMethods(
   emit: Emitter,
   worker: JobWorker,
@@ -440,30 +509,40 @@ export function buildApiMethods(
       store.updateAgent(id as string, patch as Parameters<typeof store.updateAgent>[1])
       emit({ type: 'agents' })
     },
+    // K2 (fase team-bot): eliminazione MORBIA — il turno si ferma, i job
+    // escono dalla coda, le routine si fermano e il bot prende deleted_at.
+    // Chat, memoria e routine restano TUTTE al loro posto: recuperabile in
+    // «Archiviati › Eliminati» per 30 giorni, poi purgeRemoved chiama il
+    // percorso duro (hardDeleteAgent). Mai sul bot principale.
     'agents:delete': async ([id]) => {
+      refuseMainAgent(id as string)
       loop.interrupt(id as string)
       cancelAgentJobs(db(), id as string)
-      const elections = store.deleteAgent(id as string)
-      // fase memoria-engramma (M5): memorie e storia del bot eliminato si
-      // purgano IN CODA (job memory-forget-agent: la purga è lenta)
-      const { enqueueForgetAgent } = await import('../main/memory/engine')
-      enqueueForgetAgent(db(), id as string)
-      worker.poke()
-      // fase 16b (S1.1): i gruppi che hanno eletto un nuovo coordinatore
-      // ricevono la riga di sistema nel gruppo
-      if (elections.length) {
-        const groups = await import('../main/store/groups')
-        const { coordinatorNowText } = await import('../main/agent/group-turns')
-        for (const el of elections) {
-          const name = store.getAgent(el.coordinatorId)?.name ?? el.coordinatorId
-          groups.addGroupMessage({
-            groupId: el.groupId, authorKind: 'system', authorId: null, authorName: 'sistema',
-            text: coordinatorNowText(name)
-          })
-        }
-        emit({ type: 'groups' })
-      }
+      store.pauseRoutinesOfAgent(id as string)
+      store.setAgentDeleted(id as string, Date.now())
       emit({ type: 'agents' })
+    },
+    // K2: archivia — stesso fermo (turni e routine) ma NIENTE si perde e il
+    // bot torna com'era col Ripristina (le routine restano in pausa: decide
+    // l'utente se riaccenderle)
+    'agents:archive': ([id]) => {
+      refuseMainAgent(id as string)
+      loop.interrupt(id as string)
+      cancelAgentJobs(db(), id as string)
+      store.pauseRoutinesOfAgent(id as string)
+      store.setAgentArchived(id as string, Date.now())
+      emit({ type: 'agents' })
+      return { ok: true }
+    },
+    'agents:unarchive': ([id]) => {
+      store.setAgentArchived(id as string, null)
+      emit({ type: 'agents' })
+      return { ok: true }
+    },
+    'agents:restore': ([id]) => {
+      store.setAgentDeleted(id as string, null)
+      emit({ type: 'agents' })
+      return { ok: true }
     },
     // fase 7: il bot principale è UNO (setting mainAgentId) — si cambia dalle
     // impostazioni dell'agente ("Rendi principale")
@@ -1174,12 +1253,60 @@ export function buildApiMethods(
       return groups.squadApprovalCardsForGroup(Number(groupId))
     },
 
-    'groups:delete': async ([groupId]) => {
+    // K2 (fase team-bot): eliminazione MORBIA del team — i job in coda si
+    // chiudono, il flag deleted_at lo toglie dalla barra e da ogni percorso
+    // del daemon (niente risvegli, niente deleghe); timeline e impostazioni
+    // restano per 30 giorni, poi purgeRemoved chiama deleteGroup (quella
+    // dura). I BOT RESTANO — con la casella anche (e solo) quelli CREATI
+    // per questo team: createdBy di un membro del team.
+    'groups:delete': async ([groupId, alsoDeleteMembers]) => {
       const groups = await import('../main/store/groups')
       const gid = Number(groupId)
       if (!groups.getGroup(gid)) throw uiError(UI.rpcGroupNotFound)
-      // squadra e messaggi; i bot restano (anche i job in coda se ne vanno)
-      groups.deleteGroup(db(), gid)
+      groups.cancelGroupJobs(db(), gid)
+      groups.setGroupDeleted(gid, Date.now())
+      if (alsoDeleteMembers === true) {
+        const memberIds = groups.groupMemberIds(gid)
+        const memberSet = new Set(memberIds)
+        for (const mid of memberIds) {
+          const a = store.getAgent(mid)
+          if (a && !a.parentId && a.createdBy && memberSet.has(a.createdBy)) {
+            loop.interrupt(mid)
+            cancelAgentJobs(db(), mid)
+            store.pauseRoutinesOfAgent(mid)
+            store.setAgentDeleted(mid, Date.now())
+          }
+        }
+        emit({ type: 'agents' })
+      }
+      emit({ type: 'groups' })
+      return { ok: true }
+    },
+    // K2: il team archiviato non sveglia i membri e non riceve deleghe
+    // (groupsOfMember e scheduleTurnsForMessage lo saltano); il Ripristina
+    // lo riporta com'era
+    'groups:archive': async ([groupId]) => {
+      const groups = await import('../main/store/groups')
+      const gid = Number(groupId)
+      if (!groups.getGroup(gid)) throw uiError(UI.rpcGroupNotFound)
+      groups.cancelGroupJobs(db(), gid)
+      groups.setGroupArchived(gid, Date.now())
+      emit({ type: 'groups' })
+      return { ok: true }
+    },
+    'groups:unarchive': async ([groupId]) => {
+      const groups = await import('../main/store/groups')
+      const gid = Number(groupId)
+      if (!groups.getGroup(gid)) throw uiError(UI.rpcGroupNotFound)
+      groups.setGroupArchived(gid, null)
+      emit({ type: 'groups' })
+      return { ok: true }
+    },
+    'groups:restore': async ([groupId]) => {
+      const groups = await import('../main/store/groups')
+      const gid = Number(groupId)
+      if (!groups.getGroup(gid)) throw uiError(UI.rpcGroupNotFound)
+      groups.setGroupDeleted(gid, null)
       emit({ type: 'groups' })
       return { ok: true }
     },

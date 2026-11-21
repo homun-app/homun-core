@@ -83,6 +83,16 @@ export interface SidebarModel {
   mainWaiting: boolean
   teams: SidebarTeam[]
   bots: SidebarBot[]
+  /**
+   * K2 (fase team-bot): chi NON sta più nella barra viva — gli archiviati e
+   * gli eliminati (recuperabili 30 giorni) per la sezione «Archiviati».
+   */
+  removed: {
+    archivedTeams: GroupInfo[]
+    archivedBots: Agent[]
+    deletedTeams: GroupInfo[]
+    deletedBots: Agent[]
+  }
 }
 
 /**
@@ -112,13 +122,25 @@ export function buildSidebarModel(
    */
   opts: { states?: Readonly<Record<string, BotState>>; lastSendAt?: Readonly<Record<string, number>> } = {}
 ): SidebarModel {
-  // i FIGLI (sottoagenti) non compaiono MAI nella barra
+  // i FIGLI (sottoagenti) non compaiono MAI nella barra; K2 (fase team-bot):
+  // nemmeno gli archiviati e gli eliminati — stanno in «Archiviati»
   const bots = agents.filter((a) => !a.parentId)
-  const main = bots.find((a) => a.id === mainAgentId) ?? bots[0] ?? null
+  const live = (a: Agent): boolean => !a.archivedAt && !a.deletedAt
+  const main = bots.find((a) => a.id === mainAgentId && live(a)) ?? bots.find(live) ?? null
+
+  // K2: i team archiviati/eliminati non contano come squadre (i loro membri
+  // tornano bot singoli finché il team dorme)
+  const liveGroups = groups.filter((g) => !g.archivedAt && !g.deletedAt)
+  const removed = {
+    archivedTeams: groups.filter((g) => g.archivedAt && !g.deletedAt),
+    archivedBots: bots.filter((a) => a.archivedAt && !a.deletedAt),
+    deletedTeams: groups.filter((g) => !!g.deletedAt),
+    deletedBots: bots.filter((a) => !!a.deletedAt)
+  }
 
   const teams: SidebarTeam[] = []
   const inTeams = new Set<string>()
-  for (const g of groups) {
+  for (const g of liveGroups) {
     const resolved: Agent[] = []
     for (const m of g.members) {
       const a = bots.find((x) => x.id === m.agentId)
@@ -138,7 +160,7 @@ export function buildSidebarModel(
   // prima le squadre con qualcuno che ti aspetta, poi per attività recente
   teams.sort((a, b) => Number(b.waiting) - Number(a.waiting) || b.lastAt - a.lastAt)
 
-  const free = bots.filter((a) => a.id !== main?.id && !inTeams.has(a.id))
+  const free = bots.filter((a) => a.id !== main?.id && !inTeams.has(a.id) && live(a))
   const botsOut: SidebarBot[] = free.map((agent) => {
     const state = stateOfAgent(agent, opts.states)
     return {
@@ -155,7 +177,7 @@ export function buildSidebarModel(
 
   const q = query.trim()
   const mainWaiting = main !== null && waitingOnChildren.has(main.id)
-  if (!q) return { main, mainWaiting, teams, bots: botsOut }
+  if (!q) return { main, mainWaiting, teams, bots: botsOut, removed }
   return {
     main,
     mainWaiting,
@@ -165,7 +187,8 @@ export function buildSidebarModel(
         (t.coordinator !== null && matchesQuery(t.coordinator.name, q)) ||
         t.members.some((m) => matchesQuery(m.name, q))
     ),
-    bots: botsOut.filter((b) => matchesQuery(b.agent.name, q))
+    bots: botsOut.filter((b) => matchesQuery(b.agent.name, q)),
+    removed
   }
 }
 

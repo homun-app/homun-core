@@ -56,6 +56,18 @@ export interface Agent {
    * il comportamento della 18a ESATTO; l'adattatore clampa sul modello vero.
    */
   thinking?: ThinkingSetting | null
+  /**
+   * K2 (fase team-bot): quando il bot è stato ARCHIVIATO (null = attivo).
+   * Archiviare non cancella niente: routine in pausa, turni fermi, e
+   * «Ripristina» lo riporta com'era.
+   */
+  archivedAt?: number | null
+  /**
+   * K2 (fase team-bot): quando il bot è stato ELIMINATO (null = non eliminato).
+   * L'eliminazione è morbida: resta recuperabile per 30 giorni in
+   * «Archiviati › Eliminati», poi la pulizia lo cancella davvero.
+   */
+  deletedAt?: number | null
 }
 
 export type EntryKind =
@@ -987,6 +999,12 @@ export interface SandbotApi {
   createAgent(name: string, description?: string): Promise<Agent>
   updateAgent(id: string, patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model' | 'avatar' | 'thinking' | 'section'>>): Promise<void>
   deleteAgent(id: string): Promise<void>
+  /** K2 (fase team-bot): archivia il bot (turni fermi, routine in pausa, nessun dato perso) */
+  archiveAgent(id: string): Promise<void>
+  /** K2 (fase team-bot): riporta il bot archiviato nella barra (le routine restano in pausa) */
+  unarchiveAgent(id: string): Promise<void>
+  /** K2 (fase team-bot): ripristina un bot eliminato entro i 30 giorni */
+  restoreAgent(id: string): Promise<void>
   /** fase 7: imposta il bot principale (mainAgentId, unico) */
   setMainAgent(id: string): Promise<void>
   /** fase 7: catalogo dei template di bot */
@@ -1129,8 +1147,18 @@ export interface SandbotApi {
     /** Q1 (fase squadra): l'autonomia della squadra */
     autonomy?: GroupAutonomy
   }): Promise<GroupInfo>
-  /** Fase 16b (S1.3): cancella squadra e messaggi; i bot restano. */
-  groupDelete(groupId: number): Promise<void>
+  /**
+   * K2 (fase team-bot): eliminazione MORBIA del team (recuperabile 30
+   * giorni). Con alsoDeleteMembers true segna anche — e solo — i bot
+   * CREATI per quel team (createdBy di un membro); gli altri restano.
+   */
+  groupDelete(groupId: number, alsoDeleteMembers?: boolean): Promise<void>
+  /** K2 (fase team-bot): archivia il team (non sveglia i membri, non riceve deleghe) */
+  groupArchive(groupId: number): Promise<void>
+  /** K2 (fase team-bot): riporta il team archiviato nella barra */
+  groupUnarchive(groupId: number): Promise<void>
+  /** K2 (fase team-bot): ripristina un team eliminato entro i 30 giorni */
+  groupRestore(groupId: number): Promise<void>
   /**
    * Q2 (fase squadra): le approvazioni in attesa di tutti i membri della
    * squadra e dei loro sottoagenti (la coda «Da approvare»).
@@ -1883,6 +1911,10 @@ export interface GroupInfo {
   lastMessageAt: number | null
   /** Q1 (fase squadra): l'autonomia della squadra */
   autonomy: GroupAutonomy
+  /** K2 (fase team-bot): quando il team è stato archiviato (null = attivo) */
+  archivedAt?: number | null
+  /** K2 (fase team-bot): quando il team è stato eliminato (null = non eliminato; recuperabile 30 giorni) */
+  deletedAt?: number | null
 }
 
 /**

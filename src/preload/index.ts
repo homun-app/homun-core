@@ -6,6 +6,10 @@ const api: SandbotApi = {
   createAgent: (name, description) => ipcRenderer.invoke('agents:create', name, description),
   updateAgent: (id, patch) => ipcRenderer.invoke('agents:update', id, patch),
   deleteAgent: (id) => ipcRenderer.invoke('agents:delete', id),
+  // K2 (fase team-bot): archivia/ripristina dal menu «⋯» della barra
+  archiveAgent: (id) => ipcRenderer.invoke('agents:archive', id),
+  unarchiveAgent: (id) => ipcRenderer.invoke('agents:unarchive', id),
+  restoreAgent: (id) => ipcRenderer.invoke('agents:restore', id),
   // fase 7: bot principale e template
   setMainAgent: (id) => ipcRenderer.invoke('agents:set-main', id),
   listTemplates: () => ipcRenderer.invoke('templates:list'),
@@ -133,7 +137,11 @@ const api: SandbotApi = {
   groupCreate: (name, memberIds, coordinatorId, description) =>
     ipcRenderer.invoke('groups:create', name, memberIds, coordinatorId, description),
   groupUpdate: (groupId, patch) => ipcRenderer.invoke('groups:update', groupId, patch),
-  groupDelete: (groupId) => ipcRenderer.invoke('groups:delete', groupId),
+  groupDelete: (groupId, alsoDeleteMembers) => ipcRenderer.invoke('groups:delete', groupId, alsoDeleteMembers),
+  // K2 (fase team-bot): archivia/ripristina il team dal menu «⋯» della barra
+  groupArchive: (groupId) => ipcRenderer.invoke('groups:archive', groupId),
+  groupUnarchive: (groupId) => ipcRenderer.invoke('groups:unarchive', groupId),
+  groupRestore: (groupId) => ipcRenderer.invoke('groups:restore', groupId),
   /** Q2 (fase squadra): le card pendenti dei membri e dei loro sottoagenti */
   groupPendingApprovals: (groupId: number) => ipcRenderer.invoke('groups:pending-approvals', groupId),
   /** Q4 (fase squadra): le card di approvazione della timeline della squadra */

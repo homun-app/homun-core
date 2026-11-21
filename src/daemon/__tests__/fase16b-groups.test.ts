@@ -225,14 +225,26 @@ describe('S1.3: RPC groups:create / groups:update / groups:delete', () => {
     expect(row?.text).toBe(coordinatorNowText('Scout cibo'))
   })
 
-  it('delete: squadra e messaggi via, i bot restano', async () => {
+  it('delete: eliminazione MORBIA (K2 fase team-bot) — deleted_at, fuori dai membri, i bot e i messaggi restano finché la pulizia non scade', async () => {
     const { a, b } = threeBots()
     const g = await api['groups:create']!(['Effimera', [a, b], a]) as GroupInfo
     storeGroups.addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'user', text: 'ciao', depth: 0 })
     await api['groups:delete']!([g.id])
+    // morbida: la riga resta con deleted_at (recuperabile 30 giorni) e il
+    // team non è più DI NESSUN membro (niente risvegli né deleghe)
+    expect(storeGroups.getGroup(g.id)?.deleted_at ?? null).not.toBeNull()
+    expect(storeGroups.groupsOfMember(a).map((x) => x.id)).not.toContain(g.id)
+    // i MESSAGGI restano (la timeline si cancella davvero alla pulizia)
+    expect(db().prepare('SELECT COUNT(*) AS n FROM group_messages WHERE group_id = ?').get(g.id) as { n: number }).toEqual({ n: 1 })
+    // i bot restano
+    expect(db().prepare('SELECT COUNT(*) AS n FROM agents WHERE id IN (?,?)').get(a, b) as { n: number }).toEqual({ n: 2 })
+    // dopo la finestra di recupero la pulizia porta via TUTTO (K2)
+    const deletedAt = storeGroups.getGroup(g.id)!.deleted_at!
+    const { purgeRemoved, REMOVED_RETENTION_MS } = await import('../api')
+    const purged = await purgeRemoved({ emit, worker: { poke: () => undefined }, now: deletedAt + REMOVED_RETENTION_MS + 1 })
+    expect(purged.groups).toBeGreaterThanOrEqual(1)
     expect(storeGroups.getGroup(g.id)).toBeNull()
     expect(db().prepare('SELECT COUNT(*) AS n FROM group_messages WHERE group_id = ?').get(g.id) as { n: number }).toEqual({ n: 0 })
-    // i bot restano
     expect(db().prepare('SELECT COUNT(*) AS n FROM agents WHERE id IN (?,?)').get(a, b) as { n: number }).toEqual({ n: 2 })
     const e = await errOf(() => api['groups:delete']!([g.id]))
     expect((e as Error).message).toContain('not found')

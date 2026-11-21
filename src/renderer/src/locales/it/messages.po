@@ -922,6 +922,7 @@ msgid "Alto"
 msgstr "Alto"
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
+#: src/renderer/src/components/Sidebar.tsx
 msgid "Altre azioni"
 msgstr "Altre azioni"
 
@@ -1001,6 +1002,7 @@ msgstr "ancora nessun passo"
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
+#: src/renderer/src/components/Sidebar.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 #: src/renderer/src/components/VaultSettings.tsx
@@ -1136,6 +1138,10 @@ msgstr "Apri il team"
 msgid "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 msgstr "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Apri impostazioni del team"
+msgstr "Apri impostazioni del team"
+
 #: src/renderer/src/components/BoxSetupProgress.tsx
 msgid "Apri l'installazione"
 msgstr "Apri l'installazione"
@@ -1189,6 +1195,22 @@ msgstr "Aprire <0>{0}</0> nel tuo browser"
 #: src/renderer/src/components/GuideView.tsx
 msgid "Arancio"
 msgstr "Arancio"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Archivia"
+msgstr "Archivia"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Archivia bot"
+msgstr "Archivia bot"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Archivia team"
+msgstr "Archivia team"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Archiviati"
+msgstr "Archiviati"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Argomenti (args) non sono JSON valido"
@@ -2805,13 +2827,24 @@ msgid "elimina"
 msgstr "elimina"
 
 #: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/Sidebar.tsx
 msgid "Elimina"
 msgstr "Elimina"
 
+#. placeholder {0}: target.name
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Elimina {0}?"
+msgstr "Elimina {0}?"
+
 #. placeholder {0}: agent.name
 #: src/renderer/src/components/RightPanel.tsx
-msgid "Elimina {0} con le sue chat, memorie e routine?"
-msgstr "Elimina {0} con le sue chat, memorie e routine?"
+msgid "Elimina {0}? Si cancellano la sua chat, la memoria e le routine. I documenti nella Libreria restano."
+msgstr "Elimina {0}? Si cancellano la sua chat, la memoria e le routine. I documenti nella Libreria restano."
+
+#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Elimina anche i bot creati per questo team"
+msgstr "Elimina anche i bot creati per questo team"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Elimina bot"
@@ -2825,6 +2858,11 @@ msgstr "Elimina i file dei bot"
 msgid "Elimina il server"
 msgstr "Elimina il server"
 
+#. placeholder {0}: target.name
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Elimina il team {0}?"
+msgstr "Elimina il team {0}?"
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Elimina team"
 msgstr "Elimina team"
@@ -2835,8 +2873,8 @@ msgstr "Eliminare {size}? Verranno cancellati per sempre i file che i bot hanno 
 
 #. placeholder {0}: group.name
 #: src/renderer/src/components/RightPanel.tsx
-msgid "Eliminare il team «{0}» e i suoi messaggi? I bot restano."
-msgstr "Eliminare il team «{0}» e i suoi messaggi? I bot restano."
+msgid "Eliminare il team «{0}»? Si cancellano la timeline del team e le sue impostazioni. I bot restano."
+msgstr "Eliminare il team «{0}»? Si cancellano la timeline del team e le sue impostazioni. I bot restano."
 
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "eliminare un bot"
@@ -2849,6 +2887,14 @@ msgstr "eliminata"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "eliminate"
 msgstr "eliminate"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Eliminati"
+msgstr "Eliminati"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Eliminato"
+msgstr "Eliminato"
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Email (separate da virgola)"
@@ -3640,6 +3686,11 @@ msgstr "Il bot non ha uno schermo aperto."
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Il bot non ha uno schermo aperto."
 msgstr "Il bot non ha uno schermo aperto."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.agentIsMain"
+msgstr "Il bot principale non si archivia né si elimina."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -6664,6 +6715,7 @@ msgstr "Rimuovi davvero"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/Sidebar.tsx
 msgid "Rinomina"
 msgstr "Rinomina"
 
@@ -6685,6 +6737,7 @@ msgid "Riprendi"
 msgstr "Riprendi"
 
 #: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/Sidebar.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Ripristina"
 msgstr "Ripristina"
@@ -7325,6 +7378,14 @@ msgstr "si apre l'installazione di Apple, che ti chiederà la password del Mac"
 #: src/renderer/src/components/TeamChat.tsx
 msgid "si apre qui"
 msgstr "si apre qui"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Si cancellano la sua chat, la memoria e le routine. I documenti nella Libreria restano."
+msgstr "Si cancellano la sua chat, la memoria e le routine. I documenti nella Libreria restano."
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Si cancellano la timeline del team e le sue impostazioni. I bot restano."
+msgstr "Si cancellano la timeline del team e le sue impostazioni. I bot restano."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

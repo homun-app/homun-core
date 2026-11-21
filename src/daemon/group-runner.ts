@@ -125,7 +125,9 @@ export async function runGroupTurnJob(
     }
   }
   const group = getGroup(p.groupId)
-  if (!group) { quietMember(); return finish('SKIPPED') }
+  // K2 (fase team-bot): un team archiviato o eliminato non gira turni (i
+  // job già in coda si chiudono in silenzio, come per un gruppo sparito)
+  if (!group || group.archived_at !== null || group.deleted_at !== null) { quietMember(); return finish('SKIPPED') }
   const memberIds = groupMemberIds(group.id)
   if (!memberIds.includes(p.memberId)) { quietMember(); return finish('SKIPPED') }
   const me = getAgent(p.memberId)

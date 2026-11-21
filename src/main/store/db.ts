@@ -59,7 +59,10 @@ function open(): DatabaseSync {
       model TEXT,
       status TEXT DEFAULT 'offline',
       unread INTEGER DEFAULT 0,
-      created_at INTEGER
+      created_at INTEGER,
+      -- K2 (fase team-bot): archiviazione ed eliminazione morbide
+      archived_at INTEGER,
+      deleted_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -184,7 +187,10 @@ function open(): DatabaseSync {
     ['avatar', "ALTER TABLE agents ADD COLUMN avatar TEXT"],
     // B2 (fase beta.4): il nome scritto nel dialogo «Nuovo» — update_self può
     // cambiare il nome solo finché è ancora questo
-    ['birth_name', "ALTER TABLE agents ADD COLUMN birth_name TEXT"]
+    ['birth_name', "ALTER TABLE agents ADD COLUMN birth_name TEXT"],
+    // K2 (fase team-bot): archiviato / eliminato (morbido, recuperabile 30 giorni)
+    ['archived_at', 'ALTER TABLE agents ADD COLUMN archived_at INTEGER'],
+    ['deleted_at', 'ALTER TABLE agents ADD COLUMN deleted_at INTEGER']
   ] as const) {
     if (!agentPresent.has(col)) db.exec(ddl)
   }
@@ -240,6 +246,11 @@ function open(): DatabaseSync {
   const approvalCols = db.prepare("SELECT name FROM pragma_table_info('approvals')").all() as Array<{ name: string }>
   if (!approvalCols.some((c) => c.name === 'entry_id')) db.exec('ALTER TABLE approvals ADD COLUMN entry_id INTEGER')
   db.exec('CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status)')
+  // K2 (fase team-bot): le colonne dell'archiviazione/eliminazione morbide
+  // dei team, per i DB esistenti
+  const groupCols = db.prepare("SELECT name FROM pragma_table_info('groups')").all() as Array<{ name: string }>
+  if (!groupCols.some((c) => c.name === 'archived_at')) db.exec('ALTER TABLE groups ADD COLUMN archived_at INTEGER')
+  if (!groupCols.some((c) => c.name === 'deleted_at')) db.exec('ALTER TABLE groups ADD COLUMN deleted_at INTEGER')
   // Q1 (fase squadra): l'autonomia della squadra — le squadre esistenti (e i
   // valori NULL dei DB appena migrati) valgono 'box', il default della spec
   migrateGroupAutonomy(db)
@@ -287,6 +298,9 @@ interface AgentRow {
   thinking?: string | null
   /** B2 (fase beta.4): il nome scritto nel dialogo «Nuovo» (il bot può cambiarselo solo finché resta questo) */
   birth_name?: string | null
+  /** K2 (fase team-bot): archiviazione / eliminazione morbide (NULL = attivo) */
+  archived_at?: number | null
+  deleted_at?: number | null
 }
 
 /** fase 16: parse dell'avatar salvato — un JSON ROTTO diventa null (predefinito), mai un crash. */
@@ -310,7 +324,9 @@ function rowToAgent(r: AgentRow): Agent {
     createdBy: r.created_by ?? null, section: r.section ?? null,
     parentId: r.parent_id ?? null, avatar: parseAvatar(r.avatar),
     thinking: (r.thinking as Agent['thinking']) ?? 'default',
-    birthName: r.birth_name ?? null
+    birthName: r.birth_name ?? null,
+    archivedAt: r.archived_at ?? null,
+    deletedAt: r.deleted_at ?? null
   }
 }
 
@@ -393,6 +409,44 @@ export function updateAgent(
       id
     )
 }
+
+// ---- K2 (fase team-bot): archiviazione ed eliminazione morbide ----
+
+/** Segna il momento dell'archiviazione (null = di nuovo attivo). */
+export function setAgentArchived(id: string, at: number | null): void {
+  db().prepare('UPDATE agents SET archived_at = ? WHERE id = ?').run(at, id)
+}
+
+/** Segna il momento dell'eliminazione morbida (null = ripristinato). */
+export function setAgentDeleted(id: string, at: number | null): void {
+  db().prepare('UPDATE agents SET deleted_at = ? WHERE id = ?').run(at, id)
+}
+
+/**
+ * K2: le routine del bot archiviato si METTONO IN PAUSA (enabled = 0) —
+ * niente si perde e al Ripristina restano spente: decide l'utente se
+ * riaccenderle. (È la pausa esplicita, NON paused_for_away: quella si
+ * riaccende da sola quando l'utente torna.)
+ */
+export function pauseRoutinesOfAgent(agentId: string): void {
+  db().prepare('UPDATE routines SET enabled = 0 WHERE agent_id = ?').run(agentId)
+}
+
+/**
+ * K2: gli id dei bot eliminati che hanno superato i 30 giorni di recupero —
+ * la pulizia li cancella DAVVERO. Il tempo passa da `now` (orologio finto
+ * nei test).
+ */
+export function expiredRemovedAgentIds(now: number): string[] {
+  return (
+    db()
+      .prepare('SELECT id FROM agents WHERE deleted_at IS NOT NULL AND deleted_at <= ?')
+      .all(now - REMOVED_RETENTION_MS) as Array<{ id: string }>
+  ).map((r) => r.id)
+}
+
+/** K2: la finestra di recupero dell'eliminazione (il cestino del Mac). */
+export const REMOVED_RETENTION_MS = 30 * 24 * 3_600_000
 
 /**
  * Fase 12 (punto 1): il loop registra qui il suo interrupt, così deleteAgent

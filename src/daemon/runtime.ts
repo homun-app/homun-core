@@ -27,7 +27,7 @@ import {
 import { requeueAllLeased, releaseJobsHeldForModel } from '../main/store/jobs'
 import { acquireDaemonLock, releaseDaemonLock, writeDaemonInfo, removeDaemonInfo } from './daemon-files'
 import { startWsServer, generateToken } from './ws-server'
-import { buildApiMethods, notifyComposioAppConnected } from './api'
+import { buildApiMethods, notifyComposioAppConnected, purgeRemoved } from './api'
 import { JobWorker } from './worker'
 import { tickScheduler, tickConnectorPolls, enqueueRoutineRun } from './scheduler'
 import { attachHostBridge } from './host-bridge'
@@ -1014,6 +1014,14 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
         engineMod.enqueueEmbedPendingAll(database, listAgents().map((a) => a.id), now)
       } catch {
         // niente coda in questo momento: al prossimo tick
+      }
+      // K2 (fase team-bot): la pulizia dei rimossi — bot e team eliminati
+      // da più di 30 giorni si cancellano davvero (la SQL legge solo
+      // deleted_at: leggera, a ogni tick)
+      try {
+        await purgeRemoved({ emit, worker })
+      } catch (e) {
+        console.error('[sandbotd] pulizia dei rimossi:', e)
       }
       // fase 12 (punto 4): la scadenza dei figli (queued/running oltre
       // deadline_at) — interrupt, expired, risveglio del lotto

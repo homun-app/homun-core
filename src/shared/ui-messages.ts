@@ -470,6 +470,8 @@ export const UI = {
   rpcGroupCoordinatorNotMember: msg({ id: 'rpc.groupCoordinatorNotMember', message: 'Il coordinatore deve essere un membro del team.' }),
   rpcGroupMemberUnknown: msg({ id: 'rpc.groupMemberUnknown', message: 'Questi id non sono bot: {ids}.' }),
   rpcGroupNotMember: msg({ id: 'rpc.groupNotMember', message: 'Il bot non è un membro del team.' }),
+  /** K2 (fase team-bot): il principale non si archivia né si elimina */
+  rpcAgentIsMain: msg({ id: 'rpc.agentIsMain', message: 'Il bot principale non si archivia né si elimina.' }),
   rpcTextMissing: msg({ id: 'rpc.textMissing', message: 'Testo mancante' }),
   rpcSecretSaveFailed: msg({
     id: 'rpc.secretSaveFailed',

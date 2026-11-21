@@ -397,17 +397,25 @@ function AdvancedTab() {
             <Trans>Rendi principale</Trans>
           </button>
         )}
-        {confirmDelete ? (
+        {/* K2 (fase team-bot): il PRINCIPALE non si archivia né si elimina —
+            qui come nel menu della barra, gli stessi percorsi */}
+        {agent.id !== effectiveMain && (
+          <button
+            className="w-full rounded-[12px] bg-muted px-3 py-2 text-sm transition hover:bg-accent"
+            data-testid="bot-archive"
+            onClick={() => void useStore.getState().archiveAgent(agent.id)}
+          >
+            <Trans>Archivia bot</Trans>
+          </button>
+        )}
+        {agent.id !== effectiveMain && (confirmDelete ? (
           <div className="space-y-1.5">
-            <p className="text-xs text-destructive"><Trans>Elimina {agent.name} con le sue chat, memorie e routine?</Trans></p>
+            <p className="text-xs text-destructive"><Trans>Elimina {agent.name}? Si cancellano la sua chat, la memoria e le routine. I documenti nella Libreria restano.</Trans></p>
             <div className="flex gap-2">
               <button
                 className="flex-1 rounded-[12px] bg-destructive/10 px-3 py-2 text-sm text-destructive transition hover:bg-destructive/20"
-                onClick={async () => {
-                  await api.deleteAgent(agent.id).catch(() => undefined)
-                  const rest = await api.listAgents()
-                  if (rest[0]) void useStore.getState().select(rest[0].id)
-                }}
+                data-testid="bot-delete-confirm"
+                onClick={() => void useStore.getState().deleteAgentWithUndo(agent.id)}
               >
                 <Trans>Elimina bot</Trans>
               </button>
@@ -420,7 +428,7 @@ function AdvancedTab() {
           <button className="w-full rounded-[12px] bg-muted px-3 py-2 text-sm text-muted-foreground transition hover:text-destructive" onClick={() => setConfirmDelete(true)}>
             <Trans>Elimina bot</Trans>
           </button>
-        )}
+        ))}
       </div>
     </div>
   )
@@ -1093,9 +1101,12 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
   const { i18n } = useLingui()
   const agents = useStore((s) => s.agents)
   const groupUpdate = useStore((s) => s.groupUpdate)
-  const groupDelete = useStore((s) => s.groupDelete)
+  // K2 (fase team-bot): archivia/elimina dagli stessi percorsi del menu
+  const groupArchive = useStore((s) => s.groupArchive)
+  const groupDeleteWithUndo = useStore((s) => s.groupDeleteWithUndo)
   const [description, setDescription] = useState(group.description)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteMembers, setDeleteMembers] = useState(false)
   const [busy, setBusy] = useState(false)
   // Q1 (fase squadra): la schermata 3 del disegno (autonomia della squadra)
   const [autonomyOpen, setAutonomyOpen] = useState(false)
@@ -1114,7 +1125,9 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
   }, [])
   useEffect(() => setDescription(group.description), [group.id, group.description])
   const memberAgent = (id: string): Agent | undefined => agents.find((a) => a.id === id)
-  const notIn = agents.filter((a) => !a.parentId && !group.members.some((m) => m.agentId === a.id))
+  // K2 (fase team-bot): si aggiunge alla squadra solo un bot VIVO (gli
+  // archiviati e gli eliminati non sono candidati)
+  const notIn = agents.filter((a) => !a.parentId && !a.archivedAt && !a.deletedAt && !group.members.some((m) => m.agentId === a.id))
   const overlay = layout.panel === 'overlay'
   return (
     <aside
@@ -1222,13 +1235,28 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
           <span className="mt-0.5 block text-[12px] leading-snug text-muted-foreground">{autonomyBlurb(group.autonomy, i18n)}</span>
         </button>
         {autonomyOpen && <TeamAutonomySheet group={group} onClose={() => setAutonomyOpen(false)} />}
+        {/* K2 (fase team-bot): Archivia ed Elimina passano dagli stessi
+            percorsi del menu della barra (la casella per portare via anche
+            i bot creati per il team, spenta di default) */}
+        <button
+          className="mt-2 w-full rounded-[12px] bg-muted px-3 py-2 text-sm transition hover:bg-accent"
+          data-testid="team-archive"
+          onClick={() => void groupArchive(group.id)}
+        >
+          <Trans>Archivia team</Trans>
+        </button>
         {confirmDelete ? (
-          <div className="mt-6 space-y-1.5">
-            <p className="text-xs text-destructive"><Trans>Eliminare il team «{group.name}» e i suoi messaggi? I bot restano.</Trans></p>
+          <div className="mt-4 space-y-1.5">
+            <p className="text-xs text-destructive"><Trans>Eliminare il team «{group.name}»? Si cancellano la timeline del team e le sue impostazioni. I bot restano.</Trans></p>
+            <label className="flex cursor-pointer items-center gap-2 rounded-[10px] bg-muted px-3 py-2 text-[13px]">
+              <input type="checkbox" data-testid="team-delete-members" checked={deleteMembers} onChange={(e) => setDeleteMembers(e.target.checked)} />
+              <Trans>Elimina anche i bot creati per questo team</Trans>
+            </label>
             <div className="flex gap-2">
               <button
                 className="flex-1 rounded-[12px] bg-destructive/10 px-3 py-2 text-sm text-destructive transition hover:bg-destructive/20"
-                onClick={() => void groupDelete(group.id)}
+                data-testid="team-delete-confirm"
+                onClick={() => void groupDeleteWithUndo(group.id, deleteMembers)}
               >
                 <Trans>Elimina team</Trans>
               </button>
@@ -1238,7 +1266,7 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
             </div>
           </div>
         ) : (
-          <button className="mt-6 w-full rounded-[12px] bg-muted px-3 py-2 text-sm text-muted-foreground transition hover:text-destructive" onClick={() => setConfirmDelete(true)}>
+          <button className="mt-4 w-full rounded-[12px] bg-muted px-3 py-2 text-sm text-muted-foreground transition hover:text-destructive" onClick={() => setConfirmDelete(true)}>
             <Trans>Elimina team</Trans>
           </button>
         )}

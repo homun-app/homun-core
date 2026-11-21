@@ -23,7 +23,10 @@ export const GROUPS_DDL = `
       created_by TEXT NOT NULL,
       coordinator_id TEXT,
       created_at INTEGER NOT NULL,
-      autonomy TEXT DEFAULT 'box'
+      autonomy TEXT DEFAULT 'box',
+      -- K2 (fase team-bot): archiviazione ed eliminazione morbide
+      archived_at INTEGER,
+      deleted_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS group_members (
       group_id INTEGER NOT NULL,
@@ -76,11 +79,16 @@ export interface Group {
   created_at: number
   /** Q1 (fase squadra): 'ask' | 'box' | 'box_review' (default 'box') */
   autonomy: 'ask' | 'box' | 'box_review'
+  /** K2 (fase team-bot): quando il team è stato archiviato (null = attivo) */
+  archived_at: number | null
+  /** K2 (fase team-bot): eliminazione morbida, recuperabile 30 giorni (null = non eliminato) */
+  deleted_at: number | null
 }
 
 interface GroupRow {
   id: number; name: string; description: string; created_by: string
   coordinator_id: string | null; created_at: number; autonomy?: string | null
+  archived_at?: number | null; deleted_at?: number | null
 }
 
 export interface GroupMessage {
@@ -124,7 +132,9 @@ function rowToGroup(r: GroupRow): Group {
   return {
     id: r.id, name: r.name, description: r.description, created_by: r.created_by,
     coordinator_id: r.coordinator_id, created_at: r.created_at,
-    autonomy: normalizeGroupAutonomy(r.autonomy)
+    autonomy: normalizeGroupAutonomy(r.autonomy),
+    archived_at: r.archived_at ?? null,
+    deleted_at: r.deleted_at ?? null
   }
 }
 
@@ -168,7 +178,7 @@ export function createGroup(
     ins.run(id, m, joined)
     joined += 1
   }
-  return { id, name, description, created_by: createdBy, coordinator_id: coordinator, created_at: now, autonomy: 'box' }
+  return { id, name, description, created_by: createdBy, coordinator_id: coordinator, created_at: now, autonomy: 'box', archived_at: null, deleted_at: null }
 }
 
 export function getGroup(id: number): Group | null {
@@ -235,11 +245,16 @@ export function listGroups(): Group[] {
   return (db().prepare('SELECT * FROM groups ORDER BY id').all() as unknown as GroupRow[]).map(rowToGroup)
 }
 
-/** I gruppi di cui un bot è membro (list_agents li mostra al modello). */
+/**
+ * I gruppi di cui un bot è membro (list_agents li mostra al modello).
+ * K2 (fase team-bot): i team ARCHIVIATI o ELIMINATI non contano — non si
+ * mostrano al modello, non ricevono deleghe e non svegliano nessuno.
+ */
 export function groupsOfMember(agentId: string): Group[] {
   return (db().prepare(`
     SELECT g.* FROM groups g JOIN group_members m ON m.group_id = g.id
-    WHERE m.agent_id = ? ORDER BY g.id
+    WHERE m.agent_id = ? AND g.archived_at IS NULL AND g.deleted_at IS NULL
+    ORDER BY g.id
   `).all(agentId) as unknown as GroupRow[]).map(rowToGroup)
 }
 
@@ -293,6 +308,27 @@ export function removeAgentMemberships(agentId: string): Array<{ groupId: number
     if (r.changed) changed.push({ groupId: gid, coordinatorId: r.coordinatorId })
   }
   return changed
+}
+
+// ---- K2 (fase team-bot): archiviazione ed eliminazione morbide ----
+
+/** Segna il momento dell'archiviazione del team (null = di nuovo attivo). */
+export function setGroupArchived(groupId: number, at: number | null): void {
+  db().prepare('UPDATE groups SET archived_at = ? WHERE id = ?').run(at, groupId)
+}
+
+/** Segna il momento dell'eliminazione morbida del team (null = ripristinato). */
+export function setGroupDeleted(groupId: number, at: number | null): void {
+  db().prepare('UPDATE groups SET deleted_at = ? WHERE id = ?').run(at, groupId)
+}
+
+/** K2: i team eliminati che hanno superato i 30 giorni di recupero. */
+export function expiredRemovedGroupIds(now: number, retentionMs: number): number[] {
+  return (
+    db()
+      .prepare('SELECT id FROM groups WHERE deleted_at IS NOT NULL AND deleted_at <= ?')
+      .all(now - retentionMs) as Array<{ id: number }>
+  ).map((r) => r.id)
 }
 
 /**
@@ -571,6 +607,8 @@ export interface ScheduledTurns {
 export function scheduleTurnsForMessage(message: GroupMessage, emit: (e: { type: 'groups' }) => void, now = Date.now()): ScheduledTurns {
   const group = getGroup(message.group_id)
   const result: ScheduledTurns = { plan: { turns: [], skipped: [], systemNotice: null, capNotice: false }, jobs: [] }
+  // K2 (fase team-bot): un team archiviato o eliminato NON sveglia i membri
+  if (!group || group.archived_at !== null || group.deleted_at !== null) return result
   // fase 16b (S1.2): un riepilogo NON genera turni (né righe di sistema)
   // Q4 (fase squadra): le righe relay/artifact sono di SOLA visualizzazione:
   // non svegliano nessuno e non contano nei turni o nei tetti del gruppo
@@ -641,6 +679,9 @@ export function groupWithMembers(group: Group): {
   lastMessageAt: number | null
   /** Q1 (fase squadra): l'autonomia della squadra per la UI */
   autonomy: Group['autonomy']
+  /** K2 (fase team-bot): archiviazione / eliminazione morbide per la UI */
+  archivedAt: number | null
+  deletedAt: number | null
 } {
   const names = new Map(listAgents().map((a) => [a.id, a.name]))
   return {
@@ -651,7 +692,9 @@ export function groupWithMembers(group: Group): {
     })),
     createdAt: group.created_at,
     lastMessageAt: lastGroupMessageAt(group.id),
-    autonomy: group.autonomy
+    autonomy: group.autonomy,
+    archivedAt: group.archived_at,
+    deletedAt: group.deleted_at
   }
 }
 
