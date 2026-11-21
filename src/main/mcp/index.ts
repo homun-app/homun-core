@@ -20,6 +20,8 @@ import { activeBoxEngine } from '../sandbox/engine'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
+// X2 (fase sicurezza-beta16): la categoria chiusa degli errori dei server
+import { McpServerError, classifyMcpError, type McpErrorCategory } from './error-category'
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import { getSetting, setSetting } from '../store/db'
 import { setMcpAnnotationsLookup } from '../agent/permissions'
@@ -355,7 +357,8 @@ async function egressEnvOf(cfg: McpServerConfig): Promise<Record<string, string>
       subnet = boxNetworkSubnet()
     }
     if (!gw || !subnet) {
-      throw new Error('the isolated computer network gateway is unknown: this MCP server cannot have a limited network, it does not start')
+      // X2: rifiuto locale dell'avvio, categoria decisa alla sorgente
+      throw new McpServerError('the isolated computer network gateway is unknown: this MCP server cannot have a limited network, it does not start', 'startup-error')
     }
     const listen = await ensureMcpEgressProxyGateway(cfg.id, allow, gw, subnet)
     proxyUrl = `http://${listen.host}:${listen.port}`
@@ -375,7 +378,8 @@ async function connect(cfg: McpServerConfig): Promise<Client> {
       // il foglio del server lo mostra.
       if (cfg.egress && boxShellEgressOf() !== 'none') {
         markStateError(cfg, NPM_SERVERS_EGRESS_REFUSED)
-        throw new Error(NPM_SERVERS_EGRESS_REFUSED)
+        // X2: la categoria è DECISA qui (il recinto ha rifiutato l'avvio)
+        throw new McpServerError(NPM_SERVERS_EGRESS_REFUSED, 'startup-error')
       }
       // fase 13: server stdio di registro/plugin — gira NEL BOX (docker exec),
       // mai sul Mac; le env col solo NOME in argv, i valori nell'env del figlio.
@@ -410,7 +414,11 @@ async function connect(cfg: McpServerConfig): Promise<Client> {
     // directory». Vale per ogni comando risolto (npx, node, uvx, python…);
     // il PATH dell'utente, se c'è, si rispetta dopo la cartella risolta.
     const resolved = lookupServerCommand(cfg.command ?? '')
-    if ('error' in resolved) throw new Error(resolved.error)
+    if ('error' in resolved) {
+      // X2: il comando manca — categoria decisa alla sorgente, il messaggio
+      // resta quello leggibile di oggi per la UI
+      throw new McpServerError(resolved.error, 'command-not-found')
+    }
     const a = await authResolver(cfg)
     const env = serverCommandEnv(resolved.dir, a.stdioEnv && Object.keys(a.stdioEnv).length ? a.stdioEnv : undefined)
     await client.connect(
@@ -494,16 +502,20 @@ async function ensure(cfg: McpServerConfig, force = false): Promise<Cached> {
   return entry
 }
 
-/** Test connessione + lista tool (per la UI). */
-export async function testServer(id: string): Promise<{ ok: boolean; error?: string; tools?: string[] }> {
+/**
+ * Test connessione + lista tool (per la UI). X2 (fase sicurezza-beta16):
+ * l'esito porta anche la CATEGORIA dell'errore (dal codice/tipo, decisa
+ * alla sorgente) — la nota al bot usa SOLO quella, mai il testo libero.
+ */
+export async function testServer(id: string): Promise<{ ok: boolean; error?: string; tools?: string[]; category?: McpErrorCategory }> {
   const cfg = listServers().find((s) => s.id === id)
-  if (!cfg) return { ok: false, error: 'server not found' }
+  if (!cfg) return { ok: false, error: 'server not found', category: 'unknown-error' }
   try {
     const c = await ensure(cfg, true)
     return { ok: true, tools: c.tools.map((t) => t.def.name) }
   } catch (e) {
     if (e instanceof UnauthorizedError) markNeedsAuth(cfg, uiText(UI.connTokenExpired))
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    return { ok: false, error: e instanceof Error ? e.message : String(e), category: classifyMcpError(e) }
   }
 }
 

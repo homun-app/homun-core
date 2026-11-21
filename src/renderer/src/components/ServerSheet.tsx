@@ -21,6 +21,8 @@ import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
 import { Toggle } from './Settings'
 import { ServerSetupModule } from './ServerSetup'
+// X2 (fase sicurezza-beta16): l'errore del server si mostra tagliato a 300
+import { clipErrorText } from '../../../main/mcp/error-category'
 
 /** Il server come arriva dal foglio (McpServerInfo + i campi del template). */
 export type ServerSheetInfo = InstalledServerLike & {
@@ -148,9 +150,11 @@ export function ServerSheet({ sv, onDone }: { sv: ServerSheetInfo; onDone(): voi
       </div>
 
       {/* N1 (fase mcp-egress-sicurezza): l'errore dell'ultima prova in parole —
-          es. il motore del box non garantisce il recinto e il server non parte */}
+          es. il motore del box non garantisce il recinto e il server non parte.
+          X2 (fase sicurezza-beta16): mostrato come TESTO e tagliato a 300
+          caratteri (il corpo può averlo scelto il server) */}
       {sv.stateStatus === 'error' && sv.stateError && (
-        <p className="text-[12px] leading-snug text-destructive" data-testid="server-sheet-error">{sv.stateError}</p>
+        <p className="text-[12px] leading-snug text-destructive" data-testid="server-sheet-error">{clipErrorText(sv.stateError)}</p>
       )}
 
       {/* il modulo M3, quando serve; collegato e senza coda: niente (R5 —

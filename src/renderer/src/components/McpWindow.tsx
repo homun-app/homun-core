@@ -23,6 +23,8 @@ import { envRowsFromServer, saveEnvPayload, newEnvRow, envNameLooksSecret, type 
 import { groupImportRows, importRowKey, type ImportGroupUi, type ImportScanRow, type ImportSkipRow, type ImportSource } from '../lib/mcp-import-groups'
 // K4 (fase team-bot): il logo VERO dell'app quando il file c'è nel repo
 import { logoUrlForName } from '../lib/app-logos'
+// X2 (fase sicurezza-beta16): l'errore del test si mostra tagliato a 300
+import { clipErrorText } from '../../../main/mcp/error-category'
 
 /**
  * U1 (fase mcp-ui): il bottone ICONA delle azioni per riga — 28×28, rounded-lg,
@@ -59,7 +61,10 @@ function IconButton({ label, danger, testid, onClick, children }: {
 function RowTestStatus({ test }: { test: { ok: boolean; error?: string; tools?: string[]; pending?: boolean } }): React.ReactNode {
   const { t } = useLingui()
   const n = test.tools?.length ?? 0
-  const tip = test.pending ? t`test in corso…` : test.ok ? t`${n} strumenti: ${(test.tools ?? []).join(', ')}` : (test.error ?? '')
+  // X2 (fase sicurezza-beta16): l'errore completo resta SOLO qui nella UI,
+  // tagliato a 300 e come testo — mai al bot, mai HTML
+  const error = test.error ? clipErrorText(test.error) : ''
+  const tip = test.pending ? t`test in corso…` : test.ok ? t`${n} strumenti: ${(test.tools ?? []).join(', ')}` : error
   return (
     <span
       className="flex min-w-0 shrink-0 items-center gap-1.5"
@@ -69,7 +74,7 @@ function RowTestStatus({ test }: { test: { ok: boolean; error?: string; tools?: 
       <span className={`h-2 w-2 shrink-0 rounded-full ${test.pending ? 'bg-muted-foreground/50' : test.ok ? 'bg-chart-2' : 'bg-destructive'}`} />
       {!test.pending && (
         <span className={`max-w-48 truncate text-[11px] ${test.ok ? 'text-chart-2' : 'text-destructive'}`}>
-          {test.ok ? <Plural value={n} one="# strumento" other="# strumenti" /> : (test.error ?? '')}
+          {test.ok ? <Plural value={n} one="# strumento" other="# strumenti" /> : error}
         </span>
       )}
     </span>

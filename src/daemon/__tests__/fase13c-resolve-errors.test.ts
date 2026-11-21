@@ -100,9 +100,11 @@ describe('M5: un\'installazione che lancia NON lascia la card in installing', ()
     expect(entry.meta?.status).toBe('error')
     expect(String(entry.meta?.error)).toContain('boom del registro')
     // il bot riceve il [sistema]: accodato come job user-message (il testo
-    // del messaggio che girrà al prossimo turno)
+    // del messaggio che girrà al prossimo turno). X2 (fase sicurezza-beta16):
+    // al bot SOLO la categoria fissa — il testo libero dell'errore non entra
     const sys = listJobs(db()).find((j) => j.kind === 'user-message')
-    expect(String((sys?.payload as { text?: string })?.text)).toContain('NOT added: boom del registro')
+    expect(String((sys?.payload as { text?: string })?.text)).toContain('NOT added: unknown error.')
+    expect(String((sys?.payload as { text?: string })?.text)).not.toContain('boom del registro')
     // il click SUCCESSIVO non dice "installazione in corso": la card in error
     // si può cliccare di nuovo (retry), non è incollata a installing (M5)
     const r2 = await api['connectors:resolve-mcp-server']!([AGENT, p.id, 'add']) as { ok: boolean }

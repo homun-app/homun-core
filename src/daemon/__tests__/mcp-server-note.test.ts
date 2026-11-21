@@ -50,15 +50,18 @@ describe('U5: notifyMcpServerState — la nota ai bot abilitati', () => {
     const a = createAgent('Bot della posta')
     await notifyMcpServerState(
       { name: 'mattermost', enabledFor: [a.id] },
-      { ok: false, error: 'comando "npx" non trovato: usa il percorso completo' },
+      // X2 (fase sicurezza-beta16): come lo produce testServer da oggi — la
+      // category arriva dal codice/tipo d'errore, non dal testo
+      { ok: false, error: 'comando "npx" non trovato: usa il percorso completo', category: 'command-not-found' },
       () => undefined,
       { poke: () => undefined } as never
     )
     const rows = userMessageJobs().filter((r) => r.agent_id === a.id)
     expect(rows).toHaveLength(1)
     const payload = JSON.parse(rows[0]!.payload_json) as { text: string; extraMeta?: { ui?: { id: string; values?: Record<string, string> } } }
-    expect(payload.text).toMatch(/^\[sistema\] Server MCP "mattermost" does not start/)
-    expect(payload.text).toContain('non trovato')
+    expect(payload.text).toBe('[sistema] Server MCP "mattermost" does not start: command not found.')
+    // il testo libero dell'errore NON entra nel messaggio al modello
+    expect(payload.text).not.toContain('usa il percorso completo')
     expect(payload.extraMeta?.ui?.id).toBe('sistema.mcpServerFail')
     expect(payload.extraMeta?.ui?.values).toMatchObject({ name: 'mattermost', error: 'comando "npx" non trovato: usa il percorso completo' })
   })

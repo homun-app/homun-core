@@ -23,6 +23,9 @@ import {
   type RegistryVarSpec
 } from '../../shared/registry-vars'
 import type { McpServerConfig } from '../mcp'
+// X2 (fase sicurezza-beta16): la categoria chiusa degli errori dei server
+import type { McpErrorCategory } from '../mcp/error-category'
+import { classifyMcpError } from '../mcp/error-category'
 // fase mcp-setup ritocchi (R1): il prefisso stabile degli strumenti
 import { toolSlugKeeping } from '../mcp/slug'
 import { boxHomePath, dockerRmDirArgv } from '../sandbox/docker-argv'
@@ -1340,7 +1343,12 @@ export async function serverSetupSpec(id: string, deps: InstallDeps): Promise<Se
 }
 
 /** L'esito del collegamento dal modulo (M3.3): codice per la UI, dettaglio tecnico. */
-export type ServerConnectResult = McpServerConnectResult
+/**
+ * X2 (fase sicurezza-beta16): l'esito porta anche la CATEGORIA chiusa
+ * dell'errore (dal codice/tipo, decisa alla sorgente) — la nota
+ * CONNECTOR_INSTALLED al bot usa SOLO quella, mai il testo libero.
+ */
+export type ServerConnectResult = McpServerConnectResult & { category?: McpErrorCategory }
 
 /**
  * Il clic su «Accedi con <Nome>» / «Collega» del modulo (M3): salva i valori
@@ -1418,7 +1426,7 @@ export async function connectServerSetup(
       const tools = await deps.toolsOfServer(cfg.id)
       return { ok: true, tools: tools.map((t) => t.name) }
     } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      return { ok: false, error: e instanceof Error ? e.message : String(e), category: classifyMcpError(e) }
     }
   }
   const finishOk = async (r: ServerConnectResult): Promise<ServerConnectResult> => {

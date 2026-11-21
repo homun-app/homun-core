@@ -93,6 +93,8 @@ import { existsSync } from 'node:fs'
 import { readFileSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+// X2 (fase sicurezza-beta16): la categoria chiusa degli errori dei server MCP
+import { mcpErrorCategoryText, sanitizeServerNoteName, clipErrorText, classifyMcpError, type McpErrorCategory } from '../main/mcp/error-category'
 
 // ---- fase skill (S6): gli staging delle anteprime GitHub, vivi finché
 // l'utente decide (o 10 minuti); mai path al renderer, solo id opachi ----
@@ -1695,13 +1697,14 @@ export function buildApiMethods(
       emitUpdatedEntry(aid, entry.id)
       // M5: l'installazione è protetta — un'eccezione (cpSync/mkdirSync col
       // disco pieno, errore inatteso del registro) NON lascia la card in
-      // 'installing' per sempre (ogni click dopo risponderebbe "in corso")
-      let r: { ok: true; message: string } | { ok: false; error: string }
+      // 'installing' per sempre (ogni click dopo risponderebbe "in corso").
+      // X2: anche l'eccezione prende la sua categoria (dal codice/tipo)
+      let r: { ok: true; message: string } | { ok: false; error: string; category?: McpErrorCategory }
       try {
         const { installMcpServer } = await import('../main/connectors/install')
         r = await installMcpServer(message, aid, (await installBridge()).getInstallDeps())
       } catch (e) {
-        r = { ok: false, error: e instanceof Error ? e.message : String(e) }
+        r = { ok: false, error: e instanceof Error ? e.message : String(e), category: classifyMcpError(e) }
       }
       store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
       emitUpdatedEntry(aid, entry.id)
@@ -1729,10 +1732,15 @@ export function buildApiMethods(
       const guidaImport = !r.ok && (message.id.startsWith('url:') || classifyConnectError(r.error) === 'not-mcp')
         ? ` ${MCP_WINDOW_IMPORT_GUIDANCE}` : ''
       // fase 17c (C2, MU): il testo per il modello resta inglese; meta.ui
-      // dice alla UI cosa mostrare nella lingua dell'interfaccia
-      const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Server "${message.name}" NOT added: ${r.error}${guidaImport}`
+      // dice alla UI cosa mostrare nella lingua dell'interfaccia.
+      // X2 (fase sicurezza-beta16): l'errore NON entra nel testo al bot — SOLO
+      // la categoria fissa (il corpo può averlo scelto il server); il nome è
+      // ripulito. Il testo completo resta alla UI, tagliato a 300.
+      const text = r.ok
+        ? `[sistema] ${r.message}`
+        : `[sistema] Server "${sanitizeServerNoteName(message.name)}" NOT added: ${mcpErrorCategoryText(r.category ?? 'unknown-error')}.${guidaImport}`
       enqueueUserMessage(db(), aid, text, undefined, emit, undefined, 'CONNECTOR_INSTALLED', {
-        ui: r.ok ? ui(UI.sistemaServerAdded, { name: message.name }) : ui(UI.sistemaServerAddFailed, { name: message.name, error: r.error })
+        ui: r.ok ? ui(UI.sistemaServerAdded, { name: message.name }) : ui(UI.sistemaServerAddFailed, { name: message.name, error: clipErrorText(r.error) })
       })
       worker.poke()
       return r
@@ -2975,7 +2983,7 @@ export async function notifyConnectorConnected(
  */
 export async function notifyMcpServerState(
   cfg: { name: string; toolSlug?: string; enabledFor?: string[] },
-  test: { ok: boolean; tools?: string[]; error?: string },
+  test: { ok: boolean; tools?: string[]; error?: string; category?: McpErrorCategory },
   emit: Emitter,
   worker: JobWorker
 ): Promise<void> {
@@ -2983,15 +2991,22 @@ export async function notifyMcpServerState(
   const ids = cfg.enabledFor ?? ['*']
   const prefix = serverToolsPrefix(cfg)
   const n = test.tools?.length ?? 0
+  // X2 (fase sicurezza-beta16): al bot va SOLO una categoria fissa
+  // dell'elenco chiuso — il testo completo dell'errore (che può aver scelto
+  // il server) resta alla UI, tagliato a 300. Il nome nella nota è ripulito:
+  // niente a capo, niente < >, ≤ 60 caratteri (entra anche nella query di
+  // find_tools).
+  const name = sanitizeServerNoteName(cfg.name)
+  const category = test.ok ? null : (test.category ?? 'unknown-error')
   for (const agent of store.listAgents()) {
     if (!ids.includes('*') && !ids.includes(agent.id)) continue
     const text = test.ok
-      ? `[sistema] Server MCP "${cfg.name}" connected: ${n} tools available (${prefix}__* — find them with find_tools({query: "${cfg.name}"})).`
-      : `[sistema] Server MCP "${cfg.name}" does not start: ${test.error ?? 'unknown error'}.`
+      ? `[sistema] Server MCP "${name}" connected: ${n} tools available (${prefix}__* — find them with find_tools({query: "${name}"})).`
+      : `[sistema] Server MCP "${name}" does not start: ${mcpErrorCategoryText(category!)}.`
     enqueueUserMessage(db(), agent.id, text, undefined, emit, undefined, 'CONNECTOR_INSTALLED', {
       ui: test.ok
         ? ui(UI.sistemaMcpServerOk, { name: cfg.name, count: n })
-        : ui(UI.sistemaMcpServerFail, { name: cfg.name, error: test.error ?? '' })
+        : ui(UI.sistemaMcpServerFail, { name: cfg.name, error: clipErrorText(test.error ?? '') })
     })
     worker.poke()
   }
