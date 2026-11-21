@@ -28,7 +28,8 @@ import { composioToolPolicy } from '../connectors/composio-meta'
 import { mcpCallIsRead } from '../connectors/tool-batch'
 import { callMcpWithRetry } from './retry'
 // E1 (fase mcp-env): il PATH dei comandi dei server stdio manuali
-import { lookupServerCommand } from './command-path'
+// U4 (fase mcp-ui): la cartella risolta IN TESTA al PATH del figlio
+import { lookupServerCommand, serverCommandEnv } from './command-path'
 // E4 (fase mcp-env): l'uscita di rete dei server npm nel box (proxy per-server)
 import { ensureMcpEgressProxy, ensureMcpEgressProxyGateway, mcpEgressEnv, mcpEgressAllowHosts } from './egress-proxy'
 import { COMPOSIO_MULTI_EXECUTE_TOOL, forceSyncResponseToWorkbenchOff } from '../connectors/tool-batch'
@@ -402,14 +403,18 @@ async function connect(cfg: McpServerConfig): Promise<Client> {
     // (PATH ridotto del Finder + posti noti di fnm/nvm/Homebrew, errore chiaro
     // se manca) e il processo riceve l'env di base di oggi + le variabili
     // dell'utente (non segrete dalla config, segrete dallo store cifrato,
-    // entrambe dal resolver come stdioEnv)
+    // entrambe dal resolver come stdioEnv).
+    // U4 (fase mcp-ui): la CARTELLA del comando risolto va IN TESTA al PATH
+    // del figlio — npx è uno script «#!/usr/bin/env node» e col solo PATH
+    // ridotto del Finder il figlio muore con «env: node: No such file or
+    // directory». Vale per ogni comando risolto (npx, node, uvx, python…);
+    // il PATH dell'utente, se c'è, si rispetta dopo la cartella risolta.
     const resolved = lookupServerCommand(cfg.command ?? '')
     if ('error' in resolved) throw new Error(resolved.error)
     const a = await authResolver(cfg)
+    const env = serverCommandEnv(resolved.dir, a.stdioEnv && Object.keys(a.stdioEnv).length ? a.stdioEnv : undefined)
     await client.connect(
-      a.stdioEnv && Object.keys(a.stdioEnv).length
-        ? new StdioClientTransport({ command: resolved.command, args: cfg.args ?? [], env: a.stdioEnv })
-        : new StdioClientTransport({ command: resolved.command, args: cfg.args ?? [] })
+      new StdioClientTransport({ command: resolved.command, args: cfg.args ?? [], ...(env ? { env } : {}) })
     )
   } else {
     const a = await authResolver(cfg)
