@@ -17,15 +17,13 @@ import { BadgeCheck, ChevronDown, Puzzle, Search, ChevronLeft } from 'lucide-rea
 import { api, useStore, type PluginPoint } from '../store'
 import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, type AppCategoryId } from '../../../shared/app-catalog'
-import type { SkillLibraryItem } from '../../../shared/types'
-import { appsCatalogModel, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type ConnectedRow, type CatalogRowView } from '../lib/apps-view'
+import type { McpServerInfo, SkillLibraryItem } from '../../../shared/types'
+import { appsCatalogModel, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type CatalogRowView } from '../lib/apps-view'
 import { yourPlugins, grayLineOf, stateLabelOf, type PluginSegment, type YourPluginRow } from '../lib/plugins-view'
 import { humanizeSkillName } from '../../../shared/skill-md'
-import {
-  AppRow, AppLogo, FilterPill, useConnectFlows, AppDetailSheet,
-  ConnectedDetailSheet, DevelopersContent
-} from './AppsWindow'
-import { ServerSheet } from './ServerSheet'
+import { AppRow, AppLogo, FilterPill, useConnectFlows, DevelopersContent } from './AppsWindow'
+// PL2 (fase plugin): la scheda del plugin (tavola 9) — clic su una riga
+import { PluginCard } from './PluginCard'
 import { ManualServers } from './McpWindow'
 import { SkillEditor } from './SkillsWindow'
 import { logoUrlForName } from '../lib/app-logos'
@@ -61,11 +59,11 @@ export function PluginPanel(): ReactNode {
   const [view, setView] = useState<PluginView>('list')
   const [category, setCategory] = useState<AppsFilter>('all')
   const [addOpen, setAddOpen] = useState(false)
-  const [installed, setInstalled] = useState<{ servers: InstalledServerLike[]; plugins: InstalledPluginLike[] } | null>(null)
+  const [installed, setInstalled] = useState<{ servers: McpServerInfo[]; plugins: InstalledPluginLike[] } | null>(null)
   const [skills, setSkills] = useState<SkillLibraryItem[] | null>(null)
-  // i fogli del dettaglio (i pezzi riusati di oggi)
-  const [appDetailId, setAppDetailId] = useState<string | null>(null)
-  const [linkedDetail, setLinkedDetail] = useState<ConnectedRow | null>(null)
+  // PL2: la scheda del plugin (tavola 9) — app o server; le skill restano
+  // nell'editor riusato (la loro scheda è Panoramica e Bot)
+  const [card, setCard] = useState<{ app?: CatalogRowView; server?: McpServerInfo; directEnabledFor?: string[] | null } | null>(null)
   const [skillDetail, setSkillDetail] = useState<string | null>(null)
   // «Crea con il bot»: la chat con una richiesta precompilata (il meccanismo
   // di fase pagine G4 — composerPrefill — consumato dal composer di Chat)
@@ -73,7 +71,7 @@ export function PluginPanel(): ReactNode {
 
   const refreshInstalled = async (): Promise<void> => {
     try {
-      const r = await api.connectorsInstalled() as unknown as { servers: InstalledServerLike[]; plugins: InstalledPluginLike[] }
+      const r = await api.connectorsInstalled() as unknown as { servers: McpServerInfo[]; plugins: InstalledPluginLike[] }
       setInstalled({ servers: r.servers, plugins: r.plugins })
     } catch {
       setInstalled({ servers: [], plugins: [] })
@@ -126,39 +124,38 @@ export function PluginPanel(): ReactNode {
     if (at.kind === 'mcp') { setView('mcp'); setSeg('all') }
     else if (at.kind === 'skill-new') { setView('skill-new'); setSeg('skills') }
     else if (at.kind === 'segment') { setView('list'); setSeg(at.seg) }
-    else if (at.kind === 'app') { setView('list'); setSeg('connectors'); setAppDetailId(at.appId) }
+    else if (at.kind === 'app') {
+      setView('list'); setSeg('connectors')
+      const row = model.rows.find((r) => r.app.id === at.appId)
+      if (row) setCard({ app: row, directEnabledFor: installed?.servers.find((s) => s.id === row.app.directId)?.enabledFor ?? null })
+    }
     else if (at.kind === 'server') {
       setView('list')
       const sv = installed?.servers.find((s) => s.id === at.serverId)
-      if (sv) setLinkedDetail({ kind: 'connected', key: `server:${sv.id}`, source: 'server', id: sv.id, name: sv.name, logo: '', botsLabel: { all: true, names: [], extra: 0 }, status: 'connected', via: 'direct' })
+      if (sv) setCard({ server: sv })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pluginAt])
 
-  /** Il clic su una riga di «I tuoi»: ogni riga apre la sua scheda (i pezzi di oggi). */
+  /** Il clic su una riga di «I tuoi»: ogni riga apre la sua scheda (PL2). */
   const openRow = (row: YourPluginRow): void => {
     const target = row.open
     if (target.kind === 'app') {
       setSeg('connectors')
-      setAppDetailId(target.appId)
+      const rowView = model.rows.find((r) => r.app.id === target.appId)
+      if (rowView) setCard({ app: rowView, directEnabledFor: installed?.servers.find((s) => s.id === rowView.app.directId)?.enabledFor ?? null })
     } else if (target.kind === 'server') {
       const sv = installed?.servers.find((s) => s.id === target.serverId)
-      if (sv) setLinkedDetail({
-        kind: 'connected', key: `server:${sv.id}`, source: 'server', id: sv.id, name: sv.name, logo: '',
-        botsLabel: { all: true, names: [], extra: 0 }, status: 'connected', via: 'direct'
-      })
+      if (sv) setCard({ server: sv })
     } else if (target.kind === 'plugin') {
-      const p = installed?.plugins.find((x) => x.name === target.name)
-      if (p) setLinkedDetail({
-        kind: 'connected', key: `plugin:${p.marketplace}/${p.name}`, source: 'plugin', id: p.name, name: p.name, logo: '',
-        botsLabel: { all: true, names: [], extra: 0 }, status: 'connected', via: 'direct'
-      })
+      // il plugin mostra i suoi pezzi: per ora la riga porta al suo server
+      // principale quando c'è, altrimenti resta nell'elenco (onesto)
+      const sv = installed?.servers.find((s) => s.source?.kind === 'plugin' && s.source.plugin === target.name)
+      if (sv) setCard({ server: sv })
     } else {
       setSkillDetail(target.folder)
     }
   }
-
-  const appDetail = appDetailId ? (model.rows.find((r) => r.app.id === appDetailId) ?? null) : null
   const rowGrid = 'grid grid-cols-1 gap-1.5 lg:grid-cols-2 lg:gap-x-8'
   const segments: Array<[PluginSegment, string]> = [
     ['all', t`Tutto`],
@@ -347,7 +344,7 @@ export function PluginPanel(): ReactNode {
                         onConnect={(x) => void flows.connect(x)}
                         onCancel={(x) => void flows.cancel(x)}
                         onConflictResolve={(x) => void flows.onConflictResolve(x)}
-                        onOpen={(x) => setAppDetailId(x.app.id)}
+                        onOpen={(x) => setCard({ app: x, directEnabledFor: installed?.servers.find((s) => s.id === x.app.directId)?.enabledFor ?? null })}
                       />
                     ))}
                   </div>
@@ -392,7 +389,7 @@ export function PluginPanel(): ReactNode {
                     onConnect={(x) => void flows.connect(x)}
                     onCancel={(x) => void flows.cancel(x)}
                     onConflictResolve={(x) => void flows.onConflictResolve(x)}
-                    onOpen={(x) => setAppDetailId(x.app.id)}
+                    onOpen={(x) => setCard({ app: x, directEnabledFor: installed?.servers.find((s) => s.id === x.app.directId)?.enabledFor ?? null })}
                   />
                 ))}
               </div>
@@ -446,22 +443,14 @@ export function PluginPanel(): ReactNode {
         </div>
       </div>
 
-      {/* i fogli riusati di oggi */}
-      {appDetail && (
-        <AppDetailSheet
-          row={appDetail}
-          installed={installed}
-          onClose={() => setAppDetailId(null)}
-          onChanged={() => { void refreshConnectors(); void refreshInstalled(); reloadSkills() }}
-          onConnect={(r) => { setAppDetailId(null); void flows.connect(r) }}
-        />
-      )}
-      {linkedDetail && (
-        <ConnectedDetailSheet
-          row={linkedDetail}
-          installed={installed}
-          onClose={() => setLinkedDetail(null)}
-          onChanged={() => { void refreshConnectors(); void refreshInstalled() }}
+      {/* PL2: la scheda del plugin (tavola 9) */}
+      {card && (
+        <PluginCard
+          app={card.app ? { row: card.app } : undefined}
+          server={card.server}
+          directEnabledFor={card.directEnabledFor}
+          onClose={() => setCard(null)}
+          onChanged={() => { void refreshConnectors(); void refreshComposioGateway(); void refreshInstalled(); reloadSkills() }}
         />
       )}
       {skillDetail !== null && (

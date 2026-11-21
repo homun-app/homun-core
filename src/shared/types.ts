@@ -1334,6 +1334,8 @@ export interface SandbotApi {
   mcpImportApply(picks: Array<{ source: string; name: string }>): Promise<Array<{ name: string; outcome: 'created' | 'duplicate' | 'missing' }>>
   mcpDelete(id: string): Promise<void>
   mcpTest(id: string): Promise<{ ok: boolean; error?: string; tools?: string[] }>
+  /** PL2 (fase plugin): gli strumenti di un server MCP per la scheda Autorizzazioni */
+  mcpTools(id: string): Promise<Array<{ name: string; description: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } }>>
   // fase 5: connettori del catalogo ("Connetti app")
   connectorsList(): Promise<ConnectorInfo[]>
   connectorsConnect(id: string): Promise<{ started: boolean; status: string; message?: string; conflict?: 'composio-key' }>

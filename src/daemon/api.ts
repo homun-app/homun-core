@@ -1591,6 +1591,9 @@ export function buildApiMethods(
       x.saveServers(x.listServers().filter((y) => y.id !== id))
     },
     'mcp:test': ([id]) => mcp().then((x) => x.testServer(id as string)),
+    // PL2 (fase plugin): gli strumenti completi di un server (annotazioni
+    // comprese) per la scheda «Autorizzazioni»
+    'mcp:tools': ([id]) => mcp().then((x) => x.toolsOfServer(id as string)),
 
     // ---- fase 5: connettori del catalogo ("Connetti app") ----
     'connectors:list': () => {

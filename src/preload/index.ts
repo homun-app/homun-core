@@ -189,6 +189,9 @@ const api: SandbotApi = {
   mcpSave: (s, secret) => ipcRenderer.invoke('mcp:save', s, secret),
   mcpDelete: (id) => ipcRenderer.invoke('mcp:delete', id),
   mcpTest: (id) => ipcRenderer.invoke('mcp:test', id),
+  // PL2 (fase plugin): gli strumenti di un server (nome, descrizione,
+  // annotazioni) per la scheda «Autorizzazioni» della pagina Plugin
+  mcpTools: (id) => ipcRenderer.invoke('mcp:tools', id),
   /**
    * E2 (fase mcp-env): «Importa da Cursor, Claude o ZCode» — la scansione e
    * la conferma leggono quei file SOLO al clic, nel main. Le righe non

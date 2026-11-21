@@ -1105,7 +1105,7 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
  * che si salva NON cambia significato: assente o ['*'] = tutti, gli id scelti
  * = quei bot, lista vuota = nessuno (serversForAgent).
  */
-function BotTogglesForApp({ directId, enabledFor, agents, onChanged }: {
+export function BotTogglesForApp({ directId, enabledFor, agents, onChanged }: {
   directId: string
   enabledFor: string[] | null | undefined
   agents: Array<{ id: string; name: string }>
@@ -1160,7 +1160,7 @@ function BotTogglesForApp({ directId, enabledFor, agents, onChanged }: {
  * limite di account del server si dice in parole semplici, mai l'errore
  * grezzo. Stile della finestra di oggi: niente bordi, fondi tenui.
  */
-function GatewayAccountsSection({ app, appName, onChanged }: {
+export function GatewayAccountsSection({ app, appName, onChanged }: {
   app: ComposioGatewayAppInfo
   appName: string
   onChanged(): void

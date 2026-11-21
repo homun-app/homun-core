@@ -737,6 +737,10 @@ msgstr "Access: with your account (the browser opens)"
 msgid "Accesso: con un token"
 msgstr "Access: with a token"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Account"
+msgstr "Account"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Account Composio"
 msgstr "Composio account"
@@ -744,6 +748,10 @@ msgstr "Composio account"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Account Composio · connesso"
 msgstr "Composio account · connected"
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Account e bot"
+msgstr "Accounts and bots"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Adattamenti di Homun"
@@ -932,6 +940,14 @@ msgstr "Attach image"
 msgid "Allega immagine — questo modello non vede le immagini"
 msgstr "Attach image — this model cannot see images"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Alternativa: MCP diretto"
+msgstr "Alternative: direct MCP"
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Alternativa: tramite Composio"
+msgstr "Alternative: via Composio"
+
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "Alto"
 msgstr "High"
@@ -976,6 +992,10 @@ msgstr "More…"
 #: src/renderer/src/lib/approvals-center.ts
 msgid "altro"
 msgstr "other"
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Altro"
+msgstr "Other"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Altro ▾"
@@ -1356,6 +1376,10 @@ msgstr "authorization failed ({error})"
 msgid "rpc.authOkServerDown"
 msgstr "authorization succeeded but the server does not respond: {error}"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Autorizzazioni"
+msgstr "Permissions"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Avanti"
 msgstr "Next"
@@ -1399,6 +1423,10 @@ msgstr "Automatic start"
 msgid "avvisa"
 msgstr "notify"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "azione dell'insieme fisso: chiede sempre"
+msgstr "fixed-set action: always asks"
+
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "azioni sul tuo Mac fuori dal computer"
 msgstr "actions on your Mac outside the computer"
@@ -1419,6 +1447,7 @@ msgstr "Low"
 msgid "Bearer token (opzionale — salvato cifrato)"
 msgstr "Bearer token (optional — stored encrypted)"
 
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Blocca"
 msgstr "Block"
@@ -1452,6 +1481,7 @@ msgid "Bot che la usano"
 msgstr "Bots that use it"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Bot che lo usano"
 msgstr "Bots that use it"
@@ -1550,6 +1580,7 @@ msgid "Carica qui"
 msgstr "Upload here"
 
 #: src/renderer/src/components/ActivityPanel.tsx
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
@@ -1762,6 +1793,7 @@ msgstr "is asking for an action"
 msgid "chiede un'azione di team"
 msgstr "is asking for a team action"
 
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Chiedi"
 msgstr "Ask"
@@ -2074,9 +2106,17 @@ msgstr "Bot computer: image"
 msgid "Computer del bot"
 msgstr "Bot's computer"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "con il tuo account"
+msgstr "with your account"
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Con il tuo account"
 msgstr "With your account"
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "con la chiave di progetto"
+msgstr "with the project key"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Con una chiave"
@@ -2237,6 +2277,7 @@ msgstr "Allow for 10 minutes on {0}"
 msgid "Consenti per questa missione"
 msgstr "Allow for this mission"
 
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Consenti sempre"
 msgstr "Always allow"
@@ -3339,6 +3380,14 @@ msgstr "day"
 msgid "giovedì"
 msgstr "Thursday"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "gira nel computer isolato"
+msgstr "runs in the sandboxed computer"
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "gira sul tuo Mac"
+msgstr "runs on your Mac"
+
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Gira tutto qui, senza costi."
 msgstr "Everything runs here, no costs."
@@ -3641,6 +3690,18 @@ msgstr "Commands run directly on the Mac, with approvals; no bot browser."
 msgid "I contatti sono dati personali VISIBILI ai bot (servono a scrivere bozze) ma cifrati a riposo."
 msgstr "Contacts are personal data VISIBLE to bots (they're used to write drafts) but encrypted at rest."
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "i dati vanno a {host}"
+msgstr "data goes to {host}"
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "i dati vanno solo a {host}"
+msgstr "data goes only to {host}"
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "i login e le azioni passano dai server di Composio"
+msgstr "logins and actions go through Composio servers"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "I messaggi non urgenti delle routine aspettano questa finestra."
 msgstr "Non-urgent routine messages wait for this window."
@@ -3652,6 +3713,10 @@ msgstr "the steps of the turn"
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "I secret servono ai COMANDI dei bot (<0>{SECRET_TEMPLATE}</0>): il valore entra solo nell'env del processo, mai nel transcript."
 msgstr "Secrets are used by the bots' COMMANDS (<0>{SECRET_TEMPLATE}</0>): the value only enters the process env, never the transcript."
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "i segreti stanno cifrati sul tuo Mac"
+msgstr "secrets are stored encrypted on your Mac"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "I server MCP si gestiscono nella finestra Server MCP"
@@ -4721,6 +4786,10 @@ msgstr "Rules widen what passes on its own; they are not required: even without 
 msgid "Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d'uso: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
 msgstr "Bot searches are sent to these services under their terms of use: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Le scelte: Consenti sempre · Chiedi · Blocca. Dopo che un bot ha letto contenuti non fidati, le azioni di scrittura tornano a chiedere anche se le hai consentite."
+msgstr "The choices: Always allow · Ask · Block. After a bot reads untrusted content, write actions go back to asking even if you allowed them."
+
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Le versioni precedenti si conservano in .versions/ (le ultime 10)."
 msgstr "Previous versions are kept in .versions/ (the last 10)."
@@ -4878,6 +4947,10 @@ msgstr "logins"
 msgid "Login"
 msgstr "Logins"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "login con il tuo account"
+msgstr "sign in with your account"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "composio.loginTimeout"
@@ -4957,6 +5030,11 @@ msgstr "Max"
 #: src/renderer/src/components/Settings.tsx
 msgid "mattina"
 msgstr "morning"
+
+#. placeholder {0}: app!.app.name
+#: src/renderer/src/components/PluginCard.tsx
+msgid "MCP diretto di {0}"
+msgstr "direct MCP from {0}"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Media"
@@ -5309,6 +5387,10 @@ msgstr "On the team «{tool}» is always your call: this action always asks for 
 msgid "cron.weekend"
 msgstr "at the weekend"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "nessun account"
+msgstr "no account"
+
 #: src/renderer/src/components/Chat.tsx
 msgid "Nessun agente"
 msgstr "No agent"
@@ -5339,6 +5421,10 @@ msgstr "No file uploaded."
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Nessun file di supporto."
 msgstr "No support files."
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "nessun intermediario"
+msgstr "no intermediary"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "Nessun lavoro qui: i compiti dei bot e le loro routine finiscono in questo elenco."
@@ -5476,6 +5562,10 @@ msgstr "None"
 #: src/renderer/src/components/DraftCard.tsx
 msgid "Nessuno strumento d'invio per questo canale: copia il testo"
 msgstr "No send tool for this channel: copy the text"
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Nessuno strumento elencato."
+msgstr "No tools listed."
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Nessuno: senza, Automatico chiede sempre."
@@ -5975,6 +6065,10 @@ msgstr "web pages read"
 msgid "Pannello del bot"
 msgstr "Bot panel"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Panoramica"
+msgstr "Overview"
+
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "parlarsi tra bot del team"
 msgstr "talk between the team's bots"
@@ -6040,6 +6134,7 @@ msgid "per bot"
 msgstr "by bot"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/PluginCard.tsx
 msgid "per bot:"
 msgstr "per bot:"
 
@@ -6634,6 +6729,11 @@ msgstr "repository"
 msgid "skill.err.repoNotFound"
 msgstr "Repository not found (or not reachable). Check the address."
 
+#. placeholder {0}: server.egress.allowHosts.join(', ')
+#: src/renderer/src/components/PluginCard.tsx
+msgid "rete: solo {0}"
+msgstr "network: only {0}"
+
 #. placeholder {0}: message.allowHosts.join(', ')
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Rete: solo {0} · gira nel computer isolato"
@@ -6710,6 +6810,7 @@ msgid "Richieste che aspettano te"
 msgstr "Requests waiting for you"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Ricollega"
@@ -6785,6 +6886,7 @@ msgstr "Remove the local model ({size})? You can download it again whenever you 
 msgid "rimuovi"
 msgstr "remove"
 
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
@@ -6792,6 +6894,7 @@ msgstr "remove"
 msgid "Rimuovi"
 msgstr "Remove"
 
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Rimuovi davvero"
@@ -7096,6 +7199,10 @@ msgstr "discarded"
 msgid "Scartata"
 msgstr "Discarded"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Scegli cosa i bot possono fare da soli. Le regole valgono per tutti i bot che usano questo plugin."
+msgstr "Choose what bots can do on their own. The rules apply to every bot that uses this plugin."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.groupCoordinatorRequired"
@@ -7162,11 +7269,13 @@ msgid "Schermo del bot"
 msgstr "Bot screen"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Scollega"
 msgstr "Disconnect"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/PluginCard.tsx
 msgid "Scollega davvero"
 msgstr "Really disconnect"
 
@@ -7179,6 +7288,7 @@ msgstr "Disconnect {0}? Bots using it need to be moved."
 msgid "Scollegare NON cancella l'account su Composio: si gestisce da composio.dev."
 msgstr "Disconnecting does NOT delete the account on Composio: manage it at composio.dev."
 
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Scrittura"
 msgstr "Writing"
@@ -7498,6 +7608,10 @@ msgstr "Only skipped steps can be resumed. Starting over touches neither bots no
 msgid "Si salvano cifrate sul tuo Mac quando premi Collega."
 msgstr "They are saved encrypted on your Mac when you press Connect."
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Sicurezza e accesso"
+msgstr "Security and access"
+
 #: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/Sidebar.tsx
@@ -7550,6 +7664,10 @@ msgstr "SKILL.md must start with the YAML frontmatter (--- … ---)."
 #: src/shared/ui-messages.ts
 msgid "skill.bodyTooLarge"
 msgstr "SKILL.md is too large: at most 100000 characters (now {n})."
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Sola lettura"
+msgstr "Read-only"
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Sola lettura — il bot non vede il tuo cursore"
@@ -7727,6 +7845,10 @@ msgstr "Tidying up the desk…"
 msgid "Storico delle versioni"
 msgstr "Version history"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Strada"
+msgstr "Route"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "onboarding.focusPrompt"
@@ -7882,6 +8004,10 @@ msgstr "Remove the variable"
 msgid "Toglie container da /usr/local. Ti chiederà la password del Mac. I computer dei bot vengono rimossi."
 msgstr "It removes container from /usr/local. It will ask for your Mac password. The bots’ computers are removed."
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "token aziendale"
+msgstr "workplace token"
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Token di accesso"
 msgstr "Access token"
@@ -7920,6 +8046,7 @@ msgstr "tool (mcp__…__…)"
 msgid "tool scelto dal connettore: {chosen}"
 msgstr "tool chosen from the connector: {chosen}"
 
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Torna ai plugin"
 msgstr "Back to plugins"
@@ -7953,6 +8080,7 @@ msgid "totp.unsupported"
 msgstr "TOTP not supported (algorithm {algorithm}, digits {digits}, period {period}): only SHA1, 6 digits, 30 seconds"
 
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/PluginCard.tsx
 msgid "tramite Composio"
 msgstr "via Composio"
 
@@ -8087,6 +8215,7 @@ msgstr "All"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
@@ -8380,6 +8509,11 @@ msgstr "version {version}"
 #: src/renderer/src/components/Settings.tsx
 msgid "Versione e aggiornamenti"
 msgstr "Version and updates"
+
+#. placeholder {0}: server.source.version
+#: src/renderer/src/components/PluginCard.tsx
+msgid "versione fissata {0}"
+msgstr "pinned version {0}"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Versione nuova disponibile"
