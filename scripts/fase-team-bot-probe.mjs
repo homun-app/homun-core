@@ -399,6 +399,67 @@ try {
     await waitDom(`document.querySelector('[data-testid="archived-restore-group-${group.id}"]') !== null`, 5_000) &&
     (await sidebarText()).includes('Eliminati'))
 
+      // =========== 7. K3: il clic sul nome del team apre/chiude, il doppio clic rinomina ===========
+  // (il team è stato eliminato al punto 6: si ripristina per provare K3)
+  await clickSel(`[data-testid="archived-restore-group-${group.id}"]`)
+  if (!(await waitDom(`[...document.querySelectorAll('aside nav button')].some((b) => b.textContent.trim().startsWith('Weekend Torino'))`, 5_000))) {
+    check('K3: setup — il team torna in barra per le prove del clic', false, 'team non ripristinato')
+  } else {
+    // clic sul NOME di un team NON attivo: apre la chat E mostra i membri
+    const teamNameBtn = await pageEval(`
+      const rows = [...document.querySelectorAll('aside nav button')]
+      const b = rows.find((x) => x.textContent.trim().startsWith('Weekend Torino'))
+      if (!b) return null
+      b.click()
+      return true
+    `)
+    check('K3: clic sul nome del team non attivo → la chat del team E i membri', teamNameBtn === true &&
+      await waitDom(`document.querySelector('form textarea') && (document.querySelector('form textarea').placeholder ?? '').includes('Scrivi al team')`, 5_000) &&
+      await waitDom(`[...document.querySelectorAll('aside nav button')].some((b) => (b.getAttribute('aria-label') ?? '').includes('Chiudi i membri di Weekend Torino'))`, 5_000))
+    // secondo clic SULLO STESSO NOME (ora attivo): i membri si chiudono
+    const closed = await pageEval(`
+      const rows = [...document.querySelectorAll('aside nav button')]
+      const b = rows.find((x) => x.textContent.trim().startsWith('Weekend Torino'))
+      if (!b) return null
+      b.click()
+      return true
+    `)
+    check('K3: secondo clic sul nome (team attivo) → i membri si CHIUDONO', closed === true &&
+      await waitDom(`![...document.querySelectorAll('aside nav button')].some((b) => (b.getAttribute('aria-label') ?? '').includes('Chiudi i membri di Weekend Torino'))`, 5_000))
+    // doppio clic: rinomina in linea (Invio salva, Esc annulla)
+    const dbl = await pageEval(`
+      const rows = [...document.querySelectorAll('aside nav button')]
+      const b = rows.find((x) => x.textContent.trim().startsWith('Weekend Torino'))
+      // il doppio clic arriva sullo SPAN del nome (il bersaglio vero del
+      // puntatore), non sul bottone: da lì risale
+      const span = b ? [...b.querySelectorAll('span')].find((x) => x.textContent.trim() === 'Weekend Torino') : null
+      if (!span) return null
+      span.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 }))
+      return true
+    `)
+    check('K3: doppio clic sul nome → campo di rinomina in linea', dbl === true &&
+      await waitDom(`document.querySelector('[data-testid="team-rename"]') !== null`, 5_000))
+    await pageEval(`
+      const inp = document.querySelector('[data-testid="team-rename"]')
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+      setter.call(inp, 'Weekend Torino Due')
+      inp.dispatchEvent(new Event('input', { bubbles: true }))
+      inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      return true
+    `)
+    check('K3: Invio salva — il nome nuovo del team è nella barra', await waitDom(`(await window.sandbot.listGroups()).some((g) => g.id === ${group.id} && g.name === 'Weekend Torino Due')`, 10_000))
+    // il doppio clic vale ANCHE per i bot: campo in linea sulla riga del bot
+    const dblBot = await pageEval(`
+      const rows = [...document.querySelectorAll('aside nav button')]
+      const b = rows.find((x) => x.textContent.trim().startsWith('Competitoor Due'))
+      const span = b ? [...b.querySelectorAll('span')].find((x) => x.textContent.trim() === 'Competitoor Due') : null
+      if (!span) return null
+      span.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 }))
+      return true
+    `)
+    check('K3: doppio clic sul nome di un BOT → campo di rinomina in linea', dblBot === true &&
+      await waitDom(`document.querySelector('[data-testid="bot-rename"]') !== null`, 5_000))
+  }
 } catch (e) {
   check('la sonda è arrivata in fondo senza eccezioni', false, e instanceof Error ? e.message : String(e))
 } finally {

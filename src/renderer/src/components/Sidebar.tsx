@@ -416,13 +416,30 @@ function TeamRows({ team, states, lastSendAt, now }: { team: SidebarTeam; states
       >
         <button
           className="flex min-h-[30px] min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
-          onClick={() => openGroup(team.group.id)}
+          onClick={() => {
+            // K3 (fase team-bot): il clic sul nome apre la chat E i membri di
+            // un team non attivo; sul team GIÀ attivo apre/chiude i membri
+            // (la freccia resta la scorciatoia di sempre, lo stato si salva
+            // come oggi in sandbot:sidebar.teamOpen.<id>)
+            if (openGroupId !== team.group.id) {
+              openGroup(team.group.id)
+              setOpen(true)
+              writeLS(`${TEAM_OPEN_PREFIX}${team.group.id}`, '1')
+            } else {
+              const next = !open
+              setOpen(next)
+              writeLS(`${TEAM_OPEN_PREFIX}${team.group.id}`, next ? '1' : '0')
+            }
+          }}
           title={tip}
         >
           <TeamRobot team={team} />
           {renaming
             ? <InlineName name={team.group.name} testid="team-rename" onCommit={commitRename} onCancel={() => setRenaming(false)} />
-            : <span className={`min-w-0 flex-1 truncate text-[13.5px] ${open || openGroupId === team.group.id ? 'font-semibold' : ''}`}>{team.group.name}</span>}
+            : <span
+                className={`min-w-0 flex-1 truncate text-[13.5px] ${open || openGroupId === team.group.id ? 'font-semibold' : ''}`}
+                onDoubleClick={() => setRenaming(true)}
+              >{team.group.name}</span>}
           {team.waitingCount > 0 && (
             <span className="shrink-0 text-xs font-semibold tabular-nums text-waiting" aria-label={i18n.t(msg`${team.waitingCount} ti aspettano`)}>{team.waitingCount}</span>
           )}
@@ -508,7 +525,7 @@ function MemberRow({ member, state, lastAt, now }: { member: Agent; state: BotSt
         <ColorDot agent={member} />
         {renaming
           ? <InlineName name={member.name} testid="member-rename" onCommit={commitRename} onCancel={() => setRenaming(false)} />
-          : <span className="min-w-0 flex-1 truncate">{member.name}</span>}
+          : <span className="min-w-0 flex-1 truncate" onDoubleClick={() => setRenaming(true)}>{member.name}</span>}
         <RightSide state={state} lastAt={lastAt} now={now} />
       </button>
       <RowMenu
@@ -563,7 +580,7 @@ function BotRow({ bot, now }: { bot: SidebarBot; now: number }) {
         <ColorDot agent={bot.agent} />
         {renaming
           ? <InlineName name={bot.agent.name} testid="bot-rename" onCommit={commitRename} onCancel={() => setRenaming(false)} />
-          : <span className="min-w-0 flex-1 truncate">{bot.agent.name}</span>}
+          : <span className="min-w-0 flex-1 truncate" onDoubleClick={() => setRenaming(true)}>{bot.agent.name}</span>}
         <RightSide state={bot.state} childWaiting={bot.childWaiting} lastAt={bot.lastAt} now={now} />
       </button>
       <RowMenu
