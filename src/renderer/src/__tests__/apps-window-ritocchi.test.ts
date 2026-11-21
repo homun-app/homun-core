@@ -98,8 +98,10 @@ describe('U3: niente anello di focus all\'apertura della finestra App', () => {
     expect(at).toBeGreaterThan(0)
     const menu = sidebar.slice(at, sidebar.indexOf('\nfunction ', at + 10))
     expect(menu).toMatch(/onCloseAutoFocus=\{\(e\) => \{[^}]*openedWindow\.current[^}]*e\.preventDefault\(\)/)
-    // le tre voci che aprono una finestra lo segnano PRIMA di aprirla
-    for (const open of ['setAppsOpen(true)', 'setSkillsOpen(true)', 'setSettingsOpen(true)']) {
+    // PL1 (fase plugin): dal menu resta solo Impostazioni ad aprire una
+    // finestra (le altre voci sono la pagina Plugin della barra) — la segna
+    // PRIMA di aprirla, come prima
+    for (const open of ['setSettingsOpen(true)']) {
       const item = menu.slice(menu.lastIndexOf('<DropdownMenuItem', menu.indexOf(open)), menu.indexOf(open))
       expect(item, `la voce con ${open}`).toContain('openedWindow.current = true')
     }

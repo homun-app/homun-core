@@ -11,6 +11,22 @@ import { resolveAgentModel, type ResolvedAgentModel } from '../../shared/agent-m
 
 /** Fase 19b (T1): le schede del pannello «Computer» del bot. */
 export type ComputerTab = 'screen' | 'terminal' | 'files' | 'activity'
+
+/**
+ * PL1 (fase plugin): il PUNTO della pagina Plugin che un rimando chiede —
+ * i vecchi ingressi di setAppsOpen/setSkillsOpen/setMcpOpen diventano
+ * punti della casa unica (la card «Apri Server MCP» → i server MCP, il
+ * suggerimento «Collega <App>» → l'app, la riga Skill del pannello → le
+ * skill del bot). Si consuma dentro la pagina all'apertura.
+ */
+export type PluginPoint =
+  | { kind: 'segment'; seg: 'all' | 'connectors' | 'skills' | 'connected'; agentId?: string }
+  | { kind: 'mcp' }
+  | { kind: 'skill-new' }
+  | { kind: 'developers'; scrollTo?: 'gateway' | 'marketplace' }
+  | { kind: 'app'; appId: string }
+  | { kind: 'server'; serverId: string }
+
 import type { UiTheme } from './theme'
 import { applyTheme, watchSystemTheme } from './theme'
 import { previewOf, type SidebarPreview } from './sidebar-utils'
@@ -434,6 +450,17 @@ interface Store {
   appsOpen: boolean
   setAppsOpen(v: boolean): void
   /**
+   * PL1 (fase plugin): la pagina «Plugin» — la casa unica di connettori,
+   * server MCP e skill. Copre l'area centrale come Libreria e Attività
+   * (regola B1: un punto solo che decide, il render condizionale di App).
+   * `openPlugin(at)` apre la pagina e chiude le altre viste centrali; `at`
+   * è il punto di arrivo dei rimandi e si consuma dentro la pagina.
+   */
+  pluginOpen: boolean
+  pluginAt: PluginPoint | null
+  openPlugin(at?: PluginPoint): void
+  setPluginOpen(v: boolean): void
+  /**
    * M2 (fase beta12-correzioni): la finestra «Server MCP» — si apre dalla
    * voce del menu dell'account; il rimando «Gateway, plugin e registro»
    * apre la finestra App DIRETTAMENTE sul foglio «Per sviluppatori».
@@ -585,6 +612,9 @@ export const useStore = create<Store>((set, get) => ({
   subEntries: [],
   openLibraryId: null,
   appsOpen: false,
+  // PL1 (fase plugin): la pagina Plugin (chiusa), col punto dei rimandi
+  pluginOpen: false,
+  pluginAt: null,
   // M2 (fase beta12-correzioni): la finestra «Server MCP» (chiusa)
   mcpOpen: false,
   appsOpenDevelopers: false,
@@ -960,7 +990,7 @@ export const useStore = create<Store>((set, get) => ({
     // fase 16b (S5): la squadra aperta lascia il posto alla chat del bot
     // verifica impostazioni (navigazione): scegliere un bot riporta alla sua
     // chat — Attività e Libreria si chiudono (prima restavano sopra la chat)
-    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [], typingAgentId: null, openGroupId: null, groupMessages: [], activityOpen: false, openLibraryId: null, openPageInfo: null, approvalsOpen: false, approvalsFocusId: null })
+    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [], typingAgentId: null, openGroupId: null, groupMessages: [], activityOpen: false, openLibraryId: null, openPageInfo: null, approvalsOpen: false, approvalsFocusId: null, pluginOpen: false })
     set({ entries: await api.getEntries(agentId) })
     // fase 12: i sottoagenti dell'agente scelto
     api.listSubagents(agentId).then((subagents) => set({ subagents })).catch(() => undefined)
@@ -1120,7 +1150,7 @@ export const useStore = create<Store>((set, get) => ({
   openGroup(id) {
     // verifica impostazioni (navigazione): aprire una squadra riporta alla
     // chat; chiuderla (null) non tocca Attività né Libreria
-    set(id !== null ? { openGroupId: id, groupMessages: [], activityOpen: false, openLibraryId: null, approvalsQueueOpen: false, approvalsOpen: false, approvalsFocusId: null } : { openGroupId: id, groupMessages: [], approvalsQueueOpen: false })
+    set(id !== null ? { openGroupId: id, groupMessages: [], activityOpen: false, openLibraryId: null, approvalsQueueOpen: false, approvalsOpen: false, approvalsFocusId: null, pluginOpen: false } : { openGroupId: id, groupMessages: [], approvalsQueueOpen: false })
     if (id !== null) {
       void api.groupMessages(id).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
       void api.groupApprovalCards(id).then((groupCards) => set({ groupCards })).catch(() => undefined)
@@ -1149,13 +1179,33 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   openLibrary(id) {
-    // A2: aprire la Libreria chiude il centro «Da approvare» (come Attività)
-    set(id !== null ? { openLibraryId: id, approvalsOpen: false, approvalsFocusId: null } : { openLibraryId: id })
+    // A2: aprire la Libreria chiude il centro «Da approvare» (come Attività);
+    // PL1 (fase plugin): chiude anche la pagina Plugin — una vista centrale
+    set(id !== null ? { openLibraryId: id, approvalsOpen: false, approvalsFocusId: null, pluginOpen: false } : { openLibraryId: id })
   },
 
   // fase 16c (C4): la finestra «Collega app»
   setAppsOpen(v) {
     set({ appsOpen: v })
+  },
+
+  // PL1 (fase plugin): la pagina Plugin — apre CHIUDENDO le altre viste
+  // centrali (regola B1: una sola alla volta, deciso qui) e ricorda il
+  // PUNTO chiesto dal rimando (la pagina lo consuma)
+  openPlugin(at) {
+    set({
+      pluginOpen: true,
+      pluginAt: at ?? null,
+      activityOpen: false,
+      openLibraryId: null,
+      approvalsOpen: false,
+      approvalsFocusId: null,
+      approvalsQueueOpen: false
+    })
+  },
+
+  setPluginOpen(v) {
+    set({ pluginOpen: v })
   },
 
   // M2 (fase beta12-correzioni): la finestra «Server MCP»
@@ -1172,9 +1222,10 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   // fase 16c (C5): la vista centrale «Attività» — A2: aprire lei chiude il
-  // centro «Da approvare» e la Libreria (una vista centrale alla volta)
+  // centro «Da approvare» e la Libreria (una vista centrale alla volta);
+  // PL1 (fase plugin): chiude anche la pagina Plugin
   setActivityOpen(v) {
-    set(v ? { activityOpen: true, approvalsOpen: false, approvalsFocusId: null, openLibraryId: null } : { activityOpen: false })
+    set(v ? { activityOpen: true, approvalsOpen: false, approvalsFocusId: null, openLibraryId: null, pluginOpen: false } : { activityOpen: false })
   },
 
   // fase 16c (C3.2): il modello principale cambia → lo ricordano i bot che lo
@@ -1496,7 +1547,7 @@ export const useStore = create<Store>((set, get) => ({
   // richiesta precisa (dal riquadro in cima alle chat o dalla notifica) o
   // sull'insieme; copre l'area centrale come Attività e Libreria
   setApprovalsOpen(open, focusId = null) {
-    set(open ? { approvalsOpen: true, approvalsFocusId: focusId, activityOpen: false, openLibraryId: null, approvalsQueueOpen: false } : { approvalsOpen: false, approvalsFocusId: null })
+    set(open ? { approvalsOpen: true, approvalsFocusId: focusId, activityOpen: false, openLibraryId: null, approvalsQueueOpen: false, pluginOpen: false } : { approvalsOpen: false, approvalsFocusId: null })
     if (open) get().refreshSquadData({ forceBadges: true })
   },
 

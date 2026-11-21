@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon, PanelLeftClose, PanelLeftOpen, ShieldCheck, MoreHorizontal } from 'lucide-react'
+import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon, PanelLeftClose, PanelLeftOpen, ShieldCheck, MoreHorizontal, Puzzle } from 'lucide-react'
 import { useStore, useResolvedModel, api } from '../store'
 import {
   buildSidebarModel, collapsedVoices, teamOpenState, teamAutoOpens, orderRows, cutRows, memberCut,
@@ -730,6 +730,27 @@ function RailApprovals() {
   )
 }
 
+/** PL1 (fase plugin): la voce «Plugin» della barra — la casa unica di
+ *  connettori, server MCP e skill (tavola 8). Sta tra «Da approvare» e
+ *  «Attività», con l'icona lucide Puzzle; apre la pagina che copre l'area
+ *  centrale (la apre openPlugin, che chiude le altre viste: regola B1). */
+function PluginRow() {
+  const pluginOpen = useStore((s) => s.pluginOpen)
+  const openPlugin = useStore((s) => s.openPlugin)
+  return (
+    <button
+      className={`${ROW} ${pluginOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'}`}
+      data-testid="sidebar-plugin"
+      onClick={() => openPlugin()}
+    >
+      <span className="grid size-4 shrink-0 place-items-center">
+        <Puzzle className="size-4" />
+      </span>
+      <span className="min-w-0 flex-1 truncate"><Trans>Plugin</Trans></span>
+    </button>
+  )
+}
+
 /** rail: il menu pende dal bottone in fondo della barra STRETTA (trigger ridotto all'iniziale, allineamento a destra). */
 function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
   const { t } = useLingui()
@@ -738,10 +759,6 @@ function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const setAppsOpen = useStore((s) => s.setAppsOpen)
-  const setSkillsOpen = useStore((s) => s.setSkillsOpen)
-  // M2 (fase beta12-correzioni): la finestra «Server MCP»
-  const setMcpOpen = useStore((s) => s.setMcpOpen)
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
   const main = agents.find((a) => a.id === effectiveMain)
   // fase 16c correzioni (R4): il modello mostrato è quello RISOLTO, dal
@@ -780,13 +797,9 @@ function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
         className="w-56"
         onCloseAutoFocus={(e) => { if (openedWindow.current) { openedWindow.current = false; e.preventDefault() } }}
       >
-        <DropdownMenuItem onClick={() => { openedWindow.current = true; setAppsOpen(true) }}><Trans>Collega app</Trans></DropdownMenuItem>
-        {/* fase skill · sfoglia (B1): «Skill» sta QUI nel menu, sotto Collega
-            app — non più come bottone nella barra accanto ad App */}
-        <DropdownMenuItem data-testid="menu-skills" onClick={() => { openedWindow.current = true; setSkillsOpen(true) }}><Trans>Skill</Trans></DropdownMenuItem>
-        {/* M2 (fase beta12-correzioni): «Server MCP» tra Skill e
-            Impostazioni — la finestra sua, come le Skill */}
-        <DropdownMenuItem data-testid="menu-mcp" onClick={() => { openedWindow.current = true; setMcpOpen(true) }}><Trans>Server MCP</Trans></DropdownMenuItem>
+        {/* PL1 (fase plugin): «Collega app», «Skill» e «Server MCP» non ci
+            sono più — la casa è la pagina «Plugin» della barra; dal menu
+            restano Impostazioni e il resto */}
         <DropdownMenuItem onClick={() => { openedWindow.current = true; setSettingsOpen(true) }}><Trans>Impostazioni</Trans></DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuSub>
@@ -853,7 +866,9 @@ function CollapsedColumn({
   const openGroup = useStore((s) => s.openGroup)
   const setActivityOpen = useStore((s) => s.setActivityOpen)
   const activityOpen = useStore((s) => s.activityOpen)
-  const setAppsOpen = useStore((s) => s.setAppsOpen)
+  // PL1 (fase plugin): la voce della rotaia — anche nella barra stretta
+  const pluginOpen = useStore((s) => s.pluginOpen)
+  const openPlugin = useStore((s) => s.openPlugin)
   const voices = collapsedVoices(model)
   const stateName = (st: RowState): string => i18n.t(rowStateName(st))
   return (
@@ -883,6 +898,17 @@ function CollapsedColumn({
           </button>
         )}
         <RailApprovals />
+        {/* PL1 (fase plugin): anche nella barra stretta, tra «Da approvare»
+            e «Attività» — al posto del vecchio bottone «App» in fondo */}
+        <button
+          className={`grid size-9 shrink-0 place-items-center rounded-full transition ${pluginOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+          data-testid="rail-plugin"
+          aria-label={i18n.t(msg`Plugin`)}
+          title={i18n.t(msg`Plugin`)}
+          onClick={() => openPlugin()}
+        >
+          <Puzzle className="size-4" />
+        </button>
         <button
           className={`grid size-9 shrink-0 place-items-center rounded-full transition ${activityOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
           aria-label={i18n.t(msg`Attività`)}
@@ -938,14 +964,8 @@ function CollapsedColumn({
           <Search className="size-4" />
         </button>
         <div className="flex-1" />
-        <button
-          className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
-          aria-label={i18n.t(msg`App`)}
-          title={i18n.t(msg`App`)}
-          onClick={() => setAppsOpen(true)}
-        >
-          <LayoutGrid className="size-4" />
-        </button>
+        {/* PL1 (fase plugin): il vecchio bottone «App» della rotaia non c'è
+            più — la pagina «Plugin» sta tra le voci fisse qui sopra */}
         {/* fase 16b correzioni 2 (Q3): la riga dell'utente, alta 60 con 16 di
             margine sotto — lo stesso centro verticale della pillola della chat */}
         <div className="mb-4 flex h-[60px] shrink-0 items-center justify-center">
@@ -1159,6 +1179,9 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
               />
             )}
             <ApprovalsRow />
+            {/* PL1 (fase plugin): la voce «Plugin» tra «Da approvare» e
+                «Attività» (tavola 8) — la casa unica dei collegamenti */}
+            <PluginRow />
             <button
               className={`${ROW} ${
                 activityOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'

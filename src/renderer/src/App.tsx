@@ -16,6 +16,10 @@ import { GuideView } from './components/GuideView'
 import { LibraryPanel } from './components/LibraryPanel'
 // fase 16c (C5/C4): la vista Attività e la finestra «Collega app»
 import { ActivityPanel } from './components/ActivityPanel'
+// PL1 (fase plugin): la pagina «Plugin» — la casa unica di connettori,
+// server MCP e skill (tavola 8); copre l'area centrale come Libreria e
+// Attività, con lo stesso comportamento di apertura e chiusura (B1)
+import { PluginPanel } from './components/PluginPanel'
 import { AppsWindow } from './components/AppsWindow'
 import { SkillsWindow } from './components/SkillsWindow'
 // M2 (fase beta12-correzioni): la finestra «Server MCP» (menu dell'account)
@@ -217,6 +221,8 @@ export function App() {
   const approvalsQueueOpen = useStore((s) => s.approvalsQueueOpen)
   // A2 (fase centro-autorizzazioni): il centro «Da approvare» copre l'area centrale quando è aperto
   const approvalsOpen = useStore((s) => s.approvalsOpen)
+  // PL1 (fase plugin): la pagina Plugin copre l'area centrale quando è aperta
+  const pluginOpen = useStore((s) => s.pluginOpen)
   const layout = layoutFor({ windowWidth, sidebarCollapsedByUser: sidebarCollapsed, sidebarWidthPref: sidebarWidth, panelOpen: rightPanel, panelTab })
   if (!onboardingKnown || guideView === 'loading') return <BootSplash />
   if (guideView === 'guide') return <GuideView />
@@ -240,6 +246,9 @@ export function App() {
             chat e la finestra non si usava più (select, squadra, Libreria e
             Attività chiudono approvalsOpen: qui è l'UNICO punto che decide) */}
         {approvalsOpen && <ApprovalsCenter />}
+        {/* PL1 (fase plugin): UN punto solo che decide, come B1 — il render
+            condizionale qui; openPlugin nello store chiude le altre viste */}
+        {pluginOpen && <PluginPanel />}
         <LibraryPanel />
         <ActivityPanel />
       </div>

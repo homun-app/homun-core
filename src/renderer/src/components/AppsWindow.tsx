@@ -17,7 +17,7 @@ import { Search, X } from 'lucide-react'
 import { api, useStore } from '../store'
 import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, appTaglineOf, type AppCatalogRow, type AppCategoryId } from '../../../shared/app-catalog'
-import type { AppsRegistryResult, ComposioGatewayAppInfo } from '../../../shared/types'
+import type { AppsRegistryResult, ComposioGatewayAppInfo, ComposioGatewayStatusInfo } from '../../../shared/types'
 import { appsViewModel, appsCatalogModel, botsToggleState, gatewayAccountRows, accountLimitMessage, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type ConnectedRow, type CatalogRowView } from '../lib/apps-view'
 import { mcpToolPresentation } from '../../../shared/tool-names'
 import { SettingsGroup } from './settings/SettingsGroup'
@@ -59,7 +59,7 @@ export function ProvenanceTag({ via }: { via: 'direct' | 'composio' }) {
 }
 
 /** Il logo di una riga: il file del catalogo, un data: URL, un'emoji o l'iniziale su un fondo tenue. */
-function AppLogo({ logo, name, className = 'size-10 text-base' }: { logo: string | null; name: string; className?: string }) {
+export function AppLogo({ logo, name, className = 'size-10 text-base' }: { logo: string | null; name: string; className?: string }) {
   const url = catalogLogoUrl(logo)
   if (url || logo?.startsWith('data:')) {
     // nel tema scuro una piastrella chiara dietro il logo: i marchi neri su
@@ -375,11 +375,12 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
  * SCORRENDO alla sezione Gateway (scrollTo); i server MCP manuali restano
  * nella finestra «Server MCP» — qui solo UNA riga piccola in fondo, non un
  * blocco in evidenza: niente giro a vuoto tra i due fogli.
+ * PL1 (fase plugin): il CONTENUTO vive in DevelopersContent (esportata) —
+ * la pagina Plugin lo incorpora in «Avanzate»; il foglio resta il wrapper
+ * di oggi finché le finestre esistono.
  */
-function DevelopersSheet({ onClose, scrollTo }: { onClose(): void; scrollTo?: 'gateway' | null }) {
+export function DevelopersContent({ scrollTo, footer }: { scrollTo?: 'gateway' | 'marketplace' | null; footer?: ReactNode }): ReactNode {
   const { t } = useLingui()
-  // M2: il rimando apre la finestra «Server MCP» (che chiude QUESTO foglio)
-  const setMcpOpen = useStore((s) => s.setMcpOpen)
   const [query, setQuery] = useState('')
   const [registry, setRegistry] = useState<AppsRegistryResult[] | null>(null)
   const [registryFailed, setRegistryFailed] = useState(false)
@@ -401,70 +402,91 @@ function DevelopersSheet({ onClose, scrollTo }: { onClose(): void; scrollTo?: 'g
 
   // U3: aperto da «Server MCP», il foglio arriva GIÀ sulla sezione Gateway
   useEffect(() => {
-    if (scrollTo !== 'gateway') return
-    document.getElementById('developers-gateway')?.scrollIntoView({ block: 'start' })
+    if (scrollTo !== 'gateway' && scrollTo !== 'marketplace') return
+    document.getElementById(`developers-${scrollTo}`)?.scrollIntoView({ block: 'start' })
   }, [scrollTo])
 
+  return (
+    <>
+      <strong className="block font-display text-lg"><Trans>Per sviluppatori</Trans></strong>
+      <p className="mt-1 text-xs text-muted-foreground"><Trans>Server personalizzati, plugin, gateway e registro: chi sa cos'è un server MCP lo trova qui.</Trans></p>
+      <div className="mt-4 space-y-6">
+        {/* U3: il GATEWAY per primo (è qui che porta il link della finestra
+            «Server MCP»), poi i plugin, poi il registro */}
+        <div id="developers-gateway" data-testid="developers-gateway" className="scroll-mt-4">
+          <GatewayTab />
+        </div>
+        <div id="developers-marketplace" className="scroll-mt-4">
+          <MarketplaceTab />
+        </div>
+        <ClientMetadataUrlRow />
+        <div className="space-y-2">
+          <p className="text-[13px] font-medium"><Trans>Cerca nel registro MCP</Trans></p>
+          <input
+            className="w-full rounded-full bg-muted px-3.5 py-2 text-sm outline-none"
+            placeholder={t`cerca nel registro (2+ lettere)`}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {searching && <p className="text-xs text-muted-foreground"><Trans>Cerco nel registro…</Trans></p>}
+          {registryFailed && <p className="text-xs text-muted-foreground"><Trans>Non riesco a cercare nel registro</Trans></p>}
+          {registry !== null && registry.length === 0 && !searching && <p className="text-xs text-muted-foreground"><Trans>Nessun server trovato.</Trans></p>}
+          {(registry ?? []).map((r) => (
+            <div key={r.id} className="flex items-center gap-3 rounded-[14px] bg-muted/60 px-3 py-2">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm">{r.name}</span>
+                <span className="block truncate text-xs text-muted-foreground">{r.description}</span>
+              </span>
+              <a className="shrink-0 text-xs text-primary hover:underline" href="https://github.com/modelcontextprotocol/registry" target="_blank" rel="noreferrer">
+                <Trans>il registro ›</Trans>
+              </a>
+            </div>
+          ))}
+        </div>
+        {/* fase Composio OAuth (C6): la strada della CHIAVE resta, ma solo
+            qui — per la maggior parte delle persone c'è il «Connetti» delle
+            app dell'elenco; le due strade non insieme */}
+        <ComposioKeySection />
+      </div>
+      {footer}
+    </>
+  )
+}
+
+/** Il foglio «Per sviluppatori» di oggi: il velo + la carta con DevelopersContent. */
+function DevelopersSheet({ onClose, scrollTo }: { onClose(): void; scrollTo?: 'gateway' | null }) {
+  const { t } = useLingui()
+  // M2: il rimando apre la finestra «Server MCP» (che chiude QUESTO foglio)
+  const setMcpOpen = useStore((s) => s.setMcpOpen)
   return (
     <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
       {/* U2: @container, come il dettaglio app */}
       <div className="@container max-h-[85vh] w-full max-w-2xl overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="developers-sheet">
-        <strong className="block font-display text-lg"><Trans>Per sviluppatori</Trans></strong>
-        <p className="mt-1 text-xs text-muted-foreground"><Trans>Server personalizzati, plugin, gateway e registro: chi sa cos'è un server MCP lo trova qui.</Trans></p>
-        <div className="mt-4 space-y-6">
-          {/* U3: il GATEWAY per primo (è qui che porta il link della finestra
-              «Server MCP»), poi i plugin, poi il registro */}
-          <div id="developers-gateway" data-testid="developers-gateway" className="scroll-mt-4">
-            <GatewayTab />
-          </div>
-          <MarketplaceTab />
-          <ClientMetadataUrlRow />
-          <div className="space-y-2">
-            <p className="text-[13px] font-medium"><Trans>Cerca nel registro MCP</Trans></p>
-            <input
-              className="w-full rounded-full bg-muted px-3.5 py-2 text-sm outline-none"
-              placeholder={t`cerca nel registro (2+ lettere)`}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            {searching && <p className="text-xs text-muted-foreground"><Trans>Cerco nel registro…</Trans></p>}
-            {registryFailed && <p className="text-xs text-muted-foreground"><Trans>Non riesco a cercare nel registro</Trans></p>}
-            {registry !== null && registry.length === 0 && !searching && <p className="text-xs text-muted-foreground"><Trans>Nessun server trovato.</Trans></p>}
-            {(registry ?? []).map((r) => (
-              <div key={r.id} className="flex items-center gap-3 rounded-[14px] bg-muted/60 px-3 py-2">
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm">{r.name}</span>
-                  <span className="block truncate text-xs text-muted-foreground">{r.description}</span>
-                </span>
-                <a className="shrink-0 text-xs text-primary hover:underline" href="https://github.com/modelcontextprotocol/registry" target="_blank" rel="noreferrer">
-                  <Trans>il registro ›</Trans>
-                </a>
+        <DevelopersContent
+          scrollTo={scrollTo}
+          footer={(
+            <>
+              {/* M2 → U3 (fase mcp-ui): i server MCP manuali stanno nella finestra
+                  «Server MCP» (menu dell'account) — UNA riga piccola in fondo, non
+                  un blocco in evidenza: ogni cosa in un posto solo, niente giri a vuoto */}
+              <p className="mt-4 text-center text-[12px] text-muted-foreground">
+                <button
+                  type="button"
+                  className="underline-offset-2 transition hover:text-foreground hover:underline"
+                  onClick={() => { onClose(); setMcpOpen(true) }}
+                  data-testid="developers-open-mcp"
+                >
+                  <Trans>I server MCP si gestiscono nella finestra Server MCP</Trans> ›
+                </button>
+              </p>
+              <div className="mt-2 flex justify-end">
+                <button className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
+                  <Trans>Chiudi</Trans>
+                </button>
               </div>
-            ))}
-          </div>
-          {/* fase Composio OAuth (C6): la strada della CHIAVE resta, ma solo
-              qui — per la maggior parte delle persone c'è il «Connetti» delle
-              app dell'elenco; le due strade non insieme */}
-          <ComposioKeySection />
-        </div>
-        {/* M2 → U3 (fase mcp-ui): i server MCP manuali stanno nella finestra
-            «Server MCP» (menu dell'account) — UNA riga piccola in fondo, non
-            un blocco in evidenza: ogni cosa in un posto solo, niente giri a vuoto */}
-        <p className="mt-4 text-center text-[12px] text-muted-foreground">
-          <button
-            type="button"
-            className="underline-offset-2 transition hover:text-foreground hover:underline"
-            onClick={() => { onClose(); setMcpOpen(true) }}
-            data-testid="developers-open-mcp"
-          >
-            <Trans>I server MCP si gestiscono nella finestra Server MCP</Trans> ›
-          </button>
-        </p>
-        <div className="mt-2 flex justify-end">
-          <button className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
-            <Trans>Chiudi</Trans>
-          </button>
-        </div>
+            </>
+          )}
+        />
       </div>
     </div>
   )
@@ -518,7 +540,7 @@ function ComposioKeySection() {
 // ---- fase catalogo app (P3): le pillole e la riga di un'app ----
 
 /** Una pillola dei filtri (Tutte · Connesse · categorie · Altro ▾). */
-function FilterPill({ active, onClick, children }: { active: boolean; onClick(): void; children: ReactNode }) {
+export function FilterPill({ active, onClick, children }: { active: boolean; onClick(): void; children: ReactNode }) {
   return (
     <button
       className={`rounded-full px-3 py-1 text-[12px] transition ${active ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
@@ -533,12 +555,112 @@ function FilterPill({ active, onClick, children }: { active: boolean; onClick():
 export type AppFlowKind = 'direct' | 'login' | 'app' | 'failed' | 'conflict'
 
 /**
+ * PL1 (fase plugin): il motore dei flussi «Connetti in un passo» delle app,
+ * ESTRATTO da AppsView così la pagina Plugin lo riusa senza riscriverlo —
+ * le fasi per riga (direct/login/app/conflict), il polling mentre un flusso
+ * è in corsa, la promozione login → app quando il gateway si collega e la
+ * chiusura quando la riga diventa collegata. `rows` sono le righe del
+ * modello del catalogo (appsCatalogModel().rows), per riconoscere la riga
+ * di un flusso in corsa.
+ */
+export function useConnectFlows(rows: CatalogRowView[]): {
+  connecting: Record<string, 'direct' | 'login' | 'app' | 'conflict'>
+  gatewayConnected: boolean
+  composioGateway: ComposioGatewayStatusInfo | null
+  flowOf(row: CatalogRowView): AppFlowKind | null
+  connect(row: CatalogRowView): Promise<void>
+  cancel(row: CatalogRowView): Promise<void>
+  onConflictResolve(row: CatalogRowView): Promise<void>
+  refresh(): void
+} {
+  const connectors = useStore((s) => s.connectors)
+  const refreshConnectors = useStore((s) => s.refreshConnectors)
+  const refreshComposio = useStore((s) => s.refreshComposio)
+  const composioGateway = useStore((s) => s.composioGateway)
+  const refreshComposioGateway = useStore((s) => s.refreshComposioGateway)
+  const [connecting, setConnecting] = useState<Record<string, 'direct' | 'login' | 'app' | 'conflict'>>({})
+  const gatewayConnected = connectors.find((c) => c.id === 'composio')?.state.status === 'connected'
+
+  // mentre un flusso è in corsa (o un collegamento è in attesa) si rilegge lo
+  // stato ogni 2 s: gli eventi {type:'connectors'} arrivano, il polling chiude
+  const flowBusy = Object.keys(connecting).length > 0 || Boolean(composioGateway?.pending)
+  useEffect(() => {
+    if (!flowBusy) return
+    const timer = setInterval(() => {
+      void refreshConnectors()
+      void refreshComposioGateway()
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [flowBusy, refreshConnectors, refreshComposioGateway])
+
+  // una riga COLLEGATA chiude il suo flusso; il login riuscito promuove «app»
+  useEffect(() => {
+    setConnecting((prev) => {
+      let changed = false
+      const next: typeof prev = {}
+      for (const [id, phase] of Object.entries(prev)) {
+        const row = rows.find((r) => r.app.id === id)
+        if (row?.connected === 'connected') { changed = true; continue }
+        if (phase === 'login' && gatewayConnected) { next[id] = 'app'; changed = true; continue }
+        next[id] = phase
+      }
+      return changed ? next : prev
+    })
+  }, [rows, gatewayConnected])
+
+  /** La fase visibile di una riga (null = stato fermo: Connetti/Connessa/Ricollega). */
+  const flowOf = (row: CatalogRowView): AppFlowKind | null => {
+    const phase = connecting[row.app.id]
+    if (!phase) return null
+    if (phase === 'conflict') return 'conflict'
+    if (phase === 'direct') return 'direct'
+    const slug = row.app.composioSlug
+    const pending = composioGateway?.pending
+    // solo il collegamento FATTO chiude il flusso: uno stato «da ricollegare»
+    // arrivato a metà flusso non deve spezzare l'attesa visibile all'utente
+    if (row.connected === 'connected') return null
+    if (phase === 'login' && !gatewayConnected) return 'login'
+    if (slug && pending?.slug === slug && pending.failed) return 'failed'
+    return 'app'
+  }
+
+  const connect = async (row: CatalogRowView): Promise<void> => {
+    const r = await api.appsConnect(row.app.id).catch((): Awaited<ReturnType<typeof api.appsConnect>> => ({ started: false, reason: 'unknown-app' }))
+    if (r.started) setConnecting((p) => ({ ...p, [row.app.id]: r.phase ?? 'direct' }))
+    else if (r.conflict) setConnecting((p) => ({ ...p, [row.app.id]: 'conflict' }))
+    void refreshConnectors()
+    void refreshComposioGateway()
+  }
+  const cancel = async (row: CatalogRowView): Promise<void> => {
+    setConnecting((p) => {
+      const next = { ...p }
+      delete next[row.app.id]
+      return next
+    })
+    await api.appsCancelConnect(row.app.id).catch(() => undefined)
+    void refreshConnectors()
+    void refreshComposioGateway()
+  }
+  const onConflictResolve = async (row: CatalogRowView): Promise<void> => {
+    await api.composioDisable().catch(() => undefined)
+    await refreshComposio()
+    await connect(row)
+  }
+  const refresh = (): void => {
+    void refreshConnectors()
+    void refreshComposioGateway()
+  }
+  return { connecting, gatewayConnected, composioGateway, flowOf, connect, cancel, onConflictResolve, refresh }
+}
+
+/**
  * La riga di un'app dell'elenco unico: logo, nome, tagline (o lo stato del
  * flusso) e a destra Connetti / Connessa / Ricollega / l'attesa con Annulla.
  * NIENTE etichetta di provenienza: quella sta nel foglio del dettaglio. Il
  * clic sulla riga apre il dettaglio; il clic sul bottone collega.
+ * PL1 (fase plugin): esportata — la pagina Plugin la riusa com'è.
  */
-function AppRow({ row, flow, onConnect, onCancel, onConflictResolve, onOpen }: {
+export function AppRow({ row, flow, onConnect, onCancel, onConflictResolve, onOpen }: {
   row: CatalogRowView
   flow: AppFlowKind | null
   onConnect(row: CatalogRowView): void
@@ -674,10 +796,6 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
   }, [appsOpenDevelopers])
   const [accountOpen, setAccountOpen] = useState(false)
   const [overflowOpen, setOverflowOpen] = useState(false)
-  // P4: le righe con un flusso in corso, per id ('login' → 'app' da sole)
-  const [connecting, setConnecting] = useState<Record<string, 'direct' | 'login' | 'app' | 'conflict'>>({})
-  // il server Composio del catalogo è collegato col login (l'ACCOUNT è attivo)
-  const gatewayConnected = connectors.find((c) => c.id === 'composio')?.state.status === 'connected'
 
   const refreshInstalled = async (): Promise<void> => {
     try {
@@ -718,71 +836,9 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
     [connectors, installed, agents, filter, query]
   )
 
-  // mentre un flusso è in corsa (o un collegamento è in attesa) si rilegge lo
-  // stato ogni 2 s: gli eventi {type:'connectors'} arrivano, il polling chiude
-  const flowBusy = Object.keys(connecting).length > 0 || Boolean(composioGateway?.pending)
-  useEffect(() => {
-    if (!flowBusy) return
-    const timer = setInterval(() => {
-      void refreshConnectors()
-      void refreshComposioGateway()
-    }, 2000)
-    return () => clearInterval(timer)
-  }, [flowBusy, refreshConnectors, refreshComposioGateway])
-
-  // una riga COLLEGATA chiude il suo flusso; il login riuscito promuove «app»
-  useEffect(() => {
-    setConnecting((prev) => {
-      let changed = false
-      const next: typeof prev = {}
-      for (const [id, phase] of Object.entries(prev)) {
-        const row = model.rows.find((r) => r.app.id === id)
-        if (row?.connected === 'connected') { changed = true; continue }
-        if (phase === 'login' && gatewayConnected) { next[id] = 'app'; changed = true; continue }
-        next[id] = phase
-      }
-      return changed ? next : prev
-    })
-  }, [model, gatewayConnected])
-
-  /** La fase visibile di una riga (null = stato fermo: Connetti/Connessa/Ricollega). */
-  const flowOf = (row: CatalogRowView): AppFlowKind | null => {
-    const phase = connecting[row.app.id]
-    if (!phase) return null
-    if (phase === 'conflict') return 'conflict'
-    if (phase === 'direct') return 'direct'
-    const slug = row.app.composioSlug
-    const pending = composioGateway?.pending
-    // solo il collegamento FATTO chiude il flusso: uno stato «da ricollegare»
-    // arrivato a metà flusso non deve spezzare l'attesa visibile all'utente
-    if (row.connected === 'connected') return null
-    if (phase === 'login' && !gatewayConnected) return 'login'
-    if (slug && pending?.slug === slug && pending.failed) return 'failed'
-    return 'app'
-  }
-
-  const connect = async (row: CatalogRowView): Promise<void> => {
-    const r = await api.appsConnect(row.app.id).catch((): Awaited<ReturnType<typeof api.appsConnect>> => ({ started: false, reason: 'unknown-app' }))
-    if (r.started) setConnecting((p) => ({ ...p, [row.app.id]: r.phase ?? 'direct' }))
-    else if (r.conflict) setConnecting((p) => ({ ...p, [row.app.id]: 'conflict' }))
-    void refreshConnectors()
-    void refreshComposioGateway()
-  }
-  const cancel = async (row: CatalogRowView): Promise<void> => {
-    setConnecting((p) => {
-      const next = { ...p }
-      delete next[row.app.id]
-      return next
-    })
-    await api.appsCancelConnect(row.app.id).catch(() => undefined)
-    void refreshConnectors()
-    void refreshComposioGateway()
-  }
-  const onConflictResolve = async (row: CatalogRowView): Promise<void> => {
-    await api.composioDisable().catch(() => undefined)
-    await refreshComposio()
-    await connect(row)
-  }
+  // PL1 (fase plugin): il motore dei flussi «Connetti in un passo» vive nell'hook
+  // ESTRATTO da questa vista (useConnectFlows) — la pagina Plugin lo riusa uguale
+  const { flowOf, connect, cancel, onConflictResolve, gatewayConnected } = useConnectFlows(model.rows)
 
   const openDetail = (row: CatalogRowView): void => setDetailId(row.app.id)
   const detail = detailId ? (model.rows.find((r) => r.app.id === detailId) ?? null) : null
@@ -1255,7 +1311,8 @@ function GatewayAccountsSection({ app, appName, onChanged }: {
   )
 }
 
-function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
+/** PL1 (fase plugin): esportata — la pagina Plugin apre questo foglio sui rimandi «Collega <App>». */
+export function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
   row: CatalogRowView
   installed: { servers: InstalledServerLike[]; plugins: InstalledPluginLike[] } | null
   onClose(): void
@@ -1511,7 +1568,7 @@ function ComposioAccountSheet({ onClose, onChanged }: { onClose(): void; onChang
 }
 
 /** Il foglio del dettaglio di un server o plugin collegato (ciò che restava di ConnectorTile e InstalledTab). */
-function ConnectedDetailSheet({ row, installed, onClose, onChanged }: {
+export function ConnectedDetailSheet({ row, installed, onClose, onChanged }: {
   row: ConnectedRow
   installed: { servers: InstalledServerLike[]; plugins: InstalledPluginLike[] } | null
   onClose(): void

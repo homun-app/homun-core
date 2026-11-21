@@ -274,7 +274,7 @@ export function ManualServersSheet({ onClose }: { onClose(): void }) {
 }
 
 /** Server MCP aggiunti a mano (stdio o HTTP, con header/bearer salvati cifrati). */
-function ManualServers() {
+export function ManualServers() {
   const { t } = useLingui()
   const agents = useStore((s) => s.agents)
   const [servers, setServers] = useState<McpServerInfo[]>([])

@@ -18,24 +18,22 @@ function accountMenuContent(): string {
   return m[2]!
 }
 
-describe("B1: «Skill» nel menu in fondo, non più nella barra", () => {
-  it('«Skill» sta nel menu subito sotto «Collega app» e prima di «Impostazioni»', () => {
+describe("B1 → PL1: «Skill» non sta più nel menu: la casa è la pagina Plugin", () => {
+  it('il menu dell\'account non ha più «Skill» (né «Collega app»): aprono la pagina Plugin', () => {
     const menu = accountMenuContent()
-    const at = menu.indexOf('<Trans>Collega app</Trans>')
-    const skill = menu.indexOf('<Trans>Skill</Trans>')
-    const settings = menu.indexOf('<Trans>Impostazioni</Trans>')
-    expect(at).toBeGreaterThanOrEqual(0)
-    expect(skill).toBeGreaterThan(at)
-    if (settings >= 0) expect(skill).toBeLessThan(settings)
+    expect(menu).not.toContain('<Trans>Skill</Trans>')
+    expect(menu).not.toContain('<Trans>Collega app</Trans>')
+    expect(menu).not.toContain('data-testid="menu-skills"')
+    expect(menu).not.toContain('setSkillsOpen')
   })
 
-  it('la voce del menu apre la finestra Skill (setSkillsOpen) ed è cliccabile dalle sonde', () => {
-    const menu = accountMenuContent()
-    // U3 (fase pulizia · ritocchi): la voce segna anche che apre una finestra
-    // (openedWindow) prima di aprirla — l'onClick può avere più istruzioni
-    const item = /<DropdownMenuItem[^>]*onClick=\{\(\) => (?:setSkillsOpen\(true\)|\{[^}]*setSkillsOpen\(true\)[^}]*\})\}[^>]*>/.exec(menu)
-    expect(item).not.toBeNull()
-    expect(item![0]).toContain('data-testid="menu-skills"')
+  it('la pagina Plugin ha il segmento Skill e riusa l\'editor di SkillsWindow', () => {
+    const panel = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
+    expect(panel).toMatch(/seg === 'skills'/)
+    expect(panel).toMatch(/import \{ SkillEditor \} from '\.\/SkillsWindow'/)
+    // il rimando del pannello del bot filtra sul bot (skillsFilterAgent)
+    const right = readFileSync(fileURLToPath(new URL('../components/RightPanel.tsx', import.meta.url)), 'utf8')
+    expect(right).toMatch(/setSkillsFilterAgent\(activeId\); openPlugin\(\{ kind: 'segment', seg: 'skills'/)
   })
 
   it("nella barra (larga e rotaia) non c'è più il bottone Skill", () => {

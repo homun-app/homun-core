@@ -443,8 +443,9 @@ function PluginDetail({ name, plugins, onClose }: { name: string; plugins: Array
  * (embedded, dentro il foglio). Salvataggio con validazione S1 ed errori sul
  * campo; «Bot che la usano»; File in sola lettura; Avanzate con versioni,
  * Finder, esporta; Rimuovi rosso con conferma.
+ * PL1 (fase plugin): esportato — la pagina Plugin lo riusa per «Crea una skill».
  */
-function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
+export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
   folder: string | null
   onDone(): void
   onCancel(): void

@@ -270,7 +270,9 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
  */
 export function McpWindowCard({ entry }: { entry: TranscriptEntry }) {
   const { t } = useLingui()
-  const setMcpOpen = useStore((s) => s.setMcpOpen)
+  // PL1 (fase plugin): il bottone apre la pagina «Plugin» DIRETTAMENTE nel
+  // punto dei server MCP (il form e l'import di oggi), non più la finestra
+  const openPlugin = useStore((s) => s.openPlugin)
   const message = (entry.meta?.message ?? {}) as McpWindowMessage
   if (message.type !== 'mcp-window') return null
   return (
@@ -290,7 +292,7 @@ export function McpWindowCard({ entry }: { entry: TranscriptEntry }) {
         <button
           className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
           data-testid="mcp-window-card-open"
-          onClick={() => setMcpOpen(true)}
+          onClick={() => openPlugin({ kind: 'mcp' })}
         >
           <Trans>Apri Server MCP</Trans>
         </button>

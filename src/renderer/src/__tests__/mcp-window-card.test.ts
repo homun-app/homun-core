@@ -1,9 +1,10 @@
-// M3 (fase beta12-correzioni): la card «Apri Server MCP» in chat — quando un
-// connettore manca il bot la emette (tool offer_mcp_window, payload
-// send-message type 'mcp-window'); il suo bottone apre la finestra «Server
-// MCP» di M2 e NON collega niente da sola (nessuna chiamata api). Il clic del
-// bottone qui è il VERO handler del componente renderizzato (capture del
-// runtime JSX) e apre davvero lo store (mcpOpen true).
+// M3 (fase beta12-correzioni) · PL1 (fase plugin): la card «Apri Server MCP»
+// in chat — quando un connettore manca il bot la emette (tool
+// offer_mcp_window, payload send-message type 'mcp-window'); il suo bottone
+// apre la PAGINA «Plugin» DIRETTAMENTE nel punto dei server MCP (openPlugin
+// {kind:'mcp'}, non più la finestra) e NON collega niente da sola (nessuna
+// chiamata api). Il clic qui è il VERO handler del componente renderizzato
+// (capture del runtime JSX) e apre davvero lo store.
 import './render-helper-install'
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -49,7 +50,7 @@ describe('M3: la card «Apri Server MCP» in chat', () => {
     expect(src).toMatch(/<McpWindowCard entry=\{entry\} \/>/)
   })
 
-  it('il bottone Apre la finestra (mcpOpen true nello store) e NON chiama nessuna api', () => {
+  it('il bottone apre la pagina Plugin nel punto MCP (pluginOpen + pluginAt) e NON chiama nessuna api', () => {
     capture.els.length = 0
     setStoreStateForRender(useStore, { mcpOpen: false })
     const html = renderHtml(createElement(McpWindowCard, { entry }))
@@ -63,9 +64,10 @@ describe('M3: la card «Apri Server MCP» in chat', () => {
     // il VERO handler del bottone apre la finestra
     const btn = capture.els.find((e) => typeof e.type === 'string' && (e.type as string) === 'button' && String(e.props['data-testid'] ?? '') === 'mcp-window-card-open')
     expect(btn).toBeDefined()
-    expect(useStore.getState().mcpOpen).toBe(false)
+    expect(useStore.getState().pluginOpen).toBe(false)
     ;(btn!.props.onClick as () => void)()
-    expect(useStore.getState().mcpOpen).toBe(true)
+    expect(useStore.getState().pluginOpen).toBe(true)
+    expect(useStore.getState().pluginAt).toEqual({ kind: 'mcp' })
     // la card non collega niente da sola: NESSUNA chiamata api partita dal render o dal clic
     expect(fakeApiCalls.length).toBe(0)
   })

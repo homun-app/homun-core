@@ -80,6 +80,10 @@ msgstr "\"Always allow\" choices made on cards. A server's reads only cover tool
 msgid "skill.metadataInvalid"
 msgstr "\"metadata\" must be a map of strings (each value a string)."
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "(cartella SKILL.md)"
+msgstr "(SKILL.md folder)"
+
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "(le istruzioni complete le vede il bot col tool skill)"
 msgstr "(the bot sees the full instructions with the skill tool)"
@@ -205,6 +209,12 @@ msgstr "{0} @ {1}"
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "{0} / {1} per M"
 msgstr "{0} / {1} per M"
+
+#. placeholder {0}: row.bots.names.join(', ')
+#. placeholder {1}: row.bots.extra
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "{0} +{1}"
+msgstr "{0} +{1}"
 
 #. placeholder {0}: groupPending.length
 #: src/renderer/src/components/TeamChat.tsx
@@ -805,6 +815,7 @@ msgid "aggiungi"
 msgstr "add"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -845,6 +856,10 @@ msgstr "Add another account"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Aggiungi un bot"
 msgstr "Add a bot"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Aggiungi un marketplace"
+msgstr "Add a marketplace"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Aggiungo…"
@@ -1037,7 +1052,6 @@ msgid "Anteprima"
 msgstr "Preview"
 
 #: src/renderer/src/components/AppsWindow.tsx
-#: src/renderer/src/components/Sidebar.tsx
 msgid "App"
 msgstr "Apps"
 
@@ -1568,6 +1582,10 @@ msgstr "Empty folder."
 msgid "Cassaforte"
 msgstr "Vault"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Categorie"
+msgstr "Categories"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Cerca"
@@ -1616,6 +1634,10 @@ msgstr "searches the web…"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Cerca tra app e skill"
 msgstr "Search apps and skills"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Cerca tra plugin e skill"
+msgstr "Search plugins and skills"
 
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Cerca un modello o un provider"
@@ -1870,10 +1892,6 @@ msgstr "Connect {0} through Composio"
 msgid "collega {app}…"
 msgstr "connects {app}…"
 
-#: src/renderer/src/components/Sidebar.tsx
-msgid "Collega app"
-msgstr "Connect apps"
-
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Collega un modello"
 msgstr "Connect a model"
@@ -1886,6 +1904,11 @@ msgstr "Connection of {name} cancelled."
 #: src/renderer/src/components/McpWindow.tsx
 msgid "Collegano Homun ai tuoi strumenti e ai servizi della tua azienda. Se usi già Cursor o Claude, sono gli stessi server: aggiungili qui con lo stesso comando o lo stesso indirizzo."
 msgstr "They connect Homun to your tools and your company’s services. If you already use Cursor or Claude, these are the same servers: add them here with the same command or the same address."
+
+#. placeholder {0}: yourRows.length
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Collegati · {0}"
+msgstr "Connected · {0}"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
@@ -1977,6 +2000,10 @@ msgstr "Assigned task"
 #: src/renderer/src/components/BriefCard.tsx
 msgid "Compito affidato da {parentName}"
 msgstr "Task assigned by {parentName}"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Completa"
+msgstr "Set up"
 
 #. placeholder {0}: row.app.name
 #: src/renderer/src/components/AppsWindow.tsx
@@ -2170,10 +2197,18 @@ msgstr "connector \"{id}\" unreachable (connect it before creating the trigger)"
 msgid "rpc.connectorUnknown"
 msgstr "unknown connector: {id}"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Connettori"
+msgstr "Connectors"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.connectorsUnavailable"
 msgstr "connectors not available"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Connettori, server MCP e skill: tutto quello che dà capacità ai tuoi bot, in un posto."
+msgstr "Connectors, MCP servers and skills: everything that gives your bots capabilities, in one place."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Consegna"
@@ -2263,6 +2298,10 @@ msgstr "recommended"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Consigliate per te"
 msgstr "Recommended for you"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Consigliati per il tuo lavoro"
+msgstr "Recommended for your work"
 
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "consigliato"
@@ -2387,6 +2426,10 @@ msgstr "Create"
 msgid "Crea {0}"
 msgstr "Create {0}"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Crea con il bot"
+msgstr "Create with a bot"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Crea routine"
 msgstr "Create routine"
@@ -2398,6 +2441,14 @@ msgstr "Create a rule"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Crea una routine"
 msgstr "Create a routine"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Crea una skill"
+msgstr "Create a skill"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Crea una skill che "
+msgstr "Create a skill that "
 
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "creare e modificare file nel computer"
@@ -2454,6 +2505,10 @@ msgstr "invalid cron: \"{cron}\" (5 fields, e.g. \"0 9 * * *\")"
 #: src/renderer/src/components/McpWindow.tsx
 msgid "Cursor"
 msgstr "Cursor"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Cursor, Codex, ZCode…"
+msgstr "Cursor, Codex, ZCode…"
 
 #. placeholder {0}: String(entry.meta?.fromAgentName ?? 'altro bot')
 #: src/renderer/src/components/Chat.tsx
@@ -3606,6 +3661,10 @@ msgstr "MCP servers are managed in the MCP Servers window"
 msgid "I token stanno cifrati sul tuo Mac."
 msgstr "Tokens are encrypted on your Mac."
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "I tuoi"
+msgstr "Yours"
+
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "i tuoi dati"
@@ -4066,8 +4125,13 @@ msgid "Importa {n}"
 msgstr "Import {n}"
 
 #: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 msgid "Importa da altre app"
 msgstr "Import from other apps"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Importa skill"
+msgstr "Import skills"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "importata · modificata"
@@ -5249,6 +5313,7 @@ msgstr "at the weekend"
 msgid "Nessun agente"
 msgstr "No agent"
 
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "nessun bot"
 msgstr "no bot"
@@ -5336,6 +5401,7 @@ msgid "Nessuna app connessa: comincia dalle consigliate."
 msgstr "No connected apps: start from the recommended ones."
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 msgid "Nessuna app trovata. Prova con un altro nome."
 msgstr "No app found. Try another name."
 
@@ -5389,6 +5455,10 @@ msgstr "No skills found"
 #: src/shared/ui-messages.ts
 msgid "skill.err.noSkills"
 msgstr "No skills found in this repository: it needs folders with a SKILL.md."
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Nessuna skill. Creane una, importala, o chiedi a un bot di salvarne una."
+msgstr "No skills yet. Write one, import one, or ask a bot to save one."
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Nessuna skill. Scrivine una, importala da GitHub, o chiedi a un bot di salvare come skill un lavoro che ha appena fatto."
@@ -5715,6 +5785,10 @@ msgstr "Notes"
 #: src/renderer/src/components/Settings.tsx
 msgid "Notifiche"
 msgstr "Notifications"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Nulla di collegato: comincia dai consigliati qui sotto."
+msgstr "Nothing connected yet: start from the recommendations below."
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Nuova chiave API"
@@ -6050,6 +6124,11 @@ msgstr "Pixel"
 msgid "plugin"
 msgstr "plugin"
 
+#: src/renderer/src/components/PluginPanel.tsx
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Plugin"
+msgstr "Plugin"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "sistema.pluginInstalled"
@@ -6176,6 +6255,10 @@ msgstr "output price $/M"
 #: src/shared/ui-messages.ts
 msgid "kick.5"
 msgstr "Before offering connectors, check with search_connectors which ones are already connected."
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Prima la strada più diretta. Per ogni servizio Homun usa, in quest'ordine: il server del fornitore, un server verificato nel computer isolato, e Composio solo per i servizi che non ne hanno uno."
+msgstr "The most direct route first. For each service Homun uses, in this order: the vendor's server, a verified server in the sandboxed computer, and Composio only for services that have none."
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Principale"
@@ -6627,6 +6710,7 @@ msgid "Richieste che aspettano te"
 msgstr "Requests waiting for you"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Ricollega"
 msgstr "Reconnect"
@@ -7267,8 +7351,8 @@ msgstr "External server"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/ServerSheet.tsx
-#: src/renderer/src/components/Sidebar.tsx
 msgid "Server MCP"
 msgstr "MCP server"
 
@@ -7297,6 +7381,7 @@ msgid "card.openMcpWindow"
 msgstr "MCP server for {service}"
 
 #: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 msgid "Server MCP personalizzato"
 msgstr "Custom MCP server"
 
@@ -7436,8 +7521,8 @@ msgstr "new site, interactive"
 msgid "sk-…"
 msgstr "sk-…"
 
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/Sidebar.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Skill"
 msgstr "Skills"
@@ -7835,6 +7920,10 @@ msgstr "tool (mcp__…__…)"
 msgid "tool scelto dal connettore: {chosen}"
 msgstr "tool chosen from the connector: {chosen}"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Torna ai plugin"
+msgstr "Back to plugins"
+
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "Torna al team"
 msgstr "Back to the team"
@@ -7842,6 +7931,7 @@ msgstr "Back to the team"
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/PageView.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 msgid "Torna alla chat"
 msgstr "Back to chat"
 
@@ -7979,6 +8069,7 @@ msgid "tutte"
 msgstr "all"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Tutte"
@@ -7996,6 +8087,7 @@ msgstr "All"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -8010,6 +8102,10 @@ msgstr "every day"
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Tutti i tipi"
 msgstr "All types"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Tutto"
+msgstr "All"
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "Tutto pronto."
@@ -8246,6 +8342,14 @@ msgstr "sees (images)"
 msgid "Vedi"
 msgstr "See"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Vedi i collegati →"
+msgstr "See connected →"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Vedi perché"
+msgstr "See why"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "venerdì"
 msgstr "Friday"
@@ -8253,6 +8357,10 @@ msgstr "Friday"
 #: src/renderer/src/components/GuideView.tsx
 msgid "Verde"
 msgstr "Green"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "verificato"
+msgstr "verified"
 
 #. placeholder {0}: detail.note.version
 #: src/renderer/src/components/MemoryPanel.tsx

@@ -31,22 +31,22 @@ function accountMenuContent(): string {
   return m[2]!
 }
 
-describe('M2: la voce «Server MCP» nel menu dell\'account', () => {
-  it('sta tra «Skill» e «Impostazioni» e apre la finestra (setMcpOpen)', () => {
+describe('M2 → PL1: la voce «Server MCP» NON sta più nel menu dell\'account', () => {
+  // PL1 (fase plugin): «Collega app», «Skill» e «Server MCP» sono uscite dal
+  // menu — la casa unica è la pagina «Plugin» della barra; i server MCP si
+  // aprono lì (PluginPoint {kind:'mcp'}), dentro sta ManualServers com'era
+  it('il menu non ha più la voce (né menu-mcp né setMcpOpen)', () => {
     const menu = accountMenuContent()
-    const skill = menu.indexOf('<Trans>Skill</Trans>')
-    const mcp = menu.indexOf('<Trans>Server MCP</Trans>')
-    const settings = menu.indexOf('<Trans>Impostazioni</Trans>')
-    expect(skill).toBeGreaterThanOrEqual(0)
-    expect(mcp).toBeGreaterThan(skill)
-    expect(settings).toBeGreaterThanOrEqual(0)
-    expect(mcp).toBeLessThan(settings)
-    // la voce (il nodo con il testid) segna che apre una finestra e la apre
-    const at = menu.lastIndexOf('<DropdownMenuItem', mcp)
-    const item = menu.slice(at, menu.indexOf('</DropdownMenuItem>', at))
-    expect(item).toContain('data-testid="menu-mcp"')
-    expect(item).toContain('openedWindow.current = true')
-    expect(item).toContain('setMcpOpen(true)')
+    expect(menu).not.toContain('<Trans>Server MCP</Trans>')
+    expect(menu).not.toContain('data-testid="menu-mcp"')
+    expect(menu).not.toContain('setMcpOpen(true)')
+  })
+
+  it('la pagina Plugin apre ManualServers nel punto MCP (openPlugin {kind:\'mcp\'})', () => {
+    const panel = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
+    expect(panel).toMatch(/kind === 'mcp'/)
+    expect(panel).toContain("view === 'mcp'")
+    expect(panel).toMatch(/<ManualServers \/>/)
   })
 
   it('il menu dell\'account è UNO solo: la voce vale anche per la rotaia', () => {

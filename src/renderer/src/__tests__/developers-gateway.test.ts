@@ -12,8 +12,10 @@ const MCPW = readFileSync(fileURLToPath(new URL('../components/McpWindow.tsx', i
 const STORE = readFileSync(fileURLToPath(new URL('../store.ts', import.meta.url)), 'utf8')
 
 function developersBlock(): string {
-  const start = APPSW.indexOf('function DevelopersSheet(')
-  if (start < 0) throw new Error('DevelopersSheet non trovata')
+  // PL1 (fase plugin): il contenuto del foglio vive in DevelopersContent
+  // (esportata, la pagina Plugin la incorpora in «Avanzate»)
+  const start = APPSW.indexOf('function DevelopersContent(')
+  if (start < 0) throw new Error('DevelopersContent non trovata')
   return APPSW.slice(start, APPSW.indexOf('\nfunction ', start + 10) > 0 ? APPSW.indexOf('\nfunction ', start + 10) : undefined)
 }
 
@@ -34,20 +36,23 @@ describe('U3: «Per sviluppatori» — le sezioni in ordine Gateway, Plugin, Reg
   })
 })
 
-describe('U3: il riquadro «Server MCP personalizzato» diventa UNA riga piccola in fondo', () => {
-  it('niente blocco in evidenza col bottone «Apri la finestra Server MCP»: la riga piccola sta DOPO il registro', () => {
+describe('U3 → PL1: il riquadro «Server MCP personalizzato» resta UNA riga piccola in fondo', () => {
+  // PL1 (fase plugin): il contenuto sta in DevelopersContent; la riga piccola
+  // che riporta alla finestra «Server MCP» è il FOOTER che il foglio passa
+  // (la pagina Plugin non lo passa: i server MCP stanno lì, in casa)
+  it('DevelopersContent NON contiene la riga (la passa il foglio come footer)', () => {
     const b = developersBlock()
     expect(b).not.toContain('Apri la finestra Server MCP')
-    const iRegistry = b.indexOf('Cerca nel registro MCP')
-    const iLine = b.indexOf('I server MCP si gestiscono nella finestra Server MCP')
-    expect(iLine).toBeGreaterThan(iRegistry)
-    expect(b).toMatch(/text-\[12px\]|text-xs/) // piccola
+    expect(b).not.toContain('I server MCP si gestiscono nella finestra Server MCP')
+    expect(b).toMatch(/footer/)
   })
 
-  it('la riga riporta alla finestra «Server MCP» e chiude il foglio (un foglio solo)', () => {
-    const b = developersBlock()
+  it('il foglio passa la riga piccola che riporta alla finestra «Server MCP» e chiude (un foglio solo)', () => {
+    const start = APPSW.indexOf('function DevelopersSheet(')
+    const b = APPSW.slice(start, APPSW.indexOf('\nfunction ', start + 10))
     expect(b).toMatch(/setMcpOpen\(true\)/)
     expect(b).toMatch(/onClose\(\)/)
+    expect(b).toContain('data-testid="developers-open-mcp"')
   })
 })
 

@@ -110,8 +110,9 @@ function ProfileTab({ onAvatar }: { onAvatar(): void }) {
   const tasks = useStore((s) => s.tasks)
   const openTask = useStore((s) => s.openTask)
   const setMemoryOpen = useStore((s) => s.setMemoryOpen)
-  const setSkillsOpen = useStore((s) => s.setSkillsOpen)
   const setSkillsFilterAgent = useStore((s) => s.setSkillsFilterAgent)
+  // PL1 (fase plugin): la riga «Skill» apre la pagina Plugin sul segmento
+  const openPlugin = useStore((s) => s.openPlugin)
   const [memories, setMemories] = useState<number | null>(null)
   const [skills, setSkills] = useState<number | null>(null)
   const agent = agents.find((a) => a.id === activeId)
@@ -142,7 +143,7 @@ function ProfileTab({ onAvatar }: { onAvatar(): void }) {
             : <span className="text-muted-foreground"><Trans>da scegliere</Trans></span>}
         </KvRow>
         <KvRow label={i18n.t(msg`Memoria`)}>
-          <button className="transition hover:text-foreground" onClick={() => { setMemoryOpen(true); setSkillsOpen(false) }}>
+          <button className="transition hover:text-foreground" onClick={() => setMemoryOpen(true)}>
             <Trans>{memories === null ? '…' : `${memories} note`} ›</Trans>
           </button>
         </KvRow>
@@ -152,7 +153,7 @@ function ProfileTab({ onAvatar }: { onAvatar(): void }) {
           <button
             className="transition hover:text-foreground"
             data-testid="rightpanel-skills"
-            onClick={() => { setSkillsFilterAgent(activeId); setSkillsOpen(true); setMemoryOpen(false) }}
+            onClick={() => { setSkillsFilterAgent(activeId); openPlugin({ kind: 'segment', seg: 'skills', ...(activeId ? { agentId: activeId } : {}) }); setMemoryOpen(false) }}
           >
             <Trans>{skills === null ? '…' : `${skills}`} ›</Trans>
           </button>
@@ -457,7 +458,9 @@ function SuggestionsBlock({ agentId }: { agentId: string }) {
   const connectors = useStore((s) => s.connectors)
   const composio = useStore((s) => s.composio)
   const composioGateway = useStore((s) => s.composioGateway)
-  const openAppsOn = useStore((s) => s.openAppsOn)
+  // PL1 (fase plugin): il suggerimento «Collega <App>» apre la pagina
+  // Plugin DIRETTAMENTE sul dettaglio di quell'app
+  const openPlugin = useStore((s) => s.openPlugin)
   const setComposerPrefill = useStore((s) => s.setComposerPrefill)
   const openBotSheet = useStore((s) => s.openBotSheet)
   const setRightPanel = useStore((s) => s.setRightPanel)
@@ -556,7 +559,7 @@ function SuggestionsBlock({ agentId }: { agentId: string }) {
     setRightPanel(false)
   }
   const run = (s: BotSuggestion): void => {
-    if (s.action.kind === 'connect-app') openAppsOn(s.action.appId)
+    if (s.action.kind === 'connect-app') openPlugin({ kind: 'app', appId: s.action.appId })
     else if (s.action.kind === 'create-routine') void makeRoutinePrefill(s.action.request)
     else openBotSheet('description')
   }
