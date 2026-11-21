@@ -10,13 +10,66 @@
 // ogni cosa sta in un posto solo. Come SkillsWindow: Dialog grande, Esc per
 // chiudere, niente anello di focus all'apertura.
 import { useEffect, useState } from 'react'
-import { useLingui, Trans } from '@lingui/react/macro'
+import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
+import { PlugZap, Pencil, Trash2, X } from 'lucide-react'
 import { api, useStore } from '../store'
 import type { McpServerInfo, McpServerSecret } from '../../../shared/types'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 // E1 (fase mcp-env): le righe «Variabili» del form stdio
 import { envRowsFromServer, saveEnvPayload, newEnvRow, envNameLooksSecret, type EnvRow } from '../lib/mcp-env'
+
+/**
+ * U1 (fase mcp-ui): il bottone ICONA delle azioni per riga — 28×28, rounded-lg,
+ * grigio, più scuro al passaggio (elimina rosso). NESSUN testo visibile:
+ * l'etichetta tradotta sta in aria-label e title (l'accessibilità resta).
+ */
+function IconButton({ label, danger, testid, onClick, children }: {
+  label: string
+  danger?: boolean
+  testid?: string
+  onClick(): void
+  children: React.ReactNode
+}): React.ReactNode {
+  return (
+    <button
+      type="button"
+      className={`grid size-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted ${danger ? 'hover:text-destructive' : 'hover:text-foreground'}`}
+      aria-label={label}
+      title={label}
+      {...(testid ? { 'data-testid': testid } : {})}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  )
+}
+
+/**
+ * U1/U5 (fase mcp-ui): il risultato del test di connessione nella riga — un
+ * PALLINO (verde «N strumenti», rosso con l'errore leggibile) col messaggio
+ * completo nel suggerimento. Niente testo che allarga la riga: l'etichetta è
+ * troncata, il messaggio intero sta nel title.
+ */
+function RowTestStatus({ test }: { test: { ok: boolean; error?: string; tools?: string[]; pending?: boolean } }): React.ReactNode {
+  const { t } = useLingui()
+  const n = test.tools?.length ?? 0
+  const tip = test.pending ? t`test in corso…` : test.ok ? t`${n} strumenti: ${(test.tools ?? []).join(', ')}` : (test.error ?? '')
+  return (
+    <span
+      className="flex min-w-0 shrink-0 items-center gap-1.5"
+      data-testid="mcp-row-status"
+      title={tip}
+    >
+      <span className={`h-2 w-2 shrink-0 rounded-full ${test.pending ? 'bg-muted-foreground/50' : test.ok ? 'bg-chart-2' : 'bg-destructive'}`} />
+      {!test.pending && (
+        <span className={`max-w-48 truncate text-[11px] ${test.ok ? 'text-chart-2' : 'text-destructive'}`}>
+          {test.ok ? <Plural value={n} one="# strumento" other="# strumenti" /> : (test.error ?? '')}
+        </span>
+      )}
+    </span>
+  )
+}
 
 /** La finestra «Server MCP» (dal menu dell'account; anche dalla card del bot e da «Per sviluppatori»). */
 export function McpWindow(): React.ReactNode {
@@ -108,6 +161,17 @@ function ManualServers() {
   }
   useEffect(() => { void refresh() }, [])
 
+  /**
+   * U5 (fase mcp-ui): il test di connessione di un server — parte da solo
+   * dopo ogni import/aggiunta/modifica e anche dal bottone icona (U1); la
+   * riga mostra il pallino «in corso» finché non risponde.
+   */
+  const runTest = async (id: string) => {
+    setTests((p) => ({ ...p, [id]: { ok: true, pending: true } }))
+    const r = await api.mcpTest(id).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+    setTests((p) => ({ ...p, [id]: r as { ok: boolean; error?: string; tools?: string[] } }))
+  }
+
   return (
     <div className="space-y-3">
       <strong className="block font-display text-lg"><Trans>Server MCP personalizzato</Trans></strong>
@@ -115,17 +179,22 @@ function ManualServers() {
       {servers.map((s) => (
         <div key={s.id} className="rounded-2xl bg-muted px-3 py-2.5">
           <div className="flex items-center gap-2">
-            <span className={`h-2 w-2 rounded-full ${s.enabled ? 'bg-chart-2' : 'bg-muted-foreground/40'}`} />
-            <span className="text-sm">{s.name}</span>
-            <span className="rounded-full bg-card px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{s.transport}</span>
-            <span className="flex-1 truncate text-xs text-muted-foreground">{s.transport === 'stdio' ? `${s.command} ${(s.args ?? []).join(' ')}` : s.url}</span>
-            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={async () => {
-              setTests((p) => ({ ...p, [s.id]: { ok: true, tools: ['test…'] } }))
-              const r = await api.mcpTest(s.id)
-              setTests((p) => ({ ...p, [s.id]: r }))
-            }}><Trans>test</Trans></button>
-            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => { setEdit(s); setEditBearer(''); setEnvRows(envRowsFromServer(s)) }}><Trans>modifica</Trans></button>
-            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.mcpDelete(s.id); await refresh() }}><Trans>elimina</Trans></button>
+            <span className={`h-2 w-2 shrink-0 rounded-full ${s.enabled ? 'bg-chart-2' : 'bg-muted-foreground/40'}`} />
+            <span className="shrink-0 text-sm">{s.name}</span>
+            <span className="shrink-0 rounded-full bg-card px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{s.transport}</span>
+            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{s.transport === 'stdio' ? `${s.command} ${(s.args ?? []).join(' ')}` : s.url}</span>
+            {/* U1: il risultato del test come PALLINO nella riga (U5: parte da solo) */}
+            {tests[s.id] && <RowTestStatus test={tests[s.id]!} />}
+            {/* U1: test, modifica ed elimina come ICONE (niente testo visibile) */}
+            <IconButton label={t`Test della connessione`} testid="mcp-test-button" onClick={() => { void runTest(s.id) }}>
+              <PlugZap className="size-4" />
+            </IconButton>
+            <IconButton label={t`Modifica il server`} testid="mcp-edit-button" onClick={() => { setEdit(s); setEditBearer(''); setEnvRows(envRowsFromServer(s)) }}>
+              <Pencil className="size-4" />
+            </IconButton>
+            <IconButton label={t`Elimina il server`} testid="mcp-delete-button" danger onClick={async () => { await api.mcpDelete(s.id); await refresh() }}>
+              <Trash2 className="size-4" />
+            </IconButton>
           </div>
           {/* E1 (fase mcp-env): i NOMI delle variabili del server stdio — i
               valori segreti mai, solo •••• */}
@@ -140,11 +209,6 @@ function ManualServers() {
               {s.enabledFor.includes('*') ? t`usato da tutti i bot`
                 : t`usato da: ${s.enabledFor.map((id) => agents.find((a) => a.id === id)?.name ?? id).join(', ')}`}
             </p>
-          )}
-          {tests[s.id] && (
-            <div className={`mt-2 text-xs ${tests[s.id].ok ? 'text-chart-2' : 'text-destructive'}`}>
-              {tests[s.id].ok ? t`✓ ${tests[s.id].tools?.length ?? 0} tool: ${(tests[s.id].tools ?? []).join(', ').slice(0, 200)}` : t`✕ ${tests[s.id].error ?? ''}`}
-            </div>
           )}
         </div>
       ))}
@@ -209,12 +273,13 @@ function ManualServers() {
                       </label>
                       <button
                         type="button"
-                        className="shrink-0 rounded-full px-1.5 text-xs text-muted-foreground hover:text-destructive"
+                        className="grid size-6 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-destructive"
                         aria-label={t`Togli la variabile`}
+                        title={t`Togli la variabile`}
                         data-testid="mcp-env-remove"
                         onClick={() => setEnvRows((rows) => rows.filter((_, j) => j !== i))}
                       >
-                        ✕
+                        <X className="size-3.5" />
                       </button>
                     </div>
                   ))}

@@ -411,6 +411,15 @@ msgstr "{minutes} minutes before every calendar event"
 msgid "notice.modelRouteCooled"
 msgstr "{model} on {provider} is paused until {until} (recent limit or error): the turn starts from {fallback} on {fallbackProvider}."
 
+#: src/renderer/src/components/McpWindow.tsx
+msgid "{n, plural, one {# strumento} other {# strumenti}}"
+msgstr "{n, plural, one {# tool} other {# tools}}"
+
+#. placeholder {0}: (test.tools ?? []).join(', ')
+#: src/renderer/src/components/McpWindow.tsx
+msgid "{n} strumenti: {0}"
+msgstr "{n} tools: {0}"
+
 #: src/renderer/src/bot/bot-state.ts
 msgid "{name}"
 msgstr "{name}"
@@ -617,12 +626,6 @@ msgstr "✓ {0} connected"
 msgid "✓ {0} collegato · {toolsCount} strumenti"
 msgstr "✓ {0} connected · {toolsCount} tools"
 
-#. placeholder {0}: tests[s.id].tools?.length ?? 0
-#. placeholder {1}: (tests[s.id].tools ?? []).join(', ').slice(0, 200)
-#: src/renderer/src/components/McpWindow.tsx
-msgid "✓ {0} tool: {1}"
-msgstr "✓ {0} tool: {1}"
-
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "✓ Aggiunto — il bot ha ricevuto l'esito"
 msgstr "✓ Added — the bot received the result"
@@ -650,11 +653,6 @@ msgstr "✓ Works · {0} models available"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "✓ Installato — il bot ha ricevuto l'esito"
 msgstr "✓ Installed — the bot received the result"
-
-#. placeholder {0}: tests[s.id].error ?? ''
-#: src/renderer/src/components/McpWindow.tsx
-msgid "✕ {0}"
-msgstr "✕ {0}"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "✨ Suggerisci dal transcript"
@@ -2762,7 +2760,6 @@ msgstr "Listing truncated to {0} entries."
 msgid "Elenco"
 msgstr "List"
 
-#: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "elimina"
@@ -2784,6 +2781,10 @@ msgstr "Delete bot"
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 msgid "Elimina i file dei bot"
 msgstr "Delete the bot files"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Elimina il server"
+msgstr "Delete the server"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Elimina squadra"
@@ -4939,7 +4940,6 @@ msgstr "model out of credit"
 msgid "Modello:"
 msgstr "Model:"
 
-#: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/VaultSettings.tsx
@@ -4951,6 +4951,10 @@ msgstr "edit"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Modifica"
 msgstr "Edit"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Modifica il server"
+msgstr "Edit the server"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -7602,8 +7606,12 @@ msgid "Terminale"
 msgstr "Terminal"
 
 #: src/renderer/src/components/McpWindow.tsx
-msgid "test"
-msgstr "test"
+msgid "Test della connessione"
+msgstr "Test the connection"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "test in corso…"
+msgstr "testing…"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
