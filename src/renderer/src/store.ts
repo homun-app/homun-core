@@ -14,7 +14,7 @@ export type ComputerTab = 'screen' | 'terminal' | 'files' | 'activity'
 
 /**
  * PL1 (fase plugin): il PUNTO della pagina Plugin che un rimando chiede —
- * i vecchi ingressi di setAppsOpen/setSkillsOpen/setMcpOpen diventano
+ * i vecchi ingressi delle finestre App/Skill/Server MCP diventano
  * punti della casa unica (la card «Apri Server MCP» → i server MCP, il
  * suggerimento «Collega <App>» → l'app, la riga Skill del pannello → le
  * skill del bot). Si consuma dentro la pagina all'apertura.
@@ -306,7 +306,6 @@ interface Store {
   memoryFocusId: string | null
   /** fase memoria-engramma (M6): l'avanzamento dei lavori della memoria */
   memoryProgress: { phase: 'story-backfill' | 'model-pull'; done: number; total: number; finished?: boolean; error?: string } | null
-  skillsOpen: boolean
   /** fase skill: il filtro bot della finestra «Skill» (null = tutti i bot) */
   skillsFilterAgent: string | null
   setSkillsFilterAgent(v: string | null): void
@@ -350,9 +349,6 @@ interface Store {
   /** fase pagine (G4): il testo con cui precompilare il compositore della chat */
   composerPrefill: string | null
   setComposerPrefill(text: string | null): void
-  /** fase pagine (G4): la finestra App si apre su questo dettaglio (null = lista) */
-  appsOpenApp: string | null
-  openAppsOn(appId: string | null): void
   /** fase 16b (S1.3): crea/modifica/cancella squadre dalla UI */
   groupCreate(name: string, memberIds: string[], coordinatorId: string, description?: string): Promise<void>
   groupUpdate(groupId: number, patch: {
@@ -446,9 +442,6 @@ interface Store {
   openLibrary(id: string | null): void
   /** fase 14: la libreria aperta (null = chiusa, '' = lista, id = voce) */
   openLibraryId: string | null
-  /** fase 16c (C4): la finestra «Collega app» */
-  appsOpen: boolean
-  setAppsOpen(v: boolean): void
   /**
    * PL1 (fase plugin): la pagina «Plugin» — la casa unica di connettori,
    * server MCP e skill. Copre l'area centrale come Libreria e Attività
@@ -460,19 +453,6 @@ interface Store {
   pluginAt: PluginPoint | null
   openPlugin(at?: PluginPoint): void
   setPluginOpen(v: boolean): void
-  /**
-   * M2 (fase beta12-correzioni): la finestra «Server MCP» — si apre dalla
-   * voce del menu dell'account; il rimando «Gateway, plugin e registro»
-   * apre la finestra App DIRETTAMENTE sul foglio «Per sviluppatori».
-   */
-  mcpOpen: boolean
-  setMcpOpen(v: boolean): void
-  /** M2: apre AppsWindow col foglio «Per sviluppatori» già aperto (si consuma lì) */
-  appsOpenDevelopers: boolean
-  setAppsOpenDevelopers(v: boolean): void
-  /** U3 (fase mcp-ui): il foglio «Per sviluppatori» apre SCORRENDO a questa sezione (si consuma lì) */
-  appsDevelopersScrollTo: 'gateway' | null
-  setAppsDevelopersScrollTo(v: 'gateway' | null): void
   /** fase 16c (C5): la vista centrale «Attività» (false = chat) */
   activityOpen: boolean
   setActivityOpen(v: boolean): void
@@ -530,7 +510,6 @@ interface Store {
   setMemoryOpen(v: boolean): void
   /** fase chat-limiti (CL7): apre la sezione Memoria su UNA nota (quella in quarantena) */
   openMemoryNote(id: string): void
-  setSkillsOpen(v: boolean): void
   /**
    * Fase 16b correzioni 2 (Q1): la larghezza della finestra (listener resize
    * con debounce leggero in App) e le preferenze della barra — larghezza
@@ -611,14 +590,9 @@ export const useStore = create<Store>((set, get) => ({
   openSubagentId: null,
   subEntries: [],
   openLibraryId: null,
-  appsOpen: false,
   // PL1 (fase plugin): la pagina Plugin (chiusa), col punto dei rimandi
   pluginOpen: false,
   pluginAt: null,
-  // M2 (fase beta12-correzioni): la finestra «Server MCP» (chiusa)
-  mcpOpen: false,
-  appsOpenDevelopers: false,
-  appsDevelopersScrollTo: null,
   activityOpen: false,
   // fase 16
   theme: 'system',
@@ -645,7 +619,6 @@ export const useStore = create<Store>((set, get) => ({
   memoryOpen: false,
   memoryFocusId: null,
   memoryProgress: null,
-  skillsOpen: false,
   skillsFilterAgent: null,
   botPanelTabRequest: null,
   // fase pagine (G3): il foglio Impostazioni del bot (chiuso, nessun focus)
@@ -657,7 +630,6 @@ export const useStore = create<Store>((set, get) => ({
   // dettaglio dell'app su cui aprire la finestra App
   openPageInfo: null,
   composerPrefill: null,
-  appsOpenApp: null,
   debugSteps: false,
   // fase 16b correzioni 2 (Q1): le letture dal localStorage sono le stesse
   // chiavi che usava Sidebar.tsx — la preferenza dell'utente sopravvive
@@ -1184,11 +1156,6 @@ export const useStore = create<Store>((set, get) => ({
     set(id !== null ? { openLibraryId: id, approvalsOpen: false, approvalsFocusId: null, pluginOpen: false } : { openLibraryId: id })
   },
 
-  // fase 16c (C4): la finestra «Collega app»
-  setAppsOpen(v) {
-    set({ appsOpen: v })
-  },
-
   // PL1 (fase plugin): la pagina Plugin — apre CHIUDENDO le altre viste
   // centrali (regola B1: una sola alla volta, deciso qui) e ricorda il
   // PUNTO chiesto dal rimando (la pagina lo consuma)
@@ -1206,19 +1173,6 @@ export const useStore = create<Store>((set, get) => ({
 
   setPluginOpen(v) {
     set({ pluginOpen: v })
-  },
-
-  // M2 (fase beta12-correzioni): la finestra «Server MCP»
-  setMcpOpen(v) {
-    set({ mcpOpen: v })
-  },
-
-  setAppsOpenDevelopers(v) {
-    set({ appsOpenDevelopers: v })
-  },
-
-  setAppsDevelopersScrollTo(v) {
-    set({ appsDevelopersScrollTo: v })
   },
 
   // fase 16c (C5): la vista centrale «Attività» — A2: aprire lei chiude il
@@ -1412,10 +1366,6 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   // fase pagine (G4): la finestra App sul dettaglio di quell'app
-  openAppsOn(appId) {
-    set({ appsOpenApp: appId, appsOpen: appId !== null })
-  },
-
   setMemoryOpen(v) {
     set({ memoryOpen: v })
     // fase chat-limiti (CL7): il pannello si apre senza focus se si chiude
@@ -1426,10 +1376,6 @@ export const useStore = create<Store>((set, get) => ({
   // quarantena della riga di sistema sotto il turno)
   openMemoryNote(id) {
     set({ memoryOpen: true, memoryFocusId: id })
-  },
-
-  setSkillsOpen(v) {
-    set({ skillsOpen: v })
   },
 
   // fase skill: il filtro bot della finestra «Skill»

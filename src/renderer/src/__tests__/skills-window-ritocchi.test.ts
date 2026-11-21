@@ -12,53 +12,47 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const WINDOW = fileURLToPath(new URL('../components/SkillsWindow.tsx', import.meta.url))
-const src = readFileSync(WINDOW, 'utf8')
+const PANEL = fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url))
+const src = readFileSync(PANEL, 'utf8')
+const pieces = readFileSync(WINDOW, 'utf8')
 
-/** Il blocco di un componente interno (dalla `function Nome` al successivo). */
+/** Il blocco di un componente interno dei PEZZI (dalla `function Nome` al successivo). */
 function block(name: string): string {
-  const start = src.indexOf(`function ${name}`)
+  const start = pieces.indexOf(`function ${name}`)
   if (start < 0) throw new Error(`componente ${name} non trovato in SkillsWindow.tsx`)
-  const next = src.indexOf('\nfunction ', start + 10)
-  return src.slice(start, next > 0 ? next : undefined)
+  const next = pieces.indexOf('\nfunction ', start + 10)
+  return pieces.slice(start, next > 0 ? next : undefined)
 }
 
-/** Il blocco dell'elenco: dalla lista delle skill alla sezione Sfoglia. */
-function listBlock(): string {
-  const atList = src.indexOf('data-testid="skills-list"')
-  const atBrowse = src.indexOf('data-testid="skills-catalog"')
-  if (atList < 0 || atBrowse < 0) throw new Error('elenco o sezione Sfoglia non trovati')
-  return src.slice(atList, atBrowse)
-}
-
-describe('T1: un solo campo di ricerca', () => {
-  it('il campo dentro Sfoglia non c\'è più (né lo stato dedicato): resta solo quello in alto', () => {
+describe('T1 → PL7: un solo campo di ricerca (quello della pagina Plugin)', () => {
+  it('il campo dentro Sfoglia non c\'è mai stato nella pagina: resta solo quello in alto', () => {
     expect(src).not.toContain('skills-catalog-search')
     expect(src).not.toContain('catalogQuery')
-    // il campo in alto resta UNO solo (un solo placeholder «Cerca skill»)
-    expect((src.match(/placeholder=\{t`Cerca skill`\}/g) ?? []).length).toBe(1)
+    // il campo in alto della pagina resta UNO solo
+    expect((src.match(/data-testid="plugin-search"/g) ?? []).length).toBe(1)
   })
 
   it('il campo in alto filtra ANCHE il catalogo di Sfoglia (la ricerca condivisa del catalogo)', () => {
     expect(src).toContain('searchSkillCatalog(catalog ?? [], query, lang)')
   })
 
-  it('ricerca/filtro senza risultati → «Nessuna skill trovata»; l\'invito lungo solo a libreria VUOTA e SENZA ricerca', () => {
-    const list = listBlock()
-    expect(list).toContain('<Trans>Nessuna skill trovata</Trans>')
-    expect(list).toContain('data-testid="skills-empty-filtered"')
-    // il lungo (skills-empty) dietro la condizione esplicita: libreria
-    // davvero vuota E nessuna ricerca
-    expect(src).toMatch(/const longEmpty = libEmpty && !queryTrimmed/)
+  it('ricerca senza risultati → «Nessuna skill trovata» (il messaggio breve della pagina); l\'invito lungo solo a elenco VUOTO', () => {
+    expect(src).toContain('<Trans>Nessuna skill. Creane una, importala, o chiedi a un bot di salvarne una.</Trans>')
+    expect(src).toContain('<Trans>Nessuna skill trovata</Trans>')
   })
 })
 
-describe('T2: il contenuto della finestra è un @container', () => {
-  it('la classe @container sta SOLO sul contenitore del contenuto (vale per dettaglio, editor e anteprime)', () => {
-    // una sola classe @container in tutto il file: quella del contenitore
-    const withContainer = src.match(/className="[^"]*@container[^"]*"/g) ?? []
-    expect(withContainer.length).toBe(1)
-    expect(withContainer[0]).toContain('min-h-0 flex-1 overflow-y-auto')
-    expect(src).toContain('data-testid="skills-content"')
+describe('T2 → PL7: il contenitore @container è quello dei fogli della pagina', () => {
+  it('i fogli della pagina (editor, dettaglio plugin-skill, anteprima) sono @container', () => {
+    // il pannello della pagina e i suoi fogli portano @container (le righe
+    // SettingsRow dell'editor mettono il controllo a destra)
+    const withContainer = src.match(/className="@container[^"]*"/g) ?? []
+    expect(withContainer.length).toBeGreaterThanOrEqual(2)
+  })
+  it('la vecchia FINESTRA non c\'è più: in SkillsWindow.tsx restano solo i pezzi', () => {
+    expect(pieces).not.toMatch(/export function SkillsWindow/)
+    expect(pieces).not.toContain('Dialog open')
+    expect(pieces).not.toContain('data-testid="skills-window"')
   })
 
   it('il componente condiviso SettingsRow non è stato toccato (la soglia resta nei suoi @[420px])', () => {
@@ -99,12 +93,9 @@ describe('T4: un solo «Annulla» in basso nell\'anteprima di una voce del catal
   })
 })
 
-describe('T5: niente anello di focus all\'apertura', () => {
-  it('all\'apertura il focus va al campo di ricerca (onOpenAutoFocus preventDefault, niente «Nuova skill»)', () => {
-    const at = src.indexOf('onOpenAutoFocus')
-    expect(at).toBeGreaterThan(0)
-    const handler = src.slice(at, at + 700)
-    expect(handler).toContain('preventDefault')
-    expect(handler).toContain('skills-search')
+describe('T5 → PL7: niente più dialogo della finestra Skill (niente anello di focus)', () => {
+  it('la pagina Plugin non è un Dialog: nessun onOpenAutoFocus da compensare', () => {
+    expect(src).not.toContain('onOpenAutoFocus')
+    expect(pieces).not.toContain('onOpenAutoFocus')
   })
 })

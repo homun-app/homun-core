@@ -14,16 +14,12 @@ import { Settings } from './components/Settings'
 // OA2 (fase onboarding-a): la guida a passi del primo avvio, a tutta finestra
 import { GuideView } from './components/GuideView'
 import { LibraryPanel } from './components/LibraryPanel'
-// fase 16c (C5/C4): la vista Attività e la finestra «Collega app»
+// fase 16c (C5/C4): la vista Attività
 import { ActivityPanel } from './components/ActivityPanel'
 // PL1 (fase plugin): la pagina «Plugin» — la casa unica di connettori,
 // server MCP e skill (tavola 8); copre l'area centrale come Libreria e
 // Attività, con lo stesso comportamento di apertura e chiusura (B1)
 import { PluginPanel } from './components/PluginPanel'
-import { AppsWindow } from './components/AppsWindow'
-import { SkillsWindow } from './components/SkillsWindow'
-// M2 (fase beta12-correzioni): la finestra «Server MCP» (menu dell'account)
-import { McpWindow } from './components/McpWindow'
 import { api } from './store'
 // fase 16b correzioni 2 (Q1): il layout a tre colonne è UNA funzione pura
 import { layoutFor, TRAFFIC_LIGHT_INSET } from './layout'
@@ -94,12 +90,6 @@ function LegacyHomun2Notice() {
 export function App() {
   const init = useStore((s) => s.init)
   const settingsOpen = useStore((s) => s.settingsOpen)
-  // fase 16c (C4): la finestra «Collega app»
-  const appsOpen = useStore((s) => s.appsOpen)
-  // fase skill (S4): la finestra «Skill» (libreria unica)
-  const skillsOpen = useStore((s) => s.skillsOpen)
-  // M2 (fase beta12-correzioni): la finestra «Server MCP»
-  const mcpOpen = useStore((s) => s.mcpOpen)
   // OA1 (fase onboarding-a): finché il daemon non dice lo stato del primo
   // avvio, la finestra CARICA — niente chat vuota, niente «Bot» da sola.
   // OAC1 (fase guida): la GUIDA si vede quando è APERTA (guideOpen: lo dice
@@ -254,9 +244,6 @@ export function App() {
       </div>
       <RightPanel layout={layout} />
       {settingsOpen && <Settings />}
-      {appsOpen && <AppsWindow />}
-      {skillsOpen && <SkillsWindow />}
-      {mcpOpen && <McpWindow />}
       </div>
     </div>
   )

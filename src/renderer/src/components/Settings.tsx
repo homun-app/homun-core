@@ -34,7 +34,6 @@ import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 // serve ancora un campo a testo libero per un id non ancora in elenco)
 import { ModelPicker, THINKING_LABELS } from './ui/ModelPicker'
 // fase 16c (C4): la vista condivisa con la finestra «Collega app»
-import { AppsView } from './AppsWindow'
 // fase impostazioni (I2/I4/I5): le pagine nuove e i pezzi comuni
 import { ModelsPage } from './settings/ModelsPage'
 import { ApprovalsPage } from './settings/ApprovalsPage'
@@ -151,7 +150,7 @@ export function Settings() {
               {tab === 'generale' && <GeneralTab />}
               {tab === 'modelli' && <ModelsPage />}
               {/* RV2: embedded — una sola ✕, quella delle Impostazioni */}
-              {tab === 'app' && <AppsView embedded />}
+              {tab === 'app' && <AppPluginRedirect />}
               {tab === 'approvazioni' && <ApprovalsPage />}
               {tab === 'vault' && (
                 <SettingsPage title={<Trans>Cassaforte</Trans>}>
@@ -165,6 +164,27 @@ export function Settings() {
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** PL7 (fase plugin): la scheda «App e skill» apre la pagina Plugin (una casa sola). */
+function AppPluginRedirect(): React.ReactNode {
+  const { t } = useLingui()
+  const openPlugin = useStore((s) => s.openPlugin)
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  return (
+    <div className="space-y-4 py-6 text-center">
+      <p className="text-sm text-muted-foreground">
+        <Trans>Connettori, server MCP e skill stanno nella pagina «Plugin» della barra.</Trans>
+      </p>
+      <button
+        className="rounded-full bg-foreground px-4 py-1.5 text-sm font-medium text-background transition hover:opacity-90"
+        data-testid="settings-open-plugin"
+        onClick={() => { setSettingsOpen(false); openPlugin() }}
+      >
+        {t`Apri la pagina Plugin`} ›
+      </button>
+    </div>
   )
 }
 

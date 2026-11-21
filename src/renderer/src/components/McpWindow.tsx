@@ -1,22 +1,13 @@
-// M2 (fase beta12-correzioni): la finestra «Server MCP» — i server MCP hanno
-// una finestra LORO, come le Skill, aperta dalla voce «Server MCP» nel menu
-// dell'account (tra Skill e Impostazioni). Dentro: l'elenco dei server
-// collegati e il form di aggiunta di oggi — ManualServers SPOSTATO qui da
-// AppsWindow così com'era (si sposta, non si riscrive; gli aggiungo solo la
-// mezza riga «usato da …» quando enabledFor esiste già); in fondo, piccolo,
-// «Gateway, plugin e registro» apre «Per sviluppatori». Il resto dei tool da
-// sviluppatore (chiave Composio, gateway, marketplace, registro) resta in
-// AppsWindow › Per sviluppatori, che ora rimanda qui per i server manuali:
-// ogni cosa sta in un posto solo. Come SkillsWindow: Dialog grande, Esc per
-// chiudere, niente anello di focus all'apertura.
+// PL7 (fase plugin): i PEZZI della vecchia finestra «Server MCP» — la
+// finestra non esiste più (la casa è la pagina «Plugin»): qui restano
+// ManualServers (l'elenco dei server col test, il form stdio/http con le
+// variabili e l'import) e ImportList, Riusati dalla pagina così com'erano.
 import { useEffect, useState } from 'react'
 import { useLingui, Trans, Plural } from '@lingui/react/macro'
-import { msg } from '@lingui/core/macro'
 import { PlugZap, Pencil, Trash2, X, Terminal, Globe, KeyRound } from 'lucide-react'
 import { api, useStore } from '../store'
 import type { McpServerInfo, McpServerSecret } from '../../../shared/types'
 import { serverCommandLine } from '../lib/mcp-row'
-import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 // E1 (fase mcp-env): le righe «Variabili» del form stdio
 import { envRowsFromServer, saveEnvPayload, newEnvRow, envNameLooksSecret, type EnvRow } from '../lib/mcp-env'
 // U2 (fase mcp-ui): l'elenco di import raggruppato per origine
@@ -81,85 +72,6 @@ function RowTestStatus({ test }: { test: { ok: boolean; error?: string; tools?: 
   )
 }
 
-/** La finestra «Server MCP» (dal menu dell'account; anche dalla card del bot e da «Per sviluppatori»). */
-export function McpWindow(): React.ReactNode {
-  const { i18n } = useLingui()
-  const setMcpOpen = useStore((s) => s.setMcpOpen)
-  // il rimando in fondo apre «Per sviluppatori» nella finestra App
-  const setAppsOpen = useStore((s) => s.setAppsOpen)
-  const setAppsOpenDevelopers = useStore((s) => s.setAppsOpenDevelopers)
-  // U3: porta DIRETTAMENTE alla sezione Gateway (niente giro a vuoto)
-  const setAppsDevelopersScrollTo = useStore((s) => s.setAppsDevelopersScrollTo)
-  return (
-    <Dialog open onOpenChange={(o) => { if (!o) setMcpOpen(false) }}>
-      <DialogContent
-        className="flex max-h-[88vh] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden rounded-3xl bg-card p-0 shadow-soft sm:max-w-3xl"
-        showCloseButton={false}
-        data-testid="mcp-window"
-        onOpenAutoFocus={(e) => {
-          // come T5 di SkillsWindow: niente anello di focus all'apertura; il
-          // focus della finestra arriva dal menu che l'ha aperta
-          e.preventDefault()
-        }}
-      >
-          <DialogTitle className="sr-only">{i18n._(msg`Server MCP`)}</DialogTitle>
-          <div className="flex max-h-[88vh] flex-col">
-            <div className="flex items-center gap-2 px-6 pt-5">
-              <strong className="font-display text-lg"><Trans>Server MCP</Trans></strong>
-              <span className="flex-1" />
-              <button
-                type="button"
-                className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                aria-label={i18n._(msg`Chiudi`)}
-                onClick={() => setMcpOpen(false)}
-              >
-                ✕
-              </button>
-            </div>
-            {/* l'intestazione in parole semplici: chi usa già Cursor o Claude
-                riconosce i suoi server */}
-            <p className="px-6 pt-1 text-[13px] leading-snug text-muted-foreground">
-              <Trans>Collegano Homun ai tuoi strumenti e ai servizi della tua azienda. Se usi già Cursor o Claude, sono gli stessi server: aggiungili qui con lo stesso comando o lo stesso indirizzo.</Trans>
-            </p>
-            <div className="mt-4 min-h-0 flex-1 overflow-y-auto scroll-thin px-6 pb-5">
-              <ManualServers />
-              {/* in fondo, piccolo: il resto dei tool da sviluppatore */}
-              <p className="mt-6 text-center text-[12px] text-muted-foreground">
-                <button
-                  type="button"
-                  className="underline-offset-2 transition hover:text-foreground hover:underline"
-                  data-testid="mcp-window-developers"
-                  onClick={() => {
-                    // U3: un foglio solo — questa si chiude, «Per sviluppatori»
-                    // si apre GIÀ sulla sezione Gateway (scroll diretto)
-                    setMcpOpen(false)
-                    setAppsDevelopersScrollTo('gateway')
-                    setAppsOpen(true)
-                    setAppsOpenDevelopers(true)
-                  }}
-                >
-                  <Trans>Gateway, plugin e registro</Trans> ›
-                </button>
-              </p>
-            </div>
-          </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-/**
- * U2 (fase mcp-ui): l'elenco di «Importa da Cursor, Claude o ZCode» —
- * RAGGRUPPATO per origine (icona quando c'è, altrimenti l'iniziale in un
- * cerchio; il nome dell'app e il percorso del file in piccolo grigio,
- * troncato; i gruppi vuoti nascosti). Ogni riga, alta ~44 px con spazio tra
- * le righe: casella, icona del tipo (Terminal per il comando locale, Globe
- * per l'indirizzo), nome, sotto il comando o l'host troncato; a destra
- * l'icona KeyRound col conteggio dei segreti («1 segreto» / «2 segreti») e
- * «anche in <origine>» per i doppioni esatti. I già presenti sono spenti e
- * non selezionabili. In fondo: «N selezionati», «Annulla», «Importa N».
- * Componente PRESENTAZIONALE (esportata per i test di render).
- */
 export function ImportList({ groups, skipped = [], picks, onPicks, onImport, onCancel }: {
   groups: ImportGroupUi[]
   /** U7: le voci col formato non capito, SALTATE col motivo */
@@ -262,18 +174,6 @@ export function ImportList({ groups, skipped = [], picks, onPicks, onImport, onC
   )
 }
 
-/** Server MCP aggiunti a mano: il foglio di oggi, dentro un velo. */
-export function ManualServersSheet({ onClose }: { onClose(): void }) {
-  return (
-    <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-xl overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
-        <ManualServers />
-      </div>
-    </div>
-  )
-}
-
-/** Server MCP aggiunti a mano (stdio o HTTP, con header/bearer salvati cifrati). */
 export function ManualServers() {
   const { t } = useLingui()
   const agents = useStore((s) => s.agents)

@@ -7,11 +7,11 @@
 // dell'insieme fisso (invii, pagamenti) mostrano il lucchetto e non offrono
 // «Consenti sempre». MAI dati inventati: un campo che non c'è non si mostra.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useLingui, Trans, Plural } from '@lingui/react/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
 import { Lock, ChevronLeft } from 'lucide-react'
 import { api, useStore } from '../store'
 import { i18n } from '../lib/i18n'
-import type { McpServerInfo, PermissionsConfig, ConnectorInfo, ComposioStatusInfo, ComposioGatewayStatusInfo } from '../../../shared/types'
+import type { McpServerInfo, PermissionsConfig, ConnectorInfo } from '../../../shared/types'
 import type { CatalogRowView, InstalledServerLike } from '../lib/apps-view'
 import { stateLabelOf, stradaOfServer, stradaLabel } from '../lib/plugins-view'
 import { classifyPluginTool, type FixedAskKind, type ToolGroup } from '../../../shared/tool-classify'

@@ -1,68 +1,57 @@
-// M2 (fase beta12-correzioni): i server MCP hanno una finestra LORO, come le
-// Skill — la voce «Server MCP» nel menu dell'account (tra Skill e
-// Impostazioni) apre McpWindow; dentro: l'elenco dei server collegati e il
-// form di aggiunta di oggi (ManualServers SPOSTATO da AppsWindow, non
-// riscritto), in fondo il rimando piccolo «Gateway, plugin e registro» che
-// apre «Per sviluppatori». «Per sviluppatori» non mostra più il form ma una
-// riga che rimanda alla finestra. La voce vale ANCHE per la rotaia (il menu
-// dell'account è uno solo). Oltre alle guardie sul sorgente: il render del
-// componente VERO con l'api finta (i server esistenti e il bottone di
-// aggiunta), come gli altri test del renderer senza DOM.
+// M2 (fase beta12-correzioni) → PL7 (fase plugin): la finestra «Server MCP»
+// NON esiste più — la casa unica è la pagina «Plugin» (voce della barra),
+// che nel punto MCP (openPlugin {kind:'mcp'}) mostra ManualServers COM'ERA:
+// l'elenco dei server col test, il form stdio/http con le variabili cifrate
+// e l'import da altre app. Qui si guardano i PEZZI (il file McpWindow.tsx li
+// espone) e il render vero del componente con l'api finta.
 import './render-helper-install'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
-import { renderHtml, setStoreStateForRender, parseHtml, textOf, findAll, dialogPassThroughMock } from './render-helper'
-
-vi.mock('../components/ui/dialog', () => dialogPassThroughMock())
+import { renderHtml, setStoreStateForRender, parseHtml, textOf, findAll } from './render-helper'
 
 const SIDEBAR = fileURLToPath(new URL('../components/Sidebar.tsx', import.meta.url))
 const APPSW = fileURLToPath(new URL('../components/AppsWindow.tsx', import.meta.url))
 const MCPW = fileURLToPath(new URL('../components/McpWindow.tsx', import.meta.url))
 const APP = fileURLToPath(new URL('../App.tsx', import.meta.url))
+const PANEL = fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url))
 const STORE = fileURLToPath(new URL('../store.ts', import.meta.url))
 
-/** Il blocco DropdownMenuContent dell'AccountMenu (il menu in fondo). */
-function accountMenuContent(): string {
-  const src = readFileSync(SIDEBAR, 'utf8')
-  const m = /function AccountMenu\([\s\S]*?<DropdownMenuContent([^>]*)>([\s\S]*?)<\/DropdownMenuContent>/.exec(src)
-  if (!m) throw new Error('AccountMenu non trovata in Sidebar.tsx')
-  return m[2]!
-}
-
-describe('M2 → PL1: la voce «Server MCP» NON sta più nel menu dell\'account', () => {
-  // PL1 (fase plugin): «Collega app», «Skill» e «Server MCP» sono uscite dal
-  // menu — la casa unica è la pagina «Plugin» della barra; i server MCP si
-  // aprono lì (PluginPoint {kind:'mcp'}), dentro sta ManualServers com'era
-  it('il menu non ha più la voce (né menu-mcp né setMcpOpen)', () => {
-    const menu = accountMenuContent()
-    expect(menu).not.toContain('<Trans>Server MCP</Trans>')
-    expect(menu).not.toContain('data-testid="menu-mcp"')
-    expect(menu).not.toContain('setMcpOpen(true)')
+describe('PL7: la finestra «Server MCP» non c\'è più', () => {
+  it('McpWindow.tsx non esporta NESSUNA finestra: solo i pezzi riusati', () => {
+    const src = readFileSync(MCPW, 'utf8')
+    expect(src).not.toMatch(/export function McpWindow\b/)
+    expect(src).not.toContain('Dialog open')
+    expect(src).toContain('export function ManualServers()')
+    expect(src).toContain('export function ImportList(')
   })
 
-  it('la pagina Plugin apre ManualServers nel punto MCP (openPlugin {kind:\'mcp\'})', () => {
-    const panel = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
-    expect(panel).toMatch(/kind === 'mcp'/)
-    expect(panel).toContain("view === 'mcp'")
-    expect(panel).toMatch(/<ManualServers \/>/)
+  it('lo store NON ha più mcpOpen/setMcpOpen né i flag del foglio sviluppatori', () => {
+    const src = readFileSync(STORE, 'utf8')
+    expect(src).not.toMatch(/mcpOpen: boolean/)
+    expect(src).not.toMatch(/setMcpOpen\b/)
+    expect(src).not.toMatch(/appsOpenDevelopers/)
+    expect(src).not.toMatch(/appsDevelopersScrollTo/)
   })
 
-  it('il menu dell\'account è UNO solo: la voce vale anche per la rotaia', () => {
+  it('App NON monta finestre: la pagina Plugin copre l\'area centrale', () => {
+    const src = readFileSync(APP, 'utf8')
+    expect(src).not.toMatch(/AppsWindow/)
+    expect(src).not.toMatch(/SkillsWindow/)
+    expect(src).not.toMatch(/McpWindow/)
+    expect(src).toMatch(/\{pluginOpen && <PluginPanel \/>}/)
+  })
+
+  it('il menu dell\'account è UNO solo: la rotaia usa lo stesso AccountMenu', () => {
     const src = readFileSync(SIDEBAR, 'utf8')
     expect((src.match(/function AccountMenu\(/g) ?? []).length).toBe(1)
     expect(src).toMatch(/<AccountMenu\s+rail\b/)
   })
 })
 
-describe('M2: McpWindow — la finestra dei server MCP', () => {
+describe('PL7: ManualServers — i pezzi di oggi, spostati non riscritti', () => {
   const src = readFileSync(MCPW, 'utf8')
-
-  it('il file esiste e contiene ManualServers SPOSTATO (in AppsWindow non c\'è più)', () => {
-    expect(src).toContain('function ManualServers(')
-    expect(readFileSync(APPSW, 'utf8')).not.toContain('function ManualServers(')
-  })
 
   it('il form di oggi resta com\'era: stdio e http, bearer cifrato, «+ Aggiungi server MCP»', () => {
     const start = src.indexOf('function ManualServers(')
@@ -72,23 +61,7 @@ describe('M2: McpWindow — la finestra dei server MCP', () => {
     expect(block).toContain('type="password"')
     expect(block).toContain('Bearer token (opzionale — salvato cifrato)')
     expect(block).toContain('+ Aggiungi server MCP')
-  })
-
-  it('come SkillsWindow: Dialog aperta, chiusura e Esc (onOpenChange → setMcpOpen(false)), testid propria', () => {
-    expect(src).toMatch(/<Dialog open onOpenChange=\{\(o\) => \{ if \(!o\) (setMcpOpen\(false\)|[^\n]*)/)
-    expect(src).toContain('data-testid="mcp-window"')
-    expect(src).toContain('sr-only')
-  })
-
-  it('intestazione: titolo «Server MCP» e la spiegazione semplice (Cursor o Claude)', () => {
-    expect(src).toContain('<Trans>Server MCP</Trans>')
-    expect(src).toMatch(/Cursor o Claude/)
-    expect(src).toMatch(/stesso comando o lo stesso indirizzo/)
-  })
-
-  it('in fondo, piccolo: «Gateway, plugin e registro» apre «Per sviluppatori»', () => {
-    expect(src).toContain('<Trans>Gateway, plugin e registro</Trans>')
-    expect(src).toMatch(/setAppsOpenDevelopers\(true\)/)
+    expect(block).toContain('data-testid="mcp-import-button"')
   })
 
   it('l\'elenco dice da quali bot è usato un server, quando il dato esiste già (enabledFor)', () => {
@@ -96,58 +69,36 @@ describe('M2: McpWindow — la finestra dei server MCP', () => {
   })
 })
 
-describe('M2: «Per sviluppatori» rimanda, non mostra più il form', () => {
-  it('DevelopersSheet non rende più ManualServers e ha la riga di rimando', () => {
+describe('PL7: la pagina Plugin apre ManualServers nel punto MCP', () => {
+  it('la vista interna mcp rende ManualServers, dal rimando e dal menù Aggiungi', () => {
+    const src = readFileSync(PANEL, 'utf8')
+    expect(src).toMatch(/kind === 'mcp'/)
+    expect(src).toContain("view === 'mcp'")
+    expect(src).toMatch(/<ManualServers \/>/)
+  })
+
+  it('DevelopersContent non ha più il rimando alla finestra (la pagina è la casa)', () => {
     const src = readFileSync(APPSW, 'utf8')
-    const start = src.indexOf('function DevelopersSheet(')
-    const block = src.slice(start, src.indexOf('\nfunction ', start + 10))
-    expect(block).not.toContain('<ManualServers')
-    // la riga che rimanda alla finestra «Server MCP»
-    expect(block).toMatch(/setMcpOpen\(true\)/)
-    expect(block).toMatch(/Server MCP/)
-  })
-
-  it('ServerSheet non si tocca: AppsWindow lo importa ancora per il dettaglio dei server', () => {
-    expect(readFileSync(APPSW, 'utf8')).toContain("from './ServerSheet'")
+    expect(src).toContain('export function DevelopersContent(')
+    expect(src).not.toContain('data-testid="developers-open-mcp"')
+    expect(src).not.toContain('setMcpOpen')
   })
 })
 
-describe('M2: store e App', () => {
-  it('lo store ha mcpOpen (chiusa) e setMcpOpen', () => {
-    const src = readFileSync(STORE, 'utf8')
-    expect(src).toMatch(/mcpOpen: boolean/)
-    expect(src).toMatch(/mcpOpen: false/)
-    expect(src).toMatch(/setMcpOpen\(v\)/)
-  })
-
-  it('App monta McpWindow quando mcpOpen', () => {
-    const src = readFileSync(APP, 'utf8')
-    expect(src).toMatch(/import \{ McpWindow \} from '\.\/components\/McpWindow'/)
-    expect(src).toMatch(/\{mcpOpen && <McpWindow \/>}/)
-  })
-})
-
-describe('M2: il render della finestra (componente vero, api finta)', () => {
-  // il render statico non esegue gli effect: la lista dei server ARRIVA da
-  // api.mcpList con lo stesso codice di oggi (spostato, non toccato) e le
-  // righe coi nomi dei server le verifica la sonda sul DOM vero; qui il
-  // MINIMO che la finestra mostra appena aperta
-  it('titolo, spiegazione, intestazione dell\'elenco, form di aggiunta, rimando in fondo', async () => {
-    const { McpWindow } = await import('../components/McpWindow')
+describe('PL7: il render di ManualServers (componente vero, api finta)', () => {
+  it('l\'intestazione dell\'elenco e il form di aggiunta', async () => {
+    const { ManualServers } = await import('../components/McpWindow')
     const { useStore } = await import('../store')
     setStoreStateForRender(useStore, {
       agents: [
         { id: 'a-bot', name: 'Competitoor', description: '', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 }
       ]
     })
-    const html = renderHtml(createElement(McpWindow, {}))
+    const html = renderHtml(createElement(ManualServers, {}))
     const root = parseHtml(html)
     const texts = findAll(root, () => true).map((n) => textOf(n)).join('\n')
-    expect(texts).toContain('Server MCP')
     expect(texts).toContain('Server MCP personalizzato')
     expect(texts).toContain('+ Aggiungi server MCP')
-    expect(texts).toContain('Cursor o Claude')
-    // il rimando in fondo
-    expect(texts).toContain('Gateway, plugin e registro')
+    expect(texts).toContain('Importa da altre app')
   })
 })

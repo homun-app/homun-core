@@ -19,7 +19,7 @@ import { api, useStore, type PluginPoint } from '../store'
 import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, type AppCategoryId } from '../../../shared/app-catalog'
 import type { McpServerInfo, SkillLibraryItem, SkillCatalogEntry } from '../../../shared/types'
-import { appsCatalogModel, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type CatalogRowView } from '../lib/apps-view'
+import { appsCatalogModel, type AppsFilter, type InstalledPluginLike, type CatalogRowView } from '../lib/apps-view'
 import { yourPlugins, grayLineOf, stateLabelOf, stradaLabel, connectedTable, daSistemareCount, type PluginSegment, type YourPluginRow, type ConnectedFilter } from '../lib/plugins-view'
 import type { PermissionsConfig } from '../../../shared/types'
 import { humanizeSkillName } from '../../../shared/skill-md'
@@ -608,20 +608,27 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                   : SKILL_CATEGORIES.filter((c) => catalogRows.some((e) => e.category === c)).map((c) => (
                     <div key={c} className="space-y-1.5">
                       <h4 className="pt-2 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">{t`${skillCategoryLabel(c)}`}</h4>
-                      {catalogRows.filter((e) => e.category === c).map((entry) => (
-                        <button
-                          key={entry.id}
-                          type="button"
-                          className="flex w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left transition hover:bg-muted/60"
-                          onClick={() => setCatalogId(entry.id)}
-                        >
-                          <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[15px]">{humanize(entry.id)}</span>
-                            <span className="block truncate text-[13px] text-muted-foreground">{skillCatalogDescription(entry, lang)}</span>
-                          </span>
-                        </button>
-                      ))}
+                      {catalogRows.filter((e) => e.category === c).map((entry) => {
+                        const state = skillCatalogInstallState(entry, skills ?? [])
+                        return (
+                          <button
+                            key={entry.id}
+                            type="button"
+                            className="flex w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left transition hover:bg-muted/60"
+                            onClick={() => setCatalogId(entry.id)}
+                          >
+                            <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-1.5">
+                                <span className="truncate text-[15px]">{humanize(entry.id)}</span>
+                                {state !== 'available' && <span className="shrink-0 rounded-full bg-foreground px-1.5 py-0.5 text-[10px] text-background"><Trans>Aggiunta</Trans></span>}
+                                {state === 'update' && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400"><Trans>Aggiornamento disponibile</Trans></span>}
+                              </span>
+                              <span className="block truncate text-[13px] text-muted-foreground">{skillCatalogDescription(entry, lang)}</span>
+                            </span>
+                          </button>
+                        )
+                      })}
                     </div>
                   ))}
               </div>

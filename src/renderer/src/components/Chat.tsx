@@ -300,9 +300,8 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
   const setComposerPrefill = useStore((s) => s.setComposerPrefill)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const memoryOpen = useStore((s) => s.memoryOpen)
-  const skillsOpen = useStore((s) => s.skillsOpen)
+  const pluginOpen = useStore((s) => s.pluginOpen)
   const setMemoryOpen = useStore((s) => s.setMemoryOpen)
-  const setSkillsOpen = useStore((s) => s.setSkillsOpen)
   const rightPanel = useStore((s) => s.rightPanel)
   const setRightPanel = useStore((s) => s.setRightPanel)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
@@ -372,7 +371,7 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
       })
       .catch(() => undefined)
     return () => { alive = false }
-  }, [activeId, skillsOpen])
+  }, [activeId, pluginOpen])
   // l'elenco `/` si apre SOLO quando il messaggio comincia con / e resta su
   // una riga (la query è tutto ciò che segue); filtra nome e descrizione
   const slashQuery = /^\/([^\n]*)$/.exec(text)?.[1] ?? null

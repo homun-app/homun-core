@@ -36,49 +36,34 @@ describe('U3: «Per sviluppatori» — le sezioni in ordine Gateway, Plugin, Reg
   })
 })
 
-describe('U3 → PL1: il riquadro «Server MCP personalizzato» resta UNA riga piccola in fondo', () => {
-  // PL1 (fase plugin): il contenuto sta in DevelopersContent; la riga piccola
-  // che riporta alla finestra «Server MCP» è il FOOTER che il foglio passa
-  // (la pagina Plugin non lo passa: i server MCP stanno lì, in casa)
-  it('DevelopersContent NON contiene la riga (la passa il foglio come footer)', () => {
+describe('U3 → PL7: il foglio non c\'è più — il contenuto sta in «Avanzate» della pagina', () => {
+  it('DevelopersContent non ha NESSUN rimando alla finestra «Server MCP» (la casa è la pagina)', () => {
     const b = developersBlock()
     expect(b).not.toContain('Apri la finestra Server MCP')
     expect(b).not.toContain('I server MCP si gestiscono nella finestra Server MCP')
-    expect(b).toMatch(/footer/)
+    expect(b).not.toContain('setMcpOpen')
+    // il gateway resta la PRIMA sezione, con l'ancora per lo scroll
+    expect(b).toMatch(/id="developers-gateway"/)
   })
 
-  it('il foglio passa la riga piccola che riporta alla finestra «Server MCP» e chiude (un foglio solo)', () => {
-    const start = APPSW.indexOf('function DevelopersSheet(')
-    const b = APPSW.slice(start, APPSW.indexOf('\nfunction ', start + 10))
-    expect(b).toMatch(/setMcpOpen\(true\)/)
-    expect(b).toMatch(/onClose\(\)/)
-    expect(b).toContain('data-testid="developers-open-mcp"')
+  it('la pagina Plugin incorpora DevelopersContent in «Avanzate» (id plugin-advanced)', () => {
+    const panel = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
+    expect(panel).toMatch(/<DevelopersContent scrollTo=\{null\} \/>/)
+    expect(panel).toMatch(/id="plugin-advanced"/)
   })
 })
 
-describe('U3: il link «Gateway, plugin e registro» porta DIRETTAMENTE alla sezione Gateway', () => {
-  it('la finestra «Server MCP» si CHIUDE e «Per sviluppatori» apre con lo scroll al Gateway', () => {
-    const at = MCPW.indexOf('data-testid="mcp-window-developers"')
-    const block = MCPW.slice(MCPW.lastIndexOf('<button', at), MCPW.indexOf('</button>', at))
-    expect(block).toContain('setMcpOpen(false)')
-    expect(block).toMatch(/setAppsDevelopersScrollTo\('gateway'\)/)
-    expect(block).toContain('setAppsOpen(true)')
-    expect(block).toContain('setAppsOpenDevelopers(true)')
-  })
-
-  it('lo store ha appsDevelopersScrollTo (consumata all\'apertura, come appsOpenDevelopers)', () => {
-    expect(STORE).toMatch(/appsDevelopersScrollTo: 'gateway' \| null/)
-    expect(STORE).toMatch(/appsDevelopersScrollTo: null/)
-    expect(STORE).toMatch(/setAppsDevelopersScrollTo\(/)
-  })
-
-  it('AppsWindow consuma il target e il foglio scorre all\'ancora Gateway', () => {
+describe('U3 → PL7: lo scroll alle sezioni resta (dal menù Aggiungi al marketplace)', () => {
+  it('DevelopersContent scorre all\'ancora chiesta (gateway o marketplace)', () => {
     const b = developersBlock()
     expect(b).toMatch(/scrollTo/)
     expect(b).toMatch(/scrollIntoView/)
     expect(b).toMatch(/developers-gateway/)
-    // AppsWindow passa il target al foglio quando lo apre da «Server MCP»
-    const iUse = APPSW.indexOf('appsDevelopersScrollTo')
-    expect(iUse).toBeGreaterThan(0)
+    expect(b).toMatch(/developers-marketplace/)
+  })
+
+  it('il menù «Aggiungi un marketplace» della pagina scorre ad Avanzate', () => {
+    const panel = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
+    expect(panel).toMatch(/getElementById\('plugin-advanced'\)\?\.scrollIntoView/)
   })
 })

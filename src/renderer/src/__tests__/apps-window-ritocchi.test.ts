@@ -34,22 +34,23 @@ const count = (text: string): number => (text.match(/@container/g) ?? []).length
 /** Il codice di un blocco senza i commenti JSX (che possono citare «@container»). */
 const code = (text: string): string => text.replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
 
-describe('U2: la finestra App e i suoi fogli sono @container', () => {
-  it('il contenitore del contenuto della finestra (quello che scorre) è un @container', () => {
-    const w = block('AppsWindow')
-    expect(w).toMatch(/className="@container [^"]*overflow-y-auto[^"]*"/)
-    expect(w).toContain('data-testid="apps-content"')
-    // UN punto solo nella finestra: il contenitore del contenuto
-    expect(count(code(w))).toBe(1)
+describe('U2 → PL7: la finestra App non c\'è più; i fogli vivono nella pagina Plugin', () => {
+  it('nessuna finestra e nessun foglio-morto in AppsWindow.tsx: solo i pezzi riusati', () => {
+    for (const gone of ['AppsWindow', 'AppsView', 'AppDetailSheet', 'ComposioAccountSheet', 'ConnectedDetailSheet', 'DevelopersSheet']) {
+      expect(src, gone).not.toMatch(new RegExp(`^(export )?function ${gone}\\(`, 'm'))
+    }
+    // i pezzi esportati che la pagina usa
+    for (const piece of ['AppRow', 'AppLogo', 'FilterPill', 'useConnectFlows', 'BotTogglesForApp', 'GatewayAccountsSection', 'DevelopersContent']) {
+      expect(src, piece).toMatch(new RegExp(`^export function ${piece}\\(`, 'm'))
+    }
   })
 
-  for (const sheet of ['AppDetailSheet', 'ComposioAccountSheet', 'ConnectedDetailSheet', 'DevelopersSheet']) {
-    it(`${sheet}: il contenitore del foglio è un @container (un punto solo)`, () => {
-      expect(sheetContainerClasses(sheet).split(/\s+/)).toContain('@container')
-      // nessun altro @container dentro il foglio
-      expect(count(code(block(sheet)))).toBe(1)
-    })
-  }
+  it('i contenitori dei fogli della PAGINA sono @container (la scheda del plugin e i suoi fogli)', () => {
+    const panel = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
+    const card = readFileSync(fileURLToPath(new URL('../components/PluginCard.tsx', import.meta.url)), 'utf8')
+    expect(count(code(panel))).toBeGreaterThanOrEqual(2)
+    expect(count(code(card))).toBeGreaterThanOrEqual(0)
+  })
 
   it('il componente condiviso SettingsRow non è stato toccato (la soglia resta nei suoi @[420px])', () => {
     const row = readFileSync(fileURLToPath(new URL('../components/settings/SettingsRow.tsx', import.meta.url)), 'utf8')
@@ -59,33 +60,19 @@ describe('U2: la finestra App e i suoi fogli sono @container', () => {
   })
 })
 
-describe('U3: niente anello di focus all\'apertura della finestra App', () => {
-  it('all\'apertura il focus va al campo «Cerca tra app e skill», nel frame DOPO (come T5)', () => {
-    const w = block('AppsWindow')
-    const at = w.indexOf('onOpenAutoFocus')
-    expect(at).toBeGreaterThan(0)
-    const handler = w.slice(at, at + 900)
-    // niente focus di Radix sul primo bottone (la ✕ con l'anello arancione)
-    expect(handler).toContain('e.preventDefault()')
-    // nel frame dopo, come T5
-    expect(handler).toMatch(/requestAnimationFrame\(\(\) => [^\n]*\[data-testid="apps-search"\][^\n]*\.focus\(\)/)
+describe('U3 → PL7: la pagina Plugin non è un Dialog (niente anello di focus)', () => {
+  it('nessun onOpenAutoFocus da compensare: il campo di ricerca della pagina è testid plugin-search', () => {
+    const panel = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
+    expect(panel).not.toContain('onOpenAutoFocus')
+    expect(panel).toContain('data-testid="plugin-search"')
+    expect(src).not.toContain('data-testid="apps-search"')
   })
 
-  it('il campo di ricerca è riconoscibile (data-testid="apps-search")', () => {
-    const input = src.slice(src.lastIndexOf('<input', src.indexOf('placeholder={t`Cerca tra app e skill`}')), src.indexOf('placeholder={t`Cerca tra app e skill`}'))
-    expect(input).toContain('data-testid="apps-search"')
-  })
-
-  it('i fogli che si aprono sopra non portano MAI il focus su un bottone: al più sul primo campo', () => {
-    // autoFocus solo sui campi (input/textarea), mai su un bottone
+  it('i pezzi non mettono autoFocus su un bottone: al più sui campi', () => {
     for (const m of src.matchAll(/autoFocus/g)) {
       const tag = src.slice(src.lastIndexOf('<', m.index), m.index)
       expect(tag).toMatch(/^<(input|textarea)\b/)
     }
-    // l'unico focus da programma è quello del campo di ricerca
-    const calls = [...src.matchAll(/\.focus\(\)/g)].map((m) => src.slice(Math.max(0, m.index - 120), m.index))
-    expect(calls.length).toBe(1)
-    expect(calls[0]).toContain('[data-testid="apps-search"]')
   })
 
   it('il menu dell\'account NON riprende il focus quando una sua voce apre una finestra', () => {
