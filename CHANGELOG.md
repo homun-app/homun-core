@@ -5,6 +5,43 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.16] — 2026-11-21
+
+Meno richieste inutili, server MCP che funzionano davvero, e bot e team
+che si gestiscono dalla barra.
+
+### Novità
+
+- **«Consenti sempre su questo sito»:** un permesso per dominio che resta.
+  Il bot naviga e cerca su quel sito senza chiederti ogni volta; conferme,
+  pagamenti e tuoi dati chiedono sempre.
+- **Archivia ed elimina bot e team dalla barra:** con «⋯» o il tasto destro
+  trovi Rinomina, Archivia ed Elimina. Gli archiviati stanno in fondo e si
+  ripristinano; un'eliminazione si annulla subito e si recupera per 30
+  giorni. Eliminando un team i bot restano.
+- **Importa da altre app:** oltre a Cursor, Claude e ZCode anche Claude Code,
+  Codex, Windsurf, Gemini CLI e VS Code, raggruppati per app e con i
+  doppioni uniti.
+- **Vedi subito se un server MCP funziona:** verde con il numero di
+  strumenti, oppure rosso con il motivo. I bot ricevono una nota quando un
+  server è pronto.
+- **«Team» al posto di «Squadra»**, e i loghi veri delle app.
+
+### Correzioni
+
+- **I server MCP che usano npx partono** anche se Node è installato con fnm
+  o nvm.
+- **Chiudere e riaprire Homun funziona sempre**, anche se lo riapri subito
+  dopo averlo chiuso.
+- **Guardare una pagina non chiede più il permesso**, e scrivere file nel
+  computer isolato è libero per tutti i bot.
+- **Le richieste degli aiutanti si vedono nella chat dove sei**, e il loro
+  compito si legge come un testo, non come codice.
+- **Gli stati nella chat** usano gli stessi segni della barra.
+- **Il clic sul nome di un team lo apre e lo chiude;** il doppio clic lo
+  rinomina.
+- **La schermata di avvio mostra l'icona di Homun.**
+
 ## [0.3.1001-beta.15] — 2026-11-20
 
 I bot cercano meglio sul web, e i server npm sono chiusi in un recinto vero.
