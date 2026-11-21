@@ -50,13 +50,25 @@ function secretNamesOf(entry: Record<string, unknown>, transport: 'stdio' | 'htt
   return Object.keys(headers).filter((k) => k.toLowerCase() === 'authorization')
 }
 
-/** Una riga della scansione: nome e tipo, MAI valori (i segreti restano nel main). */
+/**
+ * Una riga della scansione: nome e tipo, MAI valori (i segreti restano nel
+ * main). U2 (fase mcp-ui): porta anche il COMANDO (stdio, comando + argomenti
+ * — config pubblica) o l'URL (http) e la VIE del file d'origine, per
+ * l'elenco import raggruppato e curato (sottotitolo della riga e intestazione
+ * del gruppo); i DOPPIONI ESATTI si riconoscono da nome + comando/URL.
+ */
 export interface ImportScanRow {
   source: ImportSource
   name: string
   transport: 'stdio' | 'http'
   envNames: string[]
   secretNames: string[]
+  /** stdio: «npx -y pacchetto» (comando e argomenti: pubblici, non segreti) */
+  commandLine?: string
+  /** http: l'URL del server */
+  url?: string
+  /** il file da cui arriva la voce (per l'intestazione del gruppo) */
+  sourcePath: string
 }
 
 /**
@@ -76,10 +88,15 @@ export async function scanImportedSources(deps: {
     for (const [name, entry] of Object.entries(serversOf(json))) {
       const transport = transportOf(entry)
       if (!transport) continue
+      const args = Array.isArray(entry.args) ? entry.args.map(String) : []
       out.push({
         source, name, transport,
         envNames: transport === 'stdio' ? Object.keys((entry.env ?? {}) as Record<string, unknown>) : Object.keys((entry.headers ?? {}) as Record<string, unknown>),
-        secretNames: secretNamesOf(entry, transport)
+        secretNames: secretNamesOf(entry, transport),
+        ...(transport === 'stdio'
+          ? { commandLine: [String(entry.command), ...args].filter(Boolean).join(' ') }
+          : { url: String(entry.url) }),
+        sourcePath: path
       })
     }
   }

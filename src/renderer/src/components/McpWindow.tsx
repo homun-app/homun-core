@@ -12,12 +12,14 @@
 import { useEffect, useState } from 'react'
 import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
-import { PlugZap, Pencil, Trash2, X } from 'lucide-react'
+import { PlugZap, Pencil, Trash2, X, Terminal, Globe, KeyRound } from 'lucide-react'
 import { api, useStore } from '../store'
 import type { McpServerInfo, McpServerSecret } from '../../../shared/types'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 // E1 (fase mcp-env): le righe «Variabili» del form stdio
 import { envRowsFromServer, saveEnvPayload, newEnvRow, envNameLooksSecret, type EnvRow } from '../lib/mcp-env'
+// U2 (fase mcp-ui): l'elenco di import raggruppato per origine
+import { groupImportRows, importRowKey, type ImportGroupUi, type ImportScanRow, type ImportSource } from '../lib/mcp-import-groups'
 
 /**
  * U1 (fase mcp-ui): il bottone ICONA delle azioni per riga — 28×28, rounded-lg,
@@ -129,6 +131,92 @@ export function McpWindow(): React.ReactNode {
   )
 }
 
+/**
+ * U2 (fase mcp-ui): l'elenco di «Importa da Cursor, Claude o ZCode» —
+ * RAGGRUPPATO per origine (icona quando c'è, altrimenti l'iniziale in un
+ * cerchio; il nome dell'app e il percorso del file in piccolo grigio,
+ * troncato; i gruppi vuoti nascosti). Ogni riga, alta ~44 px con spazio tra
+ * le righe: casella, icona del tipo (Terminal per il comando locale, Globe
+ * per l'indirizzo), nome, sotto il comando o l'host troncato; a destra
+ * l'icona KeyRound col conteggio dei segreti («1 segreto» / «2 segreti») e
+ * «anche in <origine>» per i doppioni esatti. I già presenti sono spenti e
+ * non selezionabili. In fondo: «N selezionati», «Annulla», «Importa N».
+ * Componente PRESENTAZIONALE (esportata per i test di render).
+ */
+export function ImportList({ groups, picks, onPicks, onImport, onCancel }: {
+  groups: ImportGroupUi[]
+  picks: Record<string, boolean>
+  onPicks(next: Record<string, boolean>): void
+  onImport(): void
+  onCancel(): void
+}): React.ReactNode {
+  const { t } = useLingui()
+  const label = (s: ImportSource): string => (s === 'cursor' ? t`Cursor` : s === 'claude' ? t`Claude Desktop` : t`ZCode`)
+  const allRows = groups.flatMap((g) => g.rows)
+  const n = allRows.filter((r) => !r.existing && picks[importRowKey(r)] === true).length
+  return (
+    <div className="space-y-3 rounded-2xl bg-muted p-4" data-testid="mcp-import-list">
+      {groups.map((g) => (
+        <section key={g.source} data-testid={`mcp-import-group-${g.source}`} className="space-y-2">
+          <header className="flex items-center gap-2 pt-1">
+            {/* niente logo ufficiale nel repo: l'iniziale in un cerchio */}
+            <span className="grid size-6 shrink-0 place-items-center rounded-full bg-card text-[11px] font-medium text-muted-foreground" aria-hidden="true">
+              {label(g.source).slice(0, 1)}
+            </span>
+            <span className="shrink-0 text-[13px] font-medium">{label(g.source)}</span>
+            <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title={g.sourcePath}>{g.sourcePath}</span>
+          </header>
+          {g.rows.map((r) => (
+            <label key={importRowKey(r)} data-testid="mcp-import-row" className={`flex min-h-11 items-center gap-2.5 rounded-xl bg-card/70 px-3 ${r.existing ? 'opacity-60' : ''}`}>
+              <input
+                type="checkbox"
+                className="shrink-0"
+                data-testid="mcp-import-check"
+                checked={picks[importRowKey(r)] === true}
+                disabled={r.existing}
+                onChange={(e) => onPicks({ ...picks, [importRowKey(r)]: e.target.checked })}
+              />
+              {r.transport === 'stdio'
+                ? <Terminal className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                : <Globe className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm">{r.name}</span>
+                <span className="block truncate text-xs text-muted-foreground" title={r.detail}>{r.detail}</span>
+              </span>
+              {r.alsoIn.length > 0 && (
+                <span className="shrink-0 text-[11px] text-muted-foreground" data-testid="mcp-import-also">
+                  {t`anche in ${r.alsoIn.map(label).join(', ')}`}
+                </span>
+              )}
+              {r.secretCount > 0 && (
+                <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground" data-testid="mcp-import-secrets">
+                  <KeyRound className="size-3.5" aria-hidden="true" />
+                  <Plural value={r.secretCount} one="# segreto" other="# segreti" />
+                </span>
+              )}
+              {r.existing && <span className="shrink-0 text-[11px] text-muted-foreground">{t`già collegato`}</span>}
+            </label>
+          ))}
+        </section>
+      ))}
+      <div className="flex items-center gap-2 pt-1">
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          <Plural value={n} one="# selezionato" other="# selezionati" />
+        </span>
+        <button className="rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={onCancel}><Trans>Annulla</Trans></button>
+        <button
+          className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+          disabled={n === 0}
+          data-testid="mcp-import-apply"
+          onClick={onImport}
+        >
+          {t`Importa ${n}`}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /** Server MCP aggiunti a mano: il foglio di oggi, dentro un velo. */
 export function ManualServersSheet({ onClose }: { onClose(): void }) {
   return (
@@ -152,8 +240,9 @@ function ManualServers() {
   const [envRows, setEnvRows] = useState<EnvRow[]>([])
   const [tests, setTests] = useState<Record<string, { ok: boolean; error?: string; tools?: string[] }>>({})
   // E2 (fase mcp-env): l'import da Cursor/Claude/ZCode — la scansione parte
-  // SOLO al clic del bottone (i file si leggono nel main, solo allora)
-  const [importRows, setImportRows] = useState<Array<{ source: string; name: string; transport: string; envNames: string[]; secretNames: string[] }> | null>(null)
+  // SOLO al clic del bottone (i file si leggono nel main, solo allora).
+  // U2 (fase mcp-ui): l'elenco è RAGGRUPPATO per origine (ImportList)
+  const [importRows, setImportRows] = useState<ImportScanRow[] | null>(null)
   const [importPicks, setImportPicks] = useState<Record<string, boolean>>({})
 
   const refresh = async () => {
@@ -170,6 +259,24 @@ function ManualServers() {
     setTests((p) => ({ ...p, [id]: { ok: true, pending: true } }))
     const r = await api.mcpTest(id).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
     setTests((p) => ({ ...p, [id]: r as { ok: boolean; error?: string; tools?: string[] } }))
+  }
+
+  /**
+   * U2: la conferma dell'import — le voci SPISTATE diventano server manuali
+   * (i doppioni non si sovrascrivono, i segreti vanno cifrati nel main).
+   */
+  const applyImport = async (): Promise<Array<{ name: string; outcome: string }>> => {
+    if (!importRows) return []
+    const groups = groupImportRows(importRows, servers.map((s) => s.name))
+    const picks = groups
+      .flatMap((g) => g.rows)
+      .filter((r) => !r.existing && importPicks[importRowKey(r)] === true)
+      .map((r) => ({ source: r.source, name: r.name }))
+    const outcomes = await api.mcpImportApply(picks).catch(() => [] as Array<{ name: string; outcome: string }>)
+    setImportRows(null)
+    setImportPicks({})
+    await refresh()
+    return outcomes
   }
 
   return (
@@ -342,54 +449,19 @@ function ManualServers() {
             <Trans>Importa da Cursor, Claude o ZCode</Trans>
           </button>
           {importRows && (
-            <div className="rounded-2xl bg-muted p-3" data-testid="mcp-import-list">
-              {importRows.length === 0 ? (
+            importRows.length === 0 ? (
+              <div className="rounded-2xl bg-muted p-4" data-testid="mcp-import-list">
                 <p className="text-xs text-muted-foreground"><Trans>Nessun server trovato in Cursor, Claude o ZCode.</Trans></p>
-              ) : (
-                <>
-                  <div className="space-y-1">
-                    {importRows.map((r) => {
-                      const key = `${r.source}:${r.name}`
-                      const existing = servers.some((s) => s.name === r.name)
-                      return (
-                        <label key={key} className={`flex items-center gap-2 text-sm ${existing ? 'opacity-60' : ''}`}>
-                          <input
-                            type="checkbox"
-                            data-testid="mcp-import-check"
-                            checked={importPicks[key] === true}
-                            disabled={existing}
-                            onChange={(e) => setImportPicks((p) => ({ ...p, [key]: e.target.checked }))}
-                          />
-                          <span className="truncate">{r.name}</span>
-                          <span className="rounded-full bg-card px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{r.transport}</span>
-                          <span className="truncate text-[11px] text-muted-foreground">{r.source}</span>
-                          {r.secretNames.length > 0 && <span className="text-[11px] text-muted-foreground">🔒 {r.secretNames.length}</span>}
-                          {existing && <span className="text-[11px] text-muted-foreground"><Trans>già presente</Trans></span>}
-                          <span className="flex-1" />
-                        </label>
-                      )
-                    })}
-                  </div>
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button className="rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setImportRows(null)}><Trans>Annulla</Trans></button>
-                    <button
-                      className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-                      onClick={async () => {
-                        const picks = importRows
-                          .filter((r) => importPicks[`${r.source}:${r.name}`] === true)
-                          .map((r) => ({ source: r.source as 'cursor' | 'claude' | 'zcode', name: r.name }))
-                        await api.mcpImportApply(picks).catch(() => [])
-                        setImportRows(null)
-                        setImportPicks({})
-                        await refresh()
-                      }}
-                    >
-                      <Trans>Importa</Trans>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+              </div>
+            ) : (
+              <ImportList
+                groups={groupImportRows(importRows, servers.map((s) => s.name))}
+                picks={importPicks}
+                onPicks={setImportPicks}
+                onCancel={() => { setImportRows(null); setImportPicks({}) }}
+                onImport={() => { void applyImport() }}
+              />
+            )
           )}
         </div>
       )}

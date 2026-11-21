@@ -53,14 +53,30 @@ describe('E2: scanImportedSources — nome e tipo, MAI i valori', () => {
       })
     })
     expect(rows).toEqual([
-      { source: 'cursor', name: 'mattermost', transport: 'stdio', envNames: ['MATTERMOST_URL', 'MATTERMOST_TOKEN', 'MATTERMOST_TEAM_ID'], secretNames: ['MATTERMOST_TOKEN'] },
-      { source: 'cursor', name: 'web-ufficio', transport: 'http', envNames: ['Authorization', 'X-Piano'], secretNames: ['Authorization'] },
-      { source: 'claude', name: 'filesystem', transport: 'stdio', envNames: [], secretNames: [] },
-      { source: 'zcode', name: 'sequential', transport: 'stdio', envNames: ['SEQ_API_KEY'], secretNames: ['SEQ_API_KEY'] }
+      { source: 'cursor', name: 'mattermost', transport: 'stdio', envNames: ['MATTERMOST_URL', 'MATTERMOST_TOKEN', 'MATTERMOST_TEAM_ID'], secretNames: ['MATTERMOST_TOKEN'], commandLine: 'npx -y @donach/mattermost-mcp', url: undefined, sourcePath: paths[0]!.path },
+      { source: 'cursor', name: 'web-ufficio', transport: 'http', envNames: ['Authorization', 'X-Piano'], secretNames: ['Authorization'], commandLine: undefined, url: 'https://ufficio.example/mcp', sourcePath: paths[0]!.path },
+      { source: 'claude', name: 'filesystem', transport: 'stdio', envNames: [], secretNames: [], commandLine: 'npx -y @modelcontextprotocol/server-filesystem /tmp', url: undefined, sourcePath: paths[1]!.path },
+      { source: 'zcode', name: 'sequential', transport: 'stdio', envNames: ['SEQ_API_KEY'], secretNames: ['SEQ_API_KEY'], commandLine: 'npx -y @sequencemcp', url: undefined, sourcePath: paths[2]!.path }
     ])
     // NESSUN valore segreto (né altro) nella riga di scansione
     expect(JSON.stringify(rows)).not.toContain('tok-finto')
     expect(JSON.stringify(rows)).not.toContain('uff-tok')
+  })
+
+  it('U2: la riga porta il COMANDO (stdio) o l\'HOST (http) per l\'impaginazione curata — mai i valori segreti', async () => {
+    const paths = importSourcePaths(HOME)
+    const rows = await scanImportedSources({
+      paths,
+      readJson: readJson({ [paths[0]!.path]: CURSOR_JSON })
+    })
+    const mm = rows.find((r) => r.name === 'mattermost')!
+    expect(mm.commandLine).toBe('npx -y @donach/mattermost-mcp')
+    expect(mm.url).toBeUndefined()
+    const web = rows.find((r) => r.name === 'web-ufficio')!
+    expect(web.url).toBe('https://ufficio.example/mcp')
+    expect(web.commandLine).toBeUndefined()
+    // comando e URL non sono segreti: possono stare nella riga; i VALORI no
+    expect(JSON.stringify(rows)).not.toMatch(/tok-finto|uff-tok/)
   })
 
   it('un file assente o malformato si salta in silenzio (null), gli altri restano', async () => {

@@ -25,18 +25,21 @@ describe('E2: il bottone Importa e il suo elenco (guardie sul sorgente)', () => 
 
   it('caselle da spuntare, NESSUNA spuntata di default, e l\'importazione passa da api.mcpImportApply', () => {
     expect(WIN_SRC).toMatch(/data-testid="mcp-import-check"/)
-    expect(WIN_SRC).toMatch(/checked=\{importPicks\[/)
+    // U2: le spunte per chiave di riga (origine primaria : nome)
+    expect(WIN_SRC).toMatch(/picks\[importRowKey\(r\)\] === true/)
     expect(WIN_SRC, 'la scansione azzera le spunte: nessuna spuntata di default').toMatch(/setImportPicks\(\{\}\)/)
     expect(WIN_SRC).toMatch(/api\.mcpImportApply\(/)
   })
 
-  it('il nome che esiste già è «già presente» e la sua casella non si può spuntare', () => {
-    expect(WIN_SRC).toContain('già presente')
-    expect(WIN_SRC).toMatch(/disabled=\{[^}]*existing/)
+  it('il nome che esiste già è «già collegato» (U2) e la sua casella non si può spuntare', () => {
+    expect(WIN_SRC).toContain('già collegato')
+    expect(WIN_SRC).toMatch(/disabled=\{r\.existing\}/)
   })
 
   it('nessun valore segreto nell\'elenco: il renderer riceve solo nomi (scan row senza valori)', () => {
     expect(WIN_SRC).not.toMatch(/secretValue|tokenValue/)
-    expect(WIN_SRC).toMatch(/secretNames/)
+    // il conteggio dei segreti arriva dalla lib (r.secretCount), mai un valore
+    expect(WIN_SRC).toMatch(/secretCount/)
+    expect(WIN_SRC).toMatch(/data-testid="mcp-import-secrets"/)
   })
 })

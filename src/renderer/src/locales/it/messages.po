@@ -154,6 +154,11 @@ msgstr "{0, plural, one {# connessa ›} other {# connesse ›}}"
 msgid "{0, plural, one {# passo} other {# passaggi}}"
 msgstr "{0, plural, one {# passo} other {# passaggi}}"
 
+#. placeholder {0}: r.secretCount
+#: src/renderer/src/components/McpWindow.tsx
+msgid "{0, plural, one {# segreto} other {# segreti}}"
+msgstr "{0, plural, one {# segreto} other {# segreti}}"
+
 #. placeholder {0}: agentName(filterAgent)
 #. placeholder {0}: tk.status
 #: src/renderer/src/components/RightPanel.tsx
@@ -410,6 +415,10 @@ msgstr "{minutes} minuti prima di ogni evento del calendario"
 #: src/shared/ui-messages.ts
 msgid "notice.modelRouteCooled"
 msgstr "{model} su {provider} è in pausa fino alle {until} (limite o errore recente): il turno parte da {fallback} su {fallbackProvider}."
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "{n, plural, one {# selezionato} other {# selezionati}}"
+msgstr "{n, plural, one {# selezionato} other {# selezionati}}"
 
 #: src/renderer/src/components/McpWindow.tsx
 msgid "{n, plural, one {# strumento} other {# strumenti}}"
@@ -967,6 +976,11 @@ msgstr "altrove"
 #: src/renderer/src/components/Settings.tsx
 msgid "analizzo…"
 msgstr "analizzo…"
+
+#. placeholder {0}: r.alsoIn.map(label).join(', ')
+#: src/renderer/src/components/McpWindow.tsx
+msgid "anche in {0}"
+msgstr "anche in {0}"
 
 #: src/renderer/src/components/Chat.tsx
 msgid "ancora nessun passo"
@@ -1783,6 +1797,10 @@ msgstr "Cifrato sul Mac. Il bot non vedrà mai la password."
 msgid "circa (±15 min)"
 msgstr "circa (±15 min)"
 
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Claude Desktop"
+msgstr "Claude Desktop"
+
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Claude. Il più affidabile coi tool."
 msgstr "Claude. Il più affidabile coi tool."
@@ -2397,6 +2415,10 @@ msgstr "cron \"{expr}\""
 #: src/shared/ui-messages.ts
 msgid "rpc.cronInvalid"
 msgstr "cron non valido: \"{cron}\" (5 campi, es. \"0 9 * * *\")"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Cursor"
+msgstr "Cursor"
 
 #. placeholder {0}: String(entry.meta?.fromAgentName ?? 'altro bot')
 #: src/renderer/src/components/Chat.tsx
@@ -3155,6 +3177,10 @@ msgstr "Gestisci su Composio"
 msgid "gestiscile su Composio"
 msgstr "gestiscile su Composio"
 
+#: src/renderer/src/components/McpWindow.tsx
+msgid "già collegato"
+msgstr "già collegato"
+
 #: src/renderer/src/components/BoxSetupProgress.tsx
 msgid "Già installato"
 msgstr "Già installato"
@@ -3162,10 +3188,6 @@ msgstr "Già installato"
 #: src/renderer/src/components/BoxSetupProgress.tsx
 msgid "Già installato: niente da scaricare"
 msgstr "Già installato: niente da scaricare"
-
-#: src/renderer/src/components/McpWindow.tsx
-msgid "già presente"
-msgstr "già presente"
 
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Già sul tuo Mac."
@@ -3960,8 +3982,8 @@ msgid "Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valori
 msgstr "Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valori non si rileggono mai in chiaro: si possono solo sostituire. I bot vedono i nomi con <0>list-credentials</0> e i login si compilano con <1>fill_credential</1>, sempre col tuo consenso."
 
 #: src/renderer/src/components/McpWindow.tsx
-msgid "Importa"
-msgstr "Importa"
+msgid "Importa {n}"
+msgstr "Importa {n}"
 
 #: src/renderer/src/components/McpWindow.tsx
 msgid "Importa da Cursor, Claude o ZCode"
@@ -8274,3 +8296,7 @@ msgstr "webhook: token mancante"
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "xAI, Mistral, DeepSeek, Groq, Z.ai e i compatibili OpenAI."
 msgstr "xAI, Mistral, DeepSeek, Groq, Z.ai e i compatibili OpenAI."
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "ZCode"
+msgstr "ZCode"

@@ -1293,8 +1293,10 @@ export interface SandbotApi {
    * E2 (fase mcp-env): «Importa da Cursor, Claude o ZCode» — la scansione
    * (nome, tipo, nomi delle variabili e QUALI sono segreti: mai valori) e la
    * conferma, che crea i server scelti. I file si leggono SOLO al clic.
+   * U2 (fase mcp-ui): la riga porta anche il COMANDO (stdio) o l'URL (http)
+   * e la VIA del file d'origine, per l'elenco raggruppato e curato.
    */
-  mcpImportScan(): Promise<Array<{ source: 'cursor' | 'claude' | 'zcode'; name: string; transport: 'stdio' | 'http'; envNames: string[]; secretNames: string[] }>>
+  mcpImportScan(): Promise<Array<{ source: 'cursor' | 'claude' | 'zcode'; name: string; transport: 'stdio' | 'http'; envNames: string[]; secretNames: string[]; commandLine?: string; url?: string; sourcePath: string }>>
   mcpImportApply(picks: Array<{ source: 'cursor' | 'claude' | 'zcode'; name: string }>): Promise<Array<{ name: string; outcome: 'created' | 'duplicate' | 'missing' }>>
   mcpDelete(id: string): Promise<void>
   mcpTest(id: string): Promise<{ ok: boolean; error?: string; tools?: string[] }>
