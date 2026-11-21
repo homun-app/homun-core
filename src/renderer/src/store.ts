@@ -427,6 +427,9 @@ interface Store {
   /** M2: apre AppsWindow col foglio «Per sviluppatori» già aperto (si consuma lì) */
   appsOpenDevelopers: boolean
   setAppsOpenDevelopers(v: boolean): void
+  /** U3 (fase mcp-ui): il foglio «Per sviluppatori» apre SCORRENDO a questa sezione (si consuma lì) */
+  appsDevelopersScrollTo: 'gateway' | null
+  setAppsDevelopersScrollTo(v: 'gateway' | null): void
   /** fase 16c (C5): la vista centrale «Attività» (false = chat) */
   activityOpen: boolean
   setActivityOpen(v: boolean): void
@@ -559,6 +562,7 @@ export const useStore = create<Store>((set, get) => ({
   // M2 (fase beta12-correzioni): la finestra «Server MCP» (chiusa)
   mcpOpen: false,
   appsOpenDevelopers: false,
+  appsDevelopersScrollTo: null,
   activityOpen: false,
   // fase 16
   theme: 'system',
@@ -1132,6 +1136,10 @@ export const useStore = create<Store>((set, get) => ({
 
   setAppsOpenDevelopers(v) {
     set({ appsOpenDevelopers: v })
+  },
+
+  setAppsDevelopersScrollTo(v) {
+    set({ appsDevelopersScrollTo: v })
   },
 
   // fase 16c (C5): la vista centrale «Attività» — A2: aprire lei chiude il

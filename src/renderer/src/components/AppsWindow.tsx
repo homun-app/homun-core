@@ -368,13 +368,17 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
 
 /**
  * Il foglio «Per sviluppatori»: tutto ciò che ESCE dalla vista principale —
- * marketplace dei plugin, gateway (Composio Tool Router, Zapier, Pipedream),
- * riga OAuth/CIMD, server MCP manuali e ricerca nel registro MCP. Lì restano
- * identici a oggi.
+ * gateway (Composio Tool Router, Zapier, Pipedream), marketplace dei plugin,
+ * riga OAuth/CIMD e ricerca nel registro MCP.
+ * U3 (fase mcp-ui): le sezioni in ordine Gateway, Plugin, Registro; il link
+ * «Gateway, plugin e registro» della finestra «Server MCP» apre il foglio
+ * SCORRENDO alla sezione Gateway (scrollTo); i server MCP manuali restano
+ * nella finestra «Server MCP» — qui solo UNA riga piccola in fondo, non un
+ * blocco in evidenza: niente giro a vuoto tra i due fogli.
  */
-function DevelopersSheet({ onClose }: { onClose(): void }) {
+function DevelopersSheet({ onClose, scrollTo }: { onClose(): void; scrollTo?: 'gateway' | null }) {
   const { t } = useLingui()
-  // M2: il rimando apre la finestra «Server MCP»
+  // M2: il rimando apre la finestra «Server MCP» (che chiude QUESTO foglio)
   const setMcpOpen = useStore((s) => s.setMcpOpen)
   const [query, setQuery] = useState('')
   const [registry, setRegistry] = useState<AppsRegistryResult[] | null>(null)
@@ -395,6 +399,12 @@ function DevelopersSheet({ onClose }: { onClose(): void }) {
     return () => { alive = false; clearTimeout(timer) }
   }, [query])
 
+  // U3: aperto da «Server MCP», il foglio arriva GIÀ sulla sezione Gateway
+  useEffect(() => {
+    if (scrollTo !== 'gateway') return
+    document.getElementById('developers-gateway')?.scrollIntoView({ block: 'start' })
+  }, [scrollTo])
+
   return (
     <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
       {/* U2: @container, come il dettaglio app */}
@@ -402,25 +412,11 @@ function DevelopersSheet({ onClose }: { onClose(): void }) {
         <strong className="block font-display text-lg"><Trans>Per sviluppatori</Trans></strong>
         <p className="mt-1 text-xs text-muted-foreground"><Trans>Server personalizzati, plugin, gateway e registro: chi sa cos'è un server MCP lo trova qui.</Trans></p>
         <div className="mt-4 space-y-6">
-          {/* fase Composio OAuth (C6): la strada della CHIAVE resta, ma solo
-              qui — per la maggior parte delle persone c'è il «Connetti» delle
-              app dell'elenco; le due strade non insieme */}
-          <ComposioKeySection />
-          {/* M2 (fase beta12-correzioni): i server MCP manuali stanno nella
-              finestra «Server MCP» (menu dell'account) — qui solo il rimando,
-              ogni cosa in un posto solo */}
-          <div className="space-y-1">
-            <p className="text-[13px] font-medium"><Trans>Server MCP personalizzato</Trans></p>
-            <p className="text-xs text-muted-foreground"><Trans>I server MCP aggiunti a mano stanno nella finestra «Server MCP»: la apri dal menu del tuo account, sotto Skill.</Trans></p>
-            <button
-              className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-              onClick={() => { onClose(); setMcpOpen(true) }}
-              data-testid="developers-open-mcp"
-            >
-              <Trans>Apri la finestra Server MCP</Trans>
-            </button>
+          {/* U3: il GATEWAY per primo (è qui che porta il link della finestra
+              «Server MCP»), poi i plugin, poi il registro */}
+          <div id="developers-gateway" data-testid="developers-gateway" className="scroll-mt-4">
+            <GatewayTab />
           </div>
-          <GatewayTab />
           <MarketplaceTab />
           <ClientMetadataUrlRow />
           <div className="space-y-2">
@@ -446,8 +442,25 @@ function DevelopersSheet({ onClose }: { onClose(): void }) {
               </div>
             ))}
           </div>
+          {/* fase Composio OAuth (C6): la strada della CHIAVE resta, ma solo
+              qui — per la maggior parte delle persone c'è il «Connetti» delle
+              app dell'elenco; le due strade non insieme */}
+          <ComposioKeySection />
         </div>
-        <div className="mt-4 flex justify-end">
+        {/* M2 → U3 (fase mcp-ui): i server MCP manuali stanno nella finestra
+            «Server MCP» (menu dell'account) — UNA riga piccola in fondo, non
+            un blocco in evidenza: ogni cosa in un posto solo, niente giri a vuoto */}
+        <p className="mt-4 text-center text-[12px] text-muted-foreground">
+          <button
+            type="button"
+            className="underline-offset-2 transition hover:text-foreground hover:underline"
+            onClick={() => { onClose(); setMcpOpen(true) }}
+            data-testid="developers-open-mcp"
+          >
+            <Trans>I server MCP si gestiscono nella finestra Server MCP</Trans> ›
+          </button>
+        </p>
+        <div className="mt-2 flex justify-end">
           <button className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
             <Trans>Chiudi</Trans>
           </button>
@@ -649,11 +662,15 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
   }, [appsOpenApp])
   // M2 (fase beta12-correzioni): il rimando della finestra «Server MCP» apre
   // questa finestra col foglio «Per sviluppatori» GIÀ aperto (si consuma qui)
+  // U3 (fase mcp-ui): e SCORRE alla sezione chiesta (il link della finestra
+  // «Server MCP» porta dritto al Gateway)
   const appsOpenDevelopers = useStore((s) => s.appsOpenDevelopers)
+  const [developersScrollTo, setDevelopersScrollTo] = useState<'gateway' | null>(null)
   useEffect(() => {
     if (!appsOpenDevelopers) return
+    setDevelopersScrollTo(useStore.getState().appsDevelopersScrollTo ?? null)
     setDevelopersOpen(true)
-    useStore.setState({ appsOpenDevelopers: false })
+    useStore.setState({ appsOpenDevelopers: false, appsDevelopersScrollTo: null })
   }, [appsOpenDevelopers])
   const [accountOpen, setAccountOpen] = useState(false)
   const [overflowOpen, setOverflowOpen] = useState(false)
@@ -989,7 +1006,7 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
         <Trans>Per sviluppatori: server personalizzati, plugin, registro</Trans>
       </button>
 
-      {developersOpen && <DevelopersSheet onClose={() => setDevelopersOpen(false)} />}
+      {developersOpen && <DevelopersSheet onClose={() => setDevelopersOpen(false)} scrollTo={developersScrollTo} />}
       {accountOpen && (
         <ComposioAccountSheet
           onClose={() => setAccountOpen(false)}

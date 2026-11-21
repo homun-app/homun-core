@@ -1161,10 +1161,6 @@ msgstr "Open the app window to authorize."
 msgid "conn.needsAuthOpenWindow"
 msgstr "Open the Homun window to authorize"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Apri la finestra Server MCP"
-msgstr "Open the Server MCP window"
-
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Apri la squadra"
 msgstr "Open the team"
@@ -3524,8 +3520,8 @@ msgid "I secret servono ai COMANDI dei bot (<0>{SECRET_TEMPLATE}</0>): il valore
 msgstr "Secrets are used by the bots' COMMANDS (<0>{SECRET_TEMPLATE}</0>): the value only enters the process env, never the transcript."
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "I server MCP aggiunti a mano stanno nella finestra «Server MCP»: la apri dal menu del tuo account, sotto Skill."
-msgstr "Manually added MCP servers live in the “Server MCP” window: open it from your account menu, below Skill."
+msgid "I server MCP si gestiscono nella finestra Server MCP"
+msgstr "MCP servers are managed in the MCP Servers window"
 
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "I token stanno cifrati sul tuo Mac."
@@ -7196,7 +7192,6 @@ msgstr "Manual MCP servers (stdio or HTTP, with headers/bearer stored encrypted)
 msgid "card.openMcpWindow"
 msgstr "MCP server for {service}"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/McpWindow.tsx
 msgid "Server MCP personalizzato"
 msgstr "Custom MCP server"

@@ -80,6 +80,8 @@ export function McpWindow(): React.ReactNode {
   // il rimando in fondo apre «Per sviluppatori» nella finestra App
   const setAppsOpen = useStore((s) => s.setAppsOpen)
   const setAppsOpenDevelopers = useStore((s) => s.setAppsOpenDevelopers)
+  // U3: porta DIRETTAMENTE alla sezione Gateway (niente giro a vuoto)
+  const setAppsDevelopersScrollTo = useStore((s) => s.setAppsDevelopersScrollTo)
   return (
     <Dialog open onOpenChange={(o) => { if (!o) setMcpOpen(false) }}>
       <DialogContent
@@ -119,7 +121,14 @@ export function McpWindow(): React.ReactNode {
                   type="button"
                   className="underline-offset-2 transition hover:text-foreground hover:underline"
                   data-testid="mcp-window-developers"
-                  onClick={() => { setMcpOpen(false); setAppsOpen(true); setAppsOpenDevelopers(true) }}
+                  onClick={() => {
+                    // U3: un foglio solo — questa si chiude, «Per sviluppatori»
+                    // si apre GIÀ sulla sezione Gateway (scroll diretto)
+                    setMcpOpen(false)
+                    setAppsDevelopersScrollTo('gateway')
+                    setAppsOpen(true)
+                    setAppsOpenDevelopers(true)
+                  }}
                 >
                   <Trans>Gateway, plugin e registro</Trans> ›
                 </button>
