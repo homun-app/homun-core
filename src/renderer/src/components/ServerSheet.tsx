@@ -13,6 +13,8 @@ import { useLingui, Trans } from '@lingui/react/macro'
 import { api, useStore } from '../store'
 import type { McpServerConnectResult, McpServerSetupSpec } from '../../../shared/types'
 import { fillTemplate } from '../../../shared/registry-vars'
+// K4 (fase team-bot): il logo VERO dell'app quando il file c'è nel repo
+import { logoUrlForName } from '../lib/app-logos'
 import { serverRowStatus, type InstalledServerLike } from '../lib/apps-view'
 import { SettingsAdvanced } from './settings/SettingsAdvanced'
 import { SettingsGroup } from './settings/SettingsGroup'
@@ -43,11 +45,20 @@ function publisherLine(sv: ServerSheetInfo): string | null {
   return null
 }
 
-/** Il logo del foglio: l'iniziale del nome umano su fondo tenue. */
-function ServerLogo({ name }: { name: string }): React.ReactNode {
+/**
+ * Il logo del foglio: il file del repo quando c'è — per NOME umano
+ * («Mattermost») o per il publisher del registro (io.github.mattermost/… →
+ * mattermost) — e SOLO se manca l'iniziale su fondo tenue di oggi.
+ */
+function ServerLogo({ sv }: { sv: ServerSheetInfo }): React.ReactNode {
+  const publisher = publisherLine(sv)
+  const url = logoUrlForName(sv.name) ?? logoUrlForName(publisher)
+  if (url) {
+    return <img src={url} alt="" data-testid="server-sheet-logo" className="size-12 shrink-0 rounded-[12px] object-cover dark:bg-white" />
+  }
   return (
     <span className="grid size-12 shrink-0 place-items-center rounded-[12px] bg-muted text-lg font-bold text-foreground/70">
-      {name.slice(0, 1).toUpperCase()}
+      {sv.name.slice(0, 1).toUpperCase()}
     </span>
   )
 }
@@ -106,7 +117,7 @@ export function ServerSheet({ sv, onDone }: { sv: ServerSheetInfo; onDone(): voi
     <div className="space-y-4" data-testid="server-sheet">
       {/* la testata: logo, nome umano, mezza riga, stato */}
       <div className="flex items-center gap-3">
-        <ServerLogo name={sv.name} />
+        <ServerLogo sv={sv} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-lg font-medium">{sv.name}</span>
           <span className="block truncate text-[13px] text-muted-foreground">

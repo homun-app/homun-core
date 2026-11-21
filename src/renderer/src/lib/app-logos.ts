@@ -23,3 +23,21 @@ export function catalogLogoUrl(name: string | null | undefined): string | null {
 export function logoUrlForSlug(slug: string): string | null {
   return bySlug[slug.toLowerCase()] ?? null
 }
+
+/**
+ * K4 (fase team-bot): lo stem con cui un NOME umano si cerca tra i file dei
+ * loghi — «Mattermost» → mattermost, «DeepWiki MCP» → deepwiki_mcp. Pura,
+ * testabile senza la mappa di vite.
+ */
+export function logoStemForName(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+}
+
+/**
+ * K4: l'URL del logo per il NOME di un server o di un'app, quando il file è
+ * tra quelli del repo (altrimenti null: chi chiama resta sull'iniziale).
+ */
+export function logoUrlForName(name: string | null | undefined): string | null {
+  if (!name) return null
+  return bySlug[logoStemForName(name)] ?? null
+}

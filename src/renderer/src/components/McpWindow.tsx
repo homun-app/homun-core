@@ -20,6 +20,8 @@ import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 import { envRowsFromServer, saveEnvPayload, newEnvRow, envNameLooksSecret, type EnvRow } from '../lib/mcp-env'
 // U2 (fase mcp-ui): l'elenco di import raggruppato per origine
 import { groupImportRows, importRowKey, type ImportGroupUi, type ImportScanRow, type ImportSkipRow, type ImportSource } from '../lib/mcp-import-groups'
+// K4 (fase team-bot): il logo VERO dell'app quando il file c'è nel repo
+import { logoUrlForName } from '../lib/app-logos'
 
 /**
  * U1 (fase mcp-ui): il bottone ICONA delle azioni per riga — 28×28, rounded-lg,
@@ -172,6 +174,9 @@ export function ImportList({ groups, skipped = [], picks, onPicks, onImport, onC
               : s === 'windsurf' ? t`Windsurf`
                 : s === 'gemini' ? t`Gemini CLI`
                   : t`VS Code`
+  // K4 (fase team-bot): il logo della FONTE quando il file c'è nel repo
+  // (oggi solo Gemini CLI → gemini.svg; le altre restano con l'iniziale)
+  const SOURCE_LOGO: Partial<Record<ImportSource, string>> = { gemini: 'gemini' }
   /** U7: il motivo del salto, nella lingua dell'interfaccia */
   const skipReason = (r: ImportSkipRow['reason']): string =>
     r === 'env-in-command' ? t`comando con una variabile non risolta`
@@ -185,10 +190,12 @@ export function ImportList({ groups, skipped = [], picks, onPicks, onImport, onC
       {groups.map((g) => (
         <section key={g.source} data-testid={`mcp-import-group-${g.source}`} className="space-y-2">
           <header className="flex items-center gap-2 pt-1">
-            {/* niente logo ufficiale nel repo: l'iniziale in un cerchio */}
-            <span className="grid size-6 shrink-0 place-items-center rounded-full bg-card text-[11px] font-medium text-muted-foreground" aria-hidden="true">
-              {label(g.source).slice(0, 1)}
-            </span>
+            {/* K4: il logo dell'app quando il file c'è nel repo, altrimenti l'iniziale nel cerchio */}
+            {logoUrlForName(SOURCE_LOGO[g.source] ?? null)
+              ? <img src={logoUrlForName(SOURCE_LOGO[g.source] ?? null)!} alt="" data-testid="mcp-import-source-logo" className="grid size-6 shrink-0 place-items-center rounded-full object-cover dark:bg-white" />
+              : <span className="grid size-6 shrink-0 place-items-center rounded-full bg-card text-[11px] font-medium text-muted-foreground" aria-hidden="true">
+                  {label(g.source).slice(0, 1)}
+                </span>}
             <span className="shrink-0 text-[13px] font-medium">{label(g.source)}</span>
             <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title={g.sourcePath}>{g.sourcePath}</span>
           </header>
@@ -330,6 +337,10 @@ function ManualServers() {
       {servers.map((s) => (
         <div key={s.id} data-testid="mcp-server-row" className="rounded-2xl bg-muted px-3 py-2.5">
           <div className="flex items-center gap-2">
+            {/* K4: il logo dell'app quando c'è (per nome: «Mattermost»); se manca, la riga resta com'è */}
+            {logoUrlForName(s.name) && (
+              <img src={logoUrlForName(s.name)!} alt="" data-testid="mcp-server-logo" className="size-5 shrink-0 rounded-[5px] object-cover dark:bg-white" />
+            )}
             <span className={`h-2 w-2 shrink-0 rounded-full ${s.enabled ? 'bg-chart-2' : 'bg-muted-foreground/40'}`} />
             <span className="shrink-0 text-sm">{s.name}</span>
             <span className="shrink-0 rounded-full bg-card px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{s.transport}</span>
