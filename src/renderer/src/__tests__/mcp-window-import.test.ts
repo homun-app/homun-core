@@ -11,8 +11,8 @@ const WIN_SRC = readFileSync(fileURLToPath(new URL('../components/McpWindow.tsx'
 const PRELOAD_SRC = readFileSync(fileURLToPath(new URL('../../../preload/index.ts', import.meta.url)), 'utf8')
 
 describe('E2: il bottone Importa e il suo elenco (guardie sul sorgente)', () => {
-  it('il bottone si chiama «Importa da Cursor, Claude o ZCode» e apre l\'elenco solo al clic', () => {
-    expect(WIN_SRC).toContain('Importa da Cursor, Claude o ZCode')
+  it('il bottone si chiama «Importa da altre app» (U7: otto app) e apre l\'elenco solo al clic', () => {
+    expect(WIN_SRC).toContain('Importa da altre app')
     expect(WIN_SRC).toMatch(/data-testid="mcp-import-button"/)
     expect(WIN_SRC).toMatch(/data-testid="mcp-import-list"/)
   })

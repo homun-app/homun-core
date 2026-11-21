@@ -220,8 +220,10 @@ if (isDaemonMode(process.argv)) {
         mainWindows.forget(win)
         lifecycle.line('window-closed')
       })
-      // U6: la finestra principale creata
+      // U6: la finestra principale creata; e OGNI volta che si mostra (il
+      // primo show e i successivi restore/activate) la riga del registro
       lifecycle.line('window-created')
+      win.on('show', () => lifecycle.line('window-shown'))
 
       // A5: niente finestre/popup dal renderer; i link http(s) al browser
       // esterno SOLO dopo il controllo dello schema (mai file:, javascript:,

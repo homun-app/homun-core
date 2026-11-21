@@ -9,7 +9,7 @@ import './render-helper-install'
 import { describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
 import { renderHtml, parseHtml, textOf, findAll, dialogPassThroughMock } from './render-helper'
-import { groupImportRows, type ImportScanRow } from '../lib/mcp-import-groups'
+import { groupImportRows, type ImportScanRow, type ImportSkipRow } from '../lib/mcp-import-groups'
 
 vi.mock('../components/ui/dialog', () => dialogPassThroughMock())
 
@@ -108,5 +108,52 @@ describe('U2: le classi di impaginazione dell\'elenco import (guardia sul sorgen
     expect(block).toMatch(/space-y-3|gap-3/) // 12 px tra i gruppi
     expect(block).toMatch(/min-h-11/)       // ~44 px la riga
     expect(block).toMatch(/space-y-2/)      // spazio tra le righe
+  })
+})
+
+// ---- U7 (fase mcp-ui): le app in più e i server SALTATI col motivo ----
+describe('U7: il render dell\'elenco import — le nuove app e i saltati', () => {
+  const u7rows: ImportScanRow[] = [
+    { source: 'claude-code', name: 'claude-code-srv', transport: 'stdio', envNames: [], secretNames: ['CC_TOKEN'], commandLine: 'npx -y cc', sourcePath: '/Users/prova/.claude.json' },
+    { source: 'codex', name: 'mattermost', transport: 'stdio', envNames: [], secretNames: ['MATTERMOST_TOKEN'], commandLine: 'uvx mattermost-mcp', sourcePath: '/Users/prova/.codex/config.toml' },
+    { source: 'windsurf', name: 'wind', transport: 'stdio', envNames: [], secretNames: [], commandLine: 'npx -y w', sourcePath: '/Users/prova/.codeium/windsurf/mcp_config.json' },
+    { source: 'gemini', name: 'gem', transport: 'stdio', envNames: [], secretNames: ['GEM_KEY'], commandLine: 'npx -y g', sourcePath: '/Users/prova/.gemini/settings.json' },
+    { source: 'vscode', name: 'buono', transport: 'stdio', envNames: [], secretNames: [], commandLine: 'npx -y b', sourcePath: '/Users/prova/Library/Application Support/Code/User/mcp.json' }
+  ]
+  const u7skipped: ImportSkipRow[] = [
+    { source: 'vscode', name: 'col-comando-riferito', reason: 'env-in-command' },
+    { source: 'vscode', name: 'indirizzo-riferito', reason: 'env-in-url' }
+  ]
+  const u7html = () => renderHtml(createElement(ImportList, {
+    groups: groupImportRows(u7rows, []),
+    skipped: u7skipped,
+    picks: {},
+    onPicks: () => {},
+    onImport: () => {},
+    onCancel: () => {}
+  }))
+
+  it('le intestazioni delle nuove app: Claude Code, Codex, Windsurf, Gemini CLI, VS Code', () => {
+    const texts = findAll(parseHtml(u7html()), () => true).map((n) => textOf(n)).join('\n')
+    expect(texts).toContain('Claude Code')
+    expect(texts).toContain('Codex')
+    expect(texts).toContain('Windsurf')
+    expect(texts).toContain('Gemini CLI')
+    expect(texts).toContain('VS Code')
+    expect(texts).toContain('/Users/prova/.codex/config.toml')
+    expect(texts).toContain('/Users/prova/.claude.json')
+  })
+
+  it('i server SALTATI col MESSAGGIO: righe spente senza casella, dentro il loro gruppo', () => {
+    const h = u7html()
+    const texts = findAll(parseHtml(h), () => true).map((n) => textOf(n)).join('\n')
+    expect(texts).toContain('col-comando-riferito')
+    expect(texts).toMatch(/non importato: .*(variabile|comando)/)
+    expect(texts).toContain('indirizzo-riferito')
+    // la riga saltata NON ha la casella (non si può scegliere)
+    const root = parseHtml(h)
+    const saltata = findAll(root, (n) => (n.attrs['data-testid'] ?? '') === 'mcp-import-skipped')
+    expect(saltata.length).toBe(2)
+    expect(saltata.every((n) => n.tag !== 'label')).toBe(true)
   })
 })

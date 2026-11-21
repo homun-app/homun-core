@@ -66,3 +66,19 @@ export function mergeManualEnvSecrets(
 
 /** L'euristica condivisa del «segreto di default» (per il form). */
 export { envNameLooksSecret }
+
+/**
+ * U7 (fase mcp-ui): il needsAuth «da compilare» di un server MANUALE importato
+ * con variabili riferite (${env:…}, bearer_token_env_var). Quando l'utente
+ * compila i valori (mcp:save), il needsAuth si PULISCE — finché manca una
+ * chiave il server non si offre al bot (skippedByConnectorState). PURA:
+ * `filled` sono i valori arrivati (non segreti in config o segreti cifrati).
+ */
+export function manualNeedsAuthAfterFill(
+  needsAuth: { kind: 'env' | 'key' | 'settings' | 'setup'; keys: string[] } | undefined,
+  filled: Record<string, string>
+): { kind: 'env' | 'key' | 'settings' | 'setup'; keys: string[] } | undefined {
+  if (!needsAuth || needsAuth.kind !== 'env') return needsAuth
+  const complete = needsAuth.keys.every((k) => Boolean(filled[k]))
+  return complete ? undefined : needsAuth
+}

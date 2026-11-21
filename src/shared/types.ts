@@ -1295,9 +1295,15 @@ export interface SandbotApi {
    * conferma, che crea i server scelti. I file si leggono SOLO al clic.
    * U2 (fase mcp-ui): la riga porta anche il COMANDO (stdio) o l'URL (http)
    * e la VIA del file d'origine, per l'elenco raggruppato e curato.
+   * U7 (fase mcp-ui): le app sono OTTO (Cursor, Claude Desktop, ZCode, Claude
+   * Code, Codex, Windsurf, Gemini CLI, VS Code) e le voci col FORMATO non
+   * capito tornano SALTATE col motivo (mai valori segreti).
    */
-  mcpImportScan(): Promise<Array<{ source: 'cursor' | 'claude' | 'zcode'; name: string; transport: 'stdio' | 'http'; envNames: string[]; secretNames: string[]; commandLine?: string; url?: string; sourcePath: string }>>
-  mcpImportApply(picks: Array<{ source: 'cursor' | 'claude' | 'zcode'; name: string }>): Promise<Array<{ name: string; outcome: 'created' | 'duplicate' | 'missing' }>>
+  mcpImportScan(): Promise<{
+    rows: Array<{ source: string; name: string; transport: 'stdio' | 'http'; envNames: string[]; secretNames: string[]; commandLine?: string; url?: string; sourcePath: string }>
+    skipped: Array<{ source: string; name: string; reason: 'env-in-command' | 'env-in-url' | 'header-var' | 'format' }>
+  }>
+  mcpImportApply(picks: Array<{ source: string; name: string }>): Promise<Array<{ name: string; outcome: 'created' | 'duplicate' | 'missing' }>>
   mcpDelete(id: string): Promise<void>
   mcpTest(id: string): Promise<{ ok: boolean; error?: string; tools?: string[] }>
   // fase 5: connettori del catalogo ("Connetti app")

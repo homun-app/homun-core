@@ -8,6 +8,14 @@
 // FINTO come «host dichiarato», server MCP npm FINTO (il pacchetto). MAI npm
 // vero, mai docker vero, mai rete vera fuori da 127.0.0.1.
 //
+//   U4+U5 (fase mcp-ui) l'app riparte col PATH RIDOTTO del Finder: lo shim
+//       npx «#!/usr/bin/env node» col node FINTO nella cartella fnm della HOME
+//       finta PARTE (la cartella risolta in testa al PATH del figlio) → riga
+//       VERDE «2 strumenti» e nota al bot; l'indirizzo irraggiungibile e il
+//       comando inesistente → righe ROSSE con l'errore leggibile e note «non
+//       parte». L'elenco import è RAGGRUPPATO per origine (U2) con doppione
+//       unito, segreti KeyRound col plurale e «Importa N»; le azioni della
+//       riga sono ICONE lucide (U1). Catture in docs/catture/fase-mcp-ui/.
 //   E2  Importa da Cursor, Claude o ZCode — SOLO al clic: i file finti si
 //       creano DOPO l'avvio (nessuna lettura all'avvio), il bottone li trova,
 //       la conferma crea i server (segreti CIFRATI, mai valori nel renderer),
@@ -22,7 +30,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync, readdirSync, readFileSync, existsSync, renameSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, resolve, basename } from 'node:path'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { findProbeDaemons, stopProbeDaemons } from './lib/probe-daemons.mjs'
@@ -33,6 +41,8 @@ const TMP_BASE = realpathSync(tmpdir())
 const PREFIX = 'sandbot-fase-mcp-env'
 const SHOTS = join(ROOT, 'docs', 'catture', 'fase-mcp-env')
 mkdirSync(SHOTS, { recursive: true })
+const SHOTS_UI = join(ROOT, 'docs', 'catture', 'fase-mcp-ui')
+mkdirSync(SHOTS_UI, { recursive: true })
 
 const log = (...a) => console.log('[sonda mcp-env]', ...a)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -237,25 +247,33 @@ chmodSync(FAKE_DOCKER, 0o755)
 const ELECTRON = join(ROOT, 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
 const DEBUG_PORT = 9495
 let appLog = ''
-const app = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`, '--lang=it'], {
-  cwd: ROOT,
-  env: {
-    HOME: FAKE_HOME,
-    PATH: process.env.PATH,
-    SANDBOT_TEST_USER_DATA: DATA,
-    SANDBOT_TEST_FAKE_KEYCHAIN: join(DATA, 'keychain-finta.json'),
-    SANDBOT_TEST_FAKE_SAFESTORAGE: join(DATA, 'safestorage-finta.json'),
-    SANDBOT_WEB_FETCH_ALLOW_LOOPBACK: '1',
-    SANDBOT_TEST_NPM_REGISTRY_URL: `http://127.0.0.1:${npmPort}`,
-    SANDBOT_TEST_NPM_DOWNLOADS_URL: `http://127.0.0.1:${npmPort}`,
-    HOMUN_DOCKER_PATH: FAKE_DOCKER,
-    FAKE_MCP_SERVER: fakeMcpServerPath,
-    CALLS_FILE: PROXY_LOG
-  },
-  stdio: ['ignore', 'pipe', 'pipe']
-})
-app.stdout.on('data', (d) => { appLog += d.toString() })
-app.stderr.on('data', (d) => { appLog += d.toString() })
+let app = null
+/** l'app con l'env della sonda (PATH ridotto per la corsa U4/U5: niente node nel PATH di base) */
+const startApp = (extraEnv = {}) => {
+  appLog = ''
+  const p = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`, '--lang=it'], {
+    cwd: ROOT,
+    env: {
+      HOME: FAKE_HOME,
+      PATH: process.env.PATH,
+      SANDBOT_TEST_USER_DATA: DATA,
+      SANDBOT_TEST_FAKE_KEYCHAIN: join(DATA, 'keychain-finta.json'),
+      SANDBOT_TEST_FAKE_SAFESTORAGE: join(DATA, 'safestorage-finta.json'),
+      SANDBOT_WEB_FETCH_ALLOW_LOOPBACK: '1',
+      SANDBOT_TEST_NPM_REGISTRY_URL: `http://127.0.0.1:${npmPort}`,
+      SANDBOT_TEST_NPM_DOWNLOADS_URL: `http://127.0.0.1:${npmPort}`,
+      HOMUN_DOCKER_PATH: FAKE_DOCKER,
+      FAKE_MCP_SERVER: fakeMcpServerPath,
+      CALLS_FILE: PROXY_LOG,
+      ...extraEnv
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+  p.stdout.on('data', (d) => { appLog += d.toString() })
+  p.stderr.on('data', (d) => { appLog += d.toString() })
+  app = p
+  return p
+}
 const stopApp = () => { try { app?.kill('SIGTERM') } catch { /* già via */ } }
 const waitPidGone = async (pid, capMs = 15_000) => {
   const alive = () => { try { process.kill(pid, 0); return true } catch { return false } }
@@ -349,14 +367,15 @@ const settle = async (cdp) => {
   await pageEval(cdp, `await Promise.race([new Promise((resolve) => { let n = 0; const step = () => { if (++n >= 2) resolve(); else requestAnimationFrame(step) }; requestAnimationFrame(step) }), new Promise((resolve) => setTimeout(resolve, 1500))])`)
   await sleep(350)
 }
-const shot = async (cdp, name) => {
+const shot = async (cdp, name, dir = SHOTS) => {
   await settle(cdp)
   const r = await cdp.send('Page.captureScreenshot', { format: 'png' })
-  writeFileSync(join(SHOTS, name), Buffer.from(r.data, 'base64'))
-  log('cattura', name)
+  writeFileSync(join(dir, name), Buffer.from(r.data, 'base64'))
+  log('cattura', join(basename(dir), name))
 }
 
 try {
+  startApp()
   const main = await waitForPage('', 30_000)
   if (!main) throw new Error('nessuna pagina: ' + appLog.slice(-600))
   const cdp = main.cdp
@@ -390,10 +409,12 @@ try {
   mkdirSync(join(FAKE_HOME, '.cursor'), { recursive: true })
   mkdirSync(join(FAKE_HOME, 'Library', 'Application Support', 'Claude'), { recursive: true })
   mkdirSync(join(FAKE_HOME, '.zcode', 'cli'), { recursive: true })
+  // il comando di mattermost è FINTO (eco-finto): l'auto-test di U5 lo
+  // risolve e fallisce SUBITO — MAI npx vero, mai npm vero, mai rete
   writeFileSync(cursorFile, JSON.stringify({
     mcpServers: {
       mattermost: {
-        command: 'npx', args: ['-y', '@donach/mattermost-mcp'],
+        command: 'eco-finto', args: ['-y', '@donach/mattermost-mcp'],
         env: { MATTERMOST_URL: 'https://mattermost.competitoor.com', MATTERMOST_TOKEN: 'tok-segreto-import', MATTERMOST_TEAM_ID: 'team-finto' }
       },
       'ufficio-remoto': { url: 'https://ufficio.example/mcp', headers: { Authorization: 'Bearer uff-bearer' } }
@@ -437,8 +458,10 @@ try {
   `)
   await pageEval(cdp, `
     const w = document.querySelector('[data-testid="mcp-window"]')
-    const btn = [...w.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Importa')
-    if (!btn) return false
+    // U2: il bottone dice «Importa N» con N corretto ([0-9]: i backslash si
+    // perdono dentro i template literal della sonda)
+    const btn = [...w.querySelectorAll('button')].find((b) => /^Importa [0-9]+$/.test(b.textContent.trim()))
+    if (!btn || btn.textContent.trim() !== 'Importa 1') return false
     btn.click()
     return true
   `)
@@ -446,7 +469,7 @@ try {
   let servers = await rpc(cdp, 'mcpList()')
   const importato = servers.find((s) => s.name === 'mattermost')
   check('E2: «Importa» crea il server stdio con comando, argomenti e VARIABILI',
-    !!importato && importato.command === 'npx' && (importato.args ?? []).includes('-y') &&
+    !!importato && importato.command === 'eco-finto' && (importato.args ?? []).includes('-y') &&
       (importato.envSpec ?? []).some((v) => v.name === 'MATTERMOST_TOKEN' && v.secret === true) &&
       (importato.envValues ?? {}).MATTERMOST_URL === 'https://mattermost.competitoor.com',
     JSON.stringify(importato ?? {}).slice(0, 160))
@@ -460,8 +483,8 @@ try {
   // il doppione: si ripete la scansione, mattermost è «già presente» e non si sovrascrive
   await clickTestid(cdp, 'mcp-import-button')
   await waitDom(cdp, `document.querySelector('[data-testid="mcp-import-list"]')`, 5_000)
-  const giaPresente = await waitDom(cdp, `document.querySelector('[data-testid="mcp-import-list"]').textContent.includes('già presente')`, 5_000)
-  check('E2: il nome che esiste già è «già presente» e la casella è disattivata', giaPresente)
+  const giaCollegato = await waitDom(cdp, `document.querySelector('[data-testid="mcp-import-list"]').textContent.includes('già collegato')`, 5_000)
+  check('E2: il nome che esiste già è «già collegato» e la casella è disattivata', giaCollegato)
   await shot(cdp, '2-importa-gia-presente.png')
   // i file tolti → nessun server: la lettura è DEL CLIC, non una foto d'avvio
   renameSync(cursorFile, cursorFile + '.via')
@@ -628,9 +651,267 @@ try {
   check('N1: lo stato del server dice l\'errore (il foglio del server lo mostra)',
     rigaN1?.stateStatus === 'error' && String(rigaN1?.stateError ?? '').includes('do not start'),
     JSON.stringify({ stateStatus: rigaN1?.stateStatus, stateError: rigaN1?.stateError }).slice(0, 180))
-  // si torna alla rete interna per le corse successive (la corsa finisce qui,
-  // ma il setting resta pulito nel dato temporaneo)
+  // si torna alla rete interna per le corse successive
   await rpc(cdp, `settingsSet('sandbox.network', 'none')`)
+
+  // =========== U4+U5 (fase mcp-ui): lo shim npx «#!/usr/bin/env node» con il
+  // node FINTO fuori dal PATH di base → il server PARTE (la cartella risolta
+  // in TESTA al PATH del figlio), la riga va VERDE «N strumenti» e il bot
+  // riceve la nota; gli altri due server importati falliscono → righe ROSSE
+  // con l'errore leggibile e la nota «non parte». Catture in fase-mcp-ui/.
+  cdp.sock?.close?.()
+  stopApp()
+  if (Number.isInteger(app?.pid)) await waitPidGone(app.pid)
+  await stopProbeDaemons(PREFIX, { log }).catch((e) => log('stopProbeDaemons:', e.message))
+  for (let i = 0; i < 50 && findProbeDaemons(PREFIX).length > 0; i++) await sleep(200)
+
+  // la cartella fnm della HOME finta: la shim npx È il server MCP (2 strumenti)
+  // e accanto c'è il node FINTO (esegue il node della sonda col percorso assoluto)
+  const FNM_BIN = join(FAKE_HOME, '.local', 'share', 'fnm', 'aliases', 'default', 'bin')
+  mkdirSync(FNM_BIN, { recursive: true })
+  writeFileSync(join(FNM_BIN, 'npx'), [
+    '#!/usr/bin/env node',
+    'let buf = ""',
+    'const send = (o) => process.stdout.write(JSON.stringify(o) + "\\n")',
+    'process.stdin.setEncoding("utf8")',
+    'process.stdin.on("data", (d) => {',
+    '  buf += d',
+    '  let i',
+    '  while ((i = buf.indexOf("\\n")) >= 0) {',
+    '    const line = buf.slice(0, i); buf = buf.slice(i + 1)',
+    '    if (!line.trim()) continue',
+    '    const m = JSON.parse(line)',
+    '    if (m.method === "initialize") send({ jsonrpc: "2.0", id: m.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "mattermost-finto", version: "1" } } })',
+    '    else if (m.method === "tools/list") send({ jsonrpc: "2.0", id: m.id, result: { tools: [',
+    '      { name: "mattermost_envia_canale", description: "envia un messaggio nel canale", inputSchema: { type: "object" } },',
+    '      { name: "mattermost_leggi_canale", description: "legge i messaggi del canale", inputSchema: { type: "object" } }',
+    '    ] } })',
+    '    else if (m.id !== undefined) send({ jsonrpc: "2.0", id: m.id, result: {} })',
+    '  }',
+    '})'
+  ].join('\n'), { mode: 0o755 })
+  chmodSync(join(FNM_BIN, 'npx'), 0o755)
+  writeFileSync(join(FNM_BIN, 'node'), `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, { mode: 0o755 })
+  chmodSync(join(FNM_BIN, 'node'), 0o755)
+  // i file delle TRE origini con un DOPPIONE esatto (mattermost in Cursor e
+  // ZCode), un http con 2 segreti (orion-moon, indirizzo loopback IRRAGGIUNGIBILE
+  // per la riga rossa) e un comando inesistente (rotto)
+  writeFileSync(cursorFile, JSON.stringify({
+    mcpServers: {
+      mattermost: { command: 'npx', args: ['-y', '@donach/mattermost-mcp'], env: { MATTERMOST_URL: 'https://mattermost.example', MATTERMOST_TOKEN: 'tok-shim', MATTERMOST_API_KEY: 'k-shim' } },
+      'ufficio-remoto': { url: 'https://ufficio.example/mcp', headers: { Authorization: 'Bearer uff-bearer' } }
+    }
+  }, null, 2))
+  writeFileSync(claudeFile, JSON.stringify({ mcpServers: { filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'] } } }, null, 2))
+  writeFileSync(zcodeFile, JSON.stringify({ mcp: { servers: {
+    mattermost: { type: 'stdio', command: 'npx', args: ['-y', '@donach/mattermost-mcp'], env: { MATTERMOST_URL: 'https://mattermost.example', MATTERMOST_TOKEN: 'tok-shim', MATTERMOST_API_KEY: 'k-shim' } },
+    'orion-moon': { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: 'Bearer orion', 'X-Key': 'k' } },
+    rotto: { type: 'stdio', command: 'comando-che-non-esiste', args: [] }
+  } } }, null, 2))
+  // U7: i file delle altre CINQUE app ( Claude Code utente+progetto, Codex TOML
+  // con bearer_token_env_var, Windsurf, Gemini con ${env:}, VS Code col
+  // comando riferito da SALTARE col motivo)
+  const claudeCodeFile = join(FAKE_HOME, '.claude.json')
+  const codexFile = join(FAKE_HOME, '.codex', 'config.toml')
+  const windsurfFile = join(FAKE_HOME, '.codeium', 'windsurf', 'mcp_config.json')
+  const geminiFile = join(FAKE_HOME, '.gemini', 'settings.json')
+  const vscodeFile = join(FAKE_HOME, 'Library', 'Application Support', 'Code', 'User', 'mcp.json')
+  mkdirSync(join(FAKE_HOME, '.codex'), { recursive: true })
+  mkdirSync(join(FAKE_HOME, '.codeium', 'windsurf'), { recursive: true })
+  mkdirSync(join(FAKE_HOME, '.gemini'), { recursive: true })
+  mkdirSync(join(FAKE_HOME, 'Library', 'Application Support', 'Code', 'User'), { recursive: true })
+  writeFileSync(claudeCodeFile, JSON.stringify({
+    mcpServers: { 'claude-code-utente': { command: 'npx', args: ['-y', 'cc-u'] } },
+    projects: { '/Users/prova/lavoro': { mcpServers: { 'claude-code-progetto': { command: 'node', args: ['srv.js'] } } } },
+    history: ['dati', 'privati', 'che', 'non', 'si', 'leggono']
+  }, null, 2))
+  writeFileSync(codexFile, [
+    '# il config TOML di Codex (parser MINIMO, niente dipendenze)',
+    'model = "gpt-5-codex"',
+    '',
+    '[mcp_servers.codex-mm]',
+    'command = "uvx"',
+    'args = ["codex-finto"]',
+    'bearer_token_env_var = "CODEX_TOKEN"',
+    '',
+    '[mcp_servers.codex-altro]',
+    'command = "npx"',
+    'args = ["-y", "altro"]',
+    'env = { ALTRO_KEY = "v-finta" }'
+  ].join('\n'))
+  writeFileSync(windsurfFile, JSON.stringify({ mcpServers: { 'windsurf-mm': { command: 'npx', args: ['-y', 'ws'] } } }, null, 2))
+  writeFileSync(geminiFile, JSON.stringify({ mcpServers: { 'gemini-mm': { command: 'npx', args: ['-y', 'gem'], env: { GEMINI_KEY: '${env:GEMINI_KEY}' } } } }, null, 2))
+  writeFileSync(vscodeFile, JSON.stringify({ servers: {
+    'vscode-mm': { command: 'npx', args: ['-y', 'vs'] },
+    'vscode-col-riferito': { command: '${env:VS_PATH}', args: [] }
+  } }, null, 2))
+  // il PATH dell'app è QUELLO RIDOTTO del Finder: né fnm, né node
+  const PATH_RIDOTTO = '/usr/bin:/bin:/usr/sbin:/sbin'
+  startApp({ PATH: PATH_RIDOTTO })
+  const u45 = await waitForPage('', 30_000)
+  if (!u45) throw new Error('U4/U5: nessuna pagina: ' + appLog.slice(-600))
+  const u45cdp = u45.cdp
+  await rpc(u45cdp, `saveProvider(${JSON.stringify({ id: 'finto', name: 'Finto locale', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${llmPort}/v1`, enabled: true })})`).catch(() => undefined)
+  const u45agentId = await rpc(u45cdp, 'listAgents().then((a) => a[0]?.id ?? null)')
+  if (!u45agentId) throw new Error('U4/U5: nessun bot')
+
+  // la finestra «Server MCP» e l'import: elenco RAGGRUPPATO per origine (U2)
+  await clickTestid(u45cdp, 'account-menu-trigger')
+  await waitDom(u45cdp, `document.querySelector('[data-testid="menu-mcp"]')`, 5_000)
+  await clickTestid(u45cdp, 'menu-mcp')
+  if (!(await waitDom(u45cdp, `document.querySelector('[data-testid="mcp-window"]')`, 5_000))) throw new Error('U4/U5: la finestra Server MCP non si apre')
+  await clickTestid(u45cdp, 'mcp-import-button')
+  if (!(await waitDom(u45cdp, `document.querySelector('[data-testid="mcp-import-list"]')`, 5_000))) throw new Error('U4/U5: l\'elenco import non si apre')
+  const u45gruppi = await pageEval(u45cdp, `
+    const gruppi = [...document.querySelectorAll('[data-testid^="mcp-import-group-"]')].map((g) => g.dataset.testid.replace('mcp-import-group-', ''))
+    return { gruppi, testo: document.querySelector('[data-testid="mcp-import-list"]').textContent }
+  `)
+  check('U2+U7: l\'elenco import è RAGGRUPPATO per origine — le OTTO app, i gruppi vuoti nascosti',
+    JSON.stringify(u45gruppi.gruppi) === JSON.stringify(['cursor', 'claude', 'zcode', 'claude-code', 'codex', 'windsurf', 'gemini', 'vscode']), JSON.stringify(u45gruppi.gruppi))
+  check('U2: il DOPPIONE esatto (mattermost in Cursor e ZCode) compare UNA volta con «anche in ZCode»',
+    (u45gruppi.testo.split('mattermost').length - 1 >= 1) && u45gruppi.testo.includes('anche in ZCode'), u45gruppi.testo.slice(0, 120))
+  check('U2: i SEGRETI con l\'icona lucide e il conteggio (1 segreto / 2 segreti), NESSUNA emoji 🔒',
+    !u45gruppi.testo.includes('🔒') && u45gruppi.testo.includes('1 segreto') && u45gruppi.testo.includes('2 segreti'), '')
+  const u45markup = await pageEval(u45cdp, `return document.querySelector('[data-testid="mcp-import-list"]').innerHTML`)
+  check('U2: l\'icona KeyRound di lucide c\'è nel markup (niente emoji)', /lucide-key-round/.test(u45markup), '')
+  const u45fondo = await pageEval(u45cdp, `
+    return document.querySelector('[data-testid="mcp-window"]').textContent
+  `)
+  check('U2: in fondo «N selezionati», «Annulla» e «Importa N» (0 finché non si spunta)',
+    u45fondo.includes('0 selezionati') && u45fondo.includes('Annulla') && u45fondo.includes('Importa 0'), u45fondo.slice(0, 100))
+  await shot(u45cdp, '1-importa-elenco-raggruppato.png', SHOTS_UI)
+  // U7: le app nuove ci sono tutte, il SALTATO col motivo pure
+  const u45testi = u45gruppi.testo
+  check('U7: le intestazioni delle nuove app (Claude Code, Codex, Windsurf, Gemini CLI, VS Code) e le loro vie',
+    ['Claude Code', 'Codex', 'Windsurf', 'Gemini CLI', 'VS Code', '.claude.json', 'config.toml'].every((x) => u45testi.includes(x)), u45testi.slice(0, 160))
+  check('U7: Claude Code porta UTENTE e PROGETTI (due righe), Codex due (una con il token da compilare)',
+    u45testi.includes('claude-code-utente') && u45testi.includes('claude-code-progetto') &&
+      u45testi.includes('codex-mm') && u45testi.includes('codex-altro'), '')
+  const u45saltati = await pageEval(u45cdp, `
+    return [...document.querySelectorAll('[data-testid="mcp-import-skipped"]')].map((p) => p.textContent.trim())
+  `)
+  check('U7: il server col COMANDO riferito (${env:…}) è SALTATO col motivo, senza casella',
+    u45saltati.length === 1 && u45saltati[0].includes('vscode-col-riferito') && /non importato/.test(u45saltati[0]) && /variabile/.test(u45saltati[0]),
+    JSON.stringify(u45saltati))
+  check('U7: la variabile RIFERITA di Gemini è contata come SEGRETO da compilare (mai il placeholder nel DOM)',
+    u45testi.includes('gemini-mm') && !u45testi.includes('${env:'), '')
+
+  // si spuntano i TRE server nuovi (mattermost, orion-moon, rotto) e si importa
+  await pageEval(u45cdp, `
+    const righe = [...document.querySelectorAll('[data-testid="mcp-import-row"]')]
+    for (const nome of ['mattermost', 'orion-moon', 'rotto', 'codex-mm']) {
+      const r = righe.find((x) => x.textContent.includes(nome))
+      if (!r) return 'manca ' + nome
+      r.querySelector('[data-testid="mcp-import-check"]').click()
+    }
+    return 'ok'
+  `).then((r) => { if (r !== 'ok') throw new Error('U4/U5: ' + r) })
+  const u45importa = await pageEval(u45cdp, `
+    const w = document.querySelector('[data-testid="mcp-window"]')
+    const btn = [...w.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Importa 4')
+    if (!btn) return false
+    btn.click()
+    return true
+  `)
+  if (!u45importa) throw new Error('U4/U5: il bottone «Importa 4» non c\'è')
+
+  // U5: il test parte DA SOLO — la riga di mattermost va VERDE «2 strumenti»
+  // (lo shim npx trova node nella cartella fnm, U4), orion-moon e rotto ROSSE
+  const rigaDi = (nome) => `
+    const riga = [...document.querySelectorAll('[data-testid="mcp-server-row"]')]
+      .find((d) => [...d.querySelectorAll('span')].some((sp) => sp.textContent.trim() === ${JSON.stringify(nome)}))
+    if (!riga) return null
+    const s = riga.querySelector('[data-testid="mcp-row-status"]')
+    return s ? { testo: s.textContent.trim(), pallino: s.querySelector('span')?.className ?? '' } : null
+  `
+  let verde = null
+  for (let i = 0; i < 60 && !verde; i++) {
+    await sleep(500)
+    const r = await pageEval(u45cdp, rigaDi('mattermost')).catch(() => null)
+    if (r && /2 strumenti/.test(r.testo) && /bg-chart-2/.test(r.pallino)) verde = r
+  }
+  if (!verde) {
+    const righeStato = await pageEval(u45cdp, `
+      return [...document.querySelectorAll('[data-testid="mcp-server-row"]')].map((d) => {
+        const s = d.querySelector('[data-testid="mcp-row-status"]')
+        return d.textContent.trim().slice(0, 30) + ' => ' + (s ? s.textContent.trim().slice(0, 80) + ' @' + (s.title ?? '').slice(0, 120) : 'senza stato')
+      }).join(' || ')
+    `).catch(() => 'n/d')
+    log('diagnosi righe dopo import:', righeStato)
+    const dlog = join(DATA, 'data', 'daemon.log')
+    if (existsSync(dlog)) log('daemon.log (coda):', readFileSync(dlog, 'utf8').slice(-800))
+  }
+  check('U4+U5: lo shim npx «#!/usr/bin/env node» (node finto nella fnm, PATH ridotto) PARTE: riga VERDE «2 strumenti»',
+    !!verde, verde ? verde.testo : 'riga verde non arrivata')
+  await shot(u45cdp, '2-riga-verde.png', SHOTS_UI)
+  // le righe rosse con l'errore leggibile
+  const rossaOrion = await pageEval(u45cdp, rigaDi('orion-moon')).catch(() => null)
+  const rossaRotto = await pageEval(u45cdp, rigaDi('rotto')).catch(() => null)
+  check('U5: l\'indirizzo irraggiungibile → riga ROSSA con l\'errore leggibile',
+    rossaOrion && /bg-destructive/.test(rossaOrion.pallino) && rossaOrion.testo.length > 3, JSON.stringify(rossaOrion))
+  check('U5: il comando che non esiste → riga ROSSA con l\'errore leggibile («non trovato»)',
+    rossaRotto && /bg-destructive/.test(rossaRotto.pallino) && /non trovato/.test(rossaRotto.testo), JSON.stringify(rossaRotto))
+  await shot(u45cdp, '3-righe-rosse.png', SHOTS_UI)
+
+  // U1: le azioni della riga sono ICONE con aria-label, NESSUNA parola visibile
+  const u45azioni = await pageEval(u45cdp, `
+    const riga = [...document.querySelectorAll('[data-testid="mcp-window"] [data-testid="mcp-test-button"]')].slice(0, 1)[0]?.closest('div')
+    const bottoni = [...document.querySelectorAll('[data-testid="mcp-window"] [data-testid="mcp-test-button"], [data-testid="mcp-window"] [data-testid="mcp-edit-button"], [data-testid="mcp-window"] [data-testid="mcp-delete-button"]')]
+    return {
+      tre: bottoni.length,
+      aria: bottoni.every((b) => (b.getAttribute('aria-label') ?? '').length > 0 && (b.getAttribute('title') ?? '') === b.getAttribute('aria-label')),
+      visibili: bottoni.map((b) => b.textContent.trim()).join(''),
+      svg: bottoni.every((b) => b.querySelector('svg') !== null)
+    }
+  `)
+  check('U1: le azioni della riga sono 3 BOTTONI ICONA (svg) con aria-label E title, NESSUNA parola visibile',
+    u45azioni.tre >= 3 && u45azioni.aria === true && u45azioni.visibili.trim() === '' && u45azioni.svg === true,
+    JSON.stringify(u45azioni))
+  await shot(u45cdp, '4-icone-riga.png', SHOTS_UI)
+
+  // U7: il server Codex importato con la variabile RIFERITA: riga «da
+  // compilare», NESSUN test (niente pallino) e needsAuth nella config
+  let daCompilare = null
+  for (let i = 0; i < 30 && !daCompilare; i++) {
+    await sleep(400)
+    daCompilare = await pageEval(u45cdp, `
+      const riga = [...document.querySelectorAll('[data-testid="mcp-server-row"]')].find((d) => d.textContent.includes('codex-mm'))
+      return riga ? { compilare: !!riga.querySelector('[data-testid="mcp-needs-fill"]'), status: !!riga.querySelector('[data-testid="mcp-row-status"]') } : null
+    `).catch(() => null)
+  }
+  check('U7: il server Codex (bearer_token_env_var) importato «da compilare»: la riga lo dice e NON si testa',
+    !!daCompilare && daCompilare.compilare === true && daCompilare.status === false, JSON.stringify(daCompilare))
+  const u45servers = await rpc(u45cdp, 'mcpList()')
+  const codexCfg = u45servers.find((x) => x.name === 'codex-mm')
+  check('U7: la config del server Codex porta needsAuth con la variabile, e NESSUN valore (il placeholder mai)',
+    codexCfg?.needsAuth?.kind === 'env' && JSON.stringify(codexCfg?.needsAuth?.keys) === JSON.stringify(['CODEX_TOKEN']) &&
+      !JSON.stringify(codexCfg).includes('CODEX_TOKEN=') && !JSON.stringify(u45servers).includes('${env:') && !JSON.stringify(u45servers).includes('bearer'),
+    JSON.stringify({ needsAuth: codexCfg?.needsAuth }).slice(0, 120))
+  await shot(u45cdp, '5-da-compilare.png', SHOTS_UI)
+
+  // U5: il bot riceve le note di sistema (collegato / non parte)
+  const notaDi = (frase) => `
+    (await window.sandbot.getEntries(${JSON.stringify(u45agentId)}))
+      .filter((e) => e.kind === 'message' && String(e.content).startsWith('[sistema]'))
+      .map((e) => String(e.content)).join('\\n')
+  `
+  let note = ''
+  for (let i = 0; i < 60; i++) {
+    await sleep(500)
+    note = await pageEval(u45cdp, `return ${notaDi().trimStart()}`).catch(() => '')
+    if (/Server MCP "mattermost" connected/.test(note) && /does not start/.test(note)) break
+  }
+  check('U5: la nota di sistema al bot: «Server MCP \"mattermost\" connected … 2 tools» (con find_tools)',
+    /Server MCP "mattermost" connected: 2 tools/.test(note) && /find_tools/.test(note), note.slice(0, 200))
+  check('U5: le note «non parte» per orion-moon e rotto',
+    /Server MCP "orion-moon" does not start/.test(note) && /Server MCP "rotto" does not start/.test(note), note.slice(0, 300))
+  check('U7: NESSUNA nota per codex-mm (da compilare: niente test né esito)',
+    !/codex-mm/.test(note), note.slice(0, 300))
+  // il registro del ciclo di vita (temporaneo) c'è: la corsa U6 lo prova in
+  // fondo nella sonda avvio; qui basta che esista e non contenga dati utente
+  const mainLogU45 = existsSync(join(DATA, 'Logs', 'main.log')) ? readFileSync(join(DATA, 'Logs', 'main.log'), 'utf8') : ''
+  check('U6: il registro del ciclo di vita (temporaneo) cresce con l\'app della corsa',
+    /boot pid=\d+ version=\S+ mode=ui/.test(mainLogU45) && /window-created/.test(mainLogU45), '')
 
   // ---- pulizia K4 ----
   stopApp()

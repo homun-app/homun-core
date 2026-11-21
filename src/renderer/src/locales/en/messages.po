@@ -1794,6 +1794,10 @@ msgid "circa (±15 min)"
 msgstr "around (±15 min)"
 
 #: src/renderer/src/components/McpWindow.tsx
+msgid "Claude Code"
+msgstr "Claude Code"
+
+#: src/renderer/src/components/McpWindow.tsx
 msgid "Claude Desktop"
 msgstr "Claude Desktop"
 
@@ -1805,6 +1809,10 @@ msgstr "Claude. The most reliable with tools."
 #: src/shared/ui-messages.ts
 msgid "notice.queueFull"
 msgstr "Queue full: message discarded."
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Codex"
+msgstr "Codex"
 
 #: src/renderer/src/lib/fill-fields.ts
 msgid "codice TOTP"
@@ -1882,6 +1890,10 @@ msgstr "Command (e.g. node)"
 #: src/shared/ui-messages.ts
 msgid "autoreview.neverAuto"
 msgstr "command that runs other commands (never-auto)"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "comando con una variabile non risolta"
+msgstr "command with an unresolved variable"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2459,6 +2471,10 @@ msgstr "needs authorization"
 #: src/shared/ui-messages.ts
 msgid "conn.needsAuthSettings"
 msgstr "to authorize (Settings → Installed → Connect)"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "da compilare"
+msgstr "to fill in"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ServerSheet.tsx
@@ -3122,6 +3138,10 @@ msgstr "Source"
 msgid "fonte: {0}"
 msgstr "source: {0}"
 
+#: src/renderer/src/components/McpWindow.tsx
+msgid "formato non capito"
+msgstr "unrecognized format"
+
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Funziona! Sento già i pensieri."
 msgstr "It works! I can feel the thoughts already."
@@ -3156,6 +3176,10 @@ msgstr "Gateways, plugins and the registry"
 #: src/renderer/src/components/GuideView.tsx
 msgid "Gelatina"
 msgstr "Jelly"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Gemini CLI"
+msgstr "Gemini CLI"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Generali"
@@ -3434,6 +3458,10 @@ msgstr "You chose: {0}"
 #: src/renderer/src/lib/widget-decision.ts
 msgid "Hai scritto: {0}"
 msgstr "You wrote: {0}"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "header con una variabile non risolta"
+msgstr "header with an unresolved variable"
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Ho finito"
@@ -3982,8 +4010,8 @@ msgid "Importa {n}"
 msgstr "Import {n}"
 
 #: src/renderer/src/components/McpWindow.tsx
-msgid "Importa da Cursor, Claude o ZCode"
-msgstr "Import from Cursor, Claude or ZCode"
+msgid "Importa da altre app"
+msgstr "Import from other apps"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "importata · modificata"
@@ -4139,6 +4167,10 @@ msgstr "Address"
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Indirizzo (es. http://127.0.0.1:8000/v1)"
 msgstr "Address (e.g. http://127.0.0.1:8000/v1)"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "indirizzo con una variabile non risolta"
+msgstr "address with an unresolved variable"
 
 #. placeholder {0}: label.addressOf
 #: src/renderer/src/components/ServerSetup.tsx
@@ -5224,8 +5256,8 @@ msgid "Nessun risultato."
 msgstr "No results."
 
 #: src/renderer/src/components/McpWindow.tsx
-msgid "Nessun server trovato in Cursor, Claude o ZCode."
-msgstr "No servers found in Cursor, Claude or ZCode."
+msgid "Nessun server trovato nelle altre app."
+msgstr "No servers found in the other apps."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Nessun server trovato."
@@ -5460,6 +5492,10 @@ msgstr "This is not a GitHub address: paste an https://github.com/… URL."
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Non importati (non girano in Homun): {0}"
 msgstr "Not imported (they don't run in Homun): {0}"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "non importato"
+msgstr "not imported"
 
 #: src/renderer/src/lib/computer-card.ts
 msgid "Non in uso"
@@ -8222,6 +8258,10 @@ msgstr "item not found"
 msgid "voce non trovata"
 msgstr "item not found"
 
+#: src/renderer/src/components/McpWindow.tsx
+msgid "VS Code"
+msgstr "VS Code"
+
 #: src/renderer/src/components/ApprovalsBanner.tsx
 msgid "vuole"
 msgstr "wants to"
@@ -8297,6 +8337,10 @@ msgstr "webhook"
 #: src/shared/ui-messages.ts
 msgid "trigger.tokenMissing"
 msgstr "webhook: missing token"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Windsurf"
+msgstr "Windsurf"
 
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "xAI, Mistral, DeepSeek, Groq, Z.ai e i compatibili OpenAI."

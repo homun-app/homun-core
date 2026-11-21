@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { importSourcePaths, scanImportedSources, buildImportedServer, type ImportedFileJson } from '../import-sources'
+import { importSourcePaths, scanImportedSources, buildImportedServer, parseSourceFile, type ImportedFileJson } from '../import-sources'
 
 const HOME = '/Users/prova'
 
@@ -28,25 +28,27 @@ const CLAUDE_JSON: ImportedFileJson = {
 }
 const ZCODE_JSON: ImportedFileJson = { mcp: { servers: { sequential: { type: 'stdio', command: 'npx', args: ['-y', '@sequencemcp'], env: { SEQ_API_KEY: 'k' } } } } }
 
-const readJson = (files: Record<string, ImportedFileJson>) => async (path: string): Promise<ImportedFileJson | null> => files[path] ?? null
+const readText = (files: Record<string, ImportedFileJson>) => async (path: string): Promise<string | null> =>
+  files[path] ? JSON.stringify(files[path]) : null
 
 describe('E2: le VIE dei tre file (solo al clic, mai altrove)', () => {
-  it('cursor, claude e zcode nei loro posti precisi', () => {
+  it('cursor, claude e zcode nei loro posti precisi (U7: poi le altre cinque app)', () => {
     const p = importSourcePaths(HOME)
-    expect(p).toEqual([
+    expect(p.slice(0, 3)).toEqual([
       { source: 'cursor', path: `${HOME}/.cursor/mcp.json` },
       { source: 'claude', path: `${HOME}/Library/Application Support/Claude/claude_desktop_config.json` },
       { source: 'zcode', path: `${HOME}/.zcode/cli/config.json` }
     ])
+    expect(p).toHaveLength(8)
   })
 })
 
 describe('E2: scanImportedSources — nome e tipo, MAI i valori', () => {
   it('trova stdio e http dai tre file, con i NOMI delle variabili e l\'informazione di segreto', async () => {
     const paths = importSourcePaths(HOME)
-    const rows = await scanImportedSources({
+    const { rows } = await scanImportedSources({
       paths,
-      readJson: readJson({
+      readText: readText({
         [paths[0]!.path]: CURSOR_JSON,
         [paths[1]!.path]: CLAUDE_JSON,
         [paths[2]!.path]: ZCODE_JSON
@@ -65,9 +67,9 @@ describe('E2: scanImportedSources — nome e tipo, MAI i valori', () => {
 
   it('U2: la riga porta il COMANDO (stdio) o l\'HOST (http) per l\'impaginazione curata — mai i valori segreti', async () => {
     const paths = importSourcePaths(HOME)
-    const rows = await scanImportedSources({
+    const { rows } = await scanImportedSources({
       paths,
-      readJson: readJson({ [paths[0]!.path]: CURSOR_JSON })
+      readText: readText({ [paths[0]!.path]: CURSOR_JSON })
     })
     const mm = rows.find((r) => r.name === 'mattermost')!
     expect(mm.commandLine).toBe('npx -y @donach/mattermost-mcp')
@@ -81,26 +83,28 @@ describe('E2: scanImportedSources — nome e tipo, MAI i valori', () => {
 
   it('un file assente o malformato si salta in silenzio (null), gli altri restano', async () => {
     const paths = importSourcePaths(HOME)
-    const rows = await scanImportedSources({
+    const { rows } = await scanImportedSources({
       paths,
-      readJson: async (path) => (path === paths[0]!.path ? CURSOR_JSON : null)
+      readText: async (path) => (path === paths[0]!.path ? JSON.stringify(CURSOR_JSON) : null)
     })
     expect(rows.map((r) => r.name)).toEqual(['mattermost', 'web-ufficio'])
   })
 
-  it('voci malformate (senza comando né url) si saltano, MAI un errore dell\'intero file', async () => {
+  it('voci malformate (senza comando né url) si saltano col MOTIVO, MAI un errore dell\'intero file', async () => {
     const paths = importSourcePaths(HOME)
-    const rows = await scanImportedSources({
+    const { rows, skipped } = await scanImportedSources({
       paths,
-      readJson: readJson({ [paths[0]!.path]: { mcpServers: { rotto: {}, buono: { command: 'node', args: ['s.js'] } } } })
+      readText: readText({ [paths[0]!.path]: { mcpServers: { rotto: {}, buono: { command: 'node', args: ['s.js'] } } } })
     })
     expect(rows.map((r) => r.name)).toEqual(['buono'])
+    // U7: la voce senza command né url è SALTATA col motivo «format»
+    expect(skipped).toEqual([{ source: 'cursor', name: 'rotto', reason: 'format' }])
   })
 })
 
 describe('E2: buildImportedServer — la voce scelta diventa server manuale (segreti nel canale cifrato)', () => {
   it('stdio: comando/args, NON segreti in envValues, SEGRETI in secret.env', () => {
-    const built = buildImportedServer('cursor', 'mattermost', CURSOR_JSON)
+    const built = buildImportedServer('cursor', 'mattermost', parseSourceFile('cursor', JSON.stringify(CURSOR_JSON))!)
     expect(built).not.toBeNull()
     expect(built!.cfg).toMatchObject({
       name: 'mattermost', transport: 'stdio', command: 'npx',
@@ -118,19 +122,19 @@ describe('E2: buildImportedServer — la voce scelta diventa server manuale (seg
   })
 
   it('http: url e header — Authorization cifrata negli headers', () => {
-    const built = buildImportedServer('cursor', 'web-ufficio', CURSOR_JSON)
+    const built = buildImportedServer('cursor', 'web-ufficio', parseSourceFile('cursor', JSON.stringify(CURSOR_JSON))!)
     expect(built!.cfg).toMatchObject({ name: 'web-ufficio', transport: 'http', url: 'https://ufficio.example/mcp', auth: { kind: 'headers' } })
     expect(built!.secret).toEqual({ headers: { Authorization: 'Bearer uff-tok', 'X-Piano': 'free' } })
   })
 
   it('zcode: server sotto mcp.servers con type/command/args/env', () => {
-    const built = buildImportedServer('zcode', 'sequential', ZCODE_JSON)
+    const built = buildImportedServer('zcode', 'sequential', parseSourceFile('zcode', JSON.stringify(ZCODE_JSON))!)
     expect(built!.cfg).toMatchObject({ name: 'sequential', transport: 'stdio', command: 'npx' })
     expect(built!.secret).toEqual({ env: { SEQ_API_KEY: 'k' } })
   })
 
   it('una voce scomparsa tra scansione e conferma → null (si salta, niente errori)', () => {
-    expect(buildImportedServer('cursor', 'sparito', CURSOR_JSON)).toBeNull()
+    expect(buildImportedServer('cursor', 'sparito', parseSourceFile('cursor', JSON.stringify(CURSOR_JSON))!)).toBeNull()
   })
 })
 

@@ -18,12 +18,19 @@
 //       dell'aggiornamento: riga di comando con --homun-daemon, porta chiusa,
 //       dopo 5 s cambia il custode di daemon.json così la UI prosegue) → lo
 //       splash dice «Aggiorno il motore alla versione nuova…», poi la chat.
+//   C5  (fase mcp-ui, U6) X sulla finestra → quit (SIGTERM = la STESSA
+//       sequenza before-quit→will-quit→quit di ⌘Q, letta dal registro del
+//       ciclo di vita) → rilancio dello stesso eseguibile DOPO 200 ms →
+//       entro 10 s finestra principale VISIBILE e 1 SOLO processo UI vivo.
+//       L'uscita misurata (exit-ms del registro) sta sotto 1 s; il registro
+//       ha le righe attese. Chiude anche col ⌘Q VERO del gancio di prova
+//       (test:emit-quit, renderer vivo).
 //
 // Pulizia K4: 0 cartelle sandbot-fase-avvio-*, 0 daemon della sonda,
 // 0 processi del finto daemon vecchio.
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readdirSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readdirSync, existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -338,6 +345,86 @@ try {
   const t4chat = t4cdp === null ? false : await waitDom(t4cdp, `document.querySelector('form textarea')`, 45_000)
   check('C4: poi la chat arriva (il daemon nuovo parte e si collega)', t4chat === true)
   t4cdp.sock?.close?.()
+  await coldStop()
+
+  // =========== C5 (U6, fase mcp-ui): X → quit → rilancio dopo 200 ms ===========
+  // il registro del ciclo di vita sta nei dati TEMPORANEI della sonda
+  const MAINLOG = join(DATA, 'Logs', 'main.log')
+  startApp()
+  const t5 = await waitForTarget(mainTarget, 25_000)
+  const t5cdp = t5 ? await openCdp(t5.webSocketDebuggerUrl).catch(() => null) : null
+  if (!t5cdp) throw new Error('C5: nessuna finestra principale: ' + appLog.slice(-400))
+  await waitDom(t5cdp, `document.querySelector('form textarea')`, 20_000)
+  // la X: la finestra si chiude, l'app resta (tray)
+  await pageEval(t5cdp, 'window.close(); return true').catch(() => undefined)
+  t5cdp.sock?.close?.()
+  let c5sparita = false
+  for (let i = 0; i < 50; i++) {
+    if (!(await mainTarget().catch(() => null))) { c5sparita = true; break }
+    await sleep(200)
+  }
+  const c5uiDopoX = spawnSync('/bin/ps', ['eww', '-ax', '-o', 'pid=,command='], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+  const c5uiDopoXvivi = String(c5uiDopoX.stdout ?? '').split('\n')
+    .filter((l) => l.includes(join(ROOT, 'node_modules', 'electron')) && !l.includes('--type=') && !l.includes('--homun-daemon') && !l.includes('finto-daemon-vecchio'))
+  check('C5: la X chiude la finestra e l\'app RESTA (1 processo UI, nessuna finestra)', c5sparita === true && c5uiDopoXvivi.length === 1, `${c5uiDopoXvivi.length} processi UI`)
+  // il quit: SIGTERM = la STESSA sequenza before-quit→will-quit→quit di ⌘Q
+  const quitPid = app.pid
+  const tQuit = Date.now()
+  stopApp()
+  const quitGone = await waitPidGone(quitPid, 15_000)
+  const quitMs = Date.now() - tQuit
+  check('C5: il quit porta il processo UI fuori in MENO di 1 s', quitGone === true && quitMs < 1000, `${quitMs} ms`)
+  // il rilancio DOPO 200 ms dall'inizio del quit: la finestra torna e resta
+  // UN SOLO processo UI (se il secondo arriva mentre il primo esce, il primo
+  // chiama relaunch: la copia nuova mostra la finestra lo stesso — U6).
+  // Si aspetta lo STATO FINALE (la catena secondo→relaunch si assesta), non
+  // un pid specifico.
+  const uiVivi = () => String(spawnSync('/bin/ps', ['eww', '-ax', '-o', 'pid=,command='], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }).stdout ?? '').split('\n')
+    .filter((l) => l.includes(join(ROOT, 'node_modules', 'electron')) && !l.includes('--type=') && !l.includes('--homun-daemon') && !l.includes('finto-daemon-vecchio'))
+  await sleep(Math.max(0, 200 - (Date.now() - tQuit)))
+  spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`, '--lang=it'], { cwd: ROOT, env: APP_ENV, stdio: ['ignore', 'pipe', 'pipe'] })
+  const t6 = await waitForTarget(mainTarget, 15_000)
+  const t6cdp = t6 ? await openCdp(t6.webSocketDebuggerUrl).catch(() => null) : null
+  const t6visibile = t6cdp ? await pageEval(t6cdp, 'return document.visibilityState').catch(() => 'errore') : 'niente'
+  const t6chat = t6cdp === null ? false : await waitDom(t6cdp, `document.querySelector('form textarea')`, 10_000)
+  check('C5: rilancio dopo 200 ms → finestra principale VISIBILE con la chat entro 10 s',
+    t6visibile === 'visible' && t6chat === true, `visibilità ${t6visibile}, chat ${t6chat}`)
+  let c5uivivi = uiVivi()
+  for (let i = 0; i < 50 && c5uivivi.length !== 1; i++) { await sleep(200); c5uivivi = uiVivi() }
+  check('C5: alla fine 1 SOLO processo UI vivo (il vecchio è uscito, il nuovo è l\'unico)',
+    c5uivivi.length === 1, `${c5uivivi.length} processi: ${JSON.stringify(c5uivivi.map((l) => l.trim().split(/\s+/)[0]))}`)
+  // il registro del ciclo di vita: le righe attese, MAI dati dell'utente
+  await sleep(500)
+  const c5log = existsSync(MAINLOG) ? readFileSync(MAINLOG, 'utf8') : ''
+  const righeAttese = [/boot pid=\d+ version=\S+ mode=ui/, / lock\n/, /window-created/, /window-shown/, /window-closed/, /before-quit/, /will-quit/, /quit exit-ms=\d+/]
+  const righeOk = righeAttese.every((re) => re.test(c5log))
+  const exitMsLog = Number(/quit exit-ms=(\d+)/.exec(c5log)?.[1] ?? -1)
+  check('C5: il registro del ciclo di vita (temporaneo) ha le righe attese con l\'uscita misurata',
+    righeOk && exitMsLog >= 0 && exitMsLog < 1000, `exit-ms=${exitMsLog}, righe: ${c5log.split('\n').length}`)
+  // il ⌘Q VERO dal renderer (gancio di prova): si aspetta che NESSUN processo
+  // UI resti vivo (qualsiasi copia della catena sia sopravvissuta)
+  const t7 = await waitForTarget(mainTarget, 10_000)
+  const t7cdp = t7 ? await openCdp(t7.webSocketDebuggerUrl).catch(() => null) : null
+  if (t7cdp) {
+    await waitDom(t7cdp, `window.sandbot && document.querySelector('form textarea')`, 10_000)
+    const tCmdQ = Date.now()
+    // la risposta IPC può non arrivare mai (l'app esce prima di rispondere):
+    // si parte dopo 2 s al massimo, poi si guarda lo STATO (i processi)
+    await Promise.race([
+      pageEval(t7cdp, 'return await window.sandbot.testEmitQuit()').catch(() => undefined),
+      sleep(2000)
+    ])
+    let uiPost = uiVivi()
+    for (let i = 0; i < 75 && uiPost.length !== 0; i++) { await sleep(200); uiPost = uiVivi() }
+    const cmdqMs = Date.now() - tCmdQ
+    const c5log2 = existsSync(MAINLOG) ? readFileSync(MAINLOG, 'utf8') : ''
+    const exitMs2 = Number(/quit exit-ms=(\d+)/.exec(c5log2.slice(c5log.length))?.[1] ?? -1)
+    check('C5: ⌘Q vero (gancio di prova) → nessun processo UI vivo in meno di 1 s, exit-ms nel registro',
+      uiPost.length === 0 && cmdqMs < 1000 && exitMs2 >= 0 && exitMs2 < 1000, `processi ${uiPost.length}, ${cmdqMs} ms, exit-ms=${exitMs2}`)
+    t7cdp.sock?.close?.()
+  } else {
+    check('C5: ⌘Q vero (gancio di prova) → nessun processo UI vivo in meno di 1 s', false, 'nessun target dopo il rilancio')
+  }
 
   // ---- pulizia K4 (come le altre sonde) ----
   await coldStop()

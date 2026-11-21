@@ -19,7 +19,7 @@ import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 // E1 (fase mcp-env): le righe «Variabili» del form stdio
 import { envRowsFromServer, saveEnvPayload, newEnvRow, envNameLooksSecret, type EnvRow } from '../lib/mcp-env'
 // U2 (fase mcp-ui): l'elenco di import raggruppato per origine
-import { groupImportRows, importRowKey, type ImportGroupUi, type ImportScanRow, type ImportSource } from '../lib/mcp-import-groups'
+import { groupImportRows, importRowKey, type ImportGroupUi, type ImportScanRow, type ImportSkipRow, type ImportSource } from '../lib/mcp-import-groups'
 
 /**
  * U1 (fase mcp-ui): il bottone ICONA delle azioni per riga — 28×28, rounded-lg,
@@ -152,15 +152,32 @@ export function McpWindow(): React.ReactNode {
  * non selezionabili. In fondo: «N selezionati», «Annulla», «Importa N».
  * Componente PRESENTAZIONALE (esportata per i test di render).
  */
-export function ImportList({ groups, picks, onPicks, onImport, onCancel }: {
+export function ImportList({ groups, skipped = [], picks, onPicks, onImport, onCancel }: {
   groups: ImportGroupUi[]
+  /** U7: le voci col formato non capito, SALTATE col motivo */
+  skipped?: ImportSkipRow[]
   picks: Record<string, boolean>
   onPicks(next: Record<string, boolean>): void
   onImport(): void
   onCancel(): void
 }): React.ReactNode {
   const { t } = useLingui()
-  const label = (s: ImportSource): string => (s === 'cursor' ? t`Cursor` : s === 'claude' ? t`Claude Desktop` : t`ZCode`)
+  // U7: le otto app (i nomi propri non si tradiscono, il resto sì)
+  const label = (s: ImportSource): string =>
+    s === 'cursor' ? t`Cursor`
+      : s === 'claude' ? t`Claude Desktop`
+        : s === 'zcode' ? t`ZCode`
+          : s === 'claude-code' ? t`Claude Code`
+            : s === 'codex' ? t`Codex`
+              : s === 'windsurf' ? t`Windsurf`
+                : s === 'gemini' ? t`Gemini CLI`
+                  : t`VS Code`
+  /** U7: il motivo del salto, nella lingua dell'interfaccia */
+  const skipReason = (r: ImportSkipRow['reason']): string =>
+    r === 'env-in-command' ? t`comando con una variabile non risolta`
+      : r === 'env-in-url' ? t`indirizzo con una variabile non risolta`
+        : r === 'header-var' ? t`header con una variabile non risolta`
+          : t`formato non capito`
   const allRows = groups.flatMap((g) => g.rows)
   const n = allRows.filter((r) => !r.existing && picks[importRowKey(r)] === true).length
   return (
@@ -205,6 +222,12 @@ export function ImportList({ groups, picks, onPicks, onImport, onCancel }: {
               )}
               {r.existing && <span className="shrink-0 text-[11px] text-muted-foreground">{t`già collegato`}</span>}
             </label>
+          ))}
+          {/* U7: le voci col formato non capito, SALTATE col motivo (senza casella) */}
+          {skipped.filter((k) => k.source === g.source).map((k) => (
+            <p key={`skip:${k.source}:${k.name}`} data-testid="mcp-import-skipped" className="min-h-6 rounded-xl px-3 py-1 text-[11px] text-muted-foreground/70">
+              {k.name} — {t`non importato`}: {skipReason(k.reason)}
+            </p>
           ))}
         </section>
       ))}
@@ -252,6 +275,8 @@ function ManualServers() {
   // SOLO al clic del bottone (i file si leggono nel main, solo allora).
   // U2 (fase mcp-ui): l'elenco è RAGGRUPPATO per origine (ImportList)
   const [importRows, setImportRows] = useState<ImportScanRow[] | null>(null)
+  // U7: le voci saltate col motivo (collegato all'elenco)
+  const [importSkipped, setImportSkipped] = useState<ImportSkipRow[]>([])
   const [importPicks, setImportPicks] = useState<Record<string, boolean>>({})
 
   const refresh = async () => {
@@ -291,7 +316,9 @@ function ManualServers() {
     for (const o of outcomes) {
       if (o.outcome !== 'created') continue
       const created = list.find((s) => s.name === o.name)
-      if (created) void runTest(created.id)
+      // U7: i server «da compilare» (needsAuth) non si testano: aspettano i
+      // valori dell'utente (lo stesso vale per la nota del daemon)
+      if (created && !created.needsAuth) void runTest(created.id)
     }
     return outcomes
   }
@@ -301,11 +328,15 @@ function ManualServers() {
       <strong className="block font-display text-lg"><Trans>Server MCP personalizzato</Trans></strong>
       <p className="text-xs text-muted-foreground"><Trans>Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati).</Trans></p>
       {servers.map((s) => (
-        <div key={s.id} className="rounded-2xl bg-muted px-3 py-2.5">
+        <div key={s.id} data-testid="mcp-server-row" className="rounded-2xl bg-muted px-3 py-2.5">
           <div className="flex items-center gap-2">
             <span className={`h-2 w-2 shrink-0 rounded-full ${s.enabled ? 'bg-chart-2' : 'bg-muted-foreground/40'}`} />
             <span className="shrink-0 text-sm">{s.name}</span>
             <span className="shrink-0 rounded-full bg-card px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{s.transport}</span>
+            {/* U7: le variabili riferite importate «da compilare» */}
+            {s.needsAuth && (
+              <span className="shrink-0 rounded-full bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground" data-testid="mcp-needs-fill">{t`da compilare`}</span>
+            )}
             <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{s.transport === 'stdio' ? `${s.command} ${(s.args ?? []).join(' ')}` : s.url}</span>
             {/* U1: il risultato del test come PALLINO nella riga (U5: parte da solo) */}
             {tests[s.id] && <RowTestStatus test={tests[s.id]!} />}
@@ -442,7 +473,8 @@ function ManualServers() {
                 setEdit(null); setEditBearer(''); setEnvRows([])
                 await refresh()
                 // U5: dopo l'aggiunta (o la modifica) il test parte da solo
-                if (edit.enabled) void runTest(id)
+                // (U7: mai per i server «da compilare»)
+                if (edit.enabled && !edit.needsAuth) void runTest(id)
               }}
             >
               <Trans>Salva</Trans>
@@ -461,21 +493,23 @@ function ManualServers() {
             className="w-full rounded-2xl bg-muted px-3 py-2.5 text-sm text-muted-foreground transition hover:text-foreground"
             data-testid="mcp-import-button"
             onClick={async () => {
-              const rows = await api.mcpImportScan().catch(() => [])
-              setImportRows(rows)
+              const scan = await api.mcpImportScan().catch(() => ({ rows: [] as ImportScanRow[], skipped: [] as ImportSkipRow[] }))
+              setImportRows(scan.rows as ImportScanRow[])
+              setImportSkipped((scan.skipped ?? []) as ImportSkipRow[])
               setImportPicks({})
             }}
           >
-            <Trans>Importa da Cursor, Claude o ZCode</Trans>
+            <Trans>Importa da altre app</Trans>
           </button>
           {importRows && (
             importRows.length === 0 ? (
               <div className="rounded-2xl bg-muted p-4" data-testid="mcp-import-list">
-                <p className="text-xs text-muted-foreground"><Trans>Nessun server trovato in Cursor, Claude o ZCode.</Trans></p>
+                <p className="text-xs text-muted-foreground"><Trans>Nessun server trovato nelle altre app.</Trans></p>
               </div>
             ) : (
               <ImportList
                 groups={groupImportRows(importRows, servers.map((s) => s.name))}
+                skipped={importSkipped}
                 picks={importPicks}
                 onPicks={setImportPicks}
                 onCancel={() => { setImportRows(null); setImportPicks({}) }}

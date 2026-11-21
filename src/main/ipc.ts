@@ -24,7 +24,7 @@ import { setUpdateChannel, checkNow, hasUpdateConfig } from './updater'
 import type { BootStatusInfo } from './boot-status'
 // E2 (fase mcp-env): le vie dei file di Cursor/Claude/ZCode (il tipo basta:
 // i file si legano SOLO dentro i due gestori del clic)
-import type { ImportSource, ImportedFileJson } from './mcp/import-sources'
+import type { ImportSource } from './mcp/import-sources'
 // RV1 (fase beta.2): lo spostamento in Applicazioni (stato, controllo, riproposta)
 import { appNeedsMove, proposeMoveToApplications, updateCheckResultWhenMoveNeeded } from './app-location'
 import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
@@ -209,27 +209,35 @@ export function registerIpc(
   // leggono SOLO qui, SOLO al clic dell'utente (mai all'avvio, mai dal bot).
   // La scansione mostra nome e tipo MAI i valori; la conferma crea i server
   // scelti (i segreti cifrati via mcp:save) e i doppioni non si sovrascrivono
-  const readImportJson = async (path: string): Promise<ImportedFileJson | null> => {
+  // U7 (fase mcp-ui): il TESTO del file (JSON per sette app, TOML per Codex —
+  // il parse sta in import-sources); SOLO al clic, mai altrove
+  const readImportText = async (path: string): Promise<string | null> => {
     try {
-      return JSON.parse(await readFile(path, 'utf8')) as ImportedFileJson
+      return await readFile(path, 'utf8')
     } catch {
-      return null // assente o malformato: si salta in silenzio
+      return null // assente: si salta in silenzio
     }
   }
   ipcMain.handle('mcp-import:scan', async () => {
     const { scanImportedSources } = await import('./mcp/import-sources')
-    return scanImportedSources({ readJson: readImportJson })
+    return scanImportedSources({ readText: readImportText })
   })
   ipcMain.handle('mcp-import:apply', async (_e, picks: unknown) => {
-    const { importSourcePaths, buildImportedServer } = await import('./mcp/import-sources')
+    const { importSourcePaths, buildImportedServer, parseSourceFile } = await import('./mcp/import-sources')
     const paths = importSourcePaths()
     const bySource = new Map(paths.map((p) => [p.source, p.path]))
     const existing = new Set(((await client.call('mcp:list', [])) as Array<{ name: string }>).map((s) => s.name))
+    // il parse di ogni file, UNA volta sola
+    const parsedOf = new Map<ImportSource, ReturnType<typeof parseSourceFile>>()
+    for (const { source, path } of paths) {
+      parsedOf.set(source, parseSourceFile(source, await readImportText(path)))
+    }
     const out: Array<{ name: string; outcome: 'created' | 'duplicate' | 'missing' }> = []
     for (const pick of Array.isArray(picks) ? (picks as Array<{ source?: string; name?: string }>) : []) {
       const name = String(pick?.name ?? '')
-      const path = pick?.source ? bySource.get(pick.source as ImportSource) : undefined
-      if (!name || !path) {
+      const source = pick?.source as ImportSource | undefined
+      const parsed = source ? parsedOf.get(source) : undefined
+      if (!name || !source || !bySource.has(source) || !parsed) {
         out.push({ name, outcome: 'missing' })
         continue
       }
@@ -237,10 +245,9 @@ export function registerIpc(
         out.push({ name, outcome: 'duplicate' }) // già presente: non si sovrascrive
         continue
       }
-      const json = await readImportJson(path)
-      const built = json ? buildImportedServer(pick.source as ImportSource, name, json) : null
+      const built = buildImportedServer(source, name, parsed)
       if (!built) {
-        out.push({ name, outcome: 'missing' })
+        out.push({ name, outcome: 'missing' }) // voce scomparsa o SALTATA (formato non capito)
         continue
       }
       await client.call('mcp:save', [built.cfg, built.secret])

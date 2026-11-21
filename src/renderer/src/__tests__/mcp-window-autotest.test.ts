@@ -34,4 +34,11 @@ describe('U5: il test di connessione parte DA SOLO dopo import/aggiunta/modifica
     expect(block).toMatch(/notifyMcpServerState\(/)
     expect(block).toMatch(/testServer\(/)
   })
+
+  it('U7: i server «da compilare» (needsAuth) NON si testano e il needsAuth si PULISCE quando i valori arrivano', () => {
+    const start = API.indexOf("'mcp:save'")
+    const block = API.slice(start, API.indexOf("'mcp:delete'", start))
+    expect(block).toMatch(/incoming\.enabled && !incoming\.needsAuth/)
+    expect(block).toMatch(/manualNeedsAuthAfterFill\(/)
+  })
 })

@@ -1,9 +1,19 @@
-// U2 (fase mcp-ui): l'elenco di «Importa da Cursor, Claude o ZCode» si
-// RAGGRUPPA per origine e unisce i DOPPIONI ESATTI. PURA: qui la forma
-// dell'elenco (gruppi nell'ordine fisso, righe con origine, ancheIn, conteggio
-// segreti, già collegato), l'impaginazione sta in McpWindow e la sonda la
-// prova sul DOM vero.
-export type ImportSource = 'cursor' | 'claude' | 'zcode'
+// U2 (fase mcp-ui): l'elenco di «Importa da altre app» si RAGGRUPPA per
+// origine e unisce i DOPPIONI ESATTI. PURA: qui la forma dell'elenco (gruppi
+// nell'ordine fisso, righe con origine, ancheIn, conteggio segreti, già
+// collegato), l'impaginazione sta in McpWindow e la sonda la prova sul DOM
+// vero. U7: le origini sono OTTO.
+export type ImportSource = 'cursor' | 'claude' | 'zcode' | 'claude-code' | 'codex' | 'windsurf' | 'gemini' | 'vscode'
+
+/** Una voce il cui formato non si capisce: SALTATA col motivo (U7). */
+export type ImportSkipReason = 'env-in-command' | 'env-in-url' | 'header-var' | 'format'
+
+/** Il server saltato, come arriva dalla scansione. */
+export interface ImportSkipRow {
+  source: ImportSource
+  name: string
+  reason: ImportSkipReason
+}
 
 /** Una riga della scansione (dal main: nome e tipo, MAI valori segreti). */
 export interface ImportScanRow {
@@ -17,8 +27,8 @@ export interface ImportScanRow {
   sourcePath: string
 }
 
-/** L'ordine fisso dei gruppi (lo stesso dei tre file in import-sources). */
-export const IMPORT_SOURCE_ORDER: readonly ImportSource[] = ['cursor', 'claude', 'zcode']
+/** L'ordine fisso dei gruppi (lo stesso degli otto file in import-sources). */
+export const IMPORT_SOURCE_ORDER: readonly ImportSource[] = ['cursor', 'claude', 'zcode', 'claude-code', 'codex', 'windsurf', 'gemini', 'vscode']
 
 /** Una riga dell'elenco raggruppato, pronta per la UI. */
 export interface ImportRowUi {

@@ -1394,12 +1394,15 @@ export function buildApiMethods(
         setSetting: store.setSetting
       })
       const sec = secret as McpServerSecret | undefined
-      if (incoming.transport === 'stdio' && (incoming.envSpec?.length || incoming.envValues)) {
-        const { splitManualServerEnv } = await import('../main/mcp/manual-env')
+      if (incoming.transport === 'stdio' && (incoming.envSpec?.length || incoming.envValues || incoming.needsAuth)) {
+        const { splitManualServerEnv, manualNeedsAuthAfterFill } = await import('../main/mcp/manual-env')
         const { SECRET_KIND } = await import('../main/connectors/install')
         const old = (await sealed.read<Record<string, string>>(incoming.id, SECRET_KIND.env).catch(() => null)) ?? {}
-        const split = splitManualServerEnv({ envSpec: incoming.envSpec, envValues: incoming.envValues }, sec?.env ?? {}, old)
+        const split = splitManualServerEnv({ envSpec: incoming.envSpec ?? [], envValues: incoming.envValues ?? {} }, sec?.env ?? {}, old)
         incoming.envValues = split.configEnvValues
+        // U7 (fase mcp-ui): il needsAuth «da compilare» (variabili riferite
+        // importate) si PULISCE quando TUTTE le chiavi hanno un valore
+        incoming.needsAuth = manualNeedsAuthAfterFill(incoming.needsAuth, { ...split.configEnvValues, ...split.sealedEnv })
         try {
           if (Object.keys(split.sealedEnv).length) await sealed.write(incoming.id, SECRET_KIND.env, split.sealedEnv)
           else await sealed.remove(incoming.id, [SECRET_KIND.env])
@@ -1436,8 +1439,10 @@ export function buildApiMethods(
       // U5 (fase mcp-ui): dopo ogni aggiunta, modifica o riaccensione il test
       // di connessione parte DA SOLO e i bot abilitati ricevono la nota di
       // sistema («Server MCP collegato: <nome> (N strumenti)» / «non parte:
-      // <errore>»); la finestra mostra lo stesso esito col pallino della riga
-      if (incoming.enabled) {
+      // <errore>»); la finestra mostra lo stesso esito col pallino della riga.
+      // U7: i server «da compilare» (needsAuth) non si testano: non devono
+      // ancora funzionare, aspettano i valori dell'utente
+      if (incoming.enabled && !incoming.needsAuth) {
         void (async () => {
           let test: { ok: boolean; tools?: string[]; error?: string }
           try {
