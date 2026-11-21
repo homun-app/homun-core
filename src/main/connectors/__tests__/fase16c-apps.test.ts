@@ -33,9 +33,12 @@ describe('il catalogo dei connettori (C4)', () => {
     expect(byId.cloudflare).toBe('development')
   })
 
-  it('nessuna voce inventata: Slack e 1Password della tavola NON ci sono', () => {
+  it('PL4 (fase plugin): Slack c\'è ORA, VERIFICATO nelle docs del fornitore; 1Password resta fuori', () => {
     const ids = (catalogJson as Array<{ id: string }>).map((e) => e.id)
-    expect(ids).not.toContain('slack')
+    // Slack: https://mcp.slack.com/mcp, OAuth senza DCR — docs.slack.dev/ai/slack-mcp-server
+    expect(ids).toContain('slack')
+    expect(ids).toContain('gsheets')
+    // 1Password NON ha un MCP di prima parte verificato: nel dubbio non si aggiunge
     expect(ids).not.toContain('1password')
   })
 })

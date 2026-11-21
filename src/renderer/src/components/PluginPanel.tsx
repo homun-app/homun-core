@@ -530,6 +530,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
           app={card.app ? { row: card.app } : undefined}
           server={card.server}
           directEnabledFor={card.directEnabledFor}
+          onConnect={card.app ? (r) => { setCard(null); void flows.connect(r) } : undefined}
           onClose={() => setCard(null)}
           onChanged={() => { void refreshConnectors(); void refreshComposioGateway(); void refreshInstalled(); reloadSkills() }}
         />

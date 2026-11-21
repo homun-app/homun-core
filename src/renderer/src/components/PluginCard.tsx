@@ -46,7 +46,7 @@ export interface PluginCardInitial {
   permissions?: PermissionsConfig
 }
 
-export function PluginCard({ app, server, initial, directEnabledFor, onClose, onChanged }: {
+export function PluginCard({ app, server, initial, directEnabledFor, onConnect, onClose, onChanged }: {
   /** il connettore del catalogo (diretto o Composio) */
   app?: { row: CatalogRowView }
   /** il server MCP installato (manuale, registro, npm, plugin) */
@@ -54,6 +54,8 @@ export function PluginCard({ app, server, initial, directEnabledFor, onClose, on
   initial?: PluginCardInitial
   /** PL2: l'enabledFor del server diretto (dal pannello, per i toggle per bot) */
   directEnabledFor?: string[] | null
+  /** PL4: collega con la prima strada disponibile (la propone apps:connect) */
+  onConnect?(row: CatalogRowView): void
   onClose(): void
   onChanged(): void
 }): ReactNode {
@@ -140,6 +142,17 @@ export function PluginCard({ app, server, initial, directEnabledFor, onClose, on
               {state.label}
             </span>
           </span>
+          {/* PL4: non collegata — Connetti propone la PRIMA strada disponibile
+              (la decisione sta in apps:connect, come la riga del catalogo) */}
+          {!isServer && app!.row.connected === null && onConnect && (
+            <button
+              className="h-8 shrink-0 rounded-full bg-foreground px-4 text-[13px] font-medium text-background transition hover:opacity-90"
+              data-testid={`plugin-card-connect-${app!.row.app.id}`}
+              onClick={() => onConnect(app!.row)}
+            >
+              <Trans>Connetti</Trans>
+            </button>
+          )}
         </div>
 
         {/* le schede interne */}

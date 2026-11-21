@@ -4,7 +4,7 @@
 // passati come input; l'ultima battuta prova anche il catalogo di prova del
 // repo (composio-catalog.json di P1, DA SOSTITUIRE con quello vero).
 import { describe, expect, it } from 'vitest'
-import { loadAppCatalog, searchApps, appTaglineOf, appCategoryLabel, type AppCuration, type ComposioCatalogEntry, type DirectCatalogEntry } from '../app-catalog'
+import { loadAppCatalog, searchApps, appTaglineOf, appCategoryLabel, type AppCuration, type ComposioCatalogEntry, type DirectCatalogEntry, roadsOfApp } from '../app-catalog'
 
 const direct = (id: string, extra: Partial<DirectCatalogEntry> = {}): DirectCatalogEntry => ({
   id, name: id.charAt(0).toUpperCase() + id.slice(1), logo: '·', clientRegistration: 'dynamic', category: 'development', ...extra
@@ -211,5 +211,62 @@ describe('P2 — il catalogo di prova del repo (da sostituire col vero)', () => 
     for (const id of ['gmail', 'googledrive', 'googlecalendar']) {
       expect(rows.some((r) => r.id === id || r.composioSlug === id || r.directId === id)).toBe(true)
     }
+  })
+})
+
+// ---- PL4 (fase plugin): il catalogo ibrido — le STRADE con preferenza ----
+// Le voci possono avere più strade: l'MCP di prima parte del fornitore
+// (mcp-first-party) prima, poi Composio. La proposta di collegamento è la
+// PRIMA disponibile; l'alternativa si mostra. Solo strade che Homun sa già
+// percorrere (OAuth con DCR, client statico, Composio): nessuna integrazione
+// inventata. Le voci di prima parte sono VERIFICATE nella documentazione del
+// fornitore (i link stanno nelle notes del catalogo e nel REPORT).
+
+describe('PL4: roadsOfApp — le strade di una voce, la prima è la proposta', () => {
+  it('marchio doppio con MCP di prima parte DINAMICO (Notion): prima il fornitore, alternativa Composio', () => {
+    const rows = loadAppCatalog()
+    const notion = rows.find((r) => r.id === 'notion')!
+    expect(notion.via).toBe('direct')
+    const roads = roadsOfApp(notion)
+    expect(roads[0]).toMatchObject({ kind: 'mcp-first-party', chosen: true })
+    expect(roads[1]).toMatchObject({ kind: 'composio', chosen: false })
+  })
+
+  it('static NON pronto (Gmail senza client OAuth): si propone Composio, il fornitore è l\'alternativa', () => {
+    const rows = loadAppCatalog()
+    const gmail = rows.find((r) => r.id === 'gmail')!
+    expect(gmail.via).toBe('composio')
+    const roads = roadsOfApp(gmail)
+    // l'ordine resta la PREFERENZA (il fornitore prima); la PROPOSTA è la
+    // prima DISPONIBILE: senza client OAuth salvato, Composio
+    expect(roads[0]).toMatchObject({ kind: 'mcp-first-party', chosen: false })
+    expect(roads[1]).toMatchObject({ kind: 'composio', chosen: true })
+    // con il client salvato, il fornitore torna la proposta
+    const ready = loadAppCatalog({ staticClientsReady: ['gmail'] }).find((r) => r.id === 'gmail')!
+    expect(ready.via).toBe('direct')
+    expect(roadsOfApp(ready)[0]).toMatchObject({ kind: 'mcp-first-party', chosen: true })
+    expect(roadsOfApp(ready)[1]).toMatchObject({ kind: 'composio', chosen: false })
+  })
+
+  it('voce SOLO Composio (Trello): una strada sola, nessuna alternativa', () => {
+    const trello = loadAppCatalog().find((r) => r.id === 'trello')!
+    expect(trello.composioSlug).toBe('trello')
+    expect(roadsOfApp(trello)).toHaveLength(1)
+    expect(roadsOfApp(trello)[0]).toMatchObject({ kind: 'composio', chosen: true })
+  })
+
+  it('SLACK e GOOGLE SHEETS, verificati nelle docs dei fornitori, hanno l\'MCP di prima parte', () => {
+    const rows = loadAppCatalog()
+    // Slack: https://mcp.slack.com/mcp (docs.slack.dev/ai/slack-mcp-server) —
+    // OAuth SENZA registrazione dinamica: client statico
+    const slack = rows.find((r) => r.id === 'slack')!
+    expect(slack.directId).toBe('slack')
+    expect(slack.composioSlug).toBe('slack')
+    expect(roadsOfApp(slack).some((x) => x.kind === 'mcp-first-party')).toBe(true)
+    // Sheets: https://sheetsmcp.googleapis.com/mcp/v1
+    // (docs.cloud.google.com/mcp/supported-products) — statico come gli altri Google
+    const sheets = rows.find((r) => r.id === 'gsheets')!
+    expect(sheets.composioSlug).toBe('googlesheets')
+    expect(roadsOfApp(sheets).some((x) => x.kind === 'mcp-first-party')).toBe(true)
   })
 })

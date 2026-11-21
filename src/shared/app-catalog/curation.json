@@ -120,6 +120,14 @@
     "linear": {
       "direct": "linear",
       "composio": "linear"
+    },
+    "slack": {
+      "direct": "slack",
+      "composio": "slack"
+    },
+    "gsheets": {
+      "direct": "gsheets",
+      "composio": "googlesheets"
     }
   }
 }

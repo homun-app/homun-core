@@ -205,6 +205,28 @@ export function loadAppCatalog(input: LoadAppCatalogInput = {}): AppCatalogRow[]
   return rows
 }
 
+/**
+ * PL4 (fase plugin): le STRADE di una voce del catalogo, in ordine di
+ * preferenza — l'MCP di prima parte del fornitore prima (i dati vanno solo
+ * lì), poi Composio. `chosen` è quella che Homun propone al collegamento
+ * (la stessa decisione di `via`). Solo strade che Homun sa già percorrere:
+ * OAuth con DCR, client statico salvato, Composio. Nessuna integrazione
+ * nuova: le voci di prima parte sono verificate nelle docs del fornitore.
+ */
+export interface AppRoad {
+  kind: 'mcp-first-party' | 'composio'
+  /** true sulla strada proposta (la prima disponibile) */
+  chosen: boolean
+}
+
+export function roadsOfApp(row: AppCatalogRow): AppRoad[] {
+  const roads: AppRoad[] = []
+  if (row.directId) roads.push({ kind: 'mcp-first-party', chosen: row.via === 'direct' })
+  if (row.composioSlug) roads.push({ kind: 'composio', chosen: row.via === 'composio' })
+  // la scelta è UNA: la prima disponibile (per costruzione via lo è già)
+  return roads
+}
+
 export interface LoadAppCatalogInput {
   direct?: readonly DirectCatalogEntry[]
   composio?: readonly ComposioCatalogEntry[]
