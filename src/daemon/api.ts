@@ -25,6 +25,7 @@ import {
 } from '../main/agent/skill-github'
 // fase skill · catalogo (K2/K3): il catalogo attivo (repo, o finto nei test)
 import { activeSkillCatalog } from '../main/agent/skill-catalog'
+import { applySkillsImport } from '../main/agent/skill-import'
 import { skillMdIssues, isValidSkillName, parseSkillMd } from '../shared/skill-md'
 import * as providers from '../main/agent/providers'
 import { suggestRoutines } from '../main/routines'
@@ -1374,6 +1375,14 @@ export function buildApiMethods(
     // K2: l'elenco `/` del compositore — la STESSA selezione del loop
     // (invocableSkillsOf) senza i corpi: un'unica fonte di verità
     'skills:invocable': ([agentId]) => invocableSkillList(String(agentId)),
+    // PL6 (fase plugin): «Importa skill» — l'APPLY copia o collega (la HOME
+    // arriva dal main, che legge le cartelle al clic dell'utente)
+    'skills-import:apply': ([payload]) => applySkillsImport(
+      String((payload as { home: string }).home),
+      (payload as { picks: never[] }).picks,
+      (payload as { mode: 'copy' | 'link' }).mode,
+      ((payload as { extraDirs?: never[] }).extraDirs ?? [])
+    ),
     // lo SKILL.md intero per l'editor (K5: il nome è una cartella valida)
     'skills:get': ([name]) => readSkillMd(assertSkillFolder(String(name))),
     /**
@@ -1396,6 +1405,9 @@ export function buildApiMethods(
       const folder = r.folder && isValidSkillName(r.folder) ? r.folder : name
       const skillDir = join(libraryDir(), folder)
       const entry = skillsLibrary()[folder]
+      // PL6 (fase plugin): una skill COLLEGATA non si modifica (sola lettura:
+      // cambia con la sua cartella originale)
+      if (entry?.linkedPath) throw uiError(UI.skillErrLinkedReadonly)
       // nome già usato da UN'ALTRA skill → errore (mai sovrascrittura silenziosa)
       if (name !== folder && existsSync(join(libraryDir(), name))) {
         throw uiError(UI.skillErrDuplicateName)

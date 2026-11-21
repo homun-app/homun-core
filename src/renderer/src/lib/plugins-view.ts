@@ -197,7 +197,7 @@ export function yourPlugins(input: PluginViewInput): YourPluginRow[] {
       kind: 'skill',
       name: s.name,
       logo: null,
-      gray: { type: 'skill', strada: 'skill', origin: skillOriginKey(s) },
+      gray: { type: 'skill', strada: 'skill', origin: skillOriginKey(s) === 'app' && s.importedFromApp ? `app:${s.importedFromApp}` : skillOriginKey(s) },
       state: s.valid ? 'active' : 'invalid',
       verified: false,
       bots: botsLabelOf(s.enabledFor, input.agents),
@@ -232,7 +232,8 @@ function serverDetailOf(s: { command?: string; args?: string[]; url?: string }):
 }
 
 /** La chiave d'origine di una skill (la traduce la UI, il fatto sta qui). */
-export function skillOriginKey(s: SkillLibraryItem): 'homun' | 'user' | 'bot' | 'github' | 'migrated' {
+export function skillOriginKey(s: SkillLibraryItem): 'homun' | 'user' | 'bot' | 'github' | 'migrated' | 'app' {
+  if (s.source === 'app') return 'app'
   if (s.source === 'github' || s.importedModified) return 'github'
   if (s.source === 'bot') return 'bot'
   if (s.source === 'migrated') return 'migrated'
@@ -268,9 +269,11 @@ export function stradaLabel(strada: PluginStrada, origin: string | undefined, la
 export function grayLineOf(row: YourPluginRow, lang: 'it' | 'en'): string {
   const parts = [TYPE_LABEL[row.gray.type][lang]]
   if (row.gray.strada === 'skill') {
-    // l'origine della skill: GitHub quando ci ARRIVATA (o lo conserva),
-    // altrimenti Homun — mai un'origine inventata
-    parts.push(row.gray.origin === 'github' ? 'GitHub' : stradaLabel('skill', undefined, lang))
+    // l'origine della skill: GitHub quando ci ARRIVATA, l'app quando è
+    // importata da un'altra app (PL6), altrimenti Homun — mai inventata
+    if (row.gray.origin === 'github') parts.push('GitHub')
+    else if (row.gray.origin?.startsWith('app:')) parts.push(lang === 'en' ? `imported from ${row.gray.origin.slice(4)}` : `importata da ${row.gray.origin.slice(4)}`)
+    else parts.push(stradaLabel('skill', undefined, lang))
   } else if (row.gray.strada === 'plugin' && row.gray.type === 'skill') {
     // PL5: una skill di plugin: «Skill · da plugin · <nome>»
     parts.push(stradaLabel('plugin', undefined, lang))

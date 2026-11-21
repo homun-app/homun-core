@@ -247,3 +247,19 @@ describe('PL5: una skill della libreria e una da plugin, con la riga grigia gius
     expect(rows.map((r) => r.name)).toEqual(['rag'])
   })
 })
+
+// ---- PL6 (fase plugin): la skill importata da un'altra app ----
+describe('PL6: la riga grigia della skill importata da un\'altra app', () => {
+  it('«Skill · importata da Cursor» (copia o collegamento che sia)', () => {
+    const rows = yourPlugins({
+      connectedApps: [], composio: null, composioGateway: null, installed: null,
+      skills: [
+        { name: 'prezzi', folder: 'prezzi', description: 'Confronta i prezzi', enabledFor: ['*'], source: 'app' as never, importedFromApp: 'Cursor', createdAt: 1, updatedAt: 1, files: [], valid: true, issues: [] },
+        { name: 'lavoro', folder: 'lavoro', description: '', enabledFor: ['*'], source: 'app' as never, importedFromApp: 'ZCode', linkedPath: '/orig', createdAt: 1, updatedAt: 1, files: [], valid: true, issues: [] }
+      ],
+      agents: AGENTS, query: ''
+    })
+    expect(grayLineOf(rows.find((r) => r.name === 'prezzi')!, 'it')).toBe('Skill · importata da Cursor')
+    expect(grayLineOf(rows.find((r) => r.name === 'lavoro')!, 'en')).toBe('Skill · imported from ZCode')
+  })
+})

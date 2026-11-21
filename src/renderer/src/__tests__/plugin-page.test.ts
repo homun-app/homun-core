@@ -269,6 +269,57 @@ describe('PL5: le skill in pagina come le altre (libreria, plugin, catalogo)', (
   })
 })
 
+describe('PL6: «Importa skill» da altre app', () => {
+  it('NESSUNA lettura senza clic: la scansione parte solo dal menù «Importa skill»', async () => {
+    const { PluginPanel } = await import('../components/PluginPanel')
+    const { useStore } = await import('../store')
+    stubApiMethod('connectorsInstalled', () => ({ servers: [], plugins: [] }))
+    stubApiMethod('skillsLibrary', () => ({ library: [], plugins: [] }))
+    stubApiMethod('skillsImportScan', () => ({ rows: [] }))
+    setStoreStateForRender(useStore, {
+      pluginOpen: true, connectors: [], composio: null, composioGateway: null,
+      agents: [{ id: 'a-1', name: 'Competitoor', description: '', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 }]
+    })
+    const before = callsOf('skillsImportScan').length
+    renderHtml(createElement(PluginPanel, {}))
+    // il render da solo NON legge i file delle altre app
+    expect(callsOf('skillsImportScan').length).toBe(before)
+  })
+
+  it('il foglio: righe con le fonti, «già presente» spento, la scelta copia/usa l\'originale, il bottone Importa', async () => {
+    const { PluginPanel } = await import('../components/PluginPanel')
+    const { useStore } = await import('../store')
+    stubApiMethod('connectorsInstalled', () => ({ servers: [], plugins: [] }))
+    stubApiMethod('skillsLibrary', () => ({ library: [], plugins: [] }))
+    stubApiMethod('skillsImportApply', () => [])
+    setStoreStateForRender(useStore, {
+      pluginOpen: true, connectors: [], composio: null, composioGateway: null,
+      agents: [{ id: 'a-1', name: 'Competitoor', description: '', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 }]
+    })
+    const out = renderHtml(createElement(PluginPanel, {
+      initial: {
+        view: 'skill-import',
+        importRows: [
+          { name: 'lavoro', description: 'Riassume le email', sources: ['claude', 'zcode'], valid: true, existing: false, files: ['a.txt'] },
+          { name: 'prezzi', description: 'Confronta i prezzi', sources: ['cursor'], valid: true, existing: true, files: [] }
+        ]
+      }
+    } as never))
+    const root = parseHtml(out)
+    const texts = findAll(root, () => true).map((n) => textOf(n)).join('\n')
+    expect(texts).toContain('Importa skill')
+    expect(texts).toMatch(/nessuno script viene eseguito/)
+    expect(texts).toContain('lavoro')
+    expect(texts).toContain('claude, zcode')
+    expect(texts).toContain('già presente')
+    expect(texts).toContain('Copia nella libreria di Homun')
+    expect(texts).toContain('Usa la cartella originale')
+    expect(texts).toContain('Scegli una cartella…')
+    expect(callsOf('skillsImportApply').length).toBe(0)
+    setStoreStateForRender(useStore, { connectors: [], composio: null, composioGateway: null })
+  })
+})
+
 describe('PL1: la pagina Plugin (render vero, api finta)', () => {
   it('titolo, frase, ricerca, segmenti e bottone Aggiungi con le SEI voci', async () => {
     const { PluginPanel } = await import('../components/PluginPanel')

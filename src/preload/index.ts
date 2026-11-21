@@ -194,6 +194,10 @@ const api: SandbotApi = {
   mcpTools: (id) => ipcRenderer.invoke('mcp:tools', id),
   // PL3 (fase plugin): l'uso degli strumenti (ultimo uso + settimana, indice)
   pluginsUsage: () => ipcRenderer.invoke('plugins:usage'),
+  // PL6 (fase plugin): «Importa skill» — la scansione parte SOLO al clic
+  skillsImportScan: (extraDirs) => ipcRenderer.invoke('skills-import:scan', extraDirs),
+  skillsImportPickFolder: () => ipcRenderer.invoke('skills-import:pick-folder'),
+  skillsImportApply: (payload) => ipcRenderer.invoke('skills-import:apply', payload),
   /**
    * E2 (fase mcp-env): «Importa da Cursor, Claude o ZCode» — la scansione e
    * la conferma leggono quei file SOLO al clic, nel main. Le righe non

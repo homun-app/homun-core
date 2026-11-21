@@ -39,7 +39,7 @@ function uiLang(): 'it' | 'en' {
 }
 
 /** La vista interna della pagina: l'elenco, i server MCP, l'editor di una skill. */
-type PluginView = 'list' | 'mcp' | 'skill-new'
+type PluginView = 'list' | 'mcp' | 'skill-new' | 'skill-import'
 
 /** I dati iniziali (per i test senza effect; nel prodotto si caricano dall'api). */
 export interface PluginPanelInitial {
@@ -51,6 +51,10 @@ export interface PluginPanelInitial {
   pluginSkills?: Array<{ plugin: string; skills: Array<{ name: string; description: string }> }>
   /** PL5: il catalogo skill (nei test senza effect) */
   skillCatalog?: SkillCatalogEntry[]
+  /** PL6: le righe dell'import skill (nei test senza effect) */
+  importRows?: Array<{ name: string; description: string; sources: string[]; valid: boolean; existing: boolean; files: string[] }>
+  /** la vista di partenza (nei test senza clic) */
+  view?: PluginView
   /** il segmento di partenza (nei test senza clic; nei prodotti decide pluginAt) */
   seg?: PluginSegment
 }
@@ -75,13 +79,19 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
 
   const [seg, setSeg] = useState<PluginSegment>(initial?.seg ?? 'all')
   const [query, setQuery] = useState('')
-  const [view, setView] = useState<PluginView>('list')
+  const [view, setView] = useState<PluginView>(initial?.view ?? 'list')
   const [category, setCategory] = useState<AppsFilter>('all')
   const [addOpen, setAddOpen] = useState(false)
   const [installed, setInstalled] = useState<{ servers: McpServerInfo[]; plugins: InstalledPluginLike[] } | null>(initial?.installed ?? null)
   const [skills, setSkills] = useState<SkillLibraryItem[] | null>(initial?.skills ?? null)
   // PL5: le skill dei plugin e il catalogo (Sfoglia) — la ricerca e le categorie valgono anche per loro
   const [pluginSkills, setPluginSkills] = useState<Array<{ plugin: string; skills: Array<{ name: string; description: string }> }> | null>(initial?.pluginSkills ?? null)
+  // PL6: l'import delle skill dalle altre app — la scansione parte SOLO al
+  // clic del bottone (mai all'avvio); il clic del menù chiama la scan
+  const [importRows, setImportRows] = useState<Array<{ name: string; description: string; sources: string[]; valid: boolean; existing: boolean; files: string[] }> | null>(initial?.importRows ?? null)
+  const [importPicks, setImportPicks] = useState<Record<string, boolean>>({})
+  const [importMode, setImportMode] = useState<'copy' | 'link'>('copy')
+  const [importDirs, setImportDirs] = useState<Array<{ source: string; dir: string }>>([])
   const [catalog, setCatalog] = useState<SkillCatalogEntry[] | null>(initial?.skillCatalog ?? null)
   const [catalogId, setCatalogId] = useState<string | null>(null)
   const [skillCatFilter, setSkillCatFilter] = useState<'all' | SkillCategoryId>('all')
@@ -97,6 +107,13 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
   // «Crea con il bot»: la chat con una richiesta precompilata (il meccanismo
   // di fase pagine G4 — composerPrefill — consumato dal composer di Chat)
   const setComposerPrefill = useStore((s) => s.setComposerPrefill)
+
+  /** PL6: la scansione delle skill delle altre app — SOLO qui, al clic. */
+  const runImportScan = async (): Promise<void> => {
+    const scan = await api.skillsImportScan(importDirs.length ? importDirs : undefined).catch(() => ({ rows: [] as never[] }))
+    setImportRows(scan.rows)
+    setImportPicks({})
+  }
 
   const refreshInstalled = async (): Promise<void> => {
     try {
@@ -228,6 +245,108 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
       </div>
     )
   }
+  if (view === 'skill-import') {
+    const rows = importRows ?? []
+    const picked = rows.filter((r) => !r.existing && r.valid && importPicks[r.name] === true)
+    return (
+      <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background px-8 py-6" data-testid="plugin-page">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              aria-label={t`Torna ai plugin`}
+              onClick={() => { setView('list'); setSeg('skills'); setImportRows(null) }}
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <h1 className="font-display text-2xl"><Trans>Importa skill</Trans></h1>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            <Trans>Le cartelle con SKILL.md delle altre app che trovo sul tuo Mac. Si importano SOLO file di testo: nessuno script viene eseguito.</Trans>
+          </p>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto scroll-thin pb-6" data-testid="plugin-skill-import">
+            {importRows === null && <p className="text-sm text-muted-foreground"><Trans>cerco…</Trans></p>}
+            {importRows !== null && rows.length === 0 && (
+              <div className="rounded-2xl bg-muted p-4" data-testid="plugin-skill-import-empty">
+                <p className="text-xs text-muted-foreground"><Trans>Nessuna skill trovata nelle altre app.</Trans></p>
+              </div>
+            )}
+            {rows.map((r) => (
+              <label
+                key={r.name}
+                className={`flex min-h-11 items-center gap-2.5 rounded-xl bg-muted/60 px-3 ${r.existing || !r.valid ? 'opacity-60' : ''}`}
+                data-testid="plugin-skill-import-row"
+              >
+                <input
+                  type="checkbox"
+                  className="shrink-0"
+                  data-testid="plugin-skill-import-check"
+                  checked={importPicks[r.name] === true}
+                  disabled={r.existing || !r.valid}
+                  onChange={(e) => setImportPicks({ ...importPicks, [r.name]: e.target.checked })}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm">{r.name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{r.description || '—'}</span>
+                </span>
+                <span className="shrink-0 text-[11px] text-muted-foreground">{r.sources.join(', ')}</span>
+                {r.existing && <span className="shrink-0 text-[11px] text-muted-foreground">{t`già presente`}</span>}
+              </label>
+            ))}
+            {/* la cartella scelta dall'utente */}
+            <button
+              className="w-full rounded-2xl bg-muted px-3 py-2.5 text-sm text-muted-foreground transition hover:text-foreground"
+              data-testid="plugin-skill-import-folder"
+              onClick={async () => {
+                const dir = await api.skillsImportPickFolder().catch(() => null)
+                if (!dir) return
+                const next = [...importDirs, { source: 'folder', dir }]
+                setImportDirs(next)
+                const scan = await api.skillsImportScan(next).catch(() => ({ rows: [] as never[] }))
+                setImportRows(scan.rows)
+              }}
+            >
+              <Trans>Scegli una cartella…</Trans>
+            </button>
+            {/* copia oppure usa la cartella originale (sola lettura) */}
+            <div className="space-y-1.5 rounded-2xl bg-muted/60 p-3" data-testid="plugin-skill-import-mode">
+              <label className="flex items-center gap-2 text-[13px]">
+                <input type="radio" name="plugin-skill-import-mode" checked={importMode === 'copy'} onChange={() => setImportMode('copy')} />
+                <span><Trans>Copia nella libreria di Homun</Trans></span>
+              </label>
+              <label className="flex items-center gap-2 text-[13px]">
+                <input type="radio" name="plugin-skill-import-mode" checked={importMode === 'link'} onChange={() => setImportMode('link')} />
+                <span><Trans>Usa la cartella originale</Trans> <span className="text-[11px] text-muted-foreground"><Trans>(sola lettura: cambia con l'originale)</Trans></span></span>
+              </label>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{t`${picked.length} selezionate`}</span>
+              <button
+                className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+                disabled={picked.length === 0}
+                data-testid="plugin-skill-import-apply"
+                onClick={async () => {
+                  const out = await api.skillsImportApply({
+                    picks: picked.map((r) => ({ sources: r.sources, name: r.name })),
+                    mode: importMode,
+                    ...(importDirs.length ? { extraDirs: importDirs } : {})
+                  }).catch(() => [])
+                  void out
+                  setImportRows(null)
+                  setImportDirs([])
+                  reloadSkills()
+                  setView('list')
+                  setSeg('skills')
+                }}
+              >
+                {t`Importa ${picked.length}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
   if (view === 'skill-new') {
     return (
       <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background px-8 py-6" data-testid="plugin-page">
@@ -317,9 +436,10 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                 <button
                   className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
                   data-testid="plugin-add-skill-import"
-                  onClick={() => { setAddOpen(false); setSeg('skills') }}
+                  onClick={() => { setAddOpen(false); setView('skill-import'); void runImportScan() }}
                 >
-                  <Trans>Importa skill</Trans> <span className="text-[11px] text-muted-foreground"><Trans>(cartella SKILL.md)</Trans></span>
+                  <span className="block"><Trans>Importa skill</Trans></span>
+                  <span className="block text-[11px] text-muted-foreground"><Trans>Cursor, Codex, ZCode, Claude Code…</Trans></span>
                 </button>
                 <div className="my-1 h-px bg-border/60" aria-hidden="true" />
                 <button

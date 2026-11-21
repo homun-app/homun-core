@@ -1338,6 +1338,10 @@ export interface SandbotApi {
   mcpTools(id: string): Promise<Array<{ name: string; description: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } }>>
   /** PL3 (fase plugin): l'uso degli strumenti per la tabella «Collegati» (indice, non transcript) */
   pluginsUsage(): Promise<Array<{ tool: string; last: number; week: number }>>
+  /** PL6 (fase plugin): «Importa skill» — la scansione delle altre app (solo al clic) */
+  skillsImportScan(extraDirs?: Array<{ source: string; dir: string }>): Promise<{ rows: SkillImportRowRpc[] }>
+  skillsImportPickFolder(): Promise<string | null>
+  skillsImportApply(payload: { picks: Array<{ sources: string[]; name: string }>; mode: 'copy' | 'link'; extraDirs?: Array<{ source: string; dir: string }> }): Promise<Array<{ name: string; outcome: 'created' | 'linked' | 'duplicate' | 'invalid' | 'missing' }>>
   // fase 5: connettori del catalogo ("Connetti app")
   connectorsList(): Promise<ConnectorInfo[]>
   connectorsConnect(id: string): Promise<{ started: boolean; status: string; message?: string; conflict?: 'composio-key' }>
@@ -1704,7 +1708,7 @@ export interface SkillInfo {
 // ---- fase skill: la libreria unica (S2) ----
 
 /** Da dove arriva una skill della libreria. */
-export type SkillSourceKind = 'user' | 'bot' | 'github' | 'migrated'
+export type SkillSourceKind = 'user' | 'bot' | 'github' | 'migrated' | 'app'
 
 /** L'origine di una skill importata da GitHub (S6). */
 export interface SkillOrigin {
@@ -1726,6 +1730,10 @@ export interface SkillLibraryEntry {
   homunNotes?: string
   /** K5: 'user' = solo con /nome (fuori dal prompt, rifiutata dal tool skill) */
   invocation?: 'user'
+  /** PL6 (fase plugin): l'app da cui arriva l'import (Cursor, Codex, ZCode, Claude Code) */
+  importedFromApp?: string
+  /** PL6: la skill è un COLLEGAMENTO in sola lettura alla cartella originale */
+  linkedPath?: string
   createdAt: number
   updatedAt: number
 }
@@ -1753,7 +1761,23 @@ export interface SkillLibraryItem {
   invocation?: 'user'
   /** K5: si usa solo con /nome (disable-model-invocation nel frontmatter o invocation 'user') */
   userOnly?: boolean
+  /** PL6 (fase plugin): l'app da cui arriva l'import */
+  importedFromApp?: string
+  /** PL6: collegamento in sola lettura alla cartella originale */
+  linkedPath?: string
   issues: Array<{ english: string; uiId: string; values?: Record<string, string | number> }>
+}
+
+/** PL6 (fase plugin): una skill trovata nelle altre app (Cursor, Codex, ZCode, Claude Code). */
+export interface SkillImportRowRpc {
+  name: string
+  description: string
+  sources: string[]
+  paths: Record<string, string>
+  valid: boolean
+  issues: Array<{ english: string; uiId: string }>
+  files: string[]
+  existing: boolean
 }
 
 /** L'anteprima di una skill trovata in un repository GitHub (S6.3). */

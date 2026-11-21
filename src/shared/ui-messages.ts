@@ -822,6 +822,8 @@ export const UI = {
   skillErrInvalidName: msg({ id: 'skill.err.invalidName', message: 'Nome non valido: 1–64 caratteri, solo minuscole, cifre e trattini singoli.' }),
   skillErrDuplicateName: msg({ id: 'skill.err.duplicateName', message: 'Esiste già una skill con questo nome.' }),
   skillErrNotFound: msg({ id: 'skill.err.notFound', message: 'Skill non trovata.' }),
+  /** PL6 (fase plugin): la skill collegata è in sola lettura */
+  skillErrLinkedReadonly: msg({ id: 'skill.err.linkedReadonly', message: 'Questa skill è collegata in sola lettura: cambia con la sua cartella originale. Importane una copia per modificarla.' }),
   // ---- fase skill · catalogo (K3): i rifiuti dell'installazione di una voce ----
   skillErrCatalogPin: msg({ id: 'skill.err.catalogPin', message: 'La versione fissata dal catalogo non è più reperibile nel repository: non si scarica nient\u2019altro.' }),
   skillErrCatalogMissing: msg({ id: 'skill.err.catalogMissing', message: 'Questa voce non è più nel catalogo.' }),

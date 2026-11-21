@@ -46,6 +46,8 @@ export const PLUGIN_SKILL_REFUSAL = 'a plugin\'s skill: it is changed by updatin
 
 /** Il rifiuto fisso di update_skill su una skill importata da GitHub (S3.3). */
 export const GITHUB_SKILL_REFUSAL = 'an imported skill: the user edits or updates it from the Skills window'
+/** PL6 (fase plugin): una skill COLLEGATA (cartella originale, sola lettura). */
+export const LINKED_SKILL_REFUSAL = 'a linked skill: read-only, it changes with its original folder (import a copy to edit it)'
 
 /** I plugin installati abilitati per un bot (enabledFor; il figlio eredita dal padre). */
 export function pluginsEnabledFor(agentId: string, parentId?: string): InstalledPlugin[] {
@@ -281,6 +283,34 @@ export function listLibrarySkills(): LibrarySkill[] {
       .map((d) => d.name)
   } catch {
     return [] // library assente: nessuna skill
+  }
+  // PL6 (fase plugin): anche le skill COLLEGGATE (l'entry punta alla cartella
+  // ORIGINALE di un'altra app: si legge, non si modifica)
+  const linkedFolders: string[] = []
+  for (const [folder, entry] of Object.entries(lib)) {
+    if (!entry.linkedPath || dirs.includes(folder) || linkedFolders.includes(folder)) continue
+    linkedFolders.push(folder)
+    let text = ''
+    try {
+      text = readFileSync(join(entry.linkedPath, 'SKILL.md'), 'utf8')
+    } catch {
+      continue // la cartella originale è sparita: la voce non si elenca
+    }
+    const parsed = parseSkillMd(text)
+    const { files, issues } = scanSkillFolder(entry.linkedPath)
+    if (parsed.ok && parsed.skill.name === folder) {
+      out.push({ folder, ...parsed.skill, entry, usable: true, issues, files })
+    } else if (parsed.ok) {
+      out.push({
+        folder, ...parsed.skill, entry, usable: false,
+        issues: [{
+          english: `The name in the file (${parsed.skill.name}) is different from the folder (${folder}).`,
+          ui: ui(UI.skillNameFolderMismatch, { name: parsed.skill.name, folder })
+        }, ...issues], files
+      })
+    } else {
+      out.push({ folder, name: folder, description: '', body: '', frontmatter: {}, entry, usable: false, issues: [...parsed.issues, ...issues], files })
+    }
   }
   for (const folder of dirs) {
     const entry: SkillLibraryEntry = lib[folder] ?? {
@@ -662,6 +692,14 @@ export function renameLibraryFolder(from: string, to: string): void {
 /** Elimina una skill della libreria (directory inclusa); true se esisteva. */
 export function deleteLibrarySkill(name: string): boolean {
   const folder = assertSkillFolder(name)
+  let lib = skillsLibrary()
+  // PL6: togliere un COLLEGAMENTO rimuove solo l'entry — la cartella
+  // originale dell'altra app non si tocca
+  if (lib[folder]?.linkedPath) {
+    delete lib[folder]
+    saveSkillsLibrary(lib)
+    return true
+  }
   const dir = join(libraryDir(), folder)
   try {
     readdirSync(dir)
@@ -669,7 +707,7 @@ export function deleteLibrarySkill(name: string): boolean {
     return false
   }
   rmSync(dir, { recursive: true, force: true })
-  const lib = skillsLibrary()
+  lib = skillsLibrary()
   if (lib[folder]) {
     delete lib[folder]
     saveSkillsLibrary(lib)
@@ -793,13 +831,18 @@ export function libraryItemsForUi(): SkillLibraryItem[] {
     // supporto non rendono la skill non valida: tolgono solo quel file)
     valid: s.usable,
     ...(s.entry.source !== 'github' && s.entry.origin ? { importedModified: true } : {}),
+    ...(s.entry.importedFromApp ? { importedFromApp: s.entry.importedFromApp } : {}),
+    ...(s.entry.linkedPath ? { linkedPath: s.entry.linkedPath } : {}),
     issues: s.issues.map((i) => ({ english: i.english, uiId: i.ui.id, ...(i.ui.values ? { values: i.ui.values } : {}) }))
   }))
 }
 
 /** Lo SKILL.md intero di una skill (per l'editor della finestra). */
 export function readSkillMd(folder: string): string {
-  return readFileSync(join(libraryDir(), assertSkillFolder(folder), 'SKILL.md'), 'utf8')
+  const f = assertSkillFolder(folder)
+  // PL6: la skill COLLEGATA si legge dalla cartella ORIGINALE (sola lettura)
+  const linked = skillsLibrary()[f]?.linkedPath
+  return readFileSync(join(linked ?? join(libraryDir(), f), 'SKILL.md'), 'utf8')
 }
 
 /** Le skill dei plugin installati per la finestra (sola lettura, per plugin). */

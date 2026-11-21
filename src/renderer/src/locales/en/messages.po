@@ -80,10 +80,6 @@ msgstr "\"Always allow\" choices made on cards. A server's reads only cover tool
 msgid "skill.metadataInvalid"
 msgstr "\"metadata\" must be a map of strings (each value a string)."
 
-#: src/renderer/src/components/PluginPanel.tsx
-msgid "(cartella SKILL.md)"
-msgstr "(SKILL.md folder)"
-
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "(le istruzioni complete le vede il bot col tool skill)"
 msgstr "(the bot sees the full instructions with the skill tool)"
@@ -126,6 +122,10 @@ msgstr "(unnamed)"
 #: src/renderer/src/components/Settings.tsx
 msgid "(server manuale)"
 msgstr "(manual server)"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "(sola lettura: cambia con l'originale)"
+msgstr "(read-only: it changes with the original)"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -285,6 +285,11 @@ msgstr "{0} requests are waiting for you"
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "{0} richieste da {bots} bot · solo tu puoi deciderle · ogni richiesta si decide anche dove è nata"
 msgstr "{0} requests from {bots} bots · only you can decide them · each request is also decided where it was born"
+
+#. placeholder {0}: picked.length
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "{0} selezionate"
+msgstr "{0} selected"
 
 #. placeholder {0}: plugin.skills.length
 #. placeholder {1}: plugin.servers.length
@@ -1694,6 +1699,10 @@ msgstr "Searching the registry…"
 msgid "Cerco Ollama sul tuo Mac (porta 11434)."
 msgstr "Looking for Ollama on your Mac (port 11434)."
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "cerco…"
+msgstr "looking…"
+
 #: src/renderer/src/components/GuideModelStep.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Cerco…"
@@ -2450,6 +2459,10 @@ msgstr "copy curl"
 msgid "Copia la cartella in ~/Downloads/Homun/skills/"
 msgstr "Copies the folder to ~/Downloads/Homun/skills/"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Copia nella libreria di Homun"
+msgstr "Copy into Homun's library"
+
 #: src/renderer/src/components/Chat.tsx
 msgid "Copiato"
 msgstr "Copied"
@@ -2571,6 +2584,10 @@ msgstr "invalid cron: \"{cron}\" (5 fields, e.g. \"0 9 * * *\")"
 #: src/renderer/src/components/McpWindow.tsx
 msgid "Cursor"
 msgstr "Cursor"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Cursor, Codex, ZCode, Claude Code…"
+msgstr "Cursor, Codex, ZCode, Claude Code…"
 
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Cursor, Codex, ZCode…"
@@ -3385,6 +3402,10 @@ msgstr "Already installed"
 #: src/renderer/src/components/BoxSetupProgress.tsx
 msgid "Già installato: niente da scaricare"
 msgstr "Already installed: nothing to download"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "già presente"
+msgstr "already added"
 
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Già sul tuo Mac."
@@ -4215,6 +4236,11 @@ msgstr "the turn is not the user’s — creating bots or groups requires their 
 msgid "Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valori non si rileggono mai in chiaro: si possono solo sostituire. I bot vedono i nomi con <0>list-credentials</0> e i login si compilano con <1>fill_credential</1>, sempre col tuo consenso."
 msgstr "The vault is encrypted at rest (AES-256-GCM, key in the Keychain). Values are never read back in clear: they can only be replaced. Bots see names with <0>list-credentials</0> and logins are filled with <1>fill_credential</1>, always with your consent."
 
+#. placeholder {0}: picked.length
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Importa {0}"
+msgstr "Import {0}"
+
 #: src/renderer/src/components/McpWindow.tsx
 msgid "Importa {n}"
 msgstr "Import {n}"
@@ -4787,6 +4813,10 @@ msgstr "The apps in the list that go through here"
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Le azioni su {0} non chiederanno per 10 minuti"
 msgstr "Actions on {0} will not ask again for 10 minutes"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Le cartelle con SKILL.md delle altre app che trovo sul tuo Mac. Si importano SOLO file di testo: nessuno script viene eseguito."
+msgstr "The SKILL.md folders of the other apps on your Mac. Only text files are imported: no script is ever run."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Le chiamate e i risultati dei tool tornano come righe nella conversazione (per il debug)."
@@ -5585,6 +5615,10 @@ msgstr "No skills found"
 #: src/shared/ui-messages.ts
 msgid "skill.err.noSkills"
 msgstr "No skills found in this repository: it needs folders with a SKILL.md."
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Nessuna skill trovata nelle altre app."
+msgstr "No skills found in the other apps."
 
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Nessuna skill. Creane una, importala, o chiedi a un bot di salvarne una."
@@ -6670,6 +6704,11 @@ msgstr "This memory is deleted: you can restore it from the latest version below
 msgid "questa settimana"
 msgstr "this week"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.linkedReadonly"
+msgstr "This skill is linked read-only: it changes with its original folder. Import a copy to edit it."
+
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Questa skill è stata modificata: l'aggiornamento sovrascrive le modifiche (la versione attuale va nelle precedenti)."
 msgstr "This skill has been edited: updating overwrites your edits (the current version goes to the previous ones)."
@@ -7268,6 +7307,10 @@ msgstr "Choose a model"
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Scegli un modello: senza, Automatico chiede sempre."
 msgstr "Pick a model: without one, Automatic always asks."
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Scegli una cartella…"
+msgstr "Choose a folder…"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -8457,6 +8500,10 @@ msgstr "uses tools · recommended"
 #: src/renderer/src/lib/activity.ts
 msgid "usa il computer…"
 msgstr "uses the computer…"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Usa la cartella originale"
+msgstr "Use the original folder"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Usa la chiave di progetto"

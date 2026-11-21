@@ -260,6 +260,22 @@ export function registerIpc(
     }
     return out
   })
+  // PL6 (fase plugin): «Importa skill» da altre app — i file delle altre app
+  // si legano SOLO qui, al CLIC del bottone (come l'import MCP); l'APPLY sta
+  // nel daemon (scrive la libreria), la HOME passa esplicita
+  ipcMain.handle('skills-import:scan', async (_e, extraDirs?: Array<{ source: string; dir: string }>) => {
+    const { scanSkillsImport } = await import('./agent/skill-import')
+    const { homedir } = await import('node:os')
+    return scanSkillsImport(homedir(), (extraDirs ?? []).map((d) => ({ source: d.source as never, dir: d.dir })))
+  })
+  ipcMain.handle('skills-import:pick-folder', async () => {
+    const r = await dialog.showOpenDialog({ properties: ['openDirectory', 'treatPackageAsDirectory'] })
+    return r.canceled || !r.filePaths[0] ? null : r.filePaths[0]
+  })
+  ipcMain.handle('skills-import:apply', async (_e, payload: { picks: Array<{ sources: string[]; name: string }>; mode: 'copy' | 'link'; extraDirs?: Array<{ source: string; dir: string }> }) => {
+    const { homedir } = await import('node:os')
+    return client.call('skills-import:apply', [{ ...payload, home: homedir() }])
+  })
   // fase skill (S4): «Mostra nel Finder» — apre la cartella della skill nella
   // libreria (shell è di Electron, sta qui e non nel daemon RPC)
   ipcMain.handle('skills:show-in-finder', (_e, name: string) => {
