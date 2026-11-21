@@ -194,19 +194,24 @@ describe('OBD4a: invocazione senza APP_ROOT né LOG → nessuna cartella nuova, 
 
 // ---- OB6 (fase onboarding-b): la build può DURARE ----
 describe('OB6: la build finta può durare (SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS)', () => {
+  // Due avvii di Node: sulle macchine lente della CI possono superare i 5 s
+  // predefiniti. Il limite largo e il confronto RELATIVO (lenta − veloce)
+  // provano il ritardo senza dipendere dalla velocità della macchina.
   it('senza ritardo risponde subito; col ritardo ci mette almeno quel tempo', () => {
     const t0 = Date.now()
     const fast = run('ready', ['build'])
     expect(fast.status).toBe(0)
-    expect(Date.now() - t0).toBeLessThan(2_000)
+    const fastMs = Date.now() - t0
     const t1 = Date.now()
     const slow = spawnSync(process.execPath, [FAKE, 'build'], {
       encoding: 'utf8',
       env: { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: join(TMP, 'log-ob6-delay.jsonl'), SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS: '1200' }
     })
     expect(slow.status).toBe(0)
-    expect(Date.now() - t1).toBeGreaterThanOrEqual(1_100)
-  })
+    const slowMs = Date.now() - t1
+    expect(slowMs).toBeGreaterThanOrEqual(1_100)
+    expect(slowMs - fastMs).toBeGreaterThanOrEqual(900)
+  }, 30_000)
 })
 
 // ---- OBD3 (fase onboarding-b-dettagli): la build finta parla come la VERA ----
