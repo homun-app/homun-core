@@ -219,3 +219,31 @@ describe('PL3: la tabella Collegati — righe, uso e permessi', () => {
     expect(connectedTable({ rows, usage: [], perms: null, filter: 'direct', onlyDaSistemare: false }).map((r) => r.row.key)).toEqual(['s1'])
   })
 })
+
+// ---- PL5 (fase plugin): le skill dei plugin in pagina come le altre ----
+describe('PL5: una skill della libreria e una da plugin, con la riga grigia giusta', () => {
+  it('la skill del plugin: «Skill · da plugin · <plugin>», attiva, apre la scheda', () => {
+    const rows = yourPlugins({
+      connectedApps: [], composio: null, composioGateway: null, installed: null,
+      skills: [{ name: 'fatture', folder: 'fatture', description: 'Fatture', enabledFor: ['*'], source: 'user', createdAt: 1, updatedAt: 1, files: [], valid: true, issues: [] }],
+      pluginSkills: [{ plugin: 'rag-docs', skills: [{ name: 'rag', description: 'Ricerca nei documenti' }] }],
+      agents: AGENTS, query: ''
+    })
+    const plug = rows.find((r) => r.key === 'pluginskill:rag-docs/rag')!
+    expect(plug.kind).toBe('skill')
+    expect(plug.state).toBe('active')
+    expect(plug.open).toEqual({ kind: 'skill', folder: 'rag' })
+    expect(grayLineOf(plug, 'it')).toBe('Skill · da plugin · rag-docs')
+    const lib = rows.find((r) => r.name === 'fatture')!
+    expect(grayLineOf(lib, 'it')).toBe('Skill · Homun')
+  })
+
+  it('la ricerca trova anche le skill dei plugin (nome e descrizione)', () => {
+    const rows = yourPlugins({
+      connectedApps: [], composio: null, composioGateway: null, installed: null, skills: null,
+      pluginSkills: [{ plugin: 'rag-docs', skills: [{ name: 'rag', description: 'Ricerca nei documenti' }] }],
+      agents: AGENTS, query: 'documenti'
+    })
+    expect(rows.map((r) => r.name)).toEqual(['rag'])
+  })
+})

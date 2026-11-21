@@ -164,7 +164,9 @@ msgid "{0, plural, one {# segreto} other {# segreti}}"
 msgstr "{0, plural, one {# segreto} other {# segreti}}"
 
 #. placeholder {0}: agentName(filterAgent)
+#. placeholder {0}: skillCategoryLabel(c)
 #. placeholder {0}: tk.status
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "{0}"
@@ -2246,6 +2248,7 @@ msgstr "connesso"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
+#: src/renderer/src/components/PluginCard.tsx
 msgid "Connetti"
 msgstr "Connetti"
 
@@ -5573,6 +5576,7 @@ msgstr "Nessuna routine in programma."
 msgid "Nessuna routine."
 msgstr "Nessuna routine."
 
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Nessuna skill trovata"
 msgstr "Nessuna skill trovata"
@@ -7607,6 +7611,7 @@ msgstr "settimana"
 msgid "Sezione"
 msgstr "Sezione"
 
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Sfoglia"
 msgstr "Sfoglia"

@@ -18,7 +18,7 @@ import { BadgeCheck, ChevronDown, Puzzle, Search, ChevronLeft } from 'lucide-rea
 import { api, useStore, type PluginPoint } from '../store'
 import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, type AppCategoryId } from '../../../shared/app-catalog'
-import type { McpServerInfo, SkillLibraryItem } from '../../../shared/types'
+import type { McpServerInfo, SkillLibraryItem, SkillCatalogEntry } from '../../../shared/types'
 import { appsCatalogModel, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type CatalogRowView } from '../lib/apps-view'
 import { yourPlugins, grayLineOf, stateLabelOf, stradaLabel, connectedTable, daSistemareCount, type PluginSegment, type YourPluginRow, type ConnectedFilter } from '../lib/plugins-view'
 import type { PermissionsConfig } from '../../../shared/types'
@@ -27,7 +27,10 @@ import { AppRow, AppLogo, FilterPill, useConnectFlows, DevelopersContent } from 
 // PL2 (fase plugin): la scheda del plugin (tavola 9) — clic su una riga
 import { PluginCard } from './PluginCard'
 import { ManualServers } from './McpWindow'
-import { SkillEditor } from './SkillsWindow'
+// PL5: l'editor, il dettaglio delle skill di plugin e l'anteprima del catalogo — riusati
+import { SkillEditor, PluginDetail, CatalogPreview } from './SkillsWindow'
+import { SKILL_CATEGORIES, searchSkillCatalog, skillCatalogDescription, skillCatalogInstallState, type SkillCategoryId } from '../../../shared/skill-catalog'
+import { humanizeSkillName as humanize } from '../../../shared/skill-md'
 import { logoUrlForName } from '../lib/app-logos'
 
 /** La lingua attiva come 'it' | 'en'. */
@@ -44,6 +47,10 @@ export interface PluginPanelInitial {
   usage?: Array<{ tool: string; last: number; week: number }>
   perms?: PermissionsConfig
   skills?: SkillLibraryItem[]
+  /** PL5: le skill dei plugin */
+  pluginSkills?: Array<{ plugin: string; skills: Array<{ name: string; description: string }> }>
+  /** PL5: il catalogo skill (nei test senza effect) */
+  skillCatalog?: SkillCatalogEntry[]
   /** il segmento di partenza (nei test senza clic; nei prodotti decide pluginAt) */
   seg?: PluginSegment
 }
@@ -73,6 +80,11 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
   const [addOpen, setAddOpen] = useState(false)
   const [installed, setInstalled] = useState<{ servers: McpServerInfo[]; plugins: InstalledPluginLike[] } | null>(initial?.installed ?? null)
   const [skills, setSkills] = useState<SkillLibraryItem[] | null>(initial?.skills ?? null)
+  // PL5: le skill dei plugin e il catalogo (Sfoglia) — la ricerca e le categorie valgono anche per loro
+  const [pluginSkills, setPluginSkills] = useState<Array<{ plugin: string; skills: Array<{ name: string; description: string }> }> | null>(initial?.pluginSkills ?? null)
+  const [catalog, setCatalog] = useState<SkillCatalogEntry[] | null>(initial?.skillCatalog ?? null)
+  const [catalogId, setCatalogId] = useState<string | null>(null)
+  const [skillCatFilter, setSkillCatFilter] = useState<'all' | SkillCategoryId>('all')
   // PL3: l'uso dall'INDICE (mai i transcript) e le regole per i «permessi in breve»
   const [usage, setUsage] = useState<Array<{ tool: string; last: number; week: number }> | null>(initial?.usage ?? null)
   const [perms, setPerms] = useState<PermissionsConfig | null>(initial?.perms ?? null)
@@ -95,7 +107,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
     }
   }
   const reloadSkills = (): void => {
-    void api.skillsLibrary().then((r) => setSkills(r.library)).catch(() => setSkills([]))
+    void api.skillsLibrary().then((r) => { setSkills(r.library); setPluginSkills(r.plugins) }).catch(() => { setSkills([]); setPluginSkills([]) })
   }
   useEffect(() => {
     void refreshConnectors()
@@ -105,6 +117,8 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
     // PL3: l'aggregato indicizzato dell'uso + le regole scritte
     void api.pluginsUsage().then(setUsage).catch(() => setUsage([]))
     void api.getPermissions().then(setPerms).catch(() => setPerms(null))
+    // PL5: il catalogo curato (nessuna rete, arriva dal repo)
+    void api.skillsCatalog().then(setCatalog).catch(() => setCatalog([]))
   }, [refreshConnectors, refreshComposioGateway])
 
   // il modello del catalogo: le stesse righe, gli stessi filtri di oggi
@@ -127,6 +141,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
       composioGateway,
       installed,
       skills,
+      pluginSkills,
       agents,
       query: seg === 'connectors' ? '' : query
     }),
@@ -134,6 +149,13 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
   )
 
   const flows = useConnectFlows(model.rows)
+
+  // PL5: le righe del catalogo skill (la ricerca del campo in alto filtra anche questo)
+  const catalogRows = useMemo(() => {
+    const found = searchSkillCatalog(catalog ?? [], query, lang)
+    return skillCatFilter === 'all' ? found : found.filter((e) => e.category === skillCatFilter)
+  }, [catalog, query, lang, skillCatFilter])
+  const catalogEntrySel = catalogId !== null ? (catalog ?? []).find((e) => e.id === catalogId) ?? null : null
 
   // il punto di un rimando si consuma QUI (una volta sola all'apertura)
   const pluginAt = useStore((s) => s.pluginAt)
@@ -419,7 +441,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
             </section>
           )}
 
-          {/* --- SKILL: la libreria di oggi, in casa (PL5 le completa) --- */}
+          {/* --- SKILL (PL5): la libreria, le skill dei plugin e il catalogo, in casa --- */}
           {seg === 'skills' && (
             <section className="mt-2 space-y-1.5" data-testid="plugin-skills">
               {skillsFilterAgent && (
@@ -437,6 +459,52 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
               {yourRows.filter((r) => r.kind === 'skill').map((row) => (
                 <YourRow key={row.key} row={row} lang={lang} onOpen={() => openRow(row)} />
               ))}
+
+              {/* il catalogo CURATO di oggi (K2), con le sue categorie: la
+                  ricerca del campo in alto filtra anche questo (T1) */}
+              <div className="mt-6 space-y-2" data-testid="plugin-skills-catalog">
+                <h3 className="text-[14px] font-medium text-muted-foreground"><Trans>Sfoglia</Trans></h3>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    className={`rounded-full px-3 py-1 text-[12px] transition ${skillCatFilter === 'all' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
+                    onClick={() => setSkillCatFilter('all')}
+                  >
+                    <Trans>Tutte</Trans>
+                  </button>
+                  {SKILL_CATEGORIES.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={`rounded-full px-3 py-1 text-[12px] transition ${skillCatFilter === c ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
+                      onClick={() => setSkillCatFilter(skillCatFilter === c ? 'all' : c)}
+                    >
+                      {t`${skillCategoryLabel(c)}`}
+                    </button>
+                  ))}
+                </div>
+                {(catalogRows.length === 0)
+                  ? <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna skill trovata</Trans></p>
+                  : SKILL_CATEGORIES.filter((c) => catalogRows.some((e) => e.category === c)).map((c) => (
+                    <div key={c} className="space-y-1.5">
+                      <h4 className="pt-2 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">{t`${skillCategoryLabel(c)}`}</h4>
+                      {catalogRows.filter((e) => e.category === c).map((entry) => (
+                        <button
+                          key={entry.id}
+                          type="button"
+                          className="flex w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left transition hover:bg-muted/60"
+                          onClick={() => setCatalogId(entry.id)}
+                        >
+                          <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[15px]">{humanize(entry.id)}</span>
+                            <span className="block truncate text-[13px] text-muted-foreground">{skillCatalogDescription(entry, lang)}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+              </div>
             </section>
           )}
 
@@ -538,12 +606,33 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
       {skillDetail !== null && (
         <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={() => setSkillDetail(null)}>
           <div className="@container max-h-[85vh] w-full max-w-2xl overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="plugin-skill-detail">
-            <SkillEditor folder={skillDetail} onDone={() => reloadSkills()} onCancel={() => setSkillDetail(null)} embedded />
+            {/* PL5: la skill di un plugin è in sola lettura (si aggiorna col plugin) */}
+            {(pluginSkills ?? []).some((g) => g.skills.some((x) => x.name === skillDetail))
+              ? <PluginDetail name={skillDetail} plugins={pluginSkills ?? []} onClose={() => setSkillDetail(null)} />
+              : <SkillEditor folder={skillDetail} onDone={() => reloadSkills()} onCancel={() => setSkillDetail(null)} embedded />}
+          </div>
+        </div>
+      )}
+      {catalogEntrySel && (
+        <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={() => setCatalogId(null)}>
+          <div className="@container max-h-[85vh] w-full max-w-2xl overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="plugin-skill-catalog-preview">
+            <CatalogPreview
+              entry={catalogEntrySel}
+              state={skillCatalogInstallState(catalogEntrySel, skills ?? [])}
+              installedFolder={(skills ?? []).find((x) => x.origin?.catalogId === catalogEntrySel.id)?.folder ?? null}
+              onClose={() => setCatalogId(null)}
+              onChanged={() => reloadSkills()}
+            />
           </div>
         </div>
       )}
     </div>
   )
+}
+
+/** L'etichetta della categoria del catalogo skill (i testi sono del catalogo). */
+function skillCategoryLabel(c: SkillCategoryId): string {
+  return c === 'writing' ? 'Scrittura' : c === 'work' ? 'Lavoro' : c === 'thinking' ? 'Pensiero' : c === 'research' ? 'Ricerca' : 'Carriera'
 }
 
 /** Il colore del badge della strada (tavola 10: una tinta per strada). */

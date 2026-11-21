@@ -67,6 +67,8 @@ export interface PluginViewInput {
   composioGateway: ComposioGatewayStatusInfo | null
   installed: { servers: Array<InstalledServerLike & { toolSlug?: string; command?: string; args?: string[]; url?: string; auth?: { kind?: 'oauth' | 'bearer' | 'headers' } | null }> | null; plugins: InstalledPluginLike[] | null } | null
   skills: SkillLibraryItem[] | null
+  /** PL5: le skill dei PLUGIN (gruppi per plugin, in sola lettura) */
+  pluginSkills?: Array<{ plugin: string; skills: Array<{ name: string; description: string }> }> | null
   agents: AgentLike[]
   query: string
 }
@@ -168,6 +170,25 @@ export function yourPlugins(input: PluginViewInput): YourPluginRow[] {
     })
   }
 
+  // -- PL5: le skill dei PLUGIN (in sola lettura: si aggiornano col plugin) --
+  for (const group of input.pluginSkills ?? []) {
+    for (const sk of group.skills) {
+      if (q && !matchesQuery(sk.name.toLowerCase(), q) && !matchesQuery(sk.description.toLowerCase(), q)) continue
+      rows.push({
+        key: `pluginskill:${group.plugin}/${sk.name}`,
+        kind: 'skill',
+        name: sk.name,
+        logo: null,
+        gray: { type: 'skill', strada: 'plugin', origin: group.plugin },
+        state: 'active',
+        verified: false,
+        bots: { all: true, names: [], extra: 0 },
+        open: { kind: 'skill', folder: sk.name },
+        countLabel: `/${sk.name}`
+      })
+    }
+  }
+
   // -- le skill della libreria (PL5 le porta in pagina come le altre) --
   for (const s of input.skills ?? []) {
     if (q && !matchesQuery(s.name.toLowerCase(), q) && !matchesQuery(s.description.toLowerCase(), q)) continue
@@ -250,6 +271,10 @@ export function grayLineOf(row: YourPluginRow, lang: 'it' | 'en'): string {
     // l'origine della skill: GitHub quando ci ARRIVATA (o lo conserva),
     // altrimenti Homun — mai un'origine inventata
     parts.push(row.gray.origin === 'github' ? 'GitHub' : stradaLabel('skill', undefined, lang))
+  } else if (row.gray.strada === 'plugin' && row.gray.type === 'skill') {
+    // PL5: una skill di plugin: «Skill · da plugin · <nome>»
+    parts.push(stradaLabel('plugin', undefined, lang))
+    if (row.gray.origin) parts.push(row.gray.origin)
   } else {
     parts.push(stradaLabel(row.gray.strada, row.gray.origin, lang))
     if (row.gray.origin && row.gray.strada !== 'direct') parts.push(row.gray.origin)

@@ -409,8 +409,8 @@ function SkillDetailSheet({ folder, onDone, onClose }: { folder: string; onDone(
   return <SkillEditor folder={folder} onDone={onDone} onCancel={onClose} embedded />
 }
 
-/** Il dettaglio di una skill di PLUGIN: sola lettura. */
-function PluginDetail({ name, plugins, onClose }: { name: string; plugins: Array<{ plugin: string; skills: Array<{ name: string; description: string }> }>; onClose(): void }): React.ReactNode {
+/** Il dettaglio di una skill di PLUGIN: sola lettura (PL5: esportata per la pagina Plugin). */
+export function PluginDetail({ name, plugins, onClose }: { name: string; plugins: Array<{ plugin: string; skills: Array<{ name: string; description: string }> }>; onClose(): void }): React.ReactNode {
   const { i18n } = useLingui()
   const group = plugins.find((g) => g.skills.some((s) => s.name === name))
   const skill = group?.skills.find((s) => s.name === name)
@@ -850,7 +850,7 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
  * da quello del catalogo («Aggiornamento disponibile»), l'aggiornamento usa
  * il flusso di oggi: diff vecchio → nuovo, versione vecchia conservata.
  */
-function CatalogPreview({ entry, state, installedFolder, onClose, onChanged }: {
+export function CatalogPreview({ entry, state, installedFolder, onClose, onChanged }: {
   entry: SkillCatalogEntry
   state: SkillCatalogInstallState
   installedFolder: string | null

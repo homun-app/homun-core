@@ -30,7 +30,7 @@ describe("B1 → PL1: «Skill» non sta più nel menu: la casa è la pagina Plug
   it('la pagina Plugin ha il segmento Skill e riusa l\'editor di SkillsWindow', () => {
     const panel = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
     expect(panel).toMatch(/seg === 'skills'/)
-    expect(panel).toMatch(/import \{ SkillEditor \} from '\.\/SkillsWindow'/)
+    expect(panel).toMatch(/import \{ SkillEditor, PluginDetail, CatalogPreview \} from '\.\/SkillsWindow'/)
     // il rimando del pannello del bot filtra sul bot (skillsFilterAgent)
     const right = readFileSync(fileURLToPath(new URL('../components/RightPanel.tsx', import.meta.url)), 'utf8')
     expect(right).toMatch(/setSkillsFilterAgent\(activeId\); openPlugin\(\{ kind: 'segment', seg: 'skills'/)

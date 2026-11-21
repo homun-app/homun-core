@@ -232,6 +232,43 @@ describe('PL3: la tabella «Collegati» (tavola 10)', () => {
   })
 })
 
+describe('PL5: le skill in pagina come le altre (libreria, plugin, catalogo)', () => {
+  it('il segmento Skill mostra la skill della libreria e quella del plugin con la riga grigia, e il catalogo con le sue categorie', async () => {
+    const { PluginPanel } = await import('../components/PluginPanel')
+    const { useStore } = await import('../store')
+    stubApiMethod('connectorsInstalled', () => ({ servers: [], plugins: [] }))
+    stubApiMethod('skillsCatalog', () => [
+      { id: 'descrizioni-di-job', source: { repo: 'anthropics/skills', commit: 'a'.repeat(40), path: '' }, license: 'MIT', category: 'writing', description: { it: 'Descrizioni di job', en: 'Job descriptions' }, files: { exclude: [] }, reviewed: true }
+    ])
+    setStoreStateForRender(useStore, {
+      pluginOpen: true, connectors: [], composio: null, composioGateway: null,
+      agents: [{ id: 'a-1', name: 'Competitoor', description: '', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 }]
+    })
+    const out = renderHtml(createElement(PluginPanel, {
+      initial: {
+        seg: 'skills',
+        skills: [{ name: 'fatture', folder: 'fatture', description: 'Legge le fatture', enabledFor: ['*'], source: 'user', createdAt: 1, updatedAt: 1, files: ['esempio.xml'], valid: true, issues: [] }],
+        pluginSkills: [{ plugin: 'rag-docs', skills: [{ name: 'rag', description: 'Ricerca nei documenti' }] }],
+        skillCatalog: [
+          { id: 'descrizioni-di-job', source: { repo: 'anthropics/skills', commit: 'a'.repeat(40), path: '' }, license: 'MIT', category: 'writing', description: { it: 'Descrizioni di job', en: 'Job descriptions' }, files: { exclude: [] }, reviewed: true }
+        ]
+      }
+    } as never))
+    const root = parseHtml(out)
+    const texts = findAll(root, () => true).map((n) => textOf(n)).join('\n')
+    // la riga grigia giusta per ciascuna (il nome della libreria si umanizza)
+    expect(texts).toContain('Fatture')
+    expect(texts).toContain('Skill · Homun')
+    expect(texts).toContain('rag')
+    expect(texts).toContain('Skill · da plugin · rag-docs')
+    // il catalogo con le sue categorie (la ricerca e le categorie valgono anche per le skill)
+    expect(texts).toContain('Sfoglia')
+    expect(texts).toContain('Scrittura')
+    expect(texts).toContain('Descrizioni di job')
+    setStoreStateForRender(useStore, { connectors: [], composio: null, composioGateway: null })
+  })
+})
+
 describe('PL1: la pagina Plugin (render vero, api finta)', () => {
   it('titolo, frase, ricerca, segmenti e bottone Aggiungi con le SEI voci', async () => {
     const { PluginPanel } = await import('../components/PluginPanel')
