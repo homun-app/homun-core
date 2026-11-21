@@ -5,7 +5,7 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
-## [0.3.1001-beta.16] — 2026-11-21
+## [0.3.1001-beta.17] — 2026-11-21
 
 Meno richieste inutili, server MCP che funzionano davvero, e bot e team
 che si gestiscono dalla barra.
