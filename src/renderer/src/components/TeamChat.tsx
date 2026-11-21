@@ -274,7 +274,7 @@ export function TeamChat() {
     return (
       <main className="flex flex-1 items-center justify-center text-muted-foreground">
         <button className="transition hover:text-foreground" onClick={() => openGroup(null)}>
-          <Trans>Squadra non più disponibile — chiudi</Trans>
+          <Trans>Team non più disponibile — chiudi</Trans>
         </button>
       </main>
     )
@@ -287,8 +287,8 @@ export function TeamChat() {
     .filter((a): a is Agent => !!a && (a.status === 'thinking' || a.status === 'running'))
     .slice(0, 3)
   const placeholder = coordinator
-    ? i18n.t(msg`Scrivi alla squadra · risponde ${coordinator.name} (@ per un altro)`)
-    : i18n.t(msg`Scrivi alla squadra (@ per un bot)`)
+    ? i18n.t(msg`Scrivi al team · risponde ${coordinator.name} (@ per un altro)`)
+    : i18n.t(msg`Scrivi al team (@ per un bot)`)
 
   const sendNow = (): void => {
     if (!text.trim()) return
@@ -367,7 +367,7 @@ export function TeamChat() {
           </div>
         )}
         {groupMessages.length === 0 && (
-          <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Nessun messaggio nella squadra.</Trans></p>
+          <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Nessun messaggio nel team.</Trans></p>
         )}
         <div className="mx-auto max-w-3xl space-y-4">
           {/* Q4 (fase squadra): la timeline fonde i messaggi e le card di

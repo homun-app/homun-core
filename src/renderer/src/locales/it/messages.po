@@ -174,13 +174,13 @@ msgstr "{0} · {1}"
 
 #. placeholder {0}: group.name
 #: src/renderer/src/components/ApprovalsQueue.tsx
-msgid "{0} · tutte le richieste della squadra, in un posto"
-msgstr "{0} · tutte le richieste della squadra, in un posto"
+msgid "{0} · tutte le richieste del team, in un posto"
+msgstr "{0} · tutte le richieste del team, in un posto"
 
 #. placeholder {0}: group.name
 #: src/renderer/src/components/TeamAutonomySheet.tsx
-msgid "{0} · vale per tutti i bot della squadra, finché la squadra esiste"
-msgstr "{0} · vale per tutti i bot della squadra, finché la squadra esiste"
+msgid "{0} · vale per tutti i bot del team, finché il team esiste"
+msgstr "{0} · vale per tutti i bot del team, finché il team esiste"
 
 #. placeholder {0}: memories === null ? '…' : `${memories} note`
 #. placeholder {0}: skills === null ? '…' : `${skills}`
@@ -457,7 +457,7 @@ msgstr "{name} non ha un modello con cui rispondere: imposta il modello principa
 #: src/renderer/src/components/Chat.tsx
 #: src/shared/ui-messages.ts
 msgid "group.nowCoordinates"
-msgstr "{name} ora coordina la squadra"
+msgstr "{name} ora coordina il team"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1128,6 +1128,10 @@ msgstr "Apri Elementi login e attiva Homun."
 msgid "Apri i membri di {0}"
 msgstr "Apri i membri di {0}"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Apri il team"
+msgstr "Apri il team"
+
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 msgstr "Apri Impostazioni → Approvazione automatica con una regola precompilata"
@@ -1160,10 +1164,6 @@ msgstr "Apri la finestra dell'app per autorizzare."
 #: src/shared/ui-messages.ts
 msgid "conn.needsAuthOpenWindow"
 msgstr "Apri la finestra di Homun per autorizzare"
-
-#: src/renderer/src/components/ApprovalsCenter.tsx
-msgid "Apri la squadra"
-msgstr "Apri la squadra"
 
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Apri lo schermo"
@@ -1284,8 +1284,8 @@ msgid "Automatico"
 msgstr "Automatico"
 
 #: src/renderer/src/components/TeamAutonomySheet.tsx
-msgid "Autonomia della squadra"
-msgstr "Autonomia della squadra"
+msgid "Autonomia del team"
+msgstr "Autonomia del team"
 
 #: src/renderer/src/components/TeamChat.tsx
 msgid "Autonomia:"
@@ -1405,6 +1405,11 @@ msgstr "bot"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Bot"
 msgstr "Bot"
+
+#. placeholder {0}: g.rows.length
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "bot · {0}"
+msgstr "bot · {0}"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Bot che la usano"
@@ -1551,8 +1556,8 @@ msgid "Cerca (Ollama, Anthropic…)"
 msgstr "Cerca (Ollama, Anthropic…)"
 
 #: src/renderer/src/components/Sidebar.tsx
-msgid "Cerca bot e squadre"
-msgstr "Cerca bot e squadre"
+msgid "Cerca bot e team"
+msgstr "Cerca bot e team"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Cerca di nuovo"
@@ -1710,8 +1715,8 @@ msgid "chiede un'azione"
 msgstr "chiede un'azione"
 
 #: src/renderer/src/components/ApprovalsQueue.tsx
-msgid "chiede un'azione di squadra"
-msgstr "chiede un'azione di squadra"
+msgid "chiede un'azione di team"
+msgstr "chiede un'azione di team"
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Chiedi"
@@ -2821,8 +2826,8 @@ msgid "Elimina il server"
 msgstr "Elimina il server"
 
 #: src/renderer/src/components/RightPanel.tsx
-msgid "Elimina squadra"
-msgstr "Elimina squadra"
+msgid "Elimina team"
+msgstr "Elimina team"
 
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 msgid "Eliminare {size}? Verranno cancellati per sempre i file che i bot hanno creato nel loro computer. Questa azione non si può annullare."
@@ -2830,8 +2835,8 @@ msgstr "Eliminare {size}? Verranno cancellati per sempre i file che i bot hanno 
 
 #. placeholder {0}: group.name
 #: src/renderer/src/components/RightPanel.tsx
-msgid "Eliminare la squadra «{0}» e i suoi messaggi? I bot restano."
-msgstr "Eliminare la squadra «{0}» e i suoi messaggi? I bot restano."
+msgid "Eliminare il team «{0}» e i suoi messaggi? I bot restano."
+msgstr "Eliminare il team «{0}» e i suoi messaggi? I bot restano."
 
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "eliminare un bot"
@@ -3479,7 +3484,7 @@ msgstr "Ho messo in pausa le tue routine mentre eri via per evitare consumi inut
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "group.summaryPosted"
-msgstr "Ho pubblicato il riepilogo nella squadra «{name}»"
+msgstr "Ho pubblicato il riepilogo nel team «{name}»"
 
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Ho trovato questi modelli sul tuo Mac"
@@ -3617,7 +3622,7 @@ msgstr "Il bot ha provato a usare questa app ma la sessione è scaduta."
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.groupNotMember"
-msgstr "Il bot non è un membro della squadra."
+msgstr "Il bot non è un membro del team."
 
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "Il bot non ha ancora usato il suo computer."
@@ -3697,7 +3702,7 @@ msgstr "Il computer del bot"
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.groupCoordinatorNotMember"
-msgstr "Il coordinatore deve essere un membro della squadra."
+msgstr "Il coordinatore deve essere un membro del team."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Il costo è un minimo: alcuni modelli non hanno un prezzo."
@@ -4872,8 +4877,8 @@ msgid "mese"
 msgstr "mese"
 
 #: src/renderer/src/components/ApprovalsQueue.tsx
-msgid "messaggi tra bot della squadra"
-msgstr "messaggi tra bot della squadra"
+msgid "messaggi tra bot del team"
+msgstr "messaggi tra bot del team"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -5181,13 +5186,13 @@ msgstr "Nel computer dei bot i comandi girano senza chiedere: è isolato dal Mac
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
-msgid "cron.weekend"
-msgstr "nel weekend"
+msgid "approval.squadFixed"
+msgstr "Nel team «{tool}» lo decidi sempre tu: quest’azione chiede sempre la tua approvazione."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
-msgid "approval.squadFixed"
-msgstr "Nella squadra «{tool}» lo decidi sempre tu: quest’azione chiede sempre la tua approvazione."
+msgid "cron.weekend"
+msgstr "nel weekend"
 
 #: src/renderer/src/components/Chat.tsx
 msgid "Nessun agente"
@@ -5224,8 +5229,8 @@ msgid "Nessun lavoro qui: i compiti dei bot e le loro routine finiscono in quest
 msgstr "Nessun lavoro qui: i compiti dei bot e le loro routine finiscono in questo elenco."
 
 #: src/renderer/src/components/TeamChat.tsx
-msgid "Nessun messaggio nella squadra."
-msgstr "Nessun messaggio nella squadra."
+msgid "Nessun messaggio nel team."
+msgstr "Nessun messaggio nel team."
 
 #: src/renderer/src/components/Sidebar.tsx
 msgid "nessun modello"
@@ -5716,8 +5721,8 @@ msgid "Ogni azione con effetti passa da te."
 msgstr "Ogni azione con effetti passa da te."
 
 #: src/renderer/src/components/TeamAutonomySheet.tsx
-msgid "Ogni azione con effetti passa da te. Per provare una squadra nuova."
-msgstr "Ogni azione con effetti passa da te. Per provare una squadra nuova."
+msgid "Ogni azione con effetti passa da te. Per provare un team nuovo."
+msgstr "Ogni azione con effetti passa da te. Per provare un team nuovo."
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Ogni azione parte senza aspettare."
@@ -5846,8 +5851,8 @@ msgid "Pannello del bot"
 msgstr "Pannello del bot"
 
 #: src/renderer/src/components/TeamAutonomySheet.tsx
-msgid "parlarsi tra bot della squadra"
-msgstr "parlarsi tra bot della squadra"
+msgid "parlarsi tra bot del team"
+msgstr "parlarsi tra bot del team"
 
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Parti da un modello"
@@ -6126,8 +6131,8 @@ msgid "Principale"
 msgstr "Principale"
 
 #: src/renderer/src/components/RightPanel.tsx
-msgid "Prodotto dalla squadra"
-msgstr "Prodotto dalla squadra"
+msgid "Prodotto dal team"
+msgstr "Prodotto dal team"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Profilo"
@@ -7069,12 +7074,12 @@ msgstr "Scrivi a {0}"
 
 #. placeholder {0}: coordinator.name
 #: src/renderer/src/components/TeamChat.tsx
-msgid "Scrivi alla squadra · risponde {0} (@ per un altro)"
-msgstr "Scrivi alla squadra · risponde {0} (@ per un altro)"
+msgid "Scrivi al team · risponde {0} (@ per un altro)"
+msgstr "Scrivi al team · risponde {0} (@ per un altro)"
 
 #: src/renderer/src/components/TeamChat.tsx
-msgid "Scrivi alla squadra (@ per un bot)"
-msgstr "Scrivi alla squadra (@ per un bot)"
+msgid "Scrivi al team (@ per un bot)"
+msgstr "Scrivi al team (@ per un bot)"
 
 #: src/renderer/src/components/WidgetCard.tsx
 msgid "Scrivi tu…"
@@ -7151,7 +7156,7 @@ msgstr "serve anche il modello quando scegli un provider per la routine"
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.groupNameMissing"
-msgstr "Serve il nome della squadra."
+msgstr "Serve il nome del team."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -7528,20 +7533,6 @@ msgstr "Sposta su"
 msgid "dialog.moveToApplications.failedTitle"
 msgstr "Spostamento non riuscito"
 
-#: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/ApprovalsQueue.tsx
-#: src/renderer/src/lib/approvals-center.ts
-msgid "squadra"
-msgstr "squadra"
-
-#: src/renderer/src/components/TeamChat.tsx
-msgid "Squadra non più disponibile — chiudi"
-msgstr "Squadra non più disponibile — chiudi"
-
-#: src/renderer/src/components/Sidebar.tsx
-msgid "Squadre"
-msgstr "Squadre"
-
 #. placeholder {0}: input.activityTool
 #: src/renderer/src/bot/bot-state.ts
 msgid "Sta facendo: {0}"
@@ -7644,6 +7635,25 @@ msgstr "Task {id} annullato: esecuzione saltata."
 #: src/shared/ui-messages.ts
 msgid "rpc.taskNotFound"
 msgstr "Task non trovato"
+
+#: src/renderer/src/components/ApprovalsCenter.tsx
+#: src/renderer/src/components/ApprovalsQueue.tsx
+#: src/renderer/src/lib/approvals-center.ts
+msgid "team"
+msgstr "team"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Team"
+msgstr "Team"
+
+#. placeholder {0}: g.rows.length
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "team · {0}"
+msgstr "team · {0}"
+
+#: src/renderer/src/components/TeamChat.tsx
+msgid "Team non più disponibile — chiudi"
+msgstr "Team non più disponibile — chiudi"
 
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/GuideView.tsx
@@ -7764,6 +7774,10 @@ msgstr "tool (mcp__…__…)"
 msgid "tool scelto dal connettore: {chosen}"
 msgstr "tool scelto dal connettore: {chosen}"
 
+#: src/renderer/src/components/ApprovalsQueue.tsx
+msgid "Torna al team"
+msgstr "Torna al team"
+
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/PageView.tsx
@@ -7781,10 +7795,6 @@ msgstr "Torna alla libreria"
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "torna alla lista"
 msgstr "torna alla lista"
-
-#: src/renderer/src/components/ApprovalsQueue.tsx
-msgid "Torna alla squadra"
-msgstr "Torna alla squadra"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -8000,8 +8010,8 @@ msgstr "Un computer tutto suo, dentro il tuo Mac: lavora lì senza toccare i tuo
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
-msgid "Un consenso di 8 ore per tutta la squadra, solo per questo"
-msgstr "Un consenso di 8 ore per tutta la squadra, solo per questo"
+msgid "Un consenso di 8 ore per tutto il team, solo per questo"
+msgstr "Un consenso di 8 ore per tutto il team, solo per questo"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi"
@@ -8028,17 +8038,17 @@ msgstr "Un po’ di tutto"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "rpc.groupMembersRange"
+msgstr "Un team ha da 1 a 6 bot."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "notice.memoryQuarantined"
 msgstr "Una cosa da ricordare aspetta la tua conferma."
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Una di queste regole vince sempre sulle altre: l’azione diventa una card."
 msgstr "Una di queste regole vince sempre sulle altre: l’azione diventa una card."
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "rpc.groupMembersRange"
-msgstr "Una squadra ha da 1 a 6 bot."
 
 #: src/renderer/src/components/Chat.tsx
 msgid "urgente"

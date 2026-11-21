@@ -64,6 +64,6 @@ describe('Q6: il documento si apre a lato anche con la squadra aperta', () => {
     const html = renderHtml(createElement(TeamChat))
     // nessun marcato di pagina nell'HTML (il mock rende null) e la timeline c'è
     expect(html).not.toContain('data-testid="page-view"')
-    expect(html).toContain('Nessun messaggio nella squadra')
+    expect(html).toContain('Nessun messaggio nel team')
   })
 })

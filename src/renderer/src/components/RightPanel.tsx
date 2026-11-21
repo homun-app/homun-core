@@ -1140,7 +1140,7 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
         {/* Q5: «Prodotto dalla squadra» — i documenti creati nei turni della squadra */}
         {groupOverview.produced.length > 0 && (
           <div className="mt-4">
-            <p className="mb-1 text-[13px] font-semibold"><Trans>Prodotto dalla squadra</Trans></p>
+            <p className="mb-1 text-[13px] font-semibold"><Trans>Prodotto dal team</Trans></p>
             <div className="space-y-1" data-testid="team-produced">
               {groupOverview.produced.map((it, i) => (
                 <button
@@ -1224,13 +1224,13 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
         {autonomyOpen && <TeamAutonomySheet group={group} onClose={() => setAutonomyOpen(false)} />}
         {confirmDelete ? (
           <div className="mt-6 space-y-1.5">
-            <p className="text-xs text-destructive"><Trans>Eliminare la squadra «{group.name}» e i suoi messaggi? I bot restano.</Trans></p>
+            <p className="text-xs text-destructive"><Trans>Eliminare il team «{group.name}» e i suoi messaggi? I bot restano.</Trans></p>
             <div className="flex gap-2">
               <button
                 className="flex-1 rounded-[12px] bg-destructive/10 px-3 py-2 text-sm text-destructive transition hover:bg-destructive/20"
                 onClick={() => void groupDelete(group.id)}
               >
-                <Trans>Elimina squadra</Trans>
+                <Trans>Elimina team</Trans>
               </button>
               <button className="flex-1 rounded-[12px] bg-muted px-3 py-2 text-sm transition hover:bg-accent" onClick={() => setConfirmDelete(false)}>
                 <Trans>Annulla</Trans>
@@ -1239,7 +1239,7 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
           </div>
         ) : (
           <button className="mt-6 w-full rounded-[12px] bg-muted px-3 py-2 text-sm text-muted-foreground transition hover:text-destructive" onClick={() => setConfirmDelete(true)}>
-            <Trans>Elimina squadra</Trans>
+            <Trans>Elimina team</Trans>
           </button>
         )}
       </div>

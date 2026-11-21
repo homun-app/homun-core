@@ -564,7 +564,7 @@ try {
   const centerText = () => pageEval(`return document.querySelector('[data-testid="approvals-center"]').textContent`)
   let text = await centerText()
   check('i gruppi giusti: Weekend Torino · 2, Fatture marzo · 2, Ricerche · 1',
-    text.includes('Weekend Torino') && text.includes('squadra · 2') &&
+    text.includes('Weekend Torino') && text.includes('team · 2') &&
     text.includes('Fatture marzo') && text.includes('bot · 1') && text.includes('Ricerche'),
     String(text).slice(0, 300))
   check('i filtri con i conteggi: Tutte · 5, I tuoi dati · 2, Invii · 1, Siti · 2',

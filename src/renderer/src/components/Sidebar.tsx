@@ -828,8 +828,8 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
                     setSearchOpen(false)
                   }
                 }}
-                placeholder={t`Cerca bot e squadre`}
-                aria-label={t`Cerca bot e squadre`}
+                placeholder={t`Cerca bot e team`}
+                aria-label={t`Cerca bot e team`}
                 className="no-drag w-full rounded-xl bg-muted px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
               />
             </div>
@@ -884,7 +884,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
                 >
                   <Plus className="size-3.5" />
                 </button>
-              }><Trans>Squadre</Trans></Title>
+              }><Trans>Team</Trans></Title>
             )}
             {teamsCut.visible.map((team) => (
               <TeamRows key={team.group.id} team={team} states={states} lastSendAt={lastSendAtMap} now={now} />
@@ -939,8 +939,8 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
                 setSearchOpen(false)
               }
             }}
-            placeholder={t`Cerca bot e squadre`}
-            aria-label={t`Cerca bot e squadre`}
+            placeholder={t`Cerca bot e team`}
+            aria-label={t`Cerca bot e team`}
             className="no-drag w-full rounded-xl bg-card px-3 py-2 text-sm shadow-soft outline-none placeholder:text-muted-foreground"
           />
         </div>

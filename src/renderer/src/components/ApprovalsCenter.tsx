@@ -27,7 +27,7 @@ const CATEGORY_LABEL: Record<SquadPendingApprovalInfo['category'], MessageDescri
   invio: msg`invio verso fuori`,
   'sito-interattivo': msg`sito nuovo, interattivo`,
   mac: msg`il tuo Mac`,
-  squadra: msg`squadra`,
+  squadra: msg`team`,
   altro: msg`altro`
 }
 
@@ -161,7 +161,7 @@ function CenterCard({ r, now }: { r: ApprovalsCenterRow; now: number }) {
                 <button
                   className="rounded-full bg-muted px-4 py-2 text-sm transition hover:bg-accent"
                   data-testid="approval-mission"
-                  title={i18n.t(msg`Un consenso di 8 ore per tutta la squadra, solo per questo`)}
+                  title={i18n.t(msg`Un consenso di 8 ore per tutto il team, solo per questo`)}
                   onClick={() => resolve('allow', 'mission')}
                 >
                   <Trans>Consenti per questa missione</Trans>
@@ -220,7 +220,7 @@ function GroupSection({ g, now }: { g: ApprovalsGroup; now: number }) {
         <h2 className="font-display text-lg">
           {g.kind === 'squad' ? g.squad!.name : g.bot!.botName}
           <span className="ml-2 text-sm font-normal text-muted-foreground">
-            {g.kind === 'squad' ? `squadra · ${g.rows.length}` : `bot · ${g.rows.length}`}
+            {g.kind === 'squad' ? i18n.t(msg`team · ${g.rows.length}`) : i18n.t(msg`bot · ${g.rows.length}`)}
           </span>
         </h2>
         {g.kind === 'squad' && (
@@ -228,7 +228,7 @@ function GroupSection({ g, now }: { g: ApprovalsGroup; now: number }) {
             className="flex items-center gap-0.5 text-sm text-muted-foreground underline-offset-2 transition hover:text-foreground hover:underline"
             onClick={() => { openGroup(g.squad!.id); setApprovalsOpen(false) }}
           >
-            <Trans>Apri la squadra</Trans> <ChevronRight className="size-3.5" />
+            <Trans>Apri il team</Trans> <ChevronRight className="size-3.5" />
           </button>
         )}
       </div>

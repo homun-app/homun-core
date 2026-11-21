@@ -91,10 +91,10 @@ describe('A2: il centro «Da approvare» (tavola 4)', () => {
     expect(text).toContain('Siti · 1')
     // i gruppi: le squadre, poi i bot singoli
     expect(text).toContain('Weekend Torino')
-    expect(text).toContain('squadra · 2')
-    expect(text).toContain('Apri la squadra')
+    expect(text).toContain('team · 2')
+    expect(text).toContain('Apri il team')
     expect(text).toContain('Fatture marzo')
-    expect(text).toContain('squadra · 1')
+    expect(text).toContain('team · 1')
     expect(text).toContain('Ricerche')
     expect(text).toContain('bot · 1')
     // la card del sottoagente mostra il padre

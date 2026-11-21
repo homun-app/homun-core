@@ -160,7 +160,7 @@ export const UI = {
   // ---- motivi delle card di approvazione (ui accanto a reason, C2) ----
   approvalToolRequires: msg({ id: 'approval.toolRequires', message: '{tool} richiede approvazione' }),
   // Q1 (fase squadra): l'insieme FISSO nei turni di squadra — sempre all'utente
-  approvalSquadFixed: msg({ id: 'approval.squadFixed', message: 'Nella squadra «{tool}» lo decidi sempre tu: quest’azione chiede sempre la tua approvazione.' }),
+  approvalSquadFixed: msg({ id: 'approval.squadFixed', message: 'Nel team «{tool}» lo decidi sempre tu: quest’azione chiede sempre la tua approvazione.' }),
   approvalToolTargetRequires: msg({ id: 'approval.toolTargetRequires', message: '{tool} ({target}) richiede approvazione' }),
   // fase use-app (U3): la card dice l'app o l'host, mai la chiave tecnica
   approvalUseApp: msg({ id: 'approval.useApp', message: 'Vuole usare {app} sul tuo Mac.' }),
@@ -311,12 +311,12 @@ export const UI = {
   groupHourlyCap: msg({ id: 'group.hourlyCap', message: 'Tetto orario raggiunto (40 messaggi di bot in un’ora): i turni del gruppo riprendono a breve.' }),
   // fase 16b (S1.1): il cambio di coordinatore — riga di sistema del gruppo
   // (testo salvato inglese col nome in coda, la vista la riconosce e la traduce)
-  groupNowCoordinates: msg({ id: 'group.nowCoordinates', message: '{name} ora coordina la squadra' }),
+  groupNowCoordinates: msg({ id: 'group.nowCoordinates', message: '{name} ora coordina il team' }),
   // fase 16c correzioni (R3): il membro senza NESSUN modello — riga di sistema
   // del giro saltato con un motivo visibile (stessa convenzione col nome in coda)
   groupMemberNoModel: msg({ id: 'group.memberNoModel', message: '{name} non ha un modello con cui rispondere: imposta il modello principale (o il suo) perché riprenda a parlare.' }),
   // fase 16b (S1.2): la riga discreta nella chat privata del coordinatore
-  groupSummaryPosted: msg({ id: 'group.summaryPosted', message: 'Ho pubblicato il riepilogo nella squadra «{name}»' }),
+  groupSummaryPosted: msg({ id: 'group.summaryPosted', message: 'Ho pubblicato il riepilogo nel team «{name}»' }),
 
   // ---- notifiche native (C3; l'anteprima resta il testo vero) ----
   notifyNeedsInput: msg({ id: 'notify.needsInput', message: '{agent} ha bisogno di te' }),
@@ -464,12 +464,12 @@ export const UI = {
   rpcSubagentNotFound: msg({ id: 'rpc.subagentNotFound', message: 'Sottoagente non trovato' }),
   rpcGroupNotFound: msg({ id: 'rpc.groupNotFound', message: 'Gruppo non trovato' }),
   // fase 16b (S1.3): validazioni delle RPC delle squadre (UiError inglese + id)
-  rpcGroupNameMissing: msg({ id: 'rpc.groupNameMissing', message: 'Serve il nome della squadra.' }),
-  rpcGroupMembersRange: msg({ id: 'rpc.groupMembersRange', message: 'Una squadra ha da 1 a 6 bot.' }),
+  rpcGroupNameMissing: msg({ id: 'rpc.groupNameMissing', message: 'Serve il nome del team.' }),
+  rpcGroupMembersRange: msg({ id: 'rpc.groupMembersRange', message: 'Un team ha da 1 a 6 bot.' }),
   rpcGroupCoordinatorRequired: msg({ id: 'rpc.groupCoordinatorRequired', message: 'Scegli il coordinatore: deve essere uno dei membri.' }),
-  rpcGroupCoordinatorNotMember: msg({ id: 'rpc.groupCoordinatorNotMember', message: 'Il coordinatore deve essere un membro della squadra.' }),
+  rpcGroupCoordinatorNotMember: msg({ id: 'rpc.groupCoordinatorNotMember', message: 'Il coordinatore deve essere un membro del team.' }),
   rpcGroupMemberUnknown: msg({ id: 'rpc.groupMemberUnknown', message: 'Questi id non sono bot: {ids}.' }),
-  rpcGroupNotMember: msg({ id: 'rpc.groupNotMember', message: 'Il bot non è un membro della squadra.' }),
+  rpcGroupNotMember: msg({ id: 'rpc.groupNotMember', message: 'Il bot non è un membro del team.' }),
   rpcTextMissing: msg({ id: 'rpc.textMissing', message: 'Testo mancante' }),
   rpcSecretSaveFailed: msg({
     id: 'rpc.secretSaveFailed',

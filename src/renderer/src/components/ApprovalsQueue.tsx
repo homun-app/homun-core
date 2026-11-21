@@ -19,7 +19,7 @@ const CATEGORY_LABEL: Record<SquadPendingApprovalInfo['category'], MessageDescri
   invio: msg`invio verso fuori`,
   'sito-interattivo': msg`sito nuovo, interattivo`,
   mac: msg`il tuo Mac`,
-  squadra: msg`squadra`,
+  squadra: msg`team`,
   altro: msg`altro`
 }
 
@@ -39,7 +39,7 @@ export function pendingWantsLine(r: SquadPendingApprovalInfo, i18n: ReturnType<t
     invio: msg`vuole inviare verso fuori`,
     'sito-interattivo': msg`vuole aprire un sito`,
     mac: msg`vuole usare il tuo Mac`,
-    squadra: msg`chiede un'azione di squadra`,
+    squadra: msg`chiede un'azione di team`,
     altro: msg`chiede un'azione`
   }
   return `${r.agentName} ${i18n.t(wants[r.category])}`
@@ -49,7 +49,7 @@ const ACTIVITY_LABEL: Record<string, MessageDescriptor> = {
   files: msg`file scritti nel computer`,
   commands: msg`comandi nel computer, senza rete`,
   pages: msg`pagine web lette`,
-  'bot-messages': msg`messaggi tra bot della squadra`
+  'bot-messages': msg`messaggi tra bot del team`
 }
 
 const WHY_LABEL: Record<string, MessageDescriptor> = {
@@ -89,7 +89,7 @@ export function ApprovalsQueue() {
           <div className="min-w-0">
             <h1 className="flex items-center gap-2 font-display text-2xl"><ShieldCheck className="size-5 text-muted-foreground" /><Trans>Da approvare</Trans></h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              <Trans>{group.name} · tutte le richieste della squadra, in un posto</Trans>
+              <Trans>{group.name} · tutte le richieste del team, in un posto</Trans>
             </p>
           </div>
           <button
@@ -97,7 +97,7 @@ export function ApprovalsQueue() {
             data-testid="approvals-back"
             onClick={() => setApprovalsQueueOpen(false)}
           >
-            <ArrowLeft className="size-4" /> <Trans>Torna alla squadra</Trans>
+            <ArrowLeft className="size-4" /> <Trans>Torna al team</Trans>
           </button>
         </div>
       </div>
@@ -131,7 +131,7 @@ export function ApprovalsQueue() {
                       <button
                         className="rounded-full bg-muted px-4 py-2 text-sm transition hover:bg-accent"
                         data-testid="approval-mission"
-                        title={i18n.t(msg`Un consenso di 8 ore per tutta la squadra, solo per questo`)}
+                        title={i18n.t(msg`Un consenso di 8 ore per tutto il team, solo per questo`)}
                         onClick={() => resolveGroupApproval(r.agentId, r.approvalId, 'allow', 'mission')}
                       >
                         <Trans>Consenti per questa missione</Trans>

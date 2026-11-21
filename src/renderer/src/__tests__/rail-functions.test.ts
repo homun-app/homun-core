@@ -41,7 +41,7 @@ describe('R7 — la rotaia ha Crea, Cerca e menu account (guarda sul codice)', (
     expect(collapsed).toContain('aria-label={i18n.t(msg`Cerca`)}')
     // l'input sospeso è nel render della Sidebar, non dentro la colonna
     expect(SIDEBAR).toContain("{collapsed && searchOpen && (")
-    expect(SIDEBAR).toContain('placeholder={t`Cerca bot e squadre`}')
+    expect(SIDEBAR).toContain('placeholder={t`Cerca bot e team`}')
   })
 
   it('il bottone in fondo apre il menu ACCOUNT; U2: la voce che allargava la barra è USCITA dal menu', () => {

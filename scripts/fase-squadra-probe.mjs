@@ -530,7 +530,7 @@ try {
   // =========== 4. il pannello del team (Q5) e la schermata Autonomia (Q1) ===========
   // B1: idem — anche «Torna alla squadra» deve riportare alla chat della
   // squadra: era un waitDom ignorato, ora è un check
-  check('Q5: «Torna alla squadra» riporta alla chat della squadra (composer)', await clickText('Torna alla squadra', { exact: true }) &&
+  check('Q5: «Torna al team» riporta alla chat del team (composer)', await clickText('Torna al team', { exact: true }) &&
     await waitDom(`document.querySelector('form textarea')`, 5_000))
   await waitQuiet()
   // il pannello del team: il bottone PanelRight da chiuso, ALTRIMENTI la
@@ -552,7 +552,7 @@ try {
   const counters = overview.members.find((m) => m.name === 'Treni')
   check('Q5: i contatori di Treni (1 file scritto nel turno di squadra)', counters && counters.filesWritten === 1, JSON.stringify(counters))
   const producedTitles = overview.produced.map((p) => p.title).join(' | ')
-  check('Q5: «Prodotto dalla squadra» ha la guida e il file', producedTitles.includes('Torino weekend — guida definitiva') && producedTitles.includes('01_treni.md'), producedTitles)
+  check('Q5: «Prodotto dal team» ha la guida e il file', producedTitles.includes('Torino weekend — guida definitiva') && producedTitles.includes('01_treni.md'), producedTitles)
   await shot('1-chat-di-squadra.png')
 
   await waitQuiet()

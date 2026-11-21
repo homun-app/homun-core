@@ -82,6 +82,6 @@ export const CATEGORY_SHORT: Record<SquadPendingApprovalInfo['category'], Messag
   invio: msg`invii`,
   'sito-interattivo': msg`siti interattivi`,
   mac: msg`uso del Mac`,
-  squadra: msg`squadra`,
+  squadra: msg`team`,
   altro: msg`altro`
 }

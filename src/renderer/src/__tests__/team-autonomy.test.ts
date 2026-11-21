@@ -35,10 +35,10 @@ describe('Q1: la schermata Autonomia della squadra (tavola 3 del disegno)', () =
   it('le TRE voci del disegno con le descrizioni giuste, «Libera nel computer» consigliata e selezionata', () => {
     const tree = renderSheet()
     const text = textOf(tree)
-    expect(text).toContain('Autonomia della squadra')
-    expect(text).toContain('Weekend Torino · vale per tutti i bot della squadra, finché la squadra esiste')
+    expect(text).toContain('Autonomia del team')
+    expect(text).toContain('Weekend Torino · vale per tutti i bot del team, finché il team esiste')
     expect(text).toContain('Chiede tutto')
-    expect(text).toContain('Ogni azione con effetti passa da te. Per provare una squadra nuova.')
+    expect(text).toContain('Ogni azione con effetti passa da te. Per provare un team nuovo.')
     expect(text).toContain('Libera nel computer')
     expect(text).toContain('consigliata')
     expect(text).toContain('Tutto quello che resta nel computer isolato lo fa da sola. Fuori dal computer chiede.')

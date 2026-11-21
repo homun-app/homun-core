@@ -29,7 +29,7 @@ export const AUTONOMY_CHOICES: ReadonlyArray<{
     value: 'ask',
     title: msg`Chiede tutto`,
     short: msg`chiede tutto`,
-    description: msg`Ogni azione con effetti passa da te. Per provare una squadra nuova.`
+    description: msg`Ogni azione con effetti passa da te. Per provare un team nuovo.`
   },
   {
     value: 'box',
@@ -51,7 +51,7 @@ const FA_DA_SOLA: MessageDescriptor[] = [
   msg`creare e modificare file nel computer`,
   msg`eseguire comandi e codice nel computer, senza rete`,
   msg`leggere e cercare pagine web`,
-  msg`parlarsi tra bot della squadra`,
+  msg`parlarsi tra bot del team`,
   msg`lanciare sottoagenti`,
   msg`scrivere documenti nella Libreria`
 ]
@@ -97,10 +97,10 @@ export function TeamAutonomySheet({ group, onClose }: { group: GroupInfo; onClos
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 font-display text-2xl">
             <ShieldCheck className="size-5 text-muted-foreground" />
-            <Trans>Autonomia della squadra</Trans>
+            <Trans>Autonomia del team</Trans>
           </DialogTitle>
           <p className="text-sm text-muted-foreground">
-            <Trans>{group.name} · vale per tutti i bot della squadra, finché la squadra esiste</Trans>
+            <Trans>{group.name} · vale per tutti i bot del team, finché il team esiste</Trans>
           </p>
         </DialogHeader>
         <fieldset className="space-y-2">
