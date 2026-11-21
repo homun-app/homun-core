@@ -56,6 +56,8 @@ import { buildMessages, visibleReplyEntries, stampedUserContent } from './histor
 import { planResume, INTERRUPTED_TOOL_RESULT } from './resume'
 import { isExternalSend, draftFromExternalCall, draftFromBatchSend, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig, type SendCandidate } from './external-send'
 import { normalizeOptions, findDismissibleWidgets } from './widgets'
+// X1 (fase sicurezza-beta16): le pure dei bot rimossi (store mockato nei test)
+import { agentRemoved, removedAgentRefusalOf } from '../store/removed'
 import { estimateTokensOf } from './memory'
 // fase memoria-engramma (M3): la sezione Memoria del prompt dal motore Engramma
 import { buildMemorySection } from '../memory/memory-store'
@@ -1138,6 +1140,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   const agent = getAgent(agentId)
   // fase 18a (E0): errore interno in inglese (la UI ha rpc.agentNotFound)
   if (!agent) throw new Error('agent not found')
+  // X1 (fase sicurezza-beta16): un bot archiviato o eliminato non PARTE —
+  // nemmeno per i figli di un padre rimosso (seguono il padre). Rifiuto
+  // quieto con log: il worker ha già annullato il job, questa è la rete di
+  // sicurezza per le chiamate dirette (kickstart, tool, test).
+  if (agentRemoved(agent, getAgent)) {
+    console.log(`[sandbotd] turno di ${agentId} rifiutato: bot rimosso (archiviato o eliminato)`)
+    return
+  }
   // fase 16c (C3.3): il modello risolto — quello del bot se l'ha scelto, il
   // principale se segue gli altri («Come gli altri»), niente altrimenti.
   // Fase 16c correzioni (R3.6): resolveAgentModel riceve anche i provider
@@ -4604,6 +4614,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             continue
           }
           const dest = listAgents().find((a) => a.id === toId)
+          // X1 (fase sicurezza-beta16): un bot RIMOSSO non è un destinatario —
+          // «questo bot non è disponibile», distinto dal id sconosciuto
+          const removedRefusal = removedAgentRefusalOf(getAgent(toId))
+          if (!dest && removedRefusal) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: removedRefusal })
+            continue
+          }
           if (!dest) {
             messages.push({ role: 'tool', toolCallId: call.id, content: `Recipient not found ("${toId}"): find the exact id with list_agents.` })
             continue

@@ -9,6 +9,9 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { JOBS_DDL } from './jobs'
+// X1 (fase sicurezza-beta16): le pure dei bot rimossi (il modulo resta leggero
+// e mockabile a parte: il loop lo usa dove lo store è mockato nei test)
+import { agentRemoved, removedAgentRefusalOf } from './removed'
 // fase 16c (C5): lo storico delle esecuzioni delle routine (Attività globale)
 import { ROUTINE_RUNS_DDL } from './routine-runs'
 import { GROUPS_DDL, migrateGroupCoordinators, migrateGroupAutonomy, ensureGroupCoordinator, groupsOfMember } from './groups'
@@ -336,8 +339,24 @@ function rowToAgent(r: AgentRow): Agent {
  * mainAgentOf, la destinazione di send_to_agent, l'onboarding, il tray e gli
  * orfani del browser (che il boot completa con allSubagentIds). getAgent(id)
  * continua a trovarli.
+ * X1 (fase sicurezza-beta16): il roster esclude ANCHE i rimossi
+ * (archived_at/deleted_at): un bot archiviato o eliminato non è più un
+ * destinatario, non compare nei tool né nelle note di sistema e non lavora.
  */
 export function listAgents(): Agent[] {
+  const rows = db().prepare(
+    'SELECT * FROM agents WHERE parent_id IS NULL AND archived_at IS NULL AND deleted_at IS NULL ORDER BY created_at'
+  ).all() as unknown as AgentRow[]
+  return rows.map(rowToAgent)
+}
+
+/**
+ * X1 (fase sicurezza-beta16): il roster COMPLETO, rimossi compresi — la strada
+ * ESPLICITA per chi li deve vedere davvero: la sezione «Archiviati» della UI
+ * (agents:list), la pulizia dei 30 giorni (expiredRemovedAgentIds lavora già
+ * per conto suo) e il ripristino. Nessun altro uso.
+ */
+export function listAgentsIncludingRemoved(): Agent[] {
   const rows = db().prepare('SELECT * FROM agents WHERE parent_id IS NULL ORDER BY created_at').all() as unknown as AgentRow[]
   return rows.map(rowToAgent)
 }
@@ -545,6 +564,26 @@ export function subagentRefusalUi(id: string): import('../../shared/types').UiTe
   const parent = subagentParentOf(id)
   if (!parent) return null
   return ui(UI.rpcNotABot, { id, parent: parent.name })
+}
+
+// ---- X1 (fase sicurezza-beta16): i bot rimossi stanno fermi ----
+
+/**
+ * X1: la guardia — true se la riga è un bot RIMOSSO (archived_at o deleted_at)
+ * o il FIGLIO di un padre rimosso (i sottoagenti seguono il padre). false per
+ * i vivi e per gli id sconosciuti (quelli non sono «rimossi»: spariti).
+ */
+export function agentIsRemoved(id: string): boolean {
+  return agentRemoved(getAgent(id), getAgent)
+}
+
+/**
+ * X1: il rifiuto per un id di bot RIMOSSO passato a un tool che vuole un bot
+ * (send_to_agent, gruppi): «questo bot non è disponibile». null se il bot non
+ * è rimosso (vivo, figlio o sconosciuto: quelli hanno i loro rifiuti).
+ */
+export function removedAgentRefusal(id: string): string | null {
+  return removedAgentRefusalOf(getAgent(id))
 }
 
 // ---- transcript (event-sourced) ----

@@ -22,7 +22,7 @@ beforeEach(() => {
 
 describe('OA5 jobs puri: trattenere e rilasciare il job che aspetta il modello', () => {
   it('holdJobForModel: il job torna in coda, lontanissimo, col waitingModel', () => {
-    const job = enqueueJob(db, { agentId: 'a_1', kind: 'user-message', payload: { text: 'ciao' }, runAt: 1_000, now: 1_000 })
+    const job = enqueueJob(db, { agentId: 'a_1', kind: 'user-message', payload: { text: 'ciao' }, runAt: 1_000, now: 1_000 })!
     db.exec("UPDATE jobs SET status = 'leased' WHERE id = " + job.id)
     holdJobForModel(db, job.id, 1_000)
     const [held] = listJobs(db)
@@ -32,8 +32,8 @@ describe('OA5 jobs puri: trattenere e rilasciare il job che aspetta il modello',
   })
 
   it('releaseJobsHeldForModel: solo i job trattenuti tornano dovuti ADESSO; conta i rilanciati', () => {
-    const held = enqueueJob(db, { agentId: 'a_1', kind: 'user-message', payload: { text: 'ciao', waitingModel: true }, runAt: 9_000_000_000_000, now: 1_000 })
-    const normal = enqueueJob(db, { agentId: 'a_1', kind: 'user-message', payload: { text: 'poi' }, runAt: 5_000, now: 1_000 })
+    const held = enqueueJob(db, { agentId: 'a_1', kind: 'user-message', payload: { text: 'ciao', waitingModel: true }, runAt: 9_000_000_000_000, now: 1_000 })!
+    const normal = enqueueJob(db, { agentId: 'a_1', kind: 'user-message', payload: { text: 'poi' }, runAt: 5_000, now: 1_000 })!
     const released = releaseJobsHeldForModel(db, 2_000)
     expect(released).toBe(1)
     const jobs = listJobs(db)
@@ -60,7 +60,7 @@ describe('OA5 worker+runner: il messaggio trattenuto parte una volta sola quando
     }
     let t = 1_000
     const worker = new JobWorker(db, { now: () => t, runJob: makeJobRunner(db, runTurnFake as never) }, () => undefined)
-    const job = enqueueJob(db, { agentId: 'a_1', kind: 'user-message', payload: { text: 'ciao' }, runAt: 1_000, now: 1_000 })
+    const job = enqueueJob(db, { agentId: 'a_1', kind: 'user-message', payload: { text: 'ciao' }, runAt: 1_000, now: 1_000 })!
     worker.poke()
     await worker.drain()
     // il job è tornato in coda, trattenuto, e NON è fallito

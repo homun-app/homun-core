@@ -687,8 +687,11 @@ export function groupWithMembers(group: Group): {
   return {
     id: group.id, name: group.name, description: group.description,
     createdBy: group.created_by, coordinatorId: group.coordinator_id,
+    // X1 (fase sicurezza-beta16): un membro rimosso è fuori dal roster ma
+    // resta nella riga del gruppo (K2 non tocca i dati): il NOME si legge
+    // dalla sua riga, non mostriamo l'id nudo
     members: groupMemberIds(group.id).map((id) => ({
-      agentId: id, name: names.get(id) ?? id, coordinator: id === group.coordinator_id
+      agentId: id, name: names.get(id) ?? getAgent(id)?.name ?? id, coordinator: id === group.coordinator_id
     })),
     createdAt: group.created_at,
     lastMessageAt: lastGroupMessageAt(group.id),

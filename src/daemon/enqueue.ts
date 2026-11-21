@@ -9,7 +9,7 @@
 // restare in coda; un messaggio che non risponde a un widget scarta i widget
 // pendenti con dismissOnMoveOn.
 import type { DatabaseSync } from 'node:sqlite'
-import { appendEntry, getEntries, updateAgent, updateEntryMeta } from '../main/store/db'
+import { appendEntry, getEntries, updateAgent, updateEntryMeta, agentIsRemoved } from '../main/store/db'
 import { activeJobForAgent, pendingUserMessages, enqueueJob, MAX_USER_MESSAGE_QUEUE, type Job } from '../main/store/jobs'
 import { emitLastEntry, supersedeIfPaused, dismissPendingWidgets, deliverToRunningTurn } from '../main/agent/loop'
 import { noteHumanText } from '../main/agent/user-language'
@@ -49,6 +49,14 @@ export function enqueueUserMessage(
   // (va nel meta dell'entry: al modello UNA riga di contesto, in chat mai)
   readingPage?: ReadingPageMeta
 ): Job | null {
+  // X1 (fase sicurezza-beta16): un bot archiviato o eliminato non riceve
+  // messaggi da NESSUNA strada (casella, connettori, altri bot, routine) —
+  // rifiuto PRIMA di ogni effetto, con la riga di log. I figli seguono il
+  // padre. La coda pura (enqueueJob) ha la STESSA guardia.
+  if (agentIsRemoved(agentId)) {
+    console.log(`[sandbotd] messaggio per ${agentId} rifiutato: bot rimosso (archiviato o eliminato)`)
+    return null
+  }
   // BC3 (fase beta.4 — correzioni): un messaggio scritto nella casella mentre
   // il turno è fermo su AWAITING_USER e l'ultima entry del bot è una card
   // ask_user ancora senza risposta DIVENTA la risposta a quella card, come il
@@ -108,6 +116,10 @@ export function enqueueUserMessage(
     runAt: now,
     now
   })
+  // X1: il rifiuto della coda (guardia centrale) — qui non dovrebbe mai
+  // capitare (la guardia in testa è già passata), ma la consegna al turno in
+  // corso non può usare un job che non c'è
+  if (!job) return null
   if (busyWithoutCard) {
     const directUserMessage = initiator === undefined && respondedTo === undefined
     // M5: il job si consuma al confine di passo del turno in corso; se il

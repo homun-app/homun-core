@@ -23,7 +23,7 @@ beforeEach(() => {
 })
 
 const userMsg = (agentId: string, runAt = NOW, text = 'ciao') =>
-  enqueueJob(db, { agentId, kind: 'user-message', payload: { text }, runAt, now: NOW })
+  enqueueJob(db, { agentId, kind: 'user-message', payload: { text }, runAt, now: NOW })!
 
 describe('enqueue e claim', () => {
   it('un job dovuto viene preso in lease con RETURNING (attempts parte da 1)', () => {
@@ -173,7 +173,7 @@ describe('cancellazione per agente eliminato', () => {
 
 describe('claimDueJobs col tetto maxSubagentLeases', () => {
   const subRun = (agentId: string, runAt = NOW) =>
-    enqueueJob(db, { agentId, kind: 'subagent-run', payload: { subagentId: agentId }, runAt, now: NOW })
+    enqueueJob(db, { agentId, kind: 'subagent-run', payload: { subagentId: agentId }, runAt, now: NOW })!
 
   it('5 job dovuti col tetto 3 → ne partono 3; finito uno → parte il quarto', () => {
     for (let i = 1; i <= 5; i++) subRun(`sub_${i}`)
@@ -219,7 +219,7 @@ describe('claimDueJobs col tetto maxSubagentLeases', () => {
 describe('correzioni 2 R3: il payload del user-message si svuota a fine corsa', () => {
   it('completeJob svuota il payload dei user-message; gli altri kind lo tengono', () => {
     const um = userMsg('a1')
-    const rr = enqueueJob(db, { agentId: 'a2', kind: 'routine-run', payload: { routineId: 7, title: 'Backup', prompt: 'fai il backup' }, runAt: NOW, now: NOW })
+    const rr = enqueueJob(db, { agentId: 'a2', kind: 'routine-run', payload: { routineId: 7, title: 'Backup', prompt: 'fai il backup' }, runAt: NOW, now: NOW })!
     completeJob(db, um.id)
     expect(getJobById(db, um.id)!.status).toBe('done')
     expect(getJobById(db, um.id)!.payload).toEqual({})
@@ -252,7 +252,7 @@ describe('correzioni 2 R3: il payload del user-message si svuota a fine corsa', 
     const oldFailed = userMsg('a1', NOW + 1, 'vecchio failed')
     db.prepare("UPDATE jobs SET status = 'failed' WHERE id = ?").run(oldFailed.id)
     const queued = userMsg('a1', NOW + 2, 'ancora in coda')
-    const oldRoutine = enqueueJob(db, { agentId: 'a1', kind: 'routine-run', payload: { routineId: 1, title: 't', prompt: 'p' }, runAt: NOW, now: NOW })
+    const oldRoutine = enqueueJob(db, { agentId: 'a1', kind: 'routine-run', payload: { routineId: 1, title: 't', prompt: 'p' }, runAt: NOW, now: NOW })!
     db.prepare("UPDATE jobs SET status = 'done' WHERE id = ?").run(oldRoutine.id)
     expect(clearUserMessageJobPayloads(db)).toBe(2)
     expect(getJobById(db, oldDone.id)!.payload).toEqual({})

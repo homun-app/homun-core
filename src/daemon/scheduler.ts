@@ -27,14 +27,17 @@ export interface SchedulerDeps {
   now(): number
 }
 
-/** Accoda il job di run di una routine (con l'evento che l'ha causata, se c'è). */
+/**
+ * Accoda il job di run di una routine (con l'evento che l'ha causata, se c'è).
+ * X1 (fase sicurezza-beta16): null se il bot è rimosso — la routine non gira.
+ */
 export function enqueueRoutineRun(
   db: DatabaseSync,
   r: Pick<Routine, 'id' | 'agent_id' | 'title' | 'prompt'>,
   now: number,
   event?: TriggerEventPayload,
   runAt?: number
-): Job {
+): Job | null {
   const payload: Record<string, unknown> = { routineId: r.id, title: r.title, prompt: r.prompt }
   if (event) payload.event = event
   return enqueueJob(db, {
@@ -76,7 +79,9 @@ export function tickScheduler(db: DatabaseSync, emit: Emitter, now: number): Job
       emit({ type: 'entries', agentId: r.agent_id, entries: getEntries(r.agent_id).slice(-1) })
       continue
     }
-    enqueued.push(enqueueRoutineRun(db, r, now))
+    // X1: il job di un bot rimosso non nasce — la routine resta dov'è
+    const j = enqueueRoutineRun(db, r, now)
+    if (j) enqueued.push(j)
   }
   return enqueued
 }

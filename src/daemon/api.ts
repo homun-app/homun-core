@@ -465,7 +465,9 @@ export function buildApiMethods(
 
   return {
     // ---- agenti ----
-    'agents:list': () => store.listAgents(),
+    // X1 (fase sicurezza-beta16): la UI ha bisogno ANCHE dei rimossi (la
+    // sezione «Archiviati» e il ripristino): la strada esplicita completa
+    'agents:list': () => store.listAgentsIncludingRemoved(),
     'agents:create': ([name, description]) => {
       // B2 (fase beta.4): il dialogo «Nuovo» passa di qui — il nome scritto
       // resta (birthName: update_self potrà cambiarlo solo finché è ancora

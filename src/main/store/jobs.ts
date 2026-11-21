@@ -59,7 +59,40 @@ export interface EnqueueInput {
   now: number
 }
 
-export function enqueueJob(db: DatabaseSync, input: EnqueueInput): Job {
+/**
+ * X1 (fase sicurezza-beta16): la guardia della coda — true se l'agente del job
+ * è un bot RIMOSSO (archived_at/deleted_at suoi o del PADRE: i sottoagenti
+ * seguono il padre). Funzione SQL pura sulla connessione passata; senza la
+ * tabella agents (coda pura dei test con il solo JOBS_DDL) non decide: false.
+ */
+export function agentRemovedForJobs(db: DatabaseSync, agentId: string): boolean {
+  try {
+    const row = db.prepare(`
+      SELECT a.archived_at AS self_archived, a.deleted_at AS self_deleted,
+             p.archived_at AS parent_archived, p.deleted_at AS parent_deleted
+      FROM agents a LEFT JOIN agents p ON p.id = a.parent_id
+      WHERE a.id = ?
+    `).get(agentId) as
+      | { self_archived: number | null; self_deleted: number | null; parent_archived: number | null; parent_deleted: number | null }
+      | undefined
+    if (!row) return false
+    return Boolean(row.self_archived || row.self_deleted || row.parent_archived || row.parent_deleted)
+  } catch {
+    // niente tabella agents: la coda non sa dire — il job nasce (come prima)
+    return false
+  }
+}
+
+/**
+ * X1: enqueueJob RIFIUTA i job per un bot rimosso — torna null e lascia una
+ * riga di log. Unico esposto: 'memory-forget-agent', l'oblio del bot
+ * eliminato DEVE girare dopo la cancellazione (la riga può essere già via).
+ */
+export function enqueueJob(db: DatabaseSync, input: EnqueueInput): Job | null {
+  if (input.kind !== 'memory-forget-agent' && agentRemovedForJobs(db, input.agentId)) {
+    console.log(`[sandbotd] job ${input.kind} per ${input.agentId} rifiutato: bot rimosso (archiviato o eliminato)`)
+    return null
+  }
   db.prepare('INSERT INTO jobs(agent_id, kind, payload_json, run_at, status, attempts, created_at) VALUES(?,?,?,?,?,0,?)')
     .run(input.agentId, input.kind, JSON.stringify(input.payload), input.runAt, 'queued', input.now)
   const id = Number((db.prepare('SELECT last_insert_rowid() AS id').get() as { id: number }).id)
@@ -278,6 +311,15 @@ export function releaseJobsHeldForModel(db: DatabaseSync, now: number): number {
 /** Azzera i job di un agente eliminato (né eseguibili né recuperabili). */
 export function cancelAgentJobs(db: DatabaseSync, agentId: string): void {
   db.prepare("DELETE FROM jobs WHERE agent_id = ? AND status IN ('queued','leased')").run(agentId)
+}
+
+/**
+ * X1 (fase sicurezza-beta16): annulla UN job (il worker lo usa per i job di un
+ * bot rimosso rimasti in coda — accodati prima dell'archiviazione o arrivati
+ * da una versione precedente): la riga sparisce, come cancelAgentJobs.
+ */
+export function cancelJob(db: DatabaseSync, jobId: number): void {
+  db.prepare("DELETE FROM jobs WHERE id = ? AND status IN ('queued','leased')").run(jobId)
 }
 
 /**

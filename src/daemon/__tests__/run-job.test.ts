@@ -46,7 +46,7 @@ beforeEach(() => {
 
 describe('makeJobRunner: user-message', () => {
   it('primo tentativo: onTurnEntry salva payload.entryId nel job', async () => {
-    const job = enqueueJob(db, { agentId: 'a1', kind: 'user-message', payload: { text: 'ciao' }, runAt: 0, now: 0 })
+    const job = enqueueJob(db, { agentId: 'a1', kind: 'user-message', payload: { text: 'ciao' }, runAt: 0, now: 0 })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.agentId).toBe('a1')
@@ -57,7 +57,7 @@ describe('makeJobRunner: user-message', () => {
   })
 
   it('retry (payload.entryId presente): passa resume al turno', async () => {
-    const job = enqueueJob(db, { agentId: 'a1', kind: 'user-message', payload: { text: 'ciao', entryId: 7 }, runAt: 0, now: 0 })
+    const job = enqueueJob(db, { agentId: 'a1', kind: 'user-message', payload: { text: 'ciao', entryId: 7 }, runAt: 0, now: 0 })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.resume).toEqual({ entryId: 7 })
@@ -65,7 +65,7 @@ describe('makeJobRunner: user-message', () => {
   })
 
   it('le immagini viaggiano fino a runTurn', async () => {
-    const job = enqueueJob(db, { agentId: 'a1', kind: 'user-message', payload: { text: 'guarda', images: ['AAAA'] }, runAt: 0, now: 0 })
+    const job = enqueueJob(db, { agentId: 'a1', kind: 'user-message', payload: { text: 'guarda', images: ['AAAA'] }, runAt: 0, now: 0 })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.images).toEqual(['AAAA'])
@@ -77,7 +77,7 @@ describe('makeJobRunner: user-message', () => {
       agentId: 'a1', kind: 'user-message',
       payload: { text: 'configurati', initiator: 'TEMPLATE_IMPORT', extraMeta: { templateName: 'Gestore della posta in arrivo' } },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.initiator).toBe('TEMPLATE_IMPORT')
@@ -90,7 +90,7 @@ describe('makeJobRunner: user-message', () => {
       agentId: 'a2', kind: 'user-message',
       payload: { text: '<messaggio_da_agente nome="X">ciao</messaggio_da_agente>', initiator: 'AGENT', fromAgentId: 'a1', fromAgentName: 'Bot', toAgentId: 'a2', hop: 2 },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.initiator).toBe('AGENT')
@@ -106,7 +106,7 @@ describe('makeJobRunner: user-message', () => {
         fromAgentId: 'a1', fromAgentName: 'Bot', toAgentId: 'a2', hop: 1, automatic: true, entryId: 9
       },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.automatic).toBe(true)
@@ -119,7 +119,7 @@ describe('makeJobRunner: user-message', () => {
       agentId: 'a2', kind: 'user-message',
       payload: { text: 'ciao', initiator: 'AGENT', fromAgentId: 'a1', fromAgentName: 'Bot', toAgentId: 'a2', hop: 1 },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.automatic).toBeUndefined()
@@ -133,7 +133,7 @@ describe('makeJobRunner: task-run (fase 8, §3bis L7)', () => {
       agentId: 'a3', kind: 'task-run',
       payload: { taskId: 7, brief: 'fai la verifica', respondedTo: 55 },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     // il modello del task sa chi è e come chiudersi (contesto separato)
@@ -148,7 +148,7 @@ describe('makeJobRunner: task-run (fase 8, §3bis L7)', () => {
     // task nato da un turno AGENT (untrusted) e da una routine (automatic)
     db.prepare("INSERT INTO tasks(id, agent_id, title, untrusted, automatic) VALUES(8, 'a3', 'Analisi posta', 1, 1)").run()
     for (const payload of [{ taskId: 8, brief: 'analizza' }, { taskId: 8, brief: 'si, procedi', respondedTo: 12 }]) {
-      const job = enqueueJob(db, { agentId: 'a3', kind: 'task-run', payload, runAt: 0, now: 0 })
+      const job = enqueueJob(db, { agentId: 'a3', kind: 'task-run', payload, runAt: 0, now: 0 })!
       const log: Seen[] = []
       await makeJobRunner(db, fakeTurn(log))(job, emit)
       expect(log[0]!.opts).toMatchObject({ taskId: 8, untrusted: true, automatic: true, source: 'user' })
@@ -166,7 +166,7 @@ describe('makeJobRunner: task-run (fase 8, §3bis L7)', () => {
         entryId: 4
       },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts).toMatchObject({ initiator: 'TASK_DONE', automatic: true, untrusted: true })
@@ -177,7 +177,7 @@ describe('makeJobRunner: task-run (fase 8, §3bis L7)', () => {
       agentId: 'a3', kind: 'task-run',
       payload: { taskId: 99, brief: 'b' },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.text).toBe('[task no. 99 — to close it: update_task with id 99]\nb')
@@ -190,7 +190,7 @@ describe('makeJobRunner: routine-run', () => {
       agentId: 'a2', kind: 'routine-run',
       payload: { routineId: 3, title: 'Backup', prompt: 'fai il backup', entryId: 9 },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.text).toBe('[recurring routine: Backup] fai il backup')
@@ -217,7 +217,7 @@ describe('makeJobRunner: routine-run', () => {
         event: { source: 'connector_poll', kind: 'newEmail', item: 'Fattura', title: 'New email: Fattura', data: { id: 'm1' }, at: 1 }
       },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     // il modello legge il blocco <evento> con il titolo inglese
@@ -239,7 +239,7 @@ describe('makeJobRunner: routine-run', () => {
         event: { source: 'presence_return', kind: 'presenceReturn', title: 'The user just came back to the computer', at: 2 }
       },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.extraMeta).toEqual({
@@ -257,7 +257,7 @@ describe('makeJobRunner: routine-run', () => {
         event: { source: 'webhook', title: 'Webhook ricevuto', data: { a: 1 }, at: 3 }
       },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.text).toContain('[routine "Vecchia": Webhook ricevuto]')
@@ -281,7 +281,7 @@ describe('makeJobRunner: subagent-run', () => {
   })
 
   it('primo job: apre col BRIEF (blocco <brief>), segna running/started_at e passa subagent/untrusted/automatic', async () => {
-    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', first: true }, runAt: 0, now: 0 })
+    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', first: true }, runAt: 0, now: 0 })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.agentId).toBe('sub_k1')
@@ -301,7 +301,7 @@ describe('makeJobRunner: subagent-run', () => {
 
   it('eredità: untrusted/automatic della riga arrivano al turno del figlio', async () => {
     db.prepare("UPDATE subagents SET status = 'queued', untrusted = 1, automatic = 1 WHERE id = 'sub_k1'").run()
-    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', first: true }, runAt: 0, now: 0 })
+    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', first: true }, runAt: 0, now: 0 })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.untrusted).toBe(true)
@@ -309,7 +309,7 @@ describe('makeJobRunner: subagent-run', () => {
   })
 
   it('messaggio del padre: blocco <messaggio_dal_padre> col nome del padre', async () => {
-    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', message: 'aggiungi i prezzi' }, runAt: 0, now: 0 })
+    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', message: 'aggiungi i prezzi' }, runAt: 0, now: 0 })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.text).toContain('<messaggio_dal_padre nome="Padre">')
@@ -318,14 +318,14 @@ describe('makeJobRunner: subagent-run', () => {
 
   it('figlio già TERMINALE (stop/scadenza prima del job): non parte', async () => {
     db.prepare("UPDATE subagents SET status = 'stopped' WHERE id = 'sub_k1'").run()
-    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', first: true }, runAt: 0, now: 0 })
+    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', first: true }, runAt: 0, now: 0 })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log).toHaveLength(0)
   })
 
   it('ripresa R1: payload.entryId → resume, senza riscrivere il brief', async () => {
-    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', first: true, entryId: 7 }, runAt: 0, now: 0 })
+    const job = enqueueJob(db, { agentId: 'sub_k1', kind: 'subagent-run', payload: { subagentId: 'sub_k1', first: true, entryId: 7 }, runAt: 0, now: 0 })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.resume).toEqual({ entryId: 7 })
@@ -337,7 +337,7 @@ describe('makeJobRunner: subagent-run', () => {
       agentId: 'agent_p', kind: 'user-message',
       payload: { text: '<risultati_sottoagenti>…', initiator: 'SUBAGENTS_DONE', contaminated: true },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.contaminated).toBe(true)
@@ -350,7 +350,7 @@ describe('makeJobRunner: subagent-run', () => {
       agentId: 'agent_p', kind: 'task-run',
       payload: { taskId: 3, brief: '<risultati_sottoagenti>…', contaminated: true, automatic: true },
       runAt: 0, now: 0
-    })
+    })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.taskId).toBe(3)
@@ -361,8 +361,9 @@ describe('makeJobRunner: subagent-run', () => {
 })
 
 describe('makeJobRunner: routine-run con modello proprio (fase 18b, H7)', () => {
+  // X1: 'a2' è una riga di routine senza agents rimossi — il job nasce sempre
   const routineJob = (routineId: number) =>
-    enqueueJob(db, { agentId: 'a2', kind: 'routine-run', payload: { routineId, title: 'T', prompt: 'p' }, runAt: 0, now: 0 })
+    enqueueJob(db, { agentId: 'a2', kind: 'routine-run', payload: { routineId, title: 'T', prompt: 'p' }, runAt: 0, now: 0 })!
 
   it('la riga con provider_id+model passa la route a runTurn (ALL\'ESECUZIONE, non all\'accodamento)', async () => {
     const r = db.prepare('INSERT INTO routines(agent_id, title, prompt, schedule, created_at, provider_id, model, thinking) VALUES(?,?,?,?,?,?,?,?)')
@@ -398,7 +399,7 @@ describe('makeJobRunner: routine-run con modello proprio (fase 18b, H7)', () => 
 // routine: incorpora le note pendenti, solo se il modello c'è
 describe('makeJobRunner: memory-embed', () => {
   it('non chiama runTurn e non apre una riga di routine', async () => {
-    const job = enqueueJob(db, { agentId: 'a1', kind: 'memory-embed', payload: {}, runAt: 0, now: 0 })
+    const job = enqueueJob(db, { agentId: 'a1', kind: 'memory-embed', payload: {}, runAt: 0, now: 0 })!
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log).toEqual([])
@@ -424,14 +425,14 @@ describe('makeJobRunner: memory-index-story e memory-story-backfill', () => {
       const { setDataDir, appendEntry } = await import('../../main/store/db')
       setDataDir(dir)
       const entry = appendEntry({ agentId: 'a1', kind: 'message', role: 'user', content: 'la cena è alle otto' })
-      const job = enqueueJob(db, { agentId: 'a1', kind: 'memory-index-story', payload: { entryId: entry.id }, runAt: 0, now: 0 })
+      const job = enqueueJob(db, { agentId: 'a1', kind: 'memory-index-story', payload: { entryId: entry.id }, runAt: 0, now: 0 })!
       const log: Seen[] = []
       await makeJobRunner(db, fakeTurn(log))(job, emit)
       expect(log).toEqual([])
       const { searchHistory } = await import('../../main/memory/history-store')
       expect((await searchHistory('cena otto', 'a1')).length).toBe(1)
       // un entry SPARITO non indicizza nulla, e il job non è un errore
-      const gone = enqueueJob(db, { agentId: 'a1', kind: 'memory-index-story', payload: { entryId: 999_999 }, runAt: 0, now: 0 })
+      const gone = enqueueJob(db, { agentId: 'a1', kind: 'memory-index-story', payload: { entryId: 999_999 }, runAt: 0, now: 0 })!
       await makeJobRunner(db, fakeTurn(log))(gone, emit)
       expect((await searchHistory('cena otto', 'a1')).length).toBe(1)
     } finally {
@@ -453,7 +454,7 @@ describe('makeJobRunner: memory-index-story e memory-story-backfill', () => {
       const a = store.createAgent('Storico')
       store.appendEntry({ agentId: a.id, kind: 'message', role: 'user', content: 'messaggio vecchio da indicizzare' })
       const events: Array<{ type: string; phase?: string; done?: number; total?: number }> = []
-      const job = enqueueJob(db, { agentId: a.id, kind: 'memory-story-backfill', payload: {}, runAt: 0, now: 0 })
+      const job = enqueueJob(db, { agentId: a.id, kind: 'memory-story-backfill', payload: {}, runAt: 0, now: 0 })!
       await makeJobRunner(db, fakeTurn([]))(job, (ev) => { events.push(ev as never) })
       const progress = events.filter((ev) => ev.type === 'memory' && ev.phase === 'story-backfill')
       expect(progress.at(-1)).toMatchObject({ done: 1, total: 1 })
@@ -478,7 +479,7 @@ describe('makeJobRunner: memory-forget-agent', () => {
       const { indexStoryNote, searchHistory } = await import('../../main/memory/history-store')
       await writeMemoryNote('agent_g1', { content: 'privata del bot eliminato', tier: 'core', source: 's', userTurn: true })
       await indexStoryNote('agent_g1', 5, 'user', 'conversazione da dimenticare', 1730000000000)
-      const job = enqueueJob(db, { agentId: 'agent_g1', kind: 'memory-forget-agent', payload: {}, runAt: 0, now: 0 })
+      const job = enqueueJob(db, { agentId: 'agent_g1', kind: 'memory-forget-agent', payload: {}, runAt: 0, now: 0 })!
       await makeJobRunner(db, fakeTurn([]))(job, emit)
       // correzioni C2: l'oblio è PER CELLA — le due celle non ci sono più
       // (e la ricerca, col nuovo default, non le vede)

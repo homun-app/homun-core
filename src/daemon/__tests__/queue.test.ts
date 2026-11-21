@@ -42,7 +42,7 @@ describe('fase 17c (C2): le notice portano meta.ui e il content nella lingua del
   it('agente occupato → notice con content italiano E meta.ui (id+valori)', () => {
     const a = createAgent('Occupato', '')
     // job attivo sull'agente (lease del worker): enqueue accoda e scrive la notice
-    const first = enqueueJob(db(), { agentId: a.id, kind: 'user-message', payload: { text: 'x' }, runAt: Date.now(), now: Date.now() })
+    const first = enqueueJob(db(), { agentId: a.id, kind: 'user-message', payload: { text: 'x' }, runAt: Date.now(), now: Date.now() })!
     claimDueJobs(db(), Date.now(), 120_000)
     expect(first).toBeTruthy()
     enqueueUserMessage(db(), a.id, 'secondo', undefined, () => undefined)
@@ -260,15 +260,15 @@ describe('pendingAgentPairJobs: i send_to_agent accodati e non ancora consegnati
   })
 
   it('i job consegnati, più vecchi di un\'ora o con entryId non contano (già entry del destinatario)', () => {
-    const done = enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b'), runAt: 0, now: NOW - 60_000 })
+    const done = enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b'), runAt: 0, now: NOW - 60_000 })!
     db().prepare("UPDATE jobs SET status = 'done' WHERE id = ?").run(done.id)
     // esattamente un'ora fa: fuori dalla finestra
     enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b'), runAt: 0, now: NOW - 3_600_000 })
     // in lease MA con entryId: il turno è già partito, il transcript lo conta
-    const resumed = enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b', { entryId: 7 }), runAt: 0, now: NOW - 60_000 })
+    const resumed = enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b', { entryId: 7 }), runAt: 0, now: NOW - 60_000 })!
     db().prepare("UPDATE jobs SET status = 'leased' WHERE id = ?").run(resumed.id)
     // in lease SENZA entryId: in consegna, conta
-    const leased = enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b'), runAt: 0, now: NOW - 60_000 })
+    const leased = enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b'), runAt: 0, now: NOW - 60_000 })!
     db().prepare("UPDATE jobs SET status = 'leased' WHERE id = ?").run(leased.id)
     expect(pendingAgentPairJobs(db(), 'a', 'b', NOW)).toBe(1)
   })

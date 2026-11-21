@@ -57,7 +57,7 @@ describe('fase memoria-engramma · correzioni C2: il bot eliminato si dimentica 
     const { enqueueForgetAgent } = e
     const { makeJobRunner } = await import('../../../daemon/run-job')
     const { db } = await import('../../store/db')
-    const job = enqueueForgetAgent(db(), AGENT)
+    const job = enqueueForgetAgent(db(), AGENT)!
     await makeJobRunner(db())(job, () => undefined)
 
     // le due celle non ci sono più; la cella utente resta
@@ -91,7 +91,7 @@ describe('fase memoria-engramma · correzioni C2: il bot eliminato si dimentica 
     const { makeJobRunner } = await import('../../../daemon/run-job')
     const { db } = await import('../../store/db')
     // mai esistito: nessuna eccezione (NOT_FOUND vale «già dimenticata»)
-    const job = enqueueForgetAgent(db(), 'mai-esistito')
+    const job = enqueueForgetAgent(db(), 'mai-esistito')!
     await expect(makeJobRunner(db())(job, () => undefined)).resolves.toBeUndefined()
     await e.closeMemoryEngine()
   })

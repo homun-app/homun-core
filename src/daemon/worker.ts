@@ -5,7 +5,7 @@
 // tentativi. Tutto il ritmo passa da deps.now(): nei test il tempo è finto.
 import type { DatabaseSync } from 'node:sqlite'
 import {
-  recoverExpiredLeases, claimDueJobs, renewLease, completeJob, failJob, type Job
+  recoverExpiredLeases, claimDueJobs, renewLease, completeJob, failJob, agentRemovedForJobs, cancelJob, type Job
 } from '../main/store/jobs'
 import { getSetting } from '../main/store/db'
 import { holdJobForModel } from '../main/store/jobs'
@@ -89,6 +89,14 @@ export class JobWorker {
   }
 
   private async runOne(job: Job): Promise<void> {
+    // X1 (fase sicurezza-beta16): i job di un bot RIMOSSO (archiviato o
+    // eliminato, padri dei figli compreso) si ANNULLANO, non girano — restano
+    // solo i memory-forget-agent, che devono dimenticare proprio quel bot.
+    if (job.kind !== 'memory-forget-agent' && agentRemovedForJobs(this.db, job.agent_id)) {
+      console.log(`[sandbotd] job ${job.id} (${job.kind}) di ${job.agent_id} annullato: bot rimosso (archiviato o eliminato)`)
+      cancelJob(this.db, job.id)
+      return
+    }
     // heartbeat: rinnova il lease a ogni evento del turno (throttled) e
     // comunque ogni 30s finché il job è in volo
     let lastBeat = this.deps.now()

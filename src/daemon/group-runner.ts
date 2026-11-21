@@ -131,7 +131,9 @@ export async function runGroupTurnJob(
   const memberIds = groupMemberIds(group.id)
   if (!memberIds.includes(p.memberId)) { quietMember(); return finish('SKIPPED') }
   const me = getAgent(p.memberId)
-  if (!me) return finish('SKIPPED')
+  // X1 (fase sicurezza-beta16): un membro archiviato o eliminato non gira
+  // turni di squadra (il worker ha già annullato il job: questa è la rete)
+  if (!me || me.archivedAt !== null || me.deletedAt !== null) { quietMember(); return finish('SKIPPED') }
   // fase 16c correzioni (R3.1/R3.5): UN SOLO punto decide il modello —
   // resolveAgentModel, la STESSA funzione del turno (runTurn). Il controllo
   // duplicato che c'era qui («me.providerId && me.model») saltava in silenzio

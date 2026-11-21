@@ -8,6 +8,8 @@ import { UI } from '../../shared/ui-messages'
 import type { UiText } from '../../shared/types'
 import { MAX_GROUP_MEMBERS, coordinatorNowText } from './group-turns'
 import { WAKE_SUMMARY_MAX_CHARS } from './subagents'
+// X1 (fase sicurezza-beta16): le pure dei bot rimossi (store mockato nei test)
+import { removedAgentRefusalOf } from '../store/removed'
 // fase memoria-engramma (M3): gli strumenti di memoria girano sul motore
 // Engramma tramite il memory-store (stessa interfaccia verso il modello)
 import {
@@ -1774,6 +1776,9 @@ export async function executeTool(
       for (const id of memberIds) {
         const refusal = dbMod.subagentRefusal(id)
         if (refusal) return { output: `Group not created: ${refusal}.`, meta: {} }
+        // X1 (fase sicurezza-beta16): un bot RIMOSSO non entra in un team
+        const removedRefusal = removedAgentRefusalOf(dbMod.getAgent(id))
+        if (removedRefusal) return { output: `Group not created: ${removedRefusal}`, meta: {} }
       }
       const missing = memberIds.filter((id) => !agents.some((a) => a.id === id))
       if (missing.length) {
@@ -1831,6 +1836,9 @@ export async function executeTool(
         for (const id of add) {
           const refusal = dbMod.subagentRefusal(id)
           if (refusal) return { output: `Member not added: ${refusal}.`, meta: { groupChanged: groupId } }
+          // X1 (fase sicurezza-beta16): un bot RIMOSSO non entra in un team
+          const removedRefusal = removedAgentRefusalOf(dbMod.getAgent(id))
+          if (removedRefusal) return { output: `Member not added: ${removedRefusal}`, meta: { groupChanged: groupId } }
         }
         const missing = add.filter((id) => !agents.some((a) => a.id === id))
         if (missing.length) {

@@ -39,7 +39,7 @@ vi.mock('../../main/agent/providers', () => ({
 
 const {
   setDataDir, dataDir, db, createAgent, createRoutine, appendEntry, getEntries,
-  listAgents, listRoutines, setSetting
+  listAgentsIncludingRemoved, listRoutines, setSetting
 } = await import('../../main/store/db')
 const storeGroups = await import('../../main/store/groups')
 const { buildApiMethods, purgeRemoved, REMOVED_RETENTION_MS } = await import('../api')
@@ -67,7 +67,9 @@ beforeEach(() => {
 })
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
-const agentById = (id: string): Agent | undefined => listAgents().find((a) => a.id === id)
+// X1 (fase sicurezza-beta16): il roster esclude i rimossi — questi test
+// guardano proprio loro, la strada esplicita li contiene
+const agentById = (id: string): Agent | undefined => listAgentsIncludingRemoved().find((a) => a.id === id)
 const call = async (ch: string, ...p: unknown[]): Promise<unknown> => api[ch]!(p)
 const errText = async (fn: () => unknown): Promise<string | null> => {
   try { await fn(); return null } catch (e) { return e instanceof Error ? e.message : String(e) }

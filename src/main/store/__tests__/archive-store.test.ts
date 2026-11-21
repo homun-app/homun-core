@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { TEST_TMP_BASE } from '../../../test-tmp'
 import {
-  setDataDir, db, createAgent, createRoutine, listAgents, listRoutines,
+  setDataDir, db, createAgent, createRoutine, listAgentsIncludingRemoved, listRoutines,
   setAgentArchived, setAgentDeleted, pauseRoutinesOfAgent, expiredRemovedAgentIds
 } from '../db'
 import {
@@ -30,9 +30,11 @@ describe('K2: archivia il bot — flag, routine in pausa, nessun dato perso', ()
   it('setAgentArchived/unarchive scrivono e cancellano archivedAt', () => {
     const a = createAgent('Competitoor', 'scrive')
     setAgentArchived(a.id, 1_000)
-    expect(listAgents().find((x) => x.id === a.id)?.archivedAt).toBe(1_000)
+    // X1 (fase sicurezza-beta16): il roster esclude i rimossi — la riga si
+    // legge dalla strada esplicita
+    expect(listAgentsIncludingRemoved().find((x) => x.id === a.id)?.archivedAt).toBe(1_000)
     setAgentArchived(a.id, null)
-    expect(listAgents().find((x) => x.id === a.id)?.archivedAt).toBeNull()
+    expect(listAgentsIncludingRemoved().find((x) => x.id === a.id)?.archivedAt).toBeNull()
   })
 
   it('pauseRoutinesOfAgent spegne le routine del bot (e SOLO le sue)', () => {
@@ -51,9 +53,9 @@ describe('K2: elimina il bot — morbido, recuperabile, poi la pulizia', () => {
   it('setAgentDeleted segna deletedAt; a null lo ripulisce (Ripristina)', () => {
     const a = createAgent('Morbido', '')
     setAgentDeleted(a.id, 2_000)
-    expect(listAgents().find((x) => x.id === a.id)?.deletedAt).toBe(2_000)
+    expect(listAgentsIncludingRemoved().find((x) => x.id === a.id)?.deletedAt).toBe(2_000)
     setAgentDeleted(a.id, null)
-    expect(listAgents().find((x) => x.id === a.id)?.deletedAt).toBeNull()
+    expect(listAgentsIncludingRemoved().find((x) => x.id === a.id)?.deletedAt).toBeNull()
   })
 
   it('expiredRemovedAgentIds: solo chi supera i 30 giorni', () => {

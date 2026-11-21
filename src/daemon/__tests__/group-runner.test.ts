@@ -76,13 +76,14 @@ function deps(seen: Seen[], behavior?: (s: Seen) => void | Promise<void>): Group
 
 /** Il job reale del membro per il messaggio m (come lo accoda la colla). */
 function jobFor(botId: string, g: { id: number }, messageId: number): Job {
+  // X1: i bot di questi test sono VIVI — la guardia dei rimossi non scatta
   return enqueueJob(db(), {
     agentId: botId,
     kind: 'group-turn',
     payload: { groupId: g.id, memberId: botId, nonce: `g${g.id}:${botId}:msg${messageId}`, sourceMessageId: messageId },
     runAt: 0,
     now: 0
-  })
+  })!
 }
 
 describe('apertura del turno', () => {
@@ -587,7 +588,7 @@ describe('R3 — i bot null/null nel giro di squadra', () => {
       agentId: solo.id, kind: 'group-turn',
       payload: { groupId: g.id, memberId: solo.id, nonce: `g${g.id}:${solo.id}:again`, sourceMessageId: u.id },
       runAt: 0, now: 0
-    })
+    })!
     await runGroupTurnJob(db(), deps(seen), job2, emit)
     expect(groupMessages(g.id).filter((m) => m.author_kind === 'system')).toHaveLength(1)
     // e l'esito nel registro è SKIPPED

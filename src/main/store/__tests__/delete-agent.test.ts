@@ -84,7 +84,7 @@ describe('deleteAgent(padre): ferma ed elimina i sottoagenti', () => {
     })
     appendEntry({ agentId: child.id, kind: 'message', role: 'user', content: 'brief' })
     enqueueJob(db(), { agentId: 'sub_del1', kind: 'subagent-run', payload: { subagentId: 'sub_del1', first: true }, runAt: 1, now: 1 })
-    const otherJob = enqueueJob(db(), { agentId: other.id, kind: 'user-message', payload: { text: 'ciao' }, runAt: 1, now: 1 })
+    const otherJob = enqueueJob(db(), { agentId: other.id, kind: 'user-message', payload: { text: 'ciao' }, runAt: 1, now: 1 })!
 
     const stopped: string[] = []
     setAgentStopperForDaemon((id) => stopped.push(id))
@@ -124,12 +124,12 @@ describe('correzioni 2 R2: deleteAgent cancella TUTTI i job del bot; l\'oblio gi
     const other = createAgent('Altro R2', '')
     // job FATTI e FALLITI col testo del messaggio (come le versioni prima
     // della R3), più uno in coda: cancelAgentJobs porta via solo i queued
-    const done = enqueueJob(db(), { agentId: bot.id, kind: 'user-message', payload: { text: 'TESTO-SEGRETO-R2 done' }, runAt: 1, now: 1 })
+    const done = enqueueJob(db(), { agentId: bot.id, kind: 'user-message', payload: { text: 'TESTO-SEGRETO-R2 done' }, runAt: 1, now: 1 })!
     db().prepare("UPDATE jobs SET status = 'done' WHERE id = ?").run(done.id)
-    const failed = enqueueJob(db(), { agentId: bot.id, kind: 'user-message', payload: { text: 'TESTO-SEGRETO-R2 failed' }, runAt: 1, now: 1 })
+    const failed = enqueueJob(db(), { agentId: bot.id, kind: 'user-message', payload: { text: 'TESTO-SEGRETO-R2 failed' }, runAt: 1, now: 1 })!
     db().prepare("UPDATE jobs SET status = 'failed' WHERE id = ?").run(failed.id)
     enqueueJob(db(), { agentId: bot.id, kind: 'user-message', payload: { text: 'TESTO-SEGRETO-R2 queued' }, runAt: 1, now: 1 })
-    const otherJob = enqueueJob(db(), { agentId: other.id, kind: 'user-message', payload: { text: 'messaggio dell altro bot' }, runAt: 1, now: 1 })
+    const otherJob = enqueueJob(db(), { agentId: other.id, kind: 'user-message', payload: { text: 'messaggio dell altro bot' }, runAt: 1, now: 1 })!
 
     // memorie e storia del bot: le celle che l'oblio deve far sparire
     await writeMemoryNote(bot.id, { content: 'memoria privata del bot R2', tier: 'core', source: 'test', userTurn: true })
@@ -147,7 +147,7 @@ describe('correzioni 2 R2: deleteAgent cancella TUTTI i job del bot; l\'oblio gi
     // l'oblio: come agents:delete della RPC — enqueueForgetAgent DOPO la
     // cancellazione (l'ordine che fa sopravvivere il job al DELETE)
     const { enqueueForgetAgent } = e
-    const forget = enqueueForgetAgent(db(), bot.id)
+    const forget = enqueueForgetAgent(db(), bot.id)!
     expect(forget.kind).toBe('memory-forget-agent')
     const { makeJobRunner } = await import('../../../daemon/run-job')
     await makeJobRunner(db())(forget, () => undefined)
@@ -211,7 +211,7 @@ describe('v0.4.3: dopo memory-forget-agent nessun file delle celle resta aperto'
 
     // il percorso vero del demone: eliminazione del bot, poi il job col runner VERO
     deleteAgent(bot.id)
-    const forget = e.enqueueForgetAgent(db(), bot.id)
+    const forget = e.enqueueForgetAgent(db(), bot.id)!
     const { makeJobRunner } = await import('../../../daemon/run-job')
     await makeJobRunner(db())(forget, () => undefined)
 
