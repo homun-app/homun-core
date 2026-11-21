@@ -181,6 +181,57 @@ describe('PL1: i rimandi di oggi portano alla pagina Plugin', () => {
   })
 })
 
+describe('PL3: la tabella «Collegati» (tavola 10)', () => {
+  it('colonne, righe, permessi in breve, ultimo uso e «Da sistemare · N»', async () => {
+    const { PluginPanel } = await import('../components/PluginPanel')
+    const { useStore } = await import('../store')
+    stubApiMethod('connectorsInstalled', () => ({ servers: [], plugins: [] }))
+    stubApiMethod('skillsLibrary', () => ({ library: [], plugins: [] }))
+    stubApiMethod('mcpList', () => [])
+    setStoreStateForRender(useStore, {
+      pluginOpen: true,
+      connectors: [{
+        id: 'notion', name: 'Notion', logo: 'notion.svg', mcpUrl: 'https://mcp.notion.com/mcp',
+        clientRegistration: 'dynamic', docsUrl: '', notes: '',
+        state: { status: 'connected', disabledTools: [], instructions: '' }, tools: []
+      }],
+      composio: null,
+      composioGateway: { active: true, connected: [{ slug: 'trello', name: 'Trello', status: 'ACTIVE', accountId: 'x', accounts: [{ accountId: 'a1', alias: 'fabio', email: 'fabio@studio.example', status: 'ACTIVE' }] }], pending: null },
+      agents: [{ id: 'a-1', name: 'Competitoor', description: '', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 }]
+    })
+    const out = renderHtml(createElement(PluginPanel, {
+      initial: {
+        installed: { servers: [{ id: 'srv-mm', name: 'Mattermost', transport: 'stdio', command: 'npx', args: ['@donach/mattermost-mcp'], enabled: true, enabledFor: ['*'], stateStatus: 'error', serverSlug: 'mattermost' }], plugins: [] },
+        usage: [
+          { tool: 'mcp__mattermost__post_message', last: Date.now() - 3 * 24 * 3600 * 1000, week: 4 },
+          { tool: 'composio__trello__TRELLO_CREATE_CARD', last: Date.now() - 26 * 3600 * 1000, week: 31 }
+        ],
+        perms: { default: 'needs_approval', rules: [
+          { tool: 'mcp__mattermost__post_message', pattern: '*', mode: 'blocked' },
+          { tool: 'mcp__mattermost__read_channel', pattern: '*', mode: 'always_allow' }
+        ] },
+        skills: [],
+        seg: 'connected'
+      }
+    } as never))
+    const root = parseHtml(out)
+    const texts = findAll(root, () => true).map((n) => textOf(n)).join('\n')
+    // le righe della tabella: Notion (diretto del catalogo), Trello
+    // (Composio del gateway) e Mattermost (server MCP manuale rotto)
+    expect(texts).toContain('Collegati · 3')
+    expect(texts).toContain('Da sistemare · 1')
+    expect(texts).toContain('Mattermost')
+    expect(texts).toContain('npx @donach/mattermost-mcp')
+    expect(texts).toContain('1 sempre · 1 blocca')
+    expect(texts).toContain('31 questa settimana')
+    expect(texts).toContain('fabio')
+    // lo store del file è condiviso: si ripulisce per i test dopo
+    setStoreStateForRender(useStore, { connectors: [], composio: null, composioGateway: null })
+    stubApiMethod('connectorsInstalled', () => ({ servers: [], plugins: [] }))
+    stubApiMethod('skillsLibrary', () => ({ library: [], plugins: [] }))
+  })
+})
+
 describe('PL1: la pagina Plugin (render vero, api finta)', () => {
   it('titolo, frase, ricerca, segmenti e bottone Aggiungi con le SEI voci', async () => {
     const { PluginPanel } = await import('../components/PluginPanel')
@@ -190,6 +241,7 @@ describe('PL1: la pagina Plugin (render vero, api finta)', () => {
     stubApiMethod('mcpList', () => [])
     setStoreStateForRender(useStore, {
       pluginOpen: true,
+      connectors: [], composio: null, composioGateway: null,
       agents: [{ id: 'a-1', name: 'Competitoor', description: '', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 }]
     })
     const out = renderHtml(createElement(PluginPanel, {}))

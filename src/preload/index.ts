@@ -192,6 +192,8 @@ const api: SandbotApi = {
   // PL2 (fase plugin): gli strumenti di un server (nome, descrizione,
   // annotazioni) per la scheda «Autorizzazioni» della pagina Plugin
   mcpTools: (id) => ipcRenderer.invoke('mcp:tools', id),
+  // PL3 (fase plugin): l'uso degli strumenti (ultimo uso + settimana, indice)
+  pluginsUsage: () => ipcRenderer.invoke('plugins:usage'),
   /**
    * E2 (fase mcp-env): «Importa da Cursor, Claude o ZCode» — la scansione e
    * la conferma leggono quei file SOLO al clic, nel main. Le righe non

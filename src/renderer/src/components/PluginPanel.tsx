@@ -13,13 +13,15 @@
 // dal modello puro lib/plugins-view: mai dati inventati.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
+import { msg } from '@lingui/core/macro'
 import { BadgeCheck, ChevronDown, Puzzle, Search, ChevronLeft } from 'lucide-react'
 import { api, useStore, type PluginPoint } from '../store'
 import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, type AppCategoryId } from '../../../shared/app-catalog'
 import type { McpServerInfo, SkillLibraryItem } from '../../../shared/types'
 import { appsCatalogModel, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type CatalogRowView } from '../lib/apps-view'
-import { yourPlugins, grayLineOf, stateLabelOf, type PluginSegment, type YourPluginRow } from '../lib/plugins-view'
+import { yourPlugins, grayLineOf, stateLabelOf, stradaLabel, connectedTable, daSistemareCount, type PluginSegment, type YourPluginRow, type ConnectedFilter } from '../lib/plugins-view'
+import type { PermissionsConfig } from '../../../shared/types'
 import { humanizeSkillName } from '../../../shared/skill-md'
 import { AppRow, AppLogo, FilterPill, useConnectFlows, DevelopersContent } from './AppsWindow'
 // PL2 (fase plugin): la scheda del plugin (tavola 9) — clic su una riga
@@ -36,12 +38,22 @@ function uiLang(): 'it' | 'en' {
 /** La vista interna della pagina: l'elenco, i server MCP, l'editor di una skill. */
 type PluginView = 'list' | 'mcp' | 'skill-new'
 
+/** I dati iniziali (per i test senza effect; nel prodotto si caricano dall'api). */
+export interface PluginPanelInitial {
+  installed?: { servers: McpServerInfo[]; plugins: InstalledPluginLike[] }
+  usage?: Array<{ tool: string; last: number; week: number }>
+  perms?: PermissionsConfig
+  skills?: SkillLibraryItem[]
+  /** il segmento di partenza (nei test senza clic; nei prodotti decide pluginAt) */
+  seg?: PluginSegment
+}
+
 /**
  * La pagina Plugin. Il punto chiesto da un rimando (`pluginAt`) si consuma
  * qui: la card «Apri Server MCP» arriva ai server MCP, il suggerimento del
  * pannello all'app giusta, la riga Skill alle skill del bot.
  */
-export function PluginPanel(): ReactNode {
+export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): ReactNode {
   const { t } = useLingui()
   const lang = uiLang()
   const connectors = useStore((s) => s.connectors)
@@ -54,13 +66,18 @@ export function PluginPanel(): ReactNode {
   const setSkillsFilterAgent = useStore((s) => s.setSkillsFilterAgent)
   const setPluginOpen = useStore((s) => s.setPluginOpen)
 
-  const [seg, setSeg] = useState<PluginSegment>('all')
+  const [seg, setSeg] = useState<PluginSegment>(initial?.seg ?? 'all')
   const [query, setQuery] = useState('')
   const [view, setView] = useState<PluginView>('list')
   const [category, setCategory] = useState<AppsFilter>('all')
   const [addOpen, setAddOpen] = useState(false)
-  const [installed, setInstalled] = useState<{ servers: McpServerInfo[]; plugins: InstalledPluginLike[] } | null>(null)
-  const [skills, setSkills] = useState<SkillLibraryItem[] | null>(null)
+  const [installed, setInstalled] = useState<{ servers: McpServerInfo[]; plugins: InstalledPluginLike[] } | null>(initial?.installed ?? null)
+  const [skills, setSkills] = useState<SkillLibraryItem[] | null>(initial?.skills ?? null)
+  // PL3: l'uso dall'INDICE (mai i transcript) e le regole per i «permessi in breve»
+  const [usage, setUsage] = useState<Array<{ tool: string; last: number; week: number }> | null>(initial?.usage ?? null)
+  const [perms, setPerms] = useState<PermissionsConfig | null>(initial?.perms ?? null)
+  const [connFilter, setConnFilter] = useState<ConnectedFilter>('all')
+  const [onlyDaSistemare, setOnlyDaSistemare] = useState(false)
   // PL2: la scheda del plugin (tavola 9) — app o server; le skill restano
   // nell'editor riusato (la loro scheda è Panoramica e Bot)
   const [card, setCard] = useState<{ app?: CatalogRowView; server?: McpServerInfo; directEnabledFor?: string[] | null } | null>(null)
@@ -85,6 +102,9 @@ export function PluginPanel(): ReactNode {
     void refreshComposioGateway()
     void refreshInstalled()
     reloadSkills()
+    // PL3: l'aggregato indicizzato dell'uso + le regole scritte
+    void api.pluginsUsage().then(setUsage).catch(() => setUsage([]))
+    void api.getPermissions().then(setPerms).catch(() => setPerms(null))
   }, [refreshConnectors, refreshComposioGateway])
 
   // il modello del catalogo: le stesse righe, gli stessi filtri di oggi
@@ -420,12 +440,73 @@ export function PluginPanel(): ReactNode {
             </section>
           )}
 
-          {/* --- COLLEGATI: l'elenco completo (la tabella arriva in PL3) --- */}
+          {/* --- COLLEGATI (tavola 10): la tabella con le sette colonne --- */}
           {seg === 'connected' && (
-            <section className="mt-2 space-y-1.5" data-testid="plugin-connected">
-              {yourRows.map((row) => (
-                <YourRow key={row.key} row={row} lang={lang} onOpen={() => openRow(row)} />
-              ))}
+            <section className="mt-2" data-testid="plugin-connected">
+              {/* i filtri: per strada e «Da sistemare · N» */}
+              <div className="flex flex-wrap items-center gap-1.5" data-testid="plugin-connected-filters">
+                {([['all', t`Tutte le strade`], ['direct', t`MCP diretto`], ['composio', t`Composio`], ['mac', t`Sul Mac`], ['box', t`Nel computer isolato`]] as Array<[ConnectedFilter, string]>).map(([f, label]) => (
+                  <FilterPill key={f} active={connFilter === f && !onlyDaSistemare} onClick={() => { setConnFilter(f); setOnlyDaSistemare(false) }}>{label}</FilterPill>
+                ))}
+                <FilterPill active={onlyDaSistemare} onClick={() => setOnlyDaSistemare((v) => !v)}>
+                  {t`Da sistemare · ${daSistemareCount(yourRows)}`}
+                </FilterPill>
+              </div>
+              <table className="mt-3 w-full text-left text-[13px]" data-testid="plugin-connected-table">
+                <thead>
+                  <tr className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <th className="py-1.5 pr-3 font-medium"><Trans>Collegamento</Trans></th>
+                    <th className="py-1.5 pr-3 font-medium"><Trans>Strada</Trans></th>
+                    <th className="py-1.5 pr-3 font-medium"><Trans>Account</Trans></th>
+                    <th className="py-1.5 pr-3 font-medium"><Trans>Stato</Trans></th>
+                    <th className="py-1.5 pr-3 font-medium"><Trans>Permessi</Trans></th>
+                    <th className="py-1.5 pr-3 font-medium"><Trans>Bot</Trans></th>
+                    <th className="py-1.5 font-medium"><Trans>Ultimo uso</Trans></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {connectedTable({ rows: yourRows, usage: usage ?? [], perms, filter: connFilter, onlyDaSistemare }).map((r) => (
+                    <tr
+                      key={r.row.key}
+                      className="cursor-pointer border-t border-border/50 transition hover:bg-muted/50"
+                      data-testid={`plugin-connected-row-${r.row.key}`}
+                      onClick={() => openRow(r.row)}
+                    >
+                      <td className="py-2 pr-3">
+                        <span className="flex items-center gap-2">
+                          {r.row.kind === 'server' || r.row.kind === 'plugin'
+                            ? (logoUrlForName(r.row.name)
+                              ? <img src={logoUrlForName(r.row.name)!} alt="" className="size-5 shrink-0 rounded-[5px] object-cover dark:bg-white" />
+                              : <span className="grid size-5 shrink-0 place-items-center rounded-[5px] bg-muted text-[10px] font-bold">{r.row.name.slice(0, 1).toUpperCase()}</span>)
+                            : <AppLogo logo={r.row.logo} name={r.row.name} className="size-5 text-[10px]" />}
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium">{r.row.name}</span>
+                            {r.countLabel && <span className="block truncate text-[11px] text-muted-foreground" title={r.countLabel}>{r.countLabel}</span>}
+                          </span>
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3">
+                        <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] ${stradaBadgeClass(r.row.gray.strada)}`}>
+                          {stradaLabel(r.row.gray.strada, r.row.gray.origin, lang)}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3 text-muted-foreground">{r.row.accountLabel || '—'}</td>
+                      <td className={`py-2 pr-3 ${r.daSistemare ? 'text-destructive' : 'text-chart-2'}`}>{stateLabelOf(r.row.state, lang).label}</td>
+                      <td className="py-2 pr-3 text-muted-foreground">{permBriefOf(r.perms)}</td>
+                      <td className="py-2 pr-3 text-muted-foreground">
+                        {r.row.bots.all ? t`Tutti i bot` : r.row.bots.names.length > 0 ? r.row.bots.names.join(', ') : '—'}
+                      </td>
+                      <td className="py-2 text-muted-foreground">{useBriefOf(r.usage)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {connectedTable({ rows: yourRows, usage: usage ?? [], perms, filter: connFilter, onlyDaSistemare }).length === 0 && (
+                <p className="py-3 text-sm text-muted-foreground"><Trans>Nessun collegamento con questi filtri.</Trans></p>
+              )}
+              <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
+                <Trans>Cliccando una riga si apre la sua scheda. «Da sistemare» raccoglie quelli che non partono o hanno l'accesso scaduto, così non restano rotti in silenzio.</Trans>
+              </p>
             </section>
           )}
 
@@ -462,6 +543,36 @@ export function PluginPanel(): ReactNode {
       )}
     </div>
   )
+}
+
+/** Il colore del badge della strada (tavola 10: una tinta per strada). */
+function stradaBadgeClass(strada: string): string {
+  if (strada === 'direct') return 'bg-chart-2/15 text-chart-2'
+  if (strada === 'composio') return 'bg-primary/10 text-primary'
+  if (strada === 'box-npm') return 'bg-muted text-foreground'
+  if (strada === 'mac') return 'bg-muted text-muted-foreground'
+  return 'bg-muted text-muted-foreground'
+}
+
+/** «6 sempre · 8 chiedi · 1 blocca» dalle regole specifiche (null = «—»). */
+function permBriefOf(perms: { always: number; ask: number; blocked: number } | null): string {
+  if (!perms) return '—'
+  const parts: string[] = []
+  if (perms.always > 0) parts.push(`${perms.always} ${i18n._(msg`sempre`)}`)
+  if (perms.ask > 0) parts.push(`${perms.ask} ${i18n._(msg`chiedi`)}`)
+  if (perms.blocked > 0) parts.push(`${perms.blocked} ${i18n._(msg`blocca`)}`)
+  return parts.length > 0 ? parts.join(' · ') : '—'
+}
+
+/** «oggi 9:12 · 48 questa settimana» (o «mai»). */
+function useBriefOf(usage: { last: number; week: number } | null): string {
+  if (!usage) return i18n._(msg`mai`)
+  const d = new Date(usage.last)
+  const today = new Date()
+  const sameDay = d.toDateString() === today.toDateString()
+  const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const when = sameDay ? `${i18n._(msg`oggi`)} ${time}` : d.toLocaleDateString()
+  return `${when} · ${usage.week} ${i18n._(msg`questa settimana`)}`
 }
 
 /** Una riga di «I tuoi»: logo, nome, verificato se lo è, la riga grigia

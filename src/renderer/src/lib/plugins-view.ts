@@ -6,9 +6,11 @@
 // ordina e si dichiara, non si riscrive. Lo stato riprende le decisioni di
 // apps-view (serverRowStatus) e dei fogli di oggi: onesto su ciò che non
 // parte, su ciò che va ricollegato e su ciò che aspetta la configurazione.
-import type { ConnectorInfo, ComposioStatusInfo, ComposioGatewayStatusInfo, SkillLibraryItem } from '../../../shared/types'
+import type { ConnectorInfo, ComposioStatusInfo, ComposioGatewayStatusInfo, SkillLibraryItem, PermissionsConfig } from '../../../shared/types'
 import type { InstalledServerLike, InstalledPluginLike, AgentLike, CatalogRowView } from './apps-view'
 import { botsLabelOf } from './apps-view'
+// PL3: il prefisso stabile degli strumenti (mcp__<toolSlug>__), lo stesso del sistema
+import { toolSlugOf } from '../../../main/mcp/slug'
 
 /** I segmenti della pagina: Tutto · Connettori · Skill · Collegati. */
 export type PluginSegment = 'all' | 'connectors' | 'skills' | 'connected'
@@ -48,6 +50,14 @@ export interface YourPluginRow {
   bots: { all: boolean; names: string[]; extra: number }
   /** quante volte compare nella pagina per aprire la sua scheda (PL2) */
   open: { kind: 'app'; appId: string } | { kind: 'server'; serverId: string } | { kind: 'plugin'; name: string } | { kind: 'skill'; folder: string }
+  /** PL3: lo slug degli strumenti del server (mcp__<slug>__), per l'indice dell'uso */
+  serverSlug?: string
+  /** PL3: lo slug Composio (composio__<slug>__), per l'indice dell'uso */
+  composioSlug?: string
+  /** PL3: il dettaglio onesto della riga — il comando del server, «N skill» del plugin */
+  countLabel?: string
+  /** PL3: l'account onesto della riga (alias/email Composio, token, o nessun account) */
+  accountLabel?: string
 }
 
 export interface PluginViewInput {
@@ -55,7 +65,7 @@ export interface PluginViewInput {
   connectedApps: CatalogRowView[]
   composio: ComposioStatusInfo | null
   composioGateway: ComposioGatewayStatusInfo | null
-  installed: { servers: InstalledServerLike[]; plugins: InstalledPluginLike[] } | null
+  installed: { servers: Array<InstalledServerLike & { toolSlug?: string; command?: string; args?: string[]; url?: string; auth?: { kind?: 'oauth' | 'bearer' | 'headers' } | null }> | null; plugins: InstalledPluginLike[] | null } | null
   skills: SkillLibraryItem[] | null
   agents: AgentLike[]
   query: string
@@ -115,13 +125,16 @@ export function yourPlugins(input: PluginViewInput): YourPluginRow[] {
       state: r.connected === 'connected' ? 'active' : 'expired',
       verified: r.app.via === 'direct',
       bots: { all: true, names: [], extra: 0 },
-      open: { kind: 'app', appId: r.app.id }
+      open: { kind: 'app', appId: r.app.id },
+      ...(r.app.composioSlug ? { composioSlug: r.app.composioSlug } : {}),
+      ...(r.app.composioSlug ? accountLabelOfApp(input, r.app.composioSlug) : {})
     })
   }
 
   // -- i server MCP installati (registro, plugin, gateway, npm, manuali) --
   for (const s of input.installed?.servers ?? []) {
     if (q && !matchesQuery(s.name.toLowerCase(), q)) continue
+    const serverSlug = toolSlugOf({ toolSlug: s.toolSlug, name: s.name })
     rows.push({
       key: `server:${s.id}`,
       kind: 'server',
@@ -131,7 +144,10 @@ export function yourPlugins(input: PluginViewInput): YourPluginRow[] {
       state: pluginStateOfServer(s),
       verified: false,
       bots: botsLabelOf(s.enabledFor ?? null, input.agents),
-      open: { kind: 'server', serverId: s.id }
+      open: { kind: 'server', serverId: s.id },
+      serverSlug,
+      countLabel: serverDetailOf(s),
+      accountLabel: accountLabelOfServer(s)
     })
   }
 
@@ -147,7 +163,8 @@ export function yourPlugins(input: PluginViewInput): YourPluginRow[] {
       state: 'active',
       verified: false,
       bots: botsLabelOf(p.enabledFor ?? null, input.agents),
-      open: { kind: 'plugin', name: p.name }
+      open: { kind: 'plugin', name: p.name },
+      countLabel: `${p.skills.length} skill`
     })
   }
 
@@ -168,6 +185,29 @@ export function yourPlugins(input: PluginViewInput): YourPluginRow[] {
   }
 
   return rows
+}
+
+/** Gli account onesti di un'app Composio collegata (alias o email, mai l'id tecnico). */
+function accountLabelOfApp(input: PluginViewInput, slug: string): { accountLabel?: string } {
+  const app = input.composioGateway?.connected.find((a) => a.slug === slug)
+  if (app && (app.accounts ?? []).length > 0) {
+    return { accountLabel: (app.accounts ?? []).map((acc) => acc.alias ?? acc.email ?? '').filter(Boolean).join(', ') }
+  }
+  if (app?.email) return { accountLabel: app.email }
+  return app ? { accountLabel: '' } : {}
+}
+
+/** L'account onesto di un server: token quando c'è un segreto, altrimenti niente. */
+function accountLabelOfServer(s: { auth?: { kind?: 'oauth' | 'bearer' | 'headers' } | null }): string {
+  if (s.auth?.kind === 'bearer' || s.auth?.kind === 'headers') return 'token'
+  return ''
+}
+
+/** Il dettaglio onesto di un server: il comando locale o l'indirizzo (mai di più). */
+function serverDetailOf(s: { command?: string; args?: string[]; url?: string }): string | undefined {
+  if (s.url) return s.url
+  if (s.command) return [s.command, ...(s.args ?? [])].join(' ')
+  return undefined
 }
 
 /** La chiave d'origine di una skill (la traduce la UI, il fatto sta qui). */
@@ -227,4 +267,110 @@ export function stateLabelOf(state: PluginState, lang: 'it' | 'en'): { label: st
     case 'setup': return { label: via('da completare', 'needs setup'), action: 'setup' }
     case 'invalid': return { label: via('non valida', 'invalid'), action: 'why' }
   }
+}
+
+// ---- PL3 (fase plugin): la tabella «Collegati» (tavola 10) ----
+
+/** Il filtro per strada della tabella Collegati. */
+export type ConnectedFilter = 'all' | 'direct' | 'composio' | 'mac' | 'box'
+
+/** L'uso di un plugin: ultimo uso (epoch ms) e conteggio della settimana. */
+export interface PluginUse {
+  last: number
+  week: number
+}
+
+/** Le regole specifiche di un plugin, contate («6 sempre · 8 chiedi · 1 blocca»). */
+export interface PluginPermCounts {
+  always: number
+  ask: number
+  blocked: number
+}
+
+export interface ConnectedTableRow {
+  row: YourPluginRow
+  /** «N strumenti» quando NOTO, altrimenti il comando o /nome (mai inventato) */
+  countLabel: string | null
+  usage: PluginUse | null
+  perms: PluginPermCounts | null
+  /** non parte o accesso scaduto o da completare: va sistemato */
+  daSistemare: boolean
+}
+
+/** Il prefisso degli strumenti del plugin nell'indice dell'uso (null: nessuno). */
+export function usagePrefixOf(row: YourPluginRow): string | null {
+  if (row.kind === 'server' && row.serverSlug) return `mcp__${row.serverSlug}__`
+  if (row.kind === 'connector' && row.gray.strada === 'composio' && row.composioSlug) return `composio__${row.composioSlug}__`
+  if (row.kind === 'skill') return `skill:${row.name}`
+  return null
+}
+
+/** L'uso del plugin dall'indice (ultimo e settimana, somma dei suoi strumenti). */
+export function useOfRow(summaries: ReadonlyArray<{ tool: string; last: number; week: number }>, prefix: string | null): PluginUse | null {
+  if (!prefix) return null
+  let last = -1
+  let week = 0
+  for (const s of summaries) {
+    if (!s.tool.startsWith(prefix)) continue
+    if (s.last > last) last = s.last
+    week += s.week
+  }
+  return last < 0 ? null : { last, week }
+}
+
+/** Le regole specifiche del plugin, contate per modo (null: nessuna regola specifica). */
+export function permCountsOf(perms: PermissionsConfig | null, prefix: string | null): PluginPermCounts | null {
+  if (!perms || !prefix) return null
+  let always = 0
+  let ask = 0
+  let blocked = 0
+  for (const r of perms.rules) {
+    if (r.pattern !== '*' || !r.tool.startsWith(prefix)) continue
+    if (r.mode === 'always_allow') always++
+    else if (r.mode === 'blocked') blocked++
+    else ask++
+  }
+  return always + ask + blocked === 0 ? null : { always, ask, blocked }
+}
+
+/**
+ * PURA (PL3): le righe della tabella «Collegati» — ogni collegamento con la
+ * sua strada (badge), l'account onesto, lo stato con l'azione, i permessi in
+ * breve (le regole specifiche scritte), i bot e l'ultimo uso con il conteggio
+ * della settimana dall'INDICE (mai dai transcript). `daSistemare` raccoglie
+ * quelli che non partono o hanno l'accesso scaduto.
+ */
+export function connectedTable(input: {
+  rows: YourPluginRow[]
+  usage: ReadonlyArray<{ tool: string; last: number; week: number }>
+  perms: PermissionsConfig | null
+  filter: ConnectedFilter
+  onlyDaSistemare: boolean
+}): ConnectedTableRow[] {
+  const stradaOfFilter = (f: ConnectedFilter, row: YourPluginRow): boolean => {
+    if (f === 'all') return true
+    if (f === 'direct') return row.gray.strada === 'direct' || row.gray.strada === 'gateway' || row.gray.strada === 'registry'
+    if (f === 'composio') return row.gray.strada === 'composio'
+    if (f === 'mac') return row.gray.strada === 'mac'
+    return row.gray.strada === 'box-npm'
+  }
+  const out: ConnectedTableRow[] = []
+  for (const row of input.rows) {
+    if (!stradaOfFilter(input.filter, row)) continue
+    const daSistemare = row.state === 'broken' || row.state === 'expired' || row.state === 'invalid'
+    if (input.onlyDaSistemare && !daSistemare) continue
+    out.push({
+      row,
+      countLabel: row.kind === 'skill' ? `/${row.name}` : row.countLabel ?? null,
+      usage: useOfRow(input.usage, usagePrefixOf(row)),
+      perms: permCountsOf(input.perms, usagePrefixOf(row)),
+      daSistemare
+    })
+  }
+  return out
+}
+
+/** Quanti collegati vanno sistemati (non partono o accesso scaduto). */
+export function daSistemareCount(rows: ReadonlyArray<YourPluginRow>): number {
+  return rows.filter((r) => r.state === 'broken' || r.state === 'expired' || r.state === 'invalid').length
 }

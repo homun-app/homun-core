@@ -738,6 +738,7 @@ msgid "Accesso: con un token"
 msgstr "Accesso: con un token"
 
 #: src/renderer/src/components/PluginCard.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 msgid "Account"
 msgstr "Account"
 
@@ -1447,6 +1448,10 @@ msgstr "Basso"
 msgid "Bearer token (opzionale — salvato cifrato)"
 msgstr "Bearer token (opzionale — salvato cifrato)"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "blocca"
+msgstr "blocca"
+
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Blocca"
@@ -1467,6 +1472,7 @@ msgid "bot"
 msgstr "bot"
 
 #: src/renderer/src/components/GuideView.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Bot"
 msgstr "Bot"
@@ -1793,6 +1799,10 @@ msgstr "chiede un'azione"
 msgid "chiede un'azione di team"
 msgstr "chiede un'azione di team"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "chiedi"
+msgstr "chiedi"
+
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Chiedi"
@@ -1886,6 +1896,10 @@ msgstr "Claude Desktop"
 msgid "Claude. Il più affidabile coi tool."
 msgstr "Claude. Il più affidabile coi tool."
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Cliccando una riga si apre la sua scheda. «Da sistemare» raccoglie quelli che non partono o hanno l'accesso scaduto, così non restano rotti in silenzio."
+msgstr "Cliccando una riga si apre la sua scheda. «Da sistemare» raccoglie quelli che non partono o hanno l'accesso scaduto, così non restano rotti in silenzio."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "notice.queueFull"
@@ -1927,6 +1941,10 @@ msgstr "collega {app}…"
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Collega un modello"
 msgstr "Collega un modello"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Collegamento"
+msgstr "Collegamento"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2046,6 +2064,10 @@ msgstr "Completa il login di {0} nel browser…"
 #: src/renderer/src/components/TaskCard.tsx
 msgid "completato"
 msgstr "completato"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Composio"
+msgstr "Composio"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Composio attivo"
@@ -2651,6 +2673,11 @@ msgstr "Da ricollegare"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "da scegliere"
 msgstr "da scegliere"
+
+#. placeholder {0}: daSistemareCount(yourRows)
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Da sistemare · {0}"
+msgstr "Da sistemare · {0}"
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "Da solo"
@@ -4977,6 +5004,7 @@ msgstr "lunedì"
 msgid "boxSetup.verifyGatekeeper"
 msgstr "macOS non approva il pacchetto: l’ho cancellato."
 
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/sidebar-utils.ts
 msgid "mai"
 msgstr "mai"
@@ -5030,6 +5058,10 @@ msgstr "Massimo"
 #: src/renderer/src/components/Settings.tsx
 msgid "mattina"
 msgstr "mattina"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "MCP diretto"
+msgstr "MCP diretto"
 
 #. placeholder {0}: app!.app.name
 #: src/renderer/src/components/PluginCard.tsx
@@ -5377,6 +5409,10 @@ msgstr "nel computer"
 msgid "Nel computer dei bot i comandi girano senza chiedere: è isolato dal Mac."
 msgstr "Nel computer dei bot i comandi girano senza chiedere: è isolato dal Mac."
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Nel computer isolato"
+msgstr "Nel computer isolato"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "approval.squadFixed"
@@ -5408,6 +5444,10 @@ msgstr "nessun canale di invio collegato"
 #: src/shared/ui-messages.ts
 msgid "conn.silentNoClient"
 msgstr "nessun client OAuth salvato per questo server e la connessione silenziosa non ne registra: connetti il server col bottone Connetti/Riconnetti (il flusso interattivo registra e salva il client)"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Nessun collegamento con questi filtri."
+msgstr "Nessun collegamento con questi filtri."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -5912,6 +5952,10 @@ msgstr "Offline"
 msgid "Oggetto: {0}"
 msgstr "Oggetto: {0}"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "oggi"
+msgstr "oggi"
+
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Oggi"
@@ -6194,6 +6238,7 @@ msgid "Perfetto, uso quello sul Mac."
 msgstr "Perfetto, uso quello sul Mac."
 
 #: src/renderer/src/components/GuideView.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 msgid "Permessi"
 msgstr "Permessi"
 
@@ -6616,6 +6661,10 @@ msgstr "Questa è una chiave di Composio «For You» (inizia con ck_). Homun usa
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Questa memoria è eliminata: puoi ripristinarla dall'ultima versione qui sotto."
 msgstr "Questa memoria è eliminata: puoi ripristinarla dall'ultima versione qui sotto."
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "questa settimana"
+msgstr "questa settimana"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Questa skill è stata modificata: l'aggiornamento sovrascrive le modifiche (la versione attuale va nelle precedenti)."
@@ -7375,6 +7424,10 @@ msgstr "Segreto TOTP (opzionale)"
 msgid "Seleziona un file per vederne il contenuto."
 msgstr "Seleziona un file per vederne il contenuto."
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "sempre"
+msgstr "sempre"
+
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 #: src/renderer/src/components/TeamChat.tsx
@@ -7825,6 +7878,10 @@ msgstr "Stacca in una finestra"
 msgid "Stai controllando lo schermo di {0}"
 msgstr "Stai controllando lo schermo di {0}"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Stato"
+msgstr "Stato"
+
 #: src/renderer/src/components/McpWindow.tsx
 msgid "stdio (comando locale)"
 msgstr "stdio (comando locale)"
@@ -7846,6 +7903,7 @@ msgid "Storico delle versioni"
 msgstr "Storico delle versioni"
 
 #: src/renderer/src/components/PluginCard.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 msgid "Strada"
 msgstr "Strada"
 
@@ -7861,6 +7919,10 @@ msgstr "suggerimento routine"
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Sul computer del bot"
 msgstr "Sul computer del bot"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Sul Mac"
+msgstr "Sul Mac"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Sul tuo Mac"
@@ -8208,6 +8270,10 @@ msgstr "Tutte"
 msgid "Tutte · {0}"
 msgstr "Tutte · {0}"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Tutte le strade"
+msgstr "Tutte le strade"
+
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Tutti"
@@ -8285,6 +8351,10 @@ msgstr "ultimo errore: {0}{1}"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Ultimo passo: collega {0}"
 msgstr "Ultimo passo: collega {0}"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Ultimo uso"
+msgstr "Ultimo uso"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Un altro server"

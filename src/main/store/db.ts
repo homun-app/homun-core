@@ -20,6 +20,8 @@ import { GROUPS_DDL, migrateGroupCoordinators, migrateGroupAutonomy, ensureGroup
 import { MISSION_GRANT_MS } from '../agent/squad-approvals'
 import { SHELL_JOBS_DDL } from './shell-jobs'
 import { COMPUTER_ACTIONS_DDL } from './computer-actions'
+// PL3 (fase plugin): l'indice dell'uso degli strumenti (tabella «Collegati»)
+import { TOOL_USE_DDL, recordToolUse, backfillToolUse } from './tool-use'
 import { SUBAGENTS_DDL } from './subagents'
 import { LIBRARY_DDL } from './library'
 import type { Agent, AgentAvatar, TranscriptEntry, PermissionsConfig, RoutineTrigger, ModelUsageRow } from '../../shared/types'
@@ -148,6 +150,7 @@ function open(): DatabaseSync {
     ${SUBAGENTS_DDL}
     ${LIBRARY_DDL}
     ${COMPUTER_ACTIONS_DDL}
+    ${TOOL_USE_DDL}
   `)
   // fase 4: colonne nuove delle routine per i DB esistenti (CREATE TABLE IF
   // NOT EXISTS non le aggiunge); provenance distingue le routine dell'utente
@@ -257,6 +260,10 @@ function open(): DatabaseSync {
   // Q1 (fase squadra): l'autonomia della squadra — le squadre esistenti (e i
   // valori NULL dei DB appena migrati) valgono 'box', il default della spec
   migrateGroupAutonomy(db)
+  // PL3: il backfill dei tool-call GIÀ registrati (idempotente, una volta)
+  try {
+    backfillToolUse(db)
+  } catch { /* entries assente in un db nuovo: non c'è niente da copiare */ }
   // fase 16b (S1.1, migrazione): ogni gruppo esistente ha un coordinatore
   // (created_by se è ancora membro, altrimenti il primo membro); idempotente
   migrateGroupCoordinators()
@@ -601,6 +608,14 @@ export function appendEntry(e: AppendEntry): TranscriptEntry {
     .prepare('INSERT INTO entries(agent_id, kind, role, content, meta, created_at) VALUES(?,?,?,?,?,?)')
     .run(e.agentId, e.kind, e.role, e.content, e.meta ? JSON.stringify(e.meta) : null, now)
   const id = Number(r.lastInsertRowid)
+  // PL3 (fase plugin): ogni tool-call finisce anche nell'INDICE dell'uso
+  // (la tabella «Collegati» legge solo quello, mai i transcript); un errore
+  // qui non deve perdere la voce del transcript
+  if (e.kind === 'tool-call') {
+    try {
+      recordToolUse(db(), { entryId: id, tool: e.content, agentId: e.agentId, at: now })
+    } catch { /* l'indice si riempirà col backfill */ }
+  }
   return { id, agentId: e.agentId, kind: e.kind, role: e.role, content: e.content, meta: e.meta ?? null, createdAt: now }
 }
 

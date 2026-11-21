@@ -5,6 +5,8 @@
 import { cancelAgentJobs, cancelTaskJobs } from '../main/store/jobs'
 import * as store from '../main/store/db'
 import { db, dataDir } from '../main/store/db'
+// PL3 (fase plugin): l'indice dell'uso degli strumenti (tabella «Collegati»)
+import { toolUseSummaries } from '../main/store/tool-use'
 import * as loop from '../main/agent/loop'
 import * as permissions from '../main/agent/permissions'
 import { executeTool } from '../main/agent/tools'
@@ -1594,6 +1596,9 @@ export function buildApiMethods(
     // PL2 (fase plugin): gli strumenti completi di un server (annotazioni
     // comprese) per la scheda «Autorizzazioni»
     'mcp:tools': ([id]) => mcp().then((x) => x.toolsOfServer(id as string)),
+    // PL3 (fase plugin): l'aggregato INDICIZZATO dell'uso degli strumenti
+    // (ultimo uso + settimana) per la tabella «Collegati»
+    'plugins:usage': () => toolUseSummaries(db(), Date.now() - 7 * 24 * 3600 * 1000),
 
     // ---- fase 5: connettori del catalogo ("Connetti app") ----
     'connectors:list': () => {

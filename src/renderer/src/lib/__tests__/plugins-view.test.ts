@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type { CatalogRowView } from '../apps-view'
 import {
   yourPlugins, grayLineOf, stateLabelOf, stradaOfServer, pluginStateOfServer,
+  connectedTable, daSistemareCount, usagePrefixOf, useOfRow, permCountsOf,
   type YourPluginRow
 } from '../plugins-view'
 
@@ -128,5 +129,93 @@ describe('PL1: yourPlugins — le righe di «I tuoi»', () => {
       agents: AGENTS, query: 'fatture'
     })
     expect(rows.map((r) => r.name)).toEqual(['fatture'])
+  })
+})
+
+// ---- PL3 (fase plugin): la tabella «Collegati» ----
+
+function serverRow(over: Partial<YourPluginRow>): YourPluginRow {
+  return {
+    key: 'server:x', kind: 'server', name: 'ufficio', logo: null,
+    gray: { type: 'server', strada: 'mac' }, state: 'active', verified: false,
+    bots: { all: true, names: [], extra: 0 }, open: { kind: 'server', serverId: 'x' },
+    ...over
+  }
+}
+
+describe('PL3: la tabella Collegati — righe, uso e permessi', () => {
+  const usage = [
+    { tool: 'mcp__ufficio__search', last: 900, week: 4 },
+    { tool: 'mcp__ufficio__send', last: 700, week: 2 },
+    { tool: 'composio__trello__TRELLO_CREATE_CARD', last: 500, week: 9 },
+    { tool: 'skill:fatture', last: 300, week: 1 }
+  ]
+  const perms = {
+    default: 'needs_approval' as const,
+    rules: [
+      { tool: 'mcp__ufficio__search', pattern: '*', mode: 'always_allow' as const },
+      { tool: 'mcp__ufficio__send', pattern: '*', mode: 'blocked' as const },
+      { tool: 'mcp__ufficio__read', pattern: '*', mode: 'needs_approval' as const },
+      { tool: 'run-command', pattern: 'git *', mode: 'always_allow' as const }
+    ]
+  }
+
+  it('l\'uso arriva dall\'INDICE per prefisso (ultimo = MAX, settimana = somma)', () => {
+    expect(usagePrefixOf(serverRow({ serverSlug: 'ufficio' }))).toBe('mcp__ufficio__')
+    expect(useOfRow(usage, 'mcp__ufficio__')).toEqual({ last: 900, week: 6 })
+    expect(useOfRow(usage, 'skill:fatture')).toEqual({ last: 300, week: 1 })
+    expect(useOfRow(usage, 'mcp__nessuno__')).toBeNull()
+  })
+
+  it('i permessi in breve contano le REGOLE SPECIFICHE del plugin (6 sempre · 8 chiedi · 1 blocca)', () => {
+    expect(permCountsOf(perms, 'mcp__ufficio__')).toEqual({ always: 1, ask: 1, blocked: 1 })
+    expect(permCountsOf(perms, 'mcp__altro__')).toBeNull()
+    expect(permCountsOf(null, 'mcp__ufficio__')).toBeNull()
+  })
+
+  it('righe per Composio, server manuale, npm nel box e skill, con il conteggio o il comando onesti', () => {
+    const rows = connectedTable({
+      rows: [
+        serverRow({ key: 'server:mm', name: 'Mattermost', serverSlug: 'mattermost', countLabel: 'npx @donach/mattermost-mcp', state: 'broken' }),
+        serverRow({ key: 'server:pdf', name: 'pdf-tools', gray: { type: 'server', strada: 'box-npm' }, serverSlug: 'pdf-tools' }),
+        { key: 'app:trello', kind: 'connector', name: 'Trello', logo: null, gray: { type: 'connector', strada: 'composio' }, state: 'active', verified: false, bots: { all: false, names: ['Competitoor'], extra: 0 }, open: { kind: 'app', appId: 'trello' }, composioSlug: 'trello' },
+        { key: 'skill:fatture', kind: 'skill', name: 'fatture', logo: null, gray: { type: 'skill', strada: 'skill' }, state: 'active', verified: false, bots: { all: true, names: [], extra: 0 }, open: { kind: 'skill', folder: 'fatture' } }
+      ],
+      usage, perms, filter: 'all', onlyDaSistemare: false
+    })
+    expect(rows).toHaveLength(4)
+    const mm = rows.find((r) => r.row.name === 'Mattermost')!
+    expect(mm.countLabel).toBe('npx @donach/mattermost-mcp')
+    expect(mm.daSistemare).toBe(true)
+    const trello = rows.find((r) => r.row.name === 'Trello')!
+    expect(trello.usage).toEqual({ last: 500, week: 9 })
+    expect(trello.perms).toBeNull()
+    const skill = rows.find((r) => r.row.kind === 'skill')!
+    expect(skill.countLabel).toBe('/fatture')
+    expect(skill.usage).toEqual({ last: 300, week: 1 })
+  })
+
+  it('«Da sistemare» conta e filtra i rotti e gli scaduti', () => {
+    const rows: YourPluginRow[] = [
+      serverRow({ key: 'a', state: 'broken' }),
+      serverRow({ key: 'b', state: 'expired' }),
+      serverRow({ key: 'c', state: 'active' })
+    ]
+    expect(daSistemareCount(rows)).toBe(2)
+    const filtered = connectedTable({ rows, usage: [], perms: null, filter: 'all', onlyDaSistemare: true })
+    expect(filtered.map((r) => r.row.key)).toEqual(['a', 'b'])
+  })
+
+  it('il filtro per strada: MCP diretto/registro, Composio, sul Mac, nel computer isolato', () => {
+    const rows: YourPluginRow[] = [
+      serverRow({ key: 's1', gray: { type: 'server', strada: 'registry' } }),
+      serverRow({ key: 's2', gray: { type: 'server', strada: 'mac' } }),
+      serverRow({ key: 's3', gray: { type: 'server', strada: 'box-npm' } }),
+      { key: 'app:t', kind: 'connector', name: 'T', logo: null, gray: { type: 'connector', strada: 'composio' }, state: 'active', verified: false, bots: { all: true, names: [], extra: 0 }, open: { kind: 'app', appId: 't' } }
+    ]
+    expect(connectedTable({ rows, usage: [], perms: null, filter: 'mac', onlyDaSistemare: false }).map((r) => r.row.key)).toEqual(['s2'])
+    expect(connectedTable({ rows, usage: [], perms: null, filter: 'box', onlyDaSistemare: false }).map((r) => r.row.key)).toEqual(['s3'])
+    expect(connectedTable({ rows, usage: [], perms: null, filter: 'composio', onlyDaSistemare: false }).map((r) => r.row.key)).toEqual(['app:t'])
+    expect(connectedTable({ rows, usage: [], perms: null, filter: 'direct', onlyDaSistemare: false }).map((r) => r.row.key)).toEqual(['s1'])
   })
 })

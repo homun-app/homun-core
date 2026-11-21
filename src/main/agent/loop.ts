@@ -27,6 +27,8 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { TurnHeldForModel } from './turn-held'
 import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, updateEntryKindRole, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, dataDir, type Grant, type AppendEntry } from '../store/db'
+// PL3 (fase plugin): l'uso di una skill (/nome) finisce nell'indice tool_use
+import { recordToolUse } from '../store/tool-use'
 // A1 (fase centro-autorizzazioni): l'indice delle richieste pendenti del centro
 import { recordPendingApproval, setApprovalRowStatus } from '../store/approvals-center'
 // R2 (fase app — ritocchi): l'esito degli invii automatici si ripulisce come gli errori Composio
@@ -2250,6 +2252,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         try {
           const inv = skillInvocationExpansion(openingText, invocableSkillsOf(agentId))
           if (inv) {
+            // PL3 (fase plugin): l'uso della skill (/nome) si registra
+            // nell'INDICE dell'uso (skill:<nome>) — la riga della tabella
+            // «Collegati» dice l'ultimo uso senza leggere i transcript
+            try {
+              recordToolUse(db(), { entryId: turnEntryId, tool: `skill:${inv.name}`, agentId, at: Date.now() })
+            } catch { /* l'indice non deve rompere il turno */ }
             // U4: il timbro dell'entry che apre il turno resta PRIMA di tutto
             // (lo stesso che buildMessages ha calcolato dal suo createdAt)
             const openedAt = scopedEntries().find((e) => e.id === turnEntryId)?.createdAt ?? Date.now()
