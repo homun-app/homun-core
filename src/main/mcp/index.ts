@@ -326,7 +326,6 @@ function markNeedsAuth(cfg: McpServerConfig, message: string): void {
  */
 function markStateError(cfg: McpServerConfig, message: string): void {
   const id = cfg.catalogId ?? cfg.id
-  if (!cfg.catalogId && !cfg.source) return
   const all = getSetting<Record<string, Record<string, unknown>>>('connectors.state', {})
   const cur = (all[id] ?? {}) as Record<string, unknown>
   setSetting('connectors.state', { ...all, [id]: { ...cur, status: 'error', error: message } })
@@ -515,6 +514,10 @@ export async function testServer(id: string): Promise<{ ok: boolean; error?: str
     return { ok: true, tools: c.tools.map((t) => t.def.name) }
   } catch (e) {
     if (e instanceof UnauthorizedError) markNeedsAuth(cfg, uiText(UI.connTokenExpired))
+    // PL3 (fase plugin): l'esito del test si RICORDA anche per i server
+    // manuali — la pagina «Plugin» dice «non parte · Vedi perché» con
+    // l'evidenza dell'ultima prova (l'errore resta SOLO nella UI, tagliato)
+    markStateError(cfg, e instanceof Error ? e.message : String(e))
     return { ok: false, error: e instanceof Error ? e.message : String(e), category: classifyMcpError(e) }
   }
 }

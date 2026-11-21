@@ -460,10 +460,11 @@ try {
   const fixedOrder = await pageEval(`
     const texts = [...document.querySelectorAll('aside button')].map((b) => b.textContent.trim())
     const idx = (t) => texts.findIndex((x) => x.includes(t))
-    return { nuovo: idx('Nuovo'), bot: idx('la tua chat'), appr: idx('Da approvare'), att: texts.findIndex((x) => x === 'Attività'), lib: texts.findIndex((x) => x === 'Libreria') }
+    return { nuovo: idx('Nuovo'), bot: idx('la tua chat'), appr: idx('Da approvare'), plugin: texts.findIndex((x) => x === 'Plugin'), att: texts.findIndex((x) => x === 'Attività'), lib: texts.findIndex((x) => x === 'Libreria') }
   `)
-  check('l\'ordine delle fisse: Nuovo, Bot (la tua chat), Da approvare, Attività, Libreria',
-    fixedOrder.nuovo >= 0 && fixedOrder.bot > fixedOrder.nuovo && fixedOrder.appr > fixedOrder.bot && fixedOrder.att > fixedOrder.appr && fixedOrder.lib > fixedOrder.att,
+  // PL1 (fase plugin): «Plugin» tra «Da approvare» e «Attività»
+  check('l\'ordine delle fisse: Nuovo, Bot (la tua chat), Da approvare, Plugin, Attività, Libreria',
+    fixedOrder.nuovo >= 0 && fixedOrder.bot > fixedOrder.nuovo && fixedOrder.appr > fixedOrder.bot && fixedOrder.plugin > fixedOrder.appr && fixedOrder.att > fixedOrder.plugin && fixedOrder.lib > fixedOrder.att,
     JSON.stringify(fixedOrder))
 
   // =========== 2. la mascotte SOLO sul principale; le squadre col robottino 16 ===========

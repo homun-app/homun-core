@@ -373,7 +373,10 @@ function toolsOf(list: Array<{ name: string; description: string; annotations?: 
   return list.map((tool) => {
     const full = server && !tool.name.startsWith('mcp__') ? `mcp__${toolSlugOf(server)}__${tool.name}` : tool.name
     const { group, fixedAsk } = classifyPluginTool(full, tool.annotations)
-    return { full, name: tool.name, description: tool.description, group, fixedAsk }
+    // il NOME che si mostra (e nei testid) è senza prefisso mcp__<slug>__,
+    // come il resto dell'app (mcpToolPresentation): il prefisso resta al modello
+    const name = full.startsWith('mcp__') ? full.split('__').slice(2).join('__') : tool.name
+    return { full, name, description: tool.description, group, fixedAsk }
   })
 }
 

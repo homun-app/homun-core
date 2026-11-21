@@ -424,10 +424,13 @@ try {
   writeFileSync(zcodeFile, JSON.stringify({ mcp: { servers: { sequenza: { type: 'stdio', command: 'npx', args: ['-y', '@sequenza'], env: { SEQ_API_KEY: 'k-finta' } } } } }, null, 2))
 
   // la finestra «Server MCP» col bottone Importa
-  await clickTestid(cdp, 'account-menu-trigger')
-  await waitDom(cdp, `document.querySelector('[data-testid="menu-mcp"]')`, 5_000)
-  await clickTestid(cdp, 'menu-mcp')
-  if (!(await waitDom(cdp, `document.querySelector('[data-testid="mcp-window"]')`, 5_000))) throw new Error('la finestra Server MCP non si apre')
+  // PL7 (fase plugin): la finestra non c'è più — la pagina «Plugin» nel
+  // punto dei server MCP (menù Aggiungi › Server MCP personalizzato)
+  await clickTestid(cdp, 'sidebar-plugin')
+  if (!(await waitDom(cdp, `document.querySelector('[data-testid="plugin-page"]')`, 5_000))) throw new Error('la pagina Plugin non si apre')
+  await clickTestid(cdp, 'plugin-add')
+  await clickTestid(cdp, 'plugin-add-mcp')
+  if (!(await waitDom(cdp, `document.querySelector('[data-testid="mcp-import-button"]')`, 5_000))) throw new Error('i server MCP non si aprono nella pagina Plugin')
   const bottone = await waitDom(cdp, `document.querySelector('[data-testid="mcp-import-button"]')`, 5_000)
   check('E2: il bottone «Importa da Cursor, Claude o ZCode» c\'è nella finestra', bottone)
   await clickTestid(cdp, 'mcp-import-button')
@@ -457,7 +460,7 @@ try {
     return true
   `)
   await pageEval(cdp, `
-    const w = document.querySelector('[data-testid="mcp-window"]')
+    const w = document.querySelector('[data-testid="plugin-page"]')
     // U2: il bottone dice «Importa N» con N corretto ([0-9]: i backslash si
     // perdono dentro i template literal della sonda)
     const btn = [...w.querySelectorAll('button')].find((b) => /^Importa [0-9]+$/.test(b.textContent.trim()))
@@ -498,7 +501,7 @@ try {
   renameSync(zcodeFile + '.via', zcodeFile)
   // chiudi la finestra
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', keyCode: 27, windowsVirtualKeyCode: 27 })
-  await waitDom(cdp, `!document.querySelector('[data-testid="mcp-window"]')`, 5_000)
+  await waitDom(cdp, `!document.querySelector('[data-testid="mcp-server-row"]')`, 5_000)
 
   // =========== E4: il bot propone npm:, l'utente conferma, il server sta NEL BOX ===========
   // 1) il turno del bot: il modello finto chiama add_mcp_server SENZA versione
@@ -756,10 +759,12 @@ try {
   if (!u45agentId) throw new Error('U4/U5: nessun bot')
 
   // la finestra «Server MCP» e l'import: elenco RAGGRUPPATO per origine (U2)
-  await clickTestid(u45cdp, 'account-menu-trigger')
-  await waitDom(u45cdp, `document.querySelector('[data-testid="menu-mcp"]')`, 5_000)
-  await clickTestid(u45cdp, 'menu-mcp')
-  if (!(await waitDom(u45cdp, `document.querySelector('[data-testid="mcp-window"]')`, 5_000))) throw new Error('U4/U5: la finestra Server MCP non si apre')
+  // PL7 (fase plugin): pagina Plugin › Aggiungi › Server MCP personalizzato
+  await clickTestid(u45cdp, 'sidebar-plugin')
+  if (!(await waitDom(u45cdp, `document.querySelector('[data-testid="plugin-page"]')`, 5_000))) throw new Error('U4/U5: la pagina Plugin non si apre')
+  await clickTestid(u45cdp, 'plugin-add')
+  await clickTestid(u45cdp, 'plugin-add-mcp')
+  if (!(await waitDom(u45cdp, `document.querySelector('[data-testid="mcp-import-button"]')`, 5_000))) throw new Error('U4/U5: i server MCP non si aprono')
   await clickTestid(u45cdp, 'mcp-import-button')
   if (!(await waitDom(u45cdp, `document.querySelector('[data-testid="mcp-import-list"]')`, 5_000))) throw new Error('U4/U5: l\'elenco import non si apre')
   const u45gruppi = await pageEval(u45cdp, `
@@ -775,7 +780,7 @@ try {
   const u45markup = await pageEval(u45cdp, `return document.querySelector('[data-testid="mcp-import-list"]').innerHTML`)
   check('U2: l\'icona KeyRound di lucide c\'è nel markup (niente emoji)', /lucide-key-round/.test(u45markup), '')
   const u45fondo = await pageEval(u45cdp, `
-    return document.querySelector('[data-testid="mcp-window"]').textContent
+    return document.querySelector('[data-testid="plugin-page"]').textContent
   `)
   check('U2: in fondo «N selezionati», «Annulla» e «Importa N» (0 finché non si spunta)',
     u45fondo.includes('0 selezionati') && u45fondo.includes('Annulla') && u45fondo.includes('Importa 0'), u45fondo.slice(0, 100))
@@ -807,7 +812,7 @@ try {
     return 'ok'
   `).then((r) => { if (r !== 'ok') throw new Error('U4/U5: ' + r) })
   const u45importa = await pageEval(u45cdp, `
-    const w = document.querySelector('[data-testid="mcp-window"]')
+    const w = document.querySelector('[data-testid="plugin-page"]')
     const btn = [...w.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Importa 4')
     if (!btn) return false
     btn.click()
@@ -855,8 +860,8 @@ try {
 
   // U1: le azioni della riga sono ICONE con aria-label, NESSUNA parola visibile
   const u45azioni = await pageEval(u45cdp, `
-    const riga = [...document.querySelectorAll('[data-testid="mcp-window"] [data-testid="mcp-test-button"]')].slice(0, 1)[0]?.closest('div')
-    const bottoni = [...document.querySelectorAll('[data-testid="mcp-window"] [data-testid="mcp-test-button"], [data-testid="mcp-window"] [data-testid="mcp-edit-button"], [data-testid="mcp-window"] [data-testid="mcp-delete-button"]')]
+    const riga = [...document.querySelectorAll('[data-testid="plugin-page"] [data-testid="mcp-test-button"]')].slice(0, 1)[0]?.closest('div')
+    const bottoni = [...document.querySelectorAll('[data-testid="plugin-page"] [data-testid="mcp-test-button"], [data-testid="plugin-page"] [data-testid="mcp-edit-button"], [data-testid="plugin-page"] [data-testid="mcp-delete-button"]')]
     return {
       tre: bottoni.length,
       aria: bottoni.every((b) => (b.getAttribute('aria-label') ?? '').length > 0 && (b.getAttribute('title') ?? '') === b.getAttribute('aria-label')),

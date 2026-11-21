@@ -1669,7 +1669,9 @@ export function buildApiMethods(
       let storeRead: ((id: string, key: string) => Promise<unknown>) | null = null
       try { storeRead = (await installBridge()).getInstallDeps().store.read } catch { storeRead = null }
       const servers = []
-      for (const s of mcpMod.listServers().filter((x) => x.source || x.needsAuth)) {
+      // PL7 (fase plugin): TUTTI i server, i MANUALI compresi — la casa è la
+      // pagina «Plugin» (una volta i manuali stavano solo nella loro finestra)
+      for (const s of mcpMod.listServers()) {
         // L1: needsReauth dice alla scheda Installati quando mostrare il bottone
         const needsReauth = s.auth?.kind === 'oauth' && !s.catalogId && states[s.id]?.status === 'needs_auth'
         let neverAuthorized: boolean | undefined

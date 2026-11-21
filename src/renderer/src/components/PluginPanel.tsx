@@ -100,9 +100,9 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
   const [perms, setPerms] = useState<PermissionsConfig | null>(initial?.perms ?? null)
   const [connFilter, setConnFilter] = useState<ConnectedFilter>('all')
   const [onlyDaSistemare, setOnlyDaSistemare] = useState(false)
-  // PL2: la scheda del plugin (tavola 9) — app o server; le skill restano
-  // nell'editor riusato (la loro scheda è Panoramica e Bot)
-  const [card, setCard] = useState<{ app?: CatalogRowView; server?: McpServerInfo; directEnabledFor?: string[] | null } | null>(null)
+  // PL2: la scheda del plugin (tavola 9) — si ricordano gli ID e gli oggetti
+  // si cercano a OGNI render (vivi: un toggle che cambia enabledFor si vede)
+  const [card, setCard] = useState<{ appId?: string; serverId?: string } | null>(null)
   const [skillDetail, setSkillDetail] = useState<string | null>(null)
   // «Crea con il bot»: la chat con una richiesta precompilata (il meccanismo
   // di fase pagine G4 — composerPrefill — consumato dal composer di Chat)
@@ -185,13 +185,11 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
     else if (at.kind === 'segment') { setView('list'); setSeg(at.seg) }
     else if (at.kind === 'app') {
       setView('list'); setSeg('connectors')
-      const row = model.rows.find((r) => r.app.id === at.appId)
-      if (row) setCard({ app: row, directEnabledFor: installed?.servers.find((s) => s.id === row.app.directId)?.enabledFor ?? null })
+      setCard({ appId: at.appId })
     }
     else if (at.kind === 'server') {
       setView('list')
-      const sv = installed?.servers.find((s) => s.id === at.serverId)
-      if (sv) setCard({ server: sv })
+      setCard({ serverId: at.serverId })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pluginAt])
@@ -201,20 +199,21 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
     const target = row.open
     if (target.kind === 'app') {
       setSeg('connectors')
-      const rowView = model.rows.find((r) => r.app.id === target.appId)
-      if (rowView) setCard({ app: rowView, directEnabledFor: installed?.servers.find((s) => s.id === rowView.app.directId)?.enabledFor ?? null })
+      setCard({ appId: target.appId })
     } else if (target.kind === 'server') {
-      const sv = installed?.servers.find((s) => s.id === target.serverId)
-      if (sv) setCard({ server: sv })
+      setCard({ serverId: target.serverId })
     } else if (target.kind === 'plugin') {
-      // il plugin mostra i suoi pezzi: per ora la riga porta al suo server
-      // principale quando c'è, altrimenti resta nell'elenco (onesto)
+      // il plugin mostra i suoi pezzi: la riga porta al suo server principale
+      // quando c'è, altrimenti resta nell'elenco (onesto)
       const sv = installed?.servers.find((s) => s.source?.kind === 'plugin' && s.source.plugin === target.name)
-      if (sv) setCard({ server: sv })
+      if (sv) setCard({ serverId: sv.id })
     } else {
       setSkillDetail(target.folder)
     }
   }
+  // gli oggetti VIVI della scheda (cercati a ogni render: i toggle si vedono)
+  const cardApp = card?.appId ? model.rows.find((r) => r.app.id === card.appId) ?? null : null
+  const cardServer = card?.serverId ? installed?.servers.find((s) => s.id === card.serverId) ?? null : null
   const rowGrid = 'grid grid-cols-1 gap-1.5 lg:grid-cols-2 lg:gap-x-8'
   const segments: Array<[PluginSegment, string]> = [
     ['all', t`Tutto`],
@@ -429,6 +428,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                 </button>
                 <button
                   className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                  data-testid="plugin-add-mcp"
                   onClick={() => { setAddOpen(false); setView('mcp') }}
                 >
                   <Trans>Server MCP personalizzato</Trans>
@@ -506,7 +506,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                         onConnect={(x) => void flows.connect(x)}
                         onCancel={(x) => void flows.cancel(x)}
                         onConflictResolve={(x) => void flows.onConflictResolve(x)}
-                        onOpen={(x) => setCard({ app: x, directEnabledFor: installed?.servers.find((s) => s.id === x.app.directId)?.enabledFor ?? null })}
+                        onOpen={(x) => setCard({ appId: x.app.id })}
                       />
                     ))}
                   </div>
@@ -551,7 +551,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                     onConnect={(x) => void flows.connect(x)}
                     onCancel={(x) => void flows.cancel(x)}
                     onConflictResolve={(x) => void flows.onConflictResolve(x)}
-                    onOpen={(x) => setCard({ app: x, directEnabledFor: installed?.servers.find((s) => s.id === x.app.directId)?.enabledFor ?? null })}
+                    onOpen={(x) => setCard({ appId: x.app.id })}
                   />
                 ))}
               </div>
@@ -720,12 +720,12 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
       </div>
 
       {/* PL2: la scheda del plugin (tavola 9) */}
-      {card && (
+      {(cardApp ?? cardServer) && card && (
         <PluginCard
-          app={card.app ? { row: card.app } : undefined}
-          server={card.server}
-          directEnabledFor={card.directEnabledFor}
-          onConnect={card.app ? (r) => { setCard(null); void flows.connect(r) } : undefined}
+          app={cardApp ? { row: cardApp } : undefined}
+          server={cardServer ?? undefined}
+          directEnabledFor={cardApp?.app.directId ? installed?.servers.find((s) => s.id === cardApp.app.directId)?.enabledFor ?? null : null}
+          onConnect={cardApp ? (r) => { setCard(null); void flows.connect(r) } : undefined}
           onClose={() => setCard(null)}
           onChanged={() => { void refreshConnectors(); void refreshComposioGateway(); void refreshInstalled(); reloadSkills() }}
         />
