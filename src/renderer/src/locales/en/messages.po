@@ -7183,6 +7183,16 @@ msgstr "MCP server"
 msgid "Server MCP · Pubblicato da {0}"
 msgstr "MCP server · Published by {0}"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "sistema.mcpServerFail"
+msgstr "MCP server «{name}» does not start: {error}"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "sistema.mcpServerOk"
+msgstr "MCP server connected: {name} — {count, plural, one {# tool} other {# tools}}"
+
 #: src/renderer/src/components/McpWindow.tsx
 msgid "Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati)."
 msgstr "Manual MCP servers (stdio or HTTP, with headers/bearer stored encrypted)."

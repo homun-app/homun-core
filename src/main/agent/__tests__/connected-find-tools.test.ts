@@ -5,6 +5,8 @@
 // mcp__composio__* nel flusso gateway). Come: le app collegate entrano nel
 // TESTO CERCABILE del gruppo del connettore, dentro il catalogo di find_tools.
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { assembleTurnTools, activateGroupsResult } from '../turn-tools'
 import { mcpGroupAppsForAgent } from '../../mcp'
 import type { ToolDef } from '../llm'
@@ -110,5 +112,41 @@ describe('CL6: mcpGroupAppsForAgent — le app collegate per gruppo mcp', () => 
 
   it('nessun tool composio/gateway → mappa vuota (niente rumore nell\'indice)', async () => {
     expect(await mcpGroupAppsForAgent([tool('mcp__notion__NOTION_SEARCH', 'Notion search')])).toEqual({})
+  })
+})
+
+// ---- U5 (fase mcp-ui): find_tools trova gli strumenti PER NOME DEL SERVER
+// (e del servizio), non solo per gruppo: il NOME del server entra nel testo
+// cercabile del gruppo (mcpGroupServers), così «mattermost» trova i suoi
+// strumenti anche quando lo slug è un altro e i tool non lo nominano.
+describe('U5: find_tools col NOME del server trova i suoi strumenti', () => {
+  const MM_DEFS: ToolDef[] = [
+    tool('mcp__mm42__send_message', 'Send a message to a channel'),
+    tool('mcp__mm42__read_channel', 'Read the posts of a channel')
+  ]
+
+  it('find_tools({query:"mattermost"}) attiva il gruppo del server quando il NOME è noto (mcpGroupServers)', () => {
+    const r = assemble(MM_DEFS, { mcpGroupServers: { 'mcp:mm42': 'mattermost' } })
+    const act = activateGroupsResult(r.deferredIndex, [], { query: 'mattermost' })
+    expect(act.activated).toContain('mcp:mm42')
+    expect(act.text).toContain('Group mcp:mm42 is now active')
+    expect(act.text).not.toContain('No tool groups match')
+  })
+
+  it('la descrizione del gruppo porta il NOME del server (non solo lo slug)', () => {
+    const r = assemble(MM_DEFS, { mcpGroupServers: { 'mcp:mm42': 'mattermost' } })
+    const g = r.deferredIndex.find((x) => x.id === 'mcp:mm42')!
+    expect(g.description).toContain('"mattermost"')
+  })
+
+  it('senza il nome noto la query «mattermost» NON trova il gruppo (i tool non lo nominano: il comportamento di prima)', () => {
+    const r = assemble(MM_DEFS)
+    const act = activateGroupsResult(r.deferredIndex, [], { query: 'mattermost' })
+    expect(act.activated).not.toContain('mcp:mm42')
+  })
+
+  it('il loop passa i nomi dei server (mcpGroupServers costruito da activeServersForAgent)', () => {
+    const LOOP = readFileSync(fileURLToPath(new URL('../loop.ts', import.meta.url)), 'utf8')
+    expect(LOOP).toMatch(/mcpGroupServers/)
   })
 })

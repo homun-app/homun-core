@@ -136,7 +136,7 @@ import { MAX_CREATE_AGENTS_PER_TURN, wakeParentToolDef } from './tools'
 // fase 13 (punto 3): add_mcp_server/install_plugin SOLO nei turni dell'utente;
 // (punto 5): tool MCP deferiti oltre connectors.maxInlineTools
 import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED, GROUP_EXCLUDED_TOOLS, isMcpId, offerConnectorMcpGuidance, offerConnectorMissingText, isBotIntroTurn } from './connectors-policy'
-import { connectedAppsLine, mcpServerNames } from './connected-apps'
+import { connectedAppsLine, mcpServerNames, connectedMcpServersSection } from './connected-apps'
 import { PROPOSAL_RESULT } from '../connectors/install'
 import {
   requiredParamsOf, toolsDeferred, connectorsActiveSection, DEFAULT_MAX_INLINE_TOOLS
@@ -144,7 +144,7 @@ import {
 // fase velocità (S3): elenco core fisso + integrati differiti dietro find_tools/use_tool;
 // fase token (T0/T1/T2): l'elenco lo costruisce l'unica fonte pura assembleTurnTools
 // (nucleo + gruppi attivabili); use_tool resta solo per le storie vecchie
-import { assembleTurnTools, offeredMcpOf, activateGroupsResult, toolDefsOfGroups, groupsNamedInResult, RESULT_ACTIVATES, activeGroupsFromTranscript, groupActivationText, GROUP_ACTIVATION_ACT_NOW, applyBoxNoInternet, type ToolGroupPresent } from './turn-tools'
+import { assembleTurnTools, offeredMcpOf, activateGroupsResult, toolDefsOfGroups, groupsNamedInResult, RESULT_ACTIVATES, activeGroupsFromTranscript, groupActivationText, GROUP_ACTIVATION_ACT_NOW, applyBoxNoInternet, mcpGroupOf, type ToolGroupPresent } from './turn-tools'
 // Q1 (fase squadra): l'autonomia della squadra (pura)
 import { normalizeGroupAutonomy, squadAlwaysAsks, delegationSquadId } from './squad-autonomy'
 // Q2 (fase squadra): la coda delle approvazioni e il grant di missione
@@ -1881,6 +1881,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // prima dell'assemblaggio, così un gruppo non si attiva senza i suoi tool.
     let mcpToolDefs: import('./llm').ToolDef[] = []
     let mcpGroupApps: Record<string, string[]> = {}
+    // U5 (fase mcp-ui): il NOME di ogni server collegato per gruppo — entra
+    // nel testo cercabile del gruppo (find_tools per nome del server/servizio)
+    let mcpGroupServers: Record<string, string> = {}
+    // U5: i server ATTIVI del bot (nome + strumenti) per la sezione del prompt
+    let activeMcpServers: Array<{ name: string; tools: Array<{ name: string }> }> = []
     try {
       const { activeTools } = await import('../mcp')
       mcpToolDefs = await activeTools(agentId)
@@ -1895,6 +1900,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       mcpGroupApps = await mcpGroupAppsForAgent(mcpToolDefs)
     } catch {
       // niente app collegate note: l'indice di find_tools resta com'era
+    }
+    try {
+      const { activeServersForAgent } = await import('../mcp')
+      activeMcpServers = (await activeServersForAgent(agentId)) as Array<{ name: string; tools: Array<{ name: string }> }>
+      for (const s of activeMcpServers) {
+        const g = s.tools[0] ? mcpGroupOf(s.tools[0].name) : null
+        if (g && !mcpGroupServers[g]) mcpGroupServers[g] = s.name
+      }
+    } catch {
+      // elenco non disponibile: l'indice resta con gli slug
     }
     // B2 (fase beta.4): il turno di presentazione usa SOLO la domanda e il
     // proprio profilo (come il trigger «created» di Rakazo): niente MCP
@@ -2051,6 +2066,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             browserDefs,
             mcpToolDefs,
             mcpGroupApps,
+            // U5 (fase mcp-ui): find_tools trova gli strumenti anche col NOME
+            // del server (e del servizio), non solo col gruppo
+            mcpGroupServers,
             maxInlineTools,
             // fase token · nucleo (R8.2): il gruppo subagents (check/message/stop)
             // si attiva DA SOLO nei turni in cui il bot ha almeno un figlio APERTO o
@@ -2077,6 +2095,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     let mainSection = ''
     let connectorsSection = ''
     let connectedAppsSection = ''
+    // U5 (fase mcp-ui): l'elenco dei server MCP collegati e funzionanti
+    let mcpServersSection = ''
     // fase velocità (S5): le sezioni VARIABILI vanno in FONDO al sistema,
     // dopo la parte fissa e in ordine di frequenza (memoria per ultima: è
     // quella che cambia più spesso, a ogni update_memory); la sezione
@@ -2148,17 +2168,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               // alias si mostra col suo id, che Composio accetta in `account`
               .map((acc) => ({ ...(acc.accountId ? { accountId: acc.accountId } : {}), ...(acc.alias ? { alias: acc.alias } : {}), ...(acc.email ? { email: acc.email } : {}) }))
           }))
-        let servers: Array<{ name: string; tools: Array<{ name: string }> }> = []
-        try {
-          const { activeServersForAgent } = await import('../mcp')
-          servers = (await activeServersForAgent(agentId)) as Array<{ name: string; tools: Array<{ name: string }> }>
-        } catch {
-          // MCP non disponibile: bastano le app collegate
-        }
-        connectedAppsSection = connectedAppsLine({ composioApps: apps, mcpServers: mcpServerNames(servers, apps.map((a) => a.name)) })
+        // U5 (fase mcp-ui): i server attivi sono già stati calcolati per il
+        // turno (activeMcpServers): la riga delle app e la SEZIONE dei server
+        // MCP collegati vengono dallo stesso elenco
+        connectedAppsSection = connectedAppsLine({ composioApps: apps, mcpServers: mcpServerNames(activeMcpServers, apps.map((a) => a.name)) })
       } catch {
         // niente riga: il prompt resta quello di base
       }
+      // U5 (fase mcp-ui): l'elenco breve dei server MCP collegati e
+      // funzionanti per questo bot, con la regola «i loro strumenti PRIMA di
+      // ogni altra strada; mai curl dal computer isolato» — parte VARIABILE
+      // del prompt, sotto il tetto misurato CONNECTED_MCP_SECTION_TOKEN_BUDGET
+      mcpServersSection = connectedMcpServersSection(activeMcpServers.map((s) => ({ name: s.name, toolCount: s.tools.length })))
       // fase 12 (punto 6): la sezione Sottoagenti solo nei bot NORMALI, mai
       // nei turni di gruppo (lì si coordina col gruppo)
       // fase 14 (punto 8): le righe delle credenziali solo nei turni NON di gruppo
@@ -2169,6 +2190,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       systemText = systemPrompt(agent, { main: isMain, teams: opts.groupTurn !== undefined, subagents: opts.groupTurn === undefined, groups: turnCatalog.map((g) => g.id) }) +
         mainSection + buildSkillsSection(agentId) + connectorsSection +
         (connectedAppsSection ? `\n${connectedAppsSection}` : '') +
+        (mcpServersSection ? `\n${mcpServersSection}` : '') +
         await buildMemorySection(agentId)
     }
 

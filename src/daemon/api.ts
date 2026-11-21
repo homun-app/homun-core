@@ -1426,12 +1426,27 @@ export function buildApiMethods(
             cfg.auth = { kind: 'headers' }
             x.saveServers(x.listServers())
           }
-        } catch (e) {
+          } catch (e) {
           // K1.8 (fase rilascio — correzioni): il testo del catalogo di
           // MasterKeyUnavailableError arriva intero, non incapsulato
           if (isMasterKeyUnavailableError(e)) throw e
           throw uiError(UI.rpcSecretSaveFailed, { error: e instanceof Error ? e.message : String(e) })
         }
+      }
+      // U5 (fase mcp-ui): dopo ogni aggiunta, modifica o riaccensione il test
+      // di connessione parte DA SOLO e i bot abilitati ricevono la nota di
+      // sistema («Server MCP collegato: <nome> (N strumenti)» / «non parte:
+      // <errore>»); la finestra mostra lo stesso esito col pallino della riga
+      if (incoming.enabled) {
+        void (async () => {
+          let test: { ok: boolean; tools?: string[]; error?: string }
+          try {
+            test = await x.testServer(incoming.id)
+          } catch (e) {
+            test = { ok: false, error: e instanceof Error ? e.message : String(e) }
+          }
+          await notifyMcpServerState(incoming, test, emit, worker).catch(() => undefined)
+        })()
       }
       return x.listServers()
     },
@@ -2816,12 +2831,45 @@ export async function notifyConnectorConnected(
 }
 
 /**
+ * U5 (fase mcp-ui): l'esito del test di connessione automatico che segue ogni
+ * import/aggiunta/modifica/riaccensione di un server (mcp:save). Ogni bot per
+ * cui il server è abilitato (enabledFor, ['*'] = tutti) riceve la nota di
+ * sistema delle card dei connettori (initiator CONNECTOR_INSTALLED): «Server
+ * MCP collegato: <nome> (N strumenti)» con la strada di find_tools, oppure
+ * «<nome> non parte: <errore>». Il testo per il modello resta inglese; meta.ui
+ * porta la lingua dell'interfaccia. PURA rispetto ai suoi input.
+ */
+export async function notifyMcpServerState(
+  cfg: { name: string; toolSlug?: string; enabledFor?: string[] },
+  test: { ok: boolean; tools?: string[]; error?: string },
+  emit: Emitter,
+  worker: JobWorker
+): Promise<void> {
+  const { serverToolsPrefix } = await import('../main/mcp')
+  const ids = cfg.enabledFor ?? ['*']
+  const prefix = serverToolsPrefix(cfg)
+  const n = test.tools?.length ?? 0
+  for (const agent of store.listAgents()) {
+    if (!ids.includes('*') && !ids.includes(agent.id)) continue
+    const text = test.ok
+      ? `[sistema] Server MCP "${cfg.name}" connected: ${n} tools available (${prefix}__* — find them with find_tools({query: "${cfg.name}"})).`
+      : `[sistema] Server MCP "${cfg.name}" does not start: ${test.error ?? 'unknown error'}.`
+    enqueueUserMessage(db(), agent.id, text, undefined, emit, undefined, 'CONNECTOR_INSTALLED', {
+      ui: test.ok
+        ? ui(UI.sistemaMcpServerOk, { name: cfg.name, count: n })
+        : ui(UI.sistemaMcpServerFail, { name: cfg.name, error: test.error ?? '' })
+    })
+    worker.poke()
+  }
+}
+
+/**
  * Fase mcp-setup (M5.2): l'utente ha completato il collegamento di un server
  * MCP proposto dal bot (add_mcp_server). Ogni agente con la card ancora
  * aperta riceve il messaggio initiator CONNECTOR_CONNECTED col prefisso dei
- * suoi strumenti (mcp__&lt;toolSlug&gt;__*, R1) e le card si marcano meta.connected
+ * suoi strumenti (mcp__<toolSlug>__*, R1) e le card si marcano meta.connected
  * (una sola notifica per offerta). `cardIds` sono gli id delle card
- * («registry:&lt;nome&gt;» / «url:&lt;url&gt;»).
+ * («registry:<nome>» / «url:<url>»).
  */
 export async function notifyMcpServerConnected(
   cardIds: string[],

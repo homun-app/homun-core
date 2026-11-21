@@ -13,6 +13,38 @@ import type { ToolDef } from './llm'
 /** Quanti nomi al massimo nella riga; poi «and N more». */
 export const CONNECTED_APPS_MAX_NAMES = 20
 
+/**
+ * U5 (fase mcp-ui): il tetto (token caratteri/4) della sezione «Connected MCP
+ * servers» del prompt, MISURATO con 8 server dai nomi realistici (riga per
+ * server + regola find_tools-prima-di-tutto): mai alzarlo per far passare un
+ * test — il numero sta nel REPORT della fase.
+ */
+export const CONNECTED_MCP_SECTION_TOKEN_BUDGET = 150
+
+/** Quanti server al massimo nell'elenco breve del prompt; poi «and N more». */
+export const CONNECTED_MCP_MAX_SERVERS = 8
+
+/**
+ * U5 (fase mcp-ui): l'elenco BREVE dei server MCP collegati e funzionanti per
+ * quel bot (nome + una riga), con la regola che manca: per un servizio che ha
+ * un server collegato, i suoi strumenti (find_tools) PRIMA di qualunque altra
+ * strada; mai curl dal computer isolato. PURA: vuota senza server; sta nella
+ * parte VARIABILE del system prompt (mai nel prefisso in cache), sotto il
+ * tetto misurato CONNECTED_MCP_SECTION_TOKEN_BUDGET.
+ */
+export function connectedMcpServersSection(servers: ReadonlyArray<{ name: string; toolCount: number }>): string {
+  if (!servers.length) return ''
+  const shown = servers.slice(0, CONNECTED_MCP_MAX_SERVERS)
+  const over = servers.length - shown.length
+  const lines = shown.map((s) => `- ${s.name}: ${s.toolCount} tools`)
+  if (over > 0) lines.push(`- and ${over} more`)
+  return [
+    '# Connected MCP servers',
+    ...lines,
+    'For a service that has a connected server, use its tools (find_tools({query: "<server or service name>"})) BEFORE any other route — not the browser, web_fetch, curl or a new connector. Never curl or run-command from the isolated computer.'
+  ].join('\n')
+}
+
 /** Un account collegato di un'app Composio, come serve alla riga (CA3). */
 export interface ConnectedAppAccountFacts {
   alias?: string

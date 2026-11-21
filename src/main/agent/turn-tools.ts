@@ -54,6 +54,13 @@ export interface AssembleTurnToolsInput {
    * «composio» (flusso gateway).
    */
   mcpGroupApps?: Record<string, string[]>
+  /**
+   * U5 (fase mcp-ui): il NOME del server per gruppo mcp:<server> (id → nome
+   * mostrato), da activeServersForAgent: entra nella descrizione del gruppo,
+   * così find_tools({query: "mattermost"}) trova gli strumenti del server
+   * col NOME (e del servizio), anche quando lo slug è un altro.
+   */
+  mcpGroupServers?: Record<string, string>
   /** soglia connectors.maxInlineTools: sopra, i tool MCP si differiscono per server */
   maxInlineTools: number
   /** i gruppi già attivati nella conversazione (dal transcript: id di gruppo, più i nomi MCP legacy) */
@@ -185,7 +192,11 @@ function presentBuiltinGroups(catalog: ToolDef[], browserAvailable: boolean): Ar
 }
 
 /** i gruppi mcp:<server> quando i tool MCP sono differiti (una voce per server) */
-function presentMcpGroups(mcpToolDefs: ToolDef[], groupApps: Record<string, string[]> = {}): ToolGroupPresent[] {
+function presentMcpGroups(
+  mcpToolDefs: ToolDef[],
+  groupApps: Record<string, string[]> = {},
+  groupServers: Record<string, string> = {}
+): ToolGroupPresent[] {
   const byServer = new Map<string, ToolDef[]>()
   for (const t of mcpToolDefs) {
     const g = mcpGroupOf(t.name)
@@ -198,9 +209,12 @@ function presentMcpGroups(mcpToolDefs: ToolDef[], groupApps: Record<string, stri
     // sistema dopo il collegamento) chiede gli strumenti: «gmail»
     const apps = [...new Set(groupApps[id] ?? [])].filter(Boolean)
     const appsText = apps.length ? ` (connected apps: ${apps.join(', ')})` : ''
+    // U5 (fase mcp-ui): il NOME del server (non solo lo slug) — find_tools
+    // trova gli strumenti per nome del server e del servizio
+    const serverName = groupServers[id] ?? id.slice(4)
     return {
       id,
-      description: `${tools.length} tools from the "${id.slice(4)}" connector${appsText}: call find_tools({group: "${id}"}) to load them.`,
+      description: `${tools.length} tools from the "${serverName}" connector${appsText}: call find_tools({group: "${id}"}) to load them.`,
       tools,
       internalNames: tools.map((t) => t.name),
       guide: ''
@@ -244,7 +258,7 @@ export function assembleTurnTools(input: AssembleTurnToolsInput): AssembleTurnTo
 
   // i gruppi presenti: builtin + (se MCP differiti) i mcp:<server>
   const builtinPresent = presentBuiltinGroups(catalog, input.browserAvailable)
-  const mcpPresent = deferredMcp ? presentMcpGroups(input.mcpToolDefs, input.mcpGroupApps) : []
+  const mcpPresent = deferredMcp ? presentMcpGroups(input.mcpToolDefs, input.mcpGroupApps, input.mcpGroupServers) : []
   const deferredIndex: ToolGroupPresent[] = [...builtinPresent.map((b) => b.present), ...mcpPresent]
   const presentById = new Map(deferredIndex.map((g) => [g.id, g]))
 

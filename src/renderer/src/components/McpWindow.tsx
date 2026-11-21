@@ -273,6 +273,8 @@ function ManualServers() {
   /**
    * U2: la conferma dell'import — le voci SPISTATE diventano server manuali
    * (i doppioni non si sovrascrivono, i segreti vanno cifrati nel main).
+   * U5: ogni server CREATO riceve subito il test di connessione (il pallino
+   * della riga, verde «N strumenti» o rosso con l'errore).
    */
   const applyImport = async (): Promise<Array<{ name: string; outcome: string }>> => {
     if (!importRows) return []
@@ -284,7 +286,13 @@ function ManualServers() {
     const outcomes = await api.mcpImportApply(picks).catch(() => [] as Array<{ name: string; outcome: string }>)
     setImportRows(null)
     setImportPicks({})
-    await refresh()
+    const list = await api.mcpList().catch(() => servers)
+    setServers(list)
+    for (const o of outcomes) {
+      if (o.outcome !== 'created') continue
+      const created = list.find((s) => s.name === o.name)
+      if (created) void runTest(created.id)
+    }
     return outcomes
   }
 
@@ -429,9 +437,12 @@ function ManualServers() {
                 const secret: McpServerSecret | undefined = edit.transport === 'http' && editBearer.trim()
                   ? { bearerToken: editBearer.trim() }
                   : edit.transport === 'stdio' && Object.keys(env.envSecrets).length ? { env: env.envSecrets } : undefined
-                await api.mcpSave({ ...withEnv, id: edit.id || 'mcp_' + Date.now() }, secret)
+                const id = edit.id || 'mcp_' + Date.now()
+                await api.mcpSave({ ...withEnv, id }, secret)
                 setEdit(null); setEditBearer(''); setEnvRows([])
                 await refresh()
+                // U5: dopo l'aggiunta (o la modifica) il test parte da solo
+                if (edit.enabled) void runTest(id)
               }}
             >
               <Trans>Salva</Trans>

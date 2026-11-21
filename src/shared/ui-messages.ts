@@ -271,6 +271,15 @@ export const UI = {
     id: 'sistema.serverConnected',
     message: 'L’utente ha collegato {name}: i suoi strumenti {prefix}__* sono ora disponibili.'
   }),
+  // U5 (fase mcp-ui): l'esito del test automatico dopo import/aggiunta/modifica
+  sistemaMcpServerOk: msg({
+    id: 'sistema.mcpServerOk',
+    message: 'Server MCP collegato: {name} — {count, plural, one {# strumento} other {# strumenti}}'
+  }),
+  sistemaMcpServerFail: msg({
+    id: 'sistema.mcpServerFail',
+    message: 'Server MCP «{name}» non parte: {error}'
+  }),
   sistemaComposioAppConnected: msg({
     id: 'sistema.composioAppConnected',
     message: 'L’utente ha collegato {name} (tramite Composio): i suoi strumenti composio__{slug}__* sono ora disponibili.'
