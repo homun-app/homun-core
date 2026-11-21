@@ -16,7 +16,6 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
 import { setDataDir, dataDir } from './store/db'
-import { createTray, refreshTray } from './tray'
 import { initMainLanguage, applyStartupLanguage } from './i18n'
 import { DaemonClient } from './daemon-client'
 import { setDaemonSpawnContext } from './daemon-context'
@@ -41,6 +40,12 @@ import { createMainWindowManager } from './main-window'
 import { BootStatusTracker } from './boot-status'
 import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
 import { safeStorageBackendForEnv } from '../daemon/master-keys'
+// U6 (fase mcp-ui): il registro del ciclo di vita e la decisione del
+// second-instance mentre l'app sta uscendo (relaunch)
+import { createLifecycleLog, mainLogDir } from './lifecycle-log'
+import { secondInstanceWhileQuitting } from './quit-behavior'
+// U6: il tray si distrugge all'uscita
+import { createTray, refreshTray, destroyTray } from './tray'
 
 // fase 16 (U0b): la cartella dati reale dell'utente è …/Application
 // Support/sandbot (minuscolo), di prima del cambio di nome visibile in
@@ -60,6 +65,9 @@ protocol.registerSchemesAsPrivileged([
 
 if (isDaemonMode(process.argv)) {
   // ---- modalità daemon (A1): stesso eseguibile, nessuna finestra ----
+  // U6: anche il daemon scrive la sua riga di boot nello stesso registro
+  const daemonLog = createLifecycleLog(mainLogDir(() => app.getPath('logs')))
+  daemonLog.line('boot', { pid: process.pid, version: app.getVersion(), mode: 'daemon' })
   app.setActivationPolicy('accessory')
   app.whenReady().then(() => {
     const argDir = resolveDataDirArgv(process.argv) ?? process.env.SANDBOT_DATA_DIR
@@ -81,12 +89,30 @@ if (isDaemonMode(process.argv)) {
   // il daemon vive finché l'utente non lo ferma o arriva l'aggiornamento (A2)
 } else {
   // ---- modalità UI ----
+  // U6 (fase mcp-ui): il registro del ciclo di vita del main, sempre attivo
+  // e leggero (con SANDBOT_TEST_USER_DATA finisce nei dati temporanei delle
+  // prove, MAI nel ~/Library/Logs/Homun vero)
+  const lifecycle = createLifecycleLog(mainLogDir(() => app.getPath('logs')))
+  lifecycle.line('boot', { pid: process.pid, version: app.getVersion(), mode: 'ui' })
+  // U6: il flag d'uscita — imposto in before-quit, letto da second-instance
+  let quitting = false
+  let quitStartedAt = 0
   // A5: istanza singola — un secondo avvio porta in primo piano la finestra
   const gotTheLock = app.requestSingleInstanceLock()
+  lifecycle.line(gotTheLock ? 'lock' : 'lock-denied')
   if (!gotTheLock) {
     app.quit()
   } else {
     app.on('second-instance', () => {
+      // U6: se QUESTA copia sta uscendo, il nuovo avvio arriverebbe a un
+      // processo morente (il caso della beta.15: nessuna finestra finché non
+      // si rifà ⌘Q) → si riparte: la copia nuova mostrerà la finestra
+      lifecycle.line('second-instance', { quitting })
+      if (secondInstanceWhileQuitting(quitting) === 'relaunch') {
+        lifecycle.line('relaunch-on-quit')
+        app.relaunch()
+        return
+      }
       // W1 (fase avvio-finestra): SOLO la principale — si ricrea se chiusa e
       // non si toccano le altre finestre (PiP, aggiornamento, offscreen)
       showMainWindow()
@@ -105,13 +131,18 @@ if (isDaemonMode(process.argv)) {
     // sola (showMainWindow: crea se manca, restore+show+focus altrimenti) e
     // getMainWindow che torna SOLO lei, mai la PiP né le altre finestre
     const mainWindows = createMainWindowManager<BrowserWindow>(createWindow)
+    // U6 (fase mcp-ui): la PiP del turno (chiusa esplicitamente all'uscita)
+    let pip: PipManager | null = null
 
     function getMainWindow(): BrowserWindow | undefined {
       return mainWindows.getMainWindow()
     }
 
     function showMainWindow(): BrowserWindow {
-      return mainWindows.showMainWindow()
+      const win = mainWindows.showMainWindow()
+      // U6: la finestra principale mostrata (anche ricreata) nel registro
+      lifecycle.line('window-shown', { pid: process.pid })
+      return win
     }
 
     function openAgent(agentId: string): void {
@@ -184,7 +215,13 @@ if (isDaemonMode(process.argv)) {
         }
       })
       // W1: la chiusura si comunica al manager (che dimentica SOLO la principale)
-      win.on('closed', () => mainWindows.forget(win))
+      // U6: la riga del registro del ciclo di vita
+      win.on('closed', () => {
+        mainWindows.forget(win)
+        lifecycle.line('window-closed')
+      })
+      // U6: la finestra principale creata
+      lifecycle.line('window-created')
 
       // A5: niente finestre/popup dal renderer; i link http(s) al browser
       // esterno SOLO dopo il controllo dello schema (mai file:, javascript:,
@@ -286,7 +323,9 @@ if (isDaemonMode(process.argv)) {
       // SV4 (fase schermo-vivo): il gestore della PiP — una sola per volta,
       // misure ricordate in ui.pip.bounds (setting del daemon), evento `pip`
       // a tutte le finestre, «Riporta in Homun» ricrea la principale se chiusa
-      const pip = new PipManager({
+      // U6 (fase mcp-ui): il gestore vive qui ma il RIFERIMENTO è fuori, così
+      // before-quit (registrato fuori dal whenReady) può chiuderlo
+      pip = new PipManager({
         preloadPath: () => preload,
         createWindow: createPipHandle,
         urlFor: (agentId) =>
@@ -425,6 +464,34 @@ if (isDaemonMode(process.argv)) {
     app.on('window-all-closed', () => {
       // il daemon resta attivo: chiudere la finestra non ferma i bot (§6.2)
       if (process.platform !== 'darwin') app.quit()
+    })
+
+    // U6 (fase mcp-ui): uscita VELOCE e osservabile. Il flag d'uscita serve a
+    // second-instance (un nuovo avvio mentre QUESTA copia sta uscendo →
+    // relaunch, così l'utente vede comunque la finestra). Niente attese
+    // inutili: il tray si DISTRUGGE, la PiP si chiude, le finestre nascoste
+    // e offscreen chiudono con l'app; NESSUNA attesa sul daemon, che resta
+    // acceso per scelta. La durata (before-quit → quit) finisce nel registro.
+    app.on('before-quit', () => {
+      quitting = true
+      quitStartedAt = Date.now()
+      lifecycle.line('before-quit', { windows: BrowserWindow.getAllWindows().length })
+      try {
+        destroyTray()
+      } catch {
+        // già distrutto
+      }
+      try {
+        pip?.close()
+      } catch {
+        // già chiusa
+      }
+    })
+    app.on('will-quit', () => {
+      lifecycle.line('will-quit')
+    })
+    app.on('quit', (_e, _code) => {
+      lifecycle.line('quit', { 'exit-ms': quitStartedAt ? Date.now() - quitStartedAt : undefined })
     })
   }
 }

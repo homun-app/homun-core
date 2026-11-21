@@ -197,6 +197,14 @@ export function registerIpc(
     app.emit('activate')
     return { ok: true }
   })
+  // U6 (fase mcp-ui): il gancio di prova di ⌘Q — l'app quit() VERA, come la
+  // voce del menu. SOLO con SANDBOT_TEST_USER_DATA (come test:emit-activate)
+  ipcMain.handle('test:emit-quit', () => {
+    if (!process.env.SANDBOT_TEST_USER_DATA) throw new Error('test:emit-quit is probe-only (needs SANDBOT_TEST_USER_DATA)')
+    const ok = { ok: true }
+    app.quit()
+    return ok
+  })
   // E2 (fase mcp-env): «Importa da Cursor, Claude o ZCode» — i tre file si
   // leggono SOLO qui, SOLO al clic dell'utente (mai all'avvio, mai dal bot).
   // La scansione mostra nome e tipo MAI i valori; la conferma crea i server

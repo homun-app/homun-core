@@ -314,6 +314,8 @@ const api: SandbotApi = {
    * prove (SANDBOT_TEST_USER_DATA).
    */
   testEmitActivate: () => ipcRenderer.invoke('test:emit-activate'),
+  // U6 (fase mcp-ui): il ⌘Q di prova delle sonde (come testEmitActivate)
+  testEmitQuit: () => ipcRenderer.invoke('test:emit-quit'),
   // fase 17a (L5): il main ricostruisce il tray nella lingua scelta
   uiLanguageChanged: (lang) => ipcRenderer.invoke('ui:language-changed', lang),
   onEvent: (cb) => {

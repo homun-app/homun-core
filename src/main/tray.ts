@@ -64,3 +64,16 @@ export function createTray(openMainWindow: () => BrowserWindow | undefined): voi
   tray.setToolTip('Homun')
   refreshTray()
 }
+
+/**
+ * U6 (fase mcp-ui): l'icona del tray si DISTRUGGE all'uscita — niente risorse
+ * vive dietro un'app che sta chiudendo (l'uscita dopo ⌘Q resta veloce).
+ */
+export function destroyTray(): void {
+  try {
+    tray?.destroy()
+  } catch {
+    // già distrutto: niente
+  }
+  tray = null
+}
