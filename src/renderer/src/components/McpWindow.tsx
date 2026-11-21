@@ -15,6 +15,7 @@ import { msg } from '@lingui/core/macro'
 import { PlugZap, Pencil, Trash2, X, Terminal, Globe, KeyRound } from 'lucide-react'
 import { api, useStore } from '../store'
 import type { McpServerInfo, McpServerSecret } from '../../../shared/types'
+import { serverCommandLine } from '../lib/mcp-row'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 // E1 (fase mcp-env): le righe «Variabili» del form stdio
 import { envRowsFromServer, saveEnvPayload, newEnvRow, envNameLooksSecret, type EnvRow } from '../lib/mcp-env'
@@ -348,7 +349,7 @@ function ManualServers() {
             {s.needsAuth && (
               <span className="shrink-0 rounded-full bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground" data-testid="mcp-needs-fill">{t`da compilare`}</span>
             )}
-            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{s.transport === 'stdio' ? `${s.command} ${(s.args ?? []).join(' ')}` : s.url}</span>
+            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" data-testid="mcp-row-command">{serverCommandLine(s)}</span>
             {/* U1: il risultato del test come PALLINO nella riga (U5: parte da solo) */}
             {tests[s.id] && <RowTestStatus test={tests[s.id]!} />}
             {/* U1: test, modifica ed elimina come ICONE (niente testo visibile) */}
