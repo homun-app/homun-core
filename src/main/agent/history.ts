@@ -302,16 +302,10 @@ export function buildMessages(
   const max = opts.maxMessages ?? DEFAULT_MAX_MESSAGES
   const timeZone = opts.timeZone === undefined ? systemTimeZone() : (opts.timeZone ?? 'UTC')
   // fase 4: l'entry summary più recente SOSTITUISCE i turni che copre
-  // (meta.coversUpTo) — le entry restano nel DB, ma al modello non arrivano
-  let effective = entries
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const s = entries[i]!
-    if (s.kind === 'summary' && typeof s.meta?.coversUpTo === 'number') {
-      effective = entries.filter((e) => e.id > (s.meta!.coversUpTo as number) || e.id === s.id)
-      break
-    }
-  }
-  let msgs = toMessages(effective, timeZone)
+  // (meta.coversUpTo) — le entry restano nel DB, ma al modello non arrivano.
+  // D5 (fase deleghe): il criterio è la funzione UNICA effectiveEntries — la
+  // compattazione stima e pianifica sulla STESSA vista del modello
+  let msgs = toMessages(effectiveEntries(entries), timeZone)
   msgs = trimToTurnBoundary(msgs, max)
   msgs = repairToolPairs(msgs)
   // le immagini vanno all'ULTIMO messaggio utente (quello corrente)
@@ -324,6 +318,23 @@ export function buildMessages(
     }
   }
   return [{ role: 'system', content: system }, ...msgs]
+}
+
+/**
+ * D5 (fase deleghe): quello che il modello VEDE DAVVERO di una storia —
+ * l'ultimo summary più le sole entry con id > del suo coversUpTo (il
+ * criterio di buildMessages, estratto per essere RIUSATO dalla
+ * compattazione: la stima e il piano lavorano sulla stessa vista, mai sulla
+ * storia intera).
+ */
+export function effectiveEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const s = entries[i]!
+    if (s.kind === 'summary' && typeof s.meta?.coversUpTo === 'number') {
+      return entries.filter((e) => e.id > (s.meta!.coversUpTo as number) || e.id === s.id)
+    }
+  }
+  return entries
 }
 
 /**

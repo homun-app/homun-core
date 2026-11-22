@@ -161,6 +161,171 @@ describe('orchestrazione maybeCompactHistory (store reale, LLM finto)', () => {
   })
 })
 
+// ---- D5 (fase deleghe): compattazione INCREMENTALE con isteresi ----
+// Il difetto del 22/11: 36 compattazioni, ~895k token in input (il 20% del
+// giorno), 4–6 s prima di ogni risposta — getEntries passava a
+// planCompaction TUTTA la storia (le entry già coperte dall'ultimo summary
+// comprese), superata la soglia si restava sopra per sempre e il digest
+// riassumeva da capo tutto il prefisso, riassunti vecchi inclusi.
+
+describe('D5: sopra soglia una volta, sotto per un pezzo (isteresi 70% → 45%)', () => {
+  it('una storia di 600 entry con un summary che copre le prime 550 e il resto SOTTO soglia → NESSUNA compattazione (oggi ne parte una)', async () => {
+    const { setSetting } = await import('../../store/db')
+    setSetting('contextBudgetTokens', { 'prov/m5': 32_000 })
+    const agent = 'agent_d5_stabile'
+    // 550 entry coperte dal summary (testi LUNGHI: senza il summary la storia
+    // sarebbe ben oltre il 70% del budget)…
+    for (let i = 0; i < 550; i++) {
+      appendEntry({ agentId: agent, kind: i % 2 ? 'message' : 'tool-result', role: i % 2 ? 'user' : 'system', content: 'vecchia entry '.padEnd(400, 'x') })
+    }
+    const all = getEntries(agent)
+    const { appendEntry: _a } = await import('../../store/db')
+    _a({ agentId: agent, kind: 'summary', role: 'system', content: 'Riepilogo: fatto tutto fino a qui.', meta: { coversUpTo: all[all.length - 1]!.id } })
+    // …e 50 entry nuove PICCOLE: quello che il modello vede è sotto soglia
+    for (let i = 0; i < 50; i++) {
+      appendEntry({ agentId: agent, kind: 'message', role: i % 2 ? 'user' : 'assistant', content: 'nuova breve' })
+    }
+    let calls = 0
+    const done = await maybeCompactHistory(agent, 'prov', 'm5', async () => { calls++; return 'nuovo riepilogo' }, () => undefined)
+    expect(done).toBe(false)
+    expect(calls).toBe(0)
+    expect(getEntries(agent).filter((e) => e.kind === 'summary')).toHaveLength(1)
+  })
+
+  it('20 turni simulati sopra soglia: al massimo 2 compattazioni in tutto (oggi una per turno)', async () => {
+    const { setSetting } = await import('../../store/db')
+    setSetting('contextBudgetTokens', { 'prov/m5': 4_000 }) // soglia 2800, target 1800
+    const agent = 'agent_d5_turni'
+    // partenza sopra soglia: turni da ~62 token (un confine utente per turno)
+    for (let t = 0; t < 60; t++) {
+      appendEntry({ agentId: agent, kind: 'message', role: 'user', content: `turno ${t} ` + 'a'.repeat(120) })
+      appendEntry({ agentId: agent, kind: 'message', role: 'assistant', content: 'risposta ' + 'b'.repeat(120) })
+    }
+    let calls = 0
+    const digests: string[] = []
+    const compact = (): Promise<boolean> =>
+      maybeCompactHistory(agent, 'prov', 'm5', async (d) => {
+        calls++
+        digests.push(d)
+        return 'RIEPILOGO: i fatti principali finora.'
+      }, () => undefined)
+    await compact() // la prima (la storia è sopra soglia)
+    expect(calls).toBe(1)
+    // 20 turni simulati: ogni turno aggiunge ~62 token (due entry da 125
+    // caratteri) e chiama la compattazione come farebbe il loop
+    for (let t = 0; t < 20; t++) {
+      appendEntry({ agentId: agent, kind: 'message', role: 'user', content: `dopo ${t} ` + 'c'.repeat(120) })
+      appendEntry({ agentId: agent, kind: 'message', role: 'assistant', content: 'risposta ' + 'd'.repeat(120) })
+      await compact()
+    }
+    // ISTERESI: il confine riporta il resto sotto il 45% → servono ~8 turni
+    // per risedere la soglia: in 20 turni AL MASSINO 2 compattazioni
+    expect(calls).toBeLessThanOrEqual(2)
+    expect(calls).toBeGreaterThanOrEqual(1)
+  })
+
+  it('il digest della SECONDA compattazione contiene il riassunto precedente e SOLO le entry nuove', async () => {
+    const { setSetting } = await import('../../store/db')
+    setSetting('contextBudgetTokens', { 'prov/m5': 2_000 })
+    const agent = 'agent_d5_increm'
+    for (let t = 0; t < 40; t++) {
+      appendEntry({ agentId: agent, kind: 'message', role: 'user', content: `prima-fase-${t} ` + 'a'.repeat(120) })
+      appendEntry({ agentId: agent, kind: 'message', role: 'assistant', content: 'risposta ' + 'b'.repeat(120) })
+    }
+    const digests: string[] = []
+    const compact = (out: string) => maybeCompactHistory(agent, 'prov', 'm5', async (d) => { digests.push(d); return out }, () => undefined)
+    await compact('PRIMO RIEPILOGO: fatti A.')
+    const firstSummary = getEntries(agent).findLast((e) => e.kind === 'summary')!
+    const covers1 = firstSummary.meta!.coversUpTo as number
+    // altre entry fin sopra soglia
+    for (let t = 0; t < 30; t++) {
+      appendEntry({ agentId: agent, kind: 'message', role: 'user', content: `seconda-fase-${t} ` + 'e'.repeat(120) })
+      appendEntry({ agentId: agent, kind: 'message', role: 'assistant', content: 'risposta ' + 'f'.repeat(120) })
+    }
+    await compact('SECONDO RIEPILOGO: fatti A e B.')
+    expect(digests).toHaveLength(2)
+    const second = digests[1]!
+    // il riassunto precedente c'è, INTERO
+    expect(second).toContain('PRIMO RIEPILOGO: fatti A.')
+    // e nessuna entry GIÀ COPERTA rientra nel digest (i marker della prima
+    // fase non ci sono: solo il nuovo)
+    expect(second).not.toContain('prima-fase-3 ') // le prime (coperte dal primo summary) non rientrano
+    expect(second).toContain('seconda-fase-0')
+    const entries = getEntries(agent)
+    expect(entries.filter((e) => e.kind === 'message' && e.id <= covers1).length).toBeGreaterThan(0) // sanity: nel DB restano
+  })
+
+  it('il tetto del digest (50% del budget) è rispettato, col riassunto precedente INTATTO', async () => {
+    const { setSetting } = await import('../../store/db')
+    setSetting('contextBudgetTokens', { 'prov/m5': 2_000 }) // tetto digest: 1000 token ≈ 4000 caratteri
+    const agent = 'agent_d5_cap'
+    for (let t = 0; t < 60; t++) {
+      appendEntry({ agentId: agent, kind: 'tool-result', role: 'system', content: 'OUTPUT LUNGHISSIMO '.repeat(120) }) // ~2,5k caratteri l'uno
+      appendEntry({ agentId: agent, kind: 'message', role: 'user', content: `turno ${t} ` + 'a'.repeat(80) })
+    }
+    let digest = ''
+    await maybeCompactHistory(agent, 'prov', 'm5', async (d) => { digest = d; return 'RIEPILOGO.' }, () => undefined)
+    expect(digest.length).toBeLessThanOrEqual(4_000 + 200) // il tetto (con un piccolo margine di riga)
+    // la storia risale sopra soglia: la SECONDA compattazione riceve il
+    // riassunto precedente INTERO nel digest (mai tagliato dal tetto)
+    for (let t = 0; t < 30; t++) {
+      appendEntry({ agentId: agent, kind: 'tool-result', role: 'system', content: 'OUTPUT NUOVO '.repeat(120) })
+      appendEntry({ agentId: agent, kind: 'message', role: 'user', content: `dopo ${t} ` + 'a'.repeat(80) })
+    }
+    const second = await maybeCompactHistory(agent, 'prov', 'm5', async (d) => { digest = d; return 'SECONDO.' }, () => undefined)
+    expect(second).toBe(true)
+    expect(digest.length).toBeLessThanOrEqual(4_000 + 200)
+    // al secondo giro il riassunto precedente resta INTERO nel digest
+    expect(digest).toContain('RIEPILOGO.')
+  })
+
+  it('un fallimento della compattazione scrive UNA riga di log con la categoria (mai testo del modello) e il turno prosegue', async () => {
+    const { setSetting } = await import('../../store/db')
+    setSetting('contextBudgetTokens', { 'prov/m5': 2_000 })
+    const agent = 'agent_d5_fail'
+    for (let t = 0; t < 40; t++) {
+      appendEntry({ agentId: agent, kind: 'message', role: 'user', content: `turno ${t} ` + 'a'.repeat(120) })
+      appendEntry({ agentId: agent, kind: 'message', role: 'assistant', content: 'risposta ' + 'b'.repeat(120) })
+    }
+    const logs: string[] = []
+    const orig = console.log
+    console.log = (...a: unknown[]) => { logs.push(a.join(' ')) }
+    try {
+      const done = await maybeCompactHistory(agent, 'prov', 'm5', async () => { throw new Error('boom dal provider') }, () => undefined)
+      expect(done).toBe(false)
+    } finally {
+      console.log = orig
+    }
+    expect(logs.some((l) => l.includes('[compaction]'))).toBe(true)
+    expect(logs.some((l) => l.includes('boom dal provider'))).toBe(false)
+    expect(getEntries(agent).filter((e) => e.kind === 'summary')).toHaveLength(0)
+  })
+
+  it('MISURA (REPORT): 50 turni simulati — chiamate di compattazione e token dei digest', async () => {
+    const { setSetting } = await import('../../store/db')
+    setSetting('contextBudgetTokens', { 'prov/m5': 2_000 })
+    const agent = 'agent_d5_misura'
+    let calls = 0
+    let digestTokens = 0
+    const compact = () => maybeCompactHistory(agent, 'prov', 'm5', async (d) => {
+      calls++
+      digestTokens += Math.ceil(d.length / 4)
+      return 'RIEPILOGO: fatti principali.'
+    }, () => undefined)
+    for (let t = 0; t < 50; t++) {
+      appendEntry({ agentId: agent, kind: 'message', role: 'user', content: `turno ${t} ` + 'a'.repeat(120) })
+      appendEntry({ agentId: agent, kind: 'message', role: 'assistant', content: 'risposta ' + 'b'.repeat(120) })
+      appendEntry({ agentId: agent, kind: 'tool-result', role: 'system', content: 'output ' + 'o'.repeat(200) })
+      await compact()
+    }
+    // PRIMA (stessa simulazione, codice di ieri): 38 compattazioni e 100.219
+    // token di digest — una per turno, il prefisso riassunto da capo ogni
+    // volta. Il confronto finisce nel REPORT.
+    console.log(`[D5 misura] 50 turni simulati (budget 2k token): ${calls} compattazioni, ${digestTokens} token di digest in totale (prima: 38 / 100.219)`)
+    expect(calls).toBeLessThanOrEqual(12)
+  }, 60_000)
+})
+
 describe('entriesToDigest (pure)', () => {
   it('turni in forma leggibile, notice/event esclusi, contenuti lunghi troncati', () => {
     const digest = entriesToDigest([
