@@ -30,6 +30,7 @@ export type PluginPoint =
 import type { UiTheme } from './theme'
 import { applyTheme, watchSystemTheme } from './theme'
 import { previewOf, type SidebarPreview } from './sidebar-utils'
+import { collectDelegationJobs } from './lib/delegation-status'
 import { activateUiLanguage } from './lib/i18n'
 import { resolveUiLanguage, type UiLanguageSetting, type UiLanguage } from '../../shared/ui-language'
 // fase 16b correzioni 2 (Q1): lo store tiene ciò che layoutFor legge
@@ -165,6 +166,10 @@ interface Store {
   boxSetupPlan: BoxSetupRowId[] | null
   activeId: string | null
   entries: TranscriptEntry[]
+  /** D2 (fase deleghe): lo stato dei job delle deleghe accodate — jobId →
+   * queued/delivered/gone — per la riga di stato in chat (una chiamata per
+   * passata del refresh coalescente, solo se ci sono deleghe in vista) */
+  delegationStatuses: Record<string, 'queued' | 'delivered' | 'gone'>
   reasoning: Record<number, string>
   /**
    * Fase risposta (R6): la risposta in diretta per agente — il testo
@@ -426,6 +431,8 @@ interface Store {
    */
   refreshSquadData(opts?: { forceBadges?: boolean }): void
   setApprovalsQueueOpen(open: boolean): void
+  /** D2 (fase deleghe): l'Annulla della riga «In coda per <bot>» */
+  cancelDelegation(jobId: number): Promise<void>
   /** A2: apre il centro «Da approvare» (eventualmente su UNA richiesta) */
   setApprovalsOpen(open: boolean, focusId?: string | null): void
   /** A2 (fase approvazioni-chiare): la vista del centro — le richieste o il Registro */
@@ -555,6 +562,7 @@ export const useStore = create<Store>((set, get) => ({
   boxSetupPlan: null,
   activeId: null,
   entries: [],
+  delegationStatuses: {},
   reasoning: {},
   liveReply: {},
   providers: [],
@@ -1462,6 +1470,15 @@ export const useStore = create<Store>((set, get) => ({
       const gid = get().openGroupId
       void api.listGroups().then((groups) => apply('groups', groups)).catch(() => undefined)
       void api.listAgents().then((agents2) => apply('agents', agents2)).catch(() => undefined)
+      // D2 (fase deleghe): lo stato dei job delle deleghe accodate (la riga
+      // «In coda per <bot> · parte alle HH:MM» in chat) — UNA chiamata per
+      // passata, solo se la chat aperta ha deleghe in attesa
+      const delegationJobs = collectDelegationJobs(get().entries)
+      if (delegationJobs.length) {
+        void api.delegationsStatus(delegationJobs.map((d) => d.jobId))
+          .then((statuses) => apply('delegationStatuses', statuses))
+          .catch(() => undefined)
+      }
       // A1/A2/A5 (fase centro-autorizzazioni): UNA chiamata per passata per
       // TUTTE le richieste pendenti — alimenta il centro, il riquadro delle
       // chat e i numeri della barra laterale (squadre e bot singoli)
@@ -1503,6 +1520,13 @@ export const useStore = create<Store>((set, get) => ({
 
   setApprovalsQueueOpen(open) {
     set({ approvalsQueueOpen: open })
+  },
+
+  // D2 (fase deleghe): l'Annulla della riga «In coda per <bot>» — il job
+  // esce dalla coda (il messaggio non parte) e il refresh porta la riga via
+  async cancelDelegation(jobId: number) {
+    await api.delegationsCancel(jobId).catch(() => undefined)
+    get().refreshSquadData()
   },
 
   // A2 (fase centro-autorizzazioni): il centro «Da approvare» — apre su una

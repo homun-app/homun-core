@@ -129,9 +129,26 @@ export function activeJobForAgent(db: DatabaseSync, agentId: string): Job | null
 /** Tetto della coda dei messaggi utente per agente (fase 1/2; correzione A1: vale anche per send_to_agent). */
 export const MAX_USER_MESSAGE_QUEUE = 10
 
-/** Messaggi utente in attesa per un agente (il tetto coda della fase 1). */
+/**
+ * D2 (fase deleghe): il ritmo dei tentativi di una delega ferma dalla coda
+ * piena del destinatario — un tentativo ogni 2 minuti, al massimo 30 minuti
+ * (poi il messaggio torna al mittente come «non consegnato»).
+ */
+export const DELEGATION_RETRY_STEP_MS = 2 * 60_000
+export const DELEGATION_RETRY_MAX_MS = 30 * 60_000
+
+/**
+ * Messaggi utente in attesa per un agente (il tetto coda della fase 1).
+ * D2 (fase deleghe): i job delegationRetry (la delega che aspetta che la
+ * coda si liberi) NON contano — stanno FUORI dalla cosa che li blocca, se
+ * no la terrebbero piena per sempre.
+ */
 export function pendingUserMessages(db: DatabaseSync, agentId: string): number {
-  const r = db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE agent_id = ? AND status = 'queued' AND kind = 'user-message'").get(agentId) as { n: number }
+  const r = db.prepare(`
+    SELECT COUNT(*) AS n FROM jobs
+    WHERE agent_id = ? AND status = 'queued' AND kind = 'user-message'
+      AND COALESCE(json_extract(payload_json, '$.delegationRetry'), 0) = 0
+  `).get(agentId) as { n: number }
   return r.n
 }
 
@@ -158,6 +175,36 @@ export function pendingAgentPairJobs(db: DatabaseSync, a: string, b: string, now
       )
   `).get(now - 3_600_000, a, b, b, a) as { n: number }
   return r.n
+}
+
+/**
+ * D2 (fase deleghe): quando la finestra oraria della coppia si libera anche
+ * contando i GIÀ ACCODATI — il created_at del più vecchio job di catena
+ * della coppia + 1 ora; null se non ce ne sono. È il runAt del messaggio
+ * che il limite orario ha fermato (stessa finestra di pendingAgentPairJobs).
+ */
+export function pendingAgentPairReleaseAt(db: DatabaseSync, a: string, b: string, now: number): number | null {
+  const r = db.prepare(`
+    SELECT MIN(created_at) AS oldest FROM jobs
+    WHERE kind = 'user-message' AND status IN ('queued','leased')
+      AND created_at > ?
+      AND json_extract(payload_json, '$.initiator') = 'AGENT'
+      AND json_extract(payload_json, '$.entryId') IS NULL
+      AND COALESCE(json_extract(payload_json, '$.userRequested'), 0) = 0
+      AND (
+        (json_extract(payload_json, '$.fromAgentId') = ? AND json_extract(payload_json, '$.toAgentId') = ?)
+        OR (json_extract(payload_json, '$.fromAgentId') = ? AND json_extract(payload_json, '$.toAgentId') = ?)
+      )
+  `).get(now - 3_600_000, a, b, b, a) as { oldest: number | null }
+  return r.oldest === null ? null : Number(r.oldest) + 3_600_000
+}
+
+/**
+ * D2 (fase deleghe): il job di retry della delega torna in coda con un nuovo
+ * runAt SENZA passare da done/failed — il tentativo non è fallito, aspetta.
+ */
+export function postponeJob(db: DatabaseSync, jobId: number, runAt: number): void {
+  db.prepare("UPDATE jobs SET status = 'queued', lease_until = NULL, run_at = ? WHERE id = ?").run(runAt, jobId)
 }
 
 /**

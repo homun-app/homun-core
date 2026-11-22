@@ -260,6 +260,10 @@ vi.mock('../../store/approvals-center', () => ({
 
 vi.mock('../../store/jobs', () => ({
   MAX_USER_MESSAGE_QUEUE: 10,
+  // D2 (fase deleghe): il ritmo dei retry della delega ferma dalla coda piena
+  DELEGATION_RETRY_STEP_MS: 2 * 60_000,
+  // D2: quando la finestra oraria della coppia si libera anche a coda
+  pendingAgentPairReleaseAt: (_db: unknown, _a: string, _b: string, _now: number) => null,
   enqueueJob: (_db: unknown, input: { agentId: string; kind: string; payload: Record<string, unknown>; runAt: number; now: number }) => {
     const job = { id: h.db.jobs.length + 1, ...input, createdAt: input.now, status: 'queued' }
     h.db.jobs.push(job)
@@ -2458,7 +2462,7 @@ describe('fase 7: send_to_agent', () => {
     expect(toolResults.some((m) => String(m.content).includes('maximum hop 3'))).toBe(true)
   })
 
-  it('limite per ora: oltre 10 messaggi tra la stessa coppia, rifiuto senza accodare (D1: nei turni NON dell\'utente)', async () => {
+  it('limite per ora: oltre 10 messaggi tra la stessa coppia, NON parte adesso (D1+D2: si accoda con runAt futuro)', async () => {
     // 10 messaggi tra la coppia nell'ultima ora nel transcript del destinatario
     const now = Date.now()
     for (let i = 0; i < 10; i++) {
@@ -2473,12 +2477,15 @@ describe('fase 7: send_to_agent', () => {
       { text: 'ok' }
     ]
     // D1 (fase deleghe): il tetto orario vale per le CATENE — il turno qui è
-    // una routine, non il messaggio dell'utente
+    // una routine, non il messaggio dell'utente. D2: il limite è TEMPORANEO,
+    // il messaggio si accoda e il tool result dice quando parte
     await runTurn(AGENT, 'ancora', emit, undefined, { source: 'routine', title: 'Ronda', initiator: 'ROUTINE' })
-    expect(h.db.jobs).toHaveLength(0)
+    const queued = h.db.jobs.filter((j) => j.kind === 'user-message')
+    expect(queued).toHaveLength(1)
+    expect(((queued[0] as unknown) as { runAt: number }).runAt).toBeGreaterThan(now + 30 * 60_000) // tra ~un'ora, non adesso
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
     const toolResults = lastCall.filter((m) => m.role === 'tool')
-    expect(toolResults.some((m) => String(m.content).includes('in the last hour'))).toBe(true)
+    expect(toolResults.some((m) => String(m.content).includes('Queued: it will be delivered to'))).toBe(true)
   })
 
   it('il messaggio di un altro bot apre il turno con meta fromAgentId/hop (entry non scritta dall\'utente)', async () => {
@@ -2554,20 +2561,24 @@ describe('fase 7: send_to_agent', () => {
     expect(sent.meta?.final).toBe(true)
   })
 
-  it('correzione A1: la coda del destinatario ha lo stesso tetto dei messaggi utente (10 in attesa → rifiuto, niente entry)', async () => {
+  it('correzione A1 + D2: coda del destinatario piena → la delega aspetta FUORI dalla coda (job retry, +2 minuti, niente consegna adesso)', async () => {
     // 10 messaggi utente normali già in coda per il destinatario
     for (let i = 0; i < 10; i++) {
       h.db.jobs.push({ id: i + 1, agentId: OTHER, kind: 'user-message', payload: { text: `coda ${i}` }, createdAt: Date.now(), status: 'queued' })
     }
+    const t0 = Date.now()
     h.llm.queue = [
       { toolCalls: [{ id: 'c1', name: 'send_to_agent', arguments: JSON.stringify({ agentId: OTHER, text: 'un altro' }) }] },
       { text: 'ok' }
     ]
     await runTurn(AGENT, 'delega', emit)
-    expect(h.db.jobs).toHaveLength(10) // nessun job nuovo
-    expect(h.db.entries.some((e) => e.meta?.agentSend)).toBe(false) // nemmeno la traccia A2
+    // D2 (fase deleghe): un job di retry in più (delegationRetry), +2 minuti,
+    // che NON occupa la coda del destinatario (pendingUserMessages resta 10)
+    const retry = h.db.jobs.find((j) => (j.payload as Record<string, unknown>).delegationRetry === true)
+    expect(retry).toBeTruthy()
+    expect(((retry as unknown) as { runAt: number }).runAt).toBeGreaterThanOrEqual(t0 + 110_000)
     const toolResults = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(toolResults.some((c) => c.includes('Queue full for Specialista'))).toBe(true)
+    expect(toolResults.some((c) => c.includes('Queued:') && c.includes('queue'))).toBe(true)
   })
 
   it('correzione A2: la delega lascia una entry "A <nome>" dal mittente, e il turno dopo vede chiamata+esito', async () => {

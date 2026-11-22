@@ -1002,6 +1002,7 @@ msgstr "anche in {0}"
 msgid "ancora nessun passo"
 msgstr "ancora nessun passo"
 
+#: src/renderer/src/components/AgentSendRow.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
@@ -2296,6 +2297,7 @@ msgstr "Connettori, server MCP e skill: tutto quello che dà capacità ai tuoi b
 msgid "Consegna"
 msgstr "Consegna"
 
+#: src/renderer/src/components/AgentSendRow.tsx
 #: src/renderer/src/components/Chat.tsx
 msgid "Consegnato"
 msgstr "Consegnato"
@@ -4301,6 +4303,11 @@ msgstr "In avvio"
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "in coda"
 msgstr "in coda"
+
+#. placeholder {0}: clock ?? ''
+#: src/renderer/src/components/AgentSendRow.tsx
+msgid "In coda per {name} · parte alle {0}"
+msgstr "In coda per {name} · parte alle {0}"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx

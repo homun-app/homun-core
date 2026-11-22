@@ -1046,6 +1046,10 @@ export interface SandbotApi {
   resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission' | 'site' | 'server-reads', via?: 'chat' | 'center' | 'notification'): Promise<void>
   /** A2 (fase approvazioni-chiare): il registro — decisioni e chiamate passate da sole */
   approvalsLog(limit?: number): Promise<ApprovalLogRow[]>
+  /** D2 (fase deleghe): lo stato dei job delle deleghe accodate (riga di stato in chat) */
+  delegationsStatus(jobIds: number[]): Promise<Record<string, 'queued' | 'delivered' | 'gone'>>
+  /** D2: l'Annulla della riga «in coda» */
+  delegationsCancel(jobId: number): Promise<{ ok: boolean }>
   // provider e modelli
   /** fase 16c (C1): MAI la chiave — apiKey sempre '', hasKey e keyHint al posto */
   listProviders(): Promise<ProviderPublic[]>

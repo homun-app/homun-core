@@ -1002,6 +1002,7 @@ msgstr "also in {0}"
 msgid "ancora nessun passo"
 msgstr "no steps yet"
 
+#: src/renderer/src/components/AgentSendRow.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
@@ -2296,6 +2297,7 @@ msgstr "Connectors, MCP servers and skills: everything that gives your bots capa
 msgid "Consegna"
 msgstr "Delivery"
 
+#: src/renderer/src/components/AgentSendRow.tsx
 #: src/renderer/src/components/Chat.tsx
 msgid "Consegnato"
 msgstr "Delivered"
@@ -4301,6 +4303,11 @@ msgstr "Starting"
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "in coda"
 msgstr "queued"
+
+#. placeholder {0}: clock ?? ''
+#: src/renderer/src/components/AgentSendRow.tsx
+msgid "In coda per {name} · parte alle {0}"
+msgstr "Queued for {name} · starts at {0}"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx

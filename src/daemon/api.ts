@@ -2650,6 +2650,26 @@ export function buildApiMethods(
       store.removeGrant(Number(id))
       return { ok: true }
     },
+    // D2 (fase deleghe): lo stato dei job delle deleghe accodate (per la riga
+    // di stato in chat: «in coda» finché il job è queued, «consegnato» quando
+    // parte, via quando il job non c'è più — annullato o mai nato)
+    'delegations:status': async ([jobIds]) => {
+      const { getJobById } = await import('../main/store/jobs')
+      const ids = Array.isArray(jobIds) ? jobIds.map((x) => Number(x)).filter((x) => Number.isInteger(x) && x > 0) : []
+      const out: Record<string, 'queued' | 'delivered' | 'gone'> = {}
+      for (const id of ids.slice(0, 100)) {
+        const j = getJobById(db(), id)
+        out[String(id)] = !j || j.status === 'failed' ? 'gone' : j.status === 'queued' ? 'queued' : 'delivered'
+      }
+      return out
+    },
+    // D2: l'Annulla della riga «in coda» — il job esce dalla coda e il
+    // messaggio non parte
+    'delegations:cancel': async ([jobId]) => {
+      const { cancelJob } = await import('../main/store/jobs')
+      cancelJob(db(), Number(jobId))
+      return { ok: true }
+    },
     /**
      * M4: «Consenti sempre le letture di <server>» dalla card di un tool MCP
      * con readOnlyHint true — grant `mcp__<server>__*` scope 'readOnly',

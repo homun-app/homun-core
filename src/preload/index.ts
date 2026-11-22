@@ -71,6 +71,9 @@ const api: SandbotApi = {
   setDockBadge: (count) => ipcRenderer.invoke('app:dock-badge', count),
   // A2 (fase approvazioni-chiare): il registro delle decisioni (e delle passate da sole)
   approvalsLog: (limit) => ipcRenderer.invoke('approvals:log', limit),
+  // D2 (fase deleghe): lo stato dei job delle deleghe accodate e l'Annulla
+  delegationsStatus: (jobIds) => ipcRenderer.invoke('delegations:status', jobIds),
+  delegationsCancel: (jobId) => ipcRenderer.invoke('delegations:cancel', jobId),
   // fase 8 (§3bis L5): decisione dell'utente sulla regola proposta dal bot
   autoreviewRuleDecision: (agentId, entryId, action) =>
     ipcRenderer.invoke('autoreview:rule-decision', agentId, entryId, action),

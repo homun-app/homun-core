@@ -38,6 +38,34 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     // al primo tentativo l'id dell'entry utente finisce nel payload del job
     const onTurnEntry = (entryId: number): void => setJobEntryId(db, job.id, entryId)
     if (job.kind === 'user-message') {
+      // D2 (fase deleghe): la delega ferma dalla CODA PIENA del destinatario
+      // aspetta fuori dalla coda — ogni 2 minuti ritenta, al massimo 30: se
+      // la coda si è liberata consegna come una delega normale (segue sotto),
+      // se non si libera più il messaggio torna al MITTENTE come «non
+      // consegnato» e il job finisce senza girare nessun turno
+      if (job.payload.delegationRetry === true) {
+        const { pendingUserMessages, postponeJob, enqueueJob, MAX_USER_MESSAGE_QUEUE, DELEGATION_RETRY_STEP_MS, DELEGATION_RETRY_MAX_MS } = await import('../main/store/jobs')
+        if (pendingUserMessages(db, job.agent_id) >= MAX_USER_MESSAGE_QUEUE) {
+          if (Date.now() >= job.created_at + DELEGATION_RETRY_MAX_MS) {
+            const fromAgentId = String(job.payload.fromAgentId ?? '')
+            const toAgentName = String(job.payload.fromAgentName ?? job.agent_id)
+            if (fromAgentId) {
+              enqueueJob(db, {
+                agentId: fromAgentId,
+                kind: 'user-message',
+                payload: {
+                  text: `[delegation undelivered] Your message to "${toAgentName}" was NOT delivered: their queue stayed full for 30 minutes and the message was dropped. Tell the user it did not go through; do not silently retry.`,
+                  initiator: 'DELEGATION_UNDELIVERED'
+                },
+                runAt: Date.now(), now: Date.now()
+              })
+            }
+            return
+          }
+          postponeJob(db, job.id, Date.now() + DELEGATION_RETRY_STEP_MS)
+          return
+        }
+      }
       const p = job.payload as {
         text: string; images?: string[]; respondedTo?: number; initiator?: string
         // fase 7: messaggio di un altro bot (§3bis L8) — entra come evidenza

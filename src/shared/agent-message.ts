@@ -193,7 +193,7 @@ export function formatShellDone(command: string, shellId: string, exitCode: numb
 
 export type AgentSendGuard =
   | { ok: true; hop: number }
-  | { ok: false; error: string }
+  | { ok: false; error: string; reason: 'hop' | 'pair' | 'perTurn' }
 
 /**
  * Protezione contro i cicli (puro): il turno corrente è stato aperto da un
@@ -202,6 +202,9 @@ export type AgentSendGuard =
  * D1 (fase deleghe): nei turni dell'UTENTE (`userTurn`) il limite orario
  * della coppia NON vale — le deleghe chieste dall'utente non sono catene —
  * al suo posto il tetto per turno `sentThisTurn`/AGENT_USER_TURN_SEND_MAX.
+ * D2 (fase deleghe): `reason` distingue i rifiuti TEMPORANEI ('pair', la
+ * finestra oraria della coppia) da quelli definitivi (hop, tetto per turno):
+ * i primi si ACCODANO con runAt = quando il limite si libera.
  */
 export function agentSendGuard(input: {
   incomingHop: number
@@ -215,6 +218,7 @@ export function agentSendGuard(input: {
     return {
       // fase risposta: la risposta all'utente è il testo normale della risposta
       ok: false,
+      reason: 'hop',
       error: `Bot-to-bot message chain too long (maximum hop ${AGENT_HOP_MAX}): answer the user in the text of your final reply, not with other bots.`
     }
   }
@@ -222,6 +226,7 @@ export function agentSendGuard(input: {
     if ((input.sentThisTurn ?? 0) >= AGENT_USER_TURN_SEND_MAX) {
       return {
         ok: false,
+        reason: 'perTurn',
         error: `Too many messages to other bots in this turn (limit ${AGENT_USER_TURN_SEND_MAX}): reply to the user with what you have, they can ask for more.`
       }
     }
@@ -230,10 +235,37 @@ export function agentSendGuard(input: {
   if (input.pairLastHour >= AGENT_PAIR_HOURLY_MAX) {
     return {
       ok: false,
+      reason: 'pair',
       error: `Too many messages to this bot in the last hour (limit ${AGENT_PAIR_HOURLY_MAX} per agent pair): wait or talk to the user.`
     }
   }
   return { ok: true, hop: input.incomingHop + 1 }
+}
+
+/**
+ * D2 (fase deleghe): quando la finestra oraria della coppia si libera — il
+ * createdAt del messaggio PIÙ VECCHIO contato da countPairMessagesLastHour
+ * + 1 ora (uscito lui, il conto scende). null se la coppia non ha messaggi
+ * nella finestra (puro).
+ */
+export function pairWindowReleaseAt(
+  entries: Pick<TranscriptEntry, 'kind' | 'meta' | 'createdAt'>[],
+  a: string,
+  b: string,
+  now: number
+): number | null {
+  let oldest: number | null = null
+  for (const e of entries) {
+    if (e.kind !== 'message' || e.meta?.initiator !== 'AGENT') continue
+    if (e.meta?.userRequested === true) continue
+    if (e.createdAt <= now - 3_600_000) continue
+    const from = String(e.meta?.fromAgentId ?? '')
+    const to = String(e.meta?.toAgentId ?? '')
+    if ((from === a && to === b) || (from === b && to === a)) {
+      if (oldest === null || e.createdAt < oldest) oldest = e.createdAt
+    }
+  }
+  return oldest === null ? null : oldest + 3_600_000
 }
 
 /**

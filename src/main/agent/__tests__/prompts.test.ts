@@ -146,6 +146,17 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(limitsSection()).toContain('system documents')
   })
 
+  // D2 (fase deleghe): il bot non dice «in coda, riprovo» quando non lo è —
+  // la regola nel prompt, col tetto dei token misurato
+  it('D2: la regola della coda VERA in agentsSection («Never tell the user... queued») con la sezione sotto tetto', () => {
+    const s = agentsSection()
+    expect(s).toContain('Never tell the user a request is queued or that you will retry unless a tool result says it was queued')
+    expect(s).toContain('if it was refused, say so and offer to do it yourself')
+    // la sezione con la regola nuova sta in ~150 token stimati (caratteri/4,
+    // misurato: 149,5) — la riga D2 costa ~33 token
+    expect(s.length / 4).toBeLessThanOrEqual(155)
+  })
+
   // fase 10 (punto 4): la sezione nuova entra nel prompt base (tutti i bot
   // possono creare team) e il budget complessivo resta quello della fase 9
   it('team e gruppi: coordinatore unico che parla all\'utente, avvio con @menzioni, un solo messaggio all\'utente', () => {

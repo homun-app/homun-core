@@ -51,6 +51,20 @@ export function withSentStamp(text: string, ms: number, timeZone?: string | null
 }
 
 /**
+ * D2 (fase deleghe): l'ora breve HH:MM nel fuso dato — per il risultato del
+ * tool («Queued: it will be delivered to <nome> at HH:MM») e per la riga di
+ * stato della chat. Fuso non valido o assente: UTC.
+ */
+export function formatHHMM(ms: number, timeZone?: string | null): string {
+  const zone = usableTimeZone(timeZone) ?? 'UTC'
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(new Date(ms))
+  const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find((p) => p.type === type)?.value ?? ''
+  return `${part('hour')}:${part('minute')}`
+}
+
+/**
  * Il fuso del sistema: `Intl.DateTimeFormat().resolvedOptions().timeZone`,
  * con UTC quando manca o non è valido.
  */

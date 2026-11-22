@@ -37,7 +37,8 @@ import { ApprovalCard } from './ApprovalCard'
 import { ApprovalsBannerElsewhere } from './ApprovalsBanner'
 import { ComposerApproval } from './ComposerApproval'
 import { WidgetCard } from './WidgetCard'
-import { AgentSendRow } from './AgentSendRow'
+import { AgentSendRow, type DelegationStatus } from './AgentSendRow'
+import { delegationRowState, formatDelegationClock } from '../lib/delegation-status'
 import { RoutineCreatedRow } from './RoutineCreatedRow'
 import { DraftCard } from './DraftCard'
 import { ConnectorCard } from './ConnectorCard'
@@ -811,6 +812,39 @@ function UserBubbleBody({ entry }: { entry: TranscriptEntry }): React.ReactNode 
   )
 }
 
+/**
+ * D2 (fase deleghe): la riga della delega col suo STATO — «In coda per <bot>
+ * · parte alle HH:MM» con Annulla finché il job è in coda, «Consegnato»
+ * quando parte, niente riga di stato quando il risultato è arrivato (o la
+ * delega è annullata). Lo stato dei job arriva dal refresh coalescente dello
+ * store (delegationStatuses), l'ora dal fuso dell'utente.
+ */
+function AgentSendDelegationRow({ entry }: { entry: TranscriptEntry }) {
+  const { i18n } = useLingui()
+  const entries = useStore((s) => s.entries)
+  const statuses = useStore((s) => s.delegationStatuses)
+  const cancelDelegation = useStore((s) => s.cancelDelegation)
+  const meta = (entry.meta ?? {}) as { toAgentName?: unknown; delegationQueued?: { jobId: number; runAt: number } }
+  const name = String(meta.toAgentName ?? '')
+  const queued = meta.delegationQueued
+  let status: DelegationStatus | undefined
+  if (queued) {
+    const jobStatus = statuses[String(queued.jobId)]
+    const state = jobStatus === undefined ? 'queued' : delegationRowState(entry, jobStatus, entries)
+    if (state === 'queued') status = { state: 'queued', runAt: queued.runAt }
+    else if (state === 'delivered') status = { state: 'delivered' }
+  }
+  return (
+    <AgentSendRow
+      name={name}
+      content={entry.content}
+      status={status}
+      cancel={status?.state === 'queued' && queued ? () => { void cancelDelegation(queued.jobId) } : undefined}
+      clock={status?.state === 'queued' && queued ? formatDelegationClock(queued.runAt, i18n.locale) : undefined}
+    />
+  )
+}
+
 function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: TranscriptEntry; repeat?: number; showReasoning: boolean; debugSteps: boolean }) {
   const { t } = useLingui()
   const reasoning = useStore((s) => s.reasoning[entry.id])
@@ -924,9 +958,10 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
       // fase 6: trattenuto nell'outbox — invisibile finché non consegnato
       if (meta.held) return null
       // B3 (fase beta.4): delega a un altro bot — UNA riga sola, apribile
-      // (prima era una bolla piena, refusi del modello compresi)
+      // (prima era una bolla piena, refusi del modello compresi); D2 (fase
+      // deleghe): sotto, la riga di stato se la delega è IN CODA
       if (meta.agentSend && meta.toAgentName) {
-        return <AgentSendRow name={String(meta.toAgentName)} content={entry.content} />
+        return <AgentSendDelegationRow entry={entry} />
       }
       // fase 3: la card delle domande (anche quella del focus dell'onboarding, OA4)
       if (message?.type === 'widget') return <WidgetCard entry={entry} />

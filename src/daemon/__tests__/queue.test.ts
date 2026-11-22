@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setDataDir, dataDir, db, createAgent, createRoutine, listRoutines, getEntries, appendEntry, createTask, type Routine , setSetting } from '../../main/store/db'
-import { claimDueJobs, activeJobForAgent, enqueueJob, pendingAgentPairJobs } from '../../main/store/jobs'
+import { claimDueJobs, activeJobForAgent, enqueueJob, pendingAgentPairJobs, pendingUserMessages } from '../../main/store/jobs'
 import { enqueueUserMessage, enqueueWidgetResponse } from '../enqueue'
 import { dueRoutines, tickScheduler } from '../scheduler'
 import { nextCronRun } from '../cron'
@@ -281,5 +281,39 @@ describe('pendingAgentPairJobs: i send_to_agent accodati e non ancora consegnati
     // uno di catena resta contato
     enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b'), runAt: 0, now: NOW - 60_000 })
     expect(pendingAgentPairJobs(db(), 'a', 'b', NOW)).toBe(1)
+  })
+
+  // D2 (fase deleghe): quando anche il job più vecchio della coppia esce
+  // dall'ora, la finestra si libera — serve il runAt del messaggio accodato
+  it('D2: pendingAgentPairReleaseAt = created_at del più vecchio job di catena + 1 ora', async () => {
+    const { pendingAgentPairReleaseAt } = await import('../../main/store/jobs')
+    enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b'), runAt: 0, now: NOW - 40 * 60_000 })
+    enqueueJob(db(), { agentId: 'a', kind: 'user-message', payload: pairJob('b', 'a'), runAt: 0, now: NOW - 10 * 60_000 })
+    // userRequested non conta nemmeno qui
+    enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b', { userRequested: true }), runAt: 0, now: NOW - 50 * 60_000 })
+    expect(pendingAgentPairReleaseAt(db(), 'a', 'b', NOW)).toBe(NOW - 40 * 60_000 + 3_600_000)
+    expect(pendingAgentPairReleaseAt(db(), 'a', 'c', NOW)).toBeNull()
+  })
+})
+
+// D2 (fase deleghe): la coda piena del destinatario non è un rifiuto — la
+// delega aspetta FUORI dalla coda (retry ogni 2 minuti, al massimo 30)
+describe('D2: i job delegationRetry non occupano la coda del destinatario', () => {
+  it('pendingUserMessages NON conta i job con payload.delegationRetry', () => {
+    const a = createAgent('Destinatario D2', '')
+    enqueueJob(db(), { agentId: a.id, kind: 'user-message', payload: { text: 'normale' }, runAt: 0, now: Date.now() })
+    enqueueJob(db(), { agentId: a.id, kind: 'user-message', payload: { text: 'in attesa', delegationRetry: true }, runAt: Date.now() + 120_000, now: Date.now() })
+    expect(pendingUserMessages(db(), a.id)).toBe(1)
+  })
+
+  it('postponeJob rimette il job in coda con un nuovo runAt (senza passare da done)', async () => {
+    const { postponeJob, getJobById } = await import('../../main/store/jobs')
+    const a = createAgent('Destinatario D2b', '')
+    const j = enqueueJob(db(), { agentId: a.id, kind: 'user-message', payload: { text: 'x', delegationRetry: true }, runAt: 0, now: 1_000 })!
+    claimDueJobs(db(), 2_000, 120_000)
+    postponeJob(db(), j.id, 120_000)
+    const after = getJobById(db(), j.id)!
+    expect(after.status).toBe('queued')
+    expect(after.run_at).toBe(120_000)
   })
 })

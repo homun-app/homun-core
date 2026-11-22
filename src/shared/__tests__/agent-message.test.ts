@@ -140,6 +140,39 @@ describe('D1: countPairMessagesLastHour — le deleghe dell\'utente non consuman
   })
 })
 
+// ---- D2 (fase deleghe): se un messaggio non può partire, si accoda DAVVERO ----
+
+import { pairWindowReleaseAt } from '../agent-message'
+
+describe('D2: pairWindowReleaseAt — quando la finestra oraria della coppia si libera', () => {
+  const now = 2_000_000_000_000
+  const mk = (from: string, to: string, ago: number, over: Partial<TranscriptEntry> = {}): TranscriptEntry => ({
+    id: 1, agentId: to, kind: 'message', role: 'user', content: 'x',
+    meta: { initiator: 'AGENT', fromAgentId: from, toAgentId: to }, createdAt: now - ago, ...over
+  })
+
+  it('il più vecchio messaggio della finestra + 1 ora: quando esce, il conto scende', () => {
+    const entries = [
+      mk('a', 'b', 50 * 60_000),  // il più vecchio: esce tra 10 minuti
+      mk('a', 'b', 20 * 60_000),
+      mk('b', 'a', 5 * 60_000)
+    ]
+    expect(pairWindowReleaseAt(entries, 'a', 'b', now)).toBe(now - 50 * 60_000 + 3_600_000)
+  })
+
+  it('i messaggi userRequested non contano (non tengono la finestra piena)', () => {
+    const entries = [
+      mk('a', 'b', 50 * 60_000, { meta: { initiator: 'AGENT', fromAgentId: 'a', toAgentId: 'b', userRequested: true } }),
+      mk('a', 'b', 20 * 60_000)
+    ]
+    expect(pairWindowReleaseAt(entries, 'a', 'b', now)).toBe(now - 20 * 60_000 + 3_600_000)
+  })
+
+  it('nessun messaggio della coppia → null', () => {
+    expect(pairWindowReleaseAt([mk('a', 'c', 60_000)], 'a', 'b', now)).toBeNull()
+  })
+})
+
 // ---- correzione A4: neutralizzazione dei tag di chiusura nel testo ----
 
 describe('neutralizeClosingTag: il testo ostile non chiude il blocco evidenza', () => {

@@ -70,10 +70,10 @@ import { buildSkillsSection, skillInvocationExpansion, invocableSkillsOf, mayInv
 // U4 (fase pulizia · ritocchi, sostituisce P10): l'ora di invio sui messaggi
 // utente — buildMessages la mette su quelli delle entry, qui quella dei
 // messaggi che il loop costruisce durante il turno
-import { systemTimeZone, withSentStamp } from './current-time'
+import { systemTimeZone, withSentStamp, formatHHMM } from './current-time'
 import { maybeCompactHistory, summarizeWithLlm } from './compaction'
 import { automationEventText, selfProfileFieldsText } from './update-state'
-import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX, formatWebSearchEvidence, formatWebFetchEvidence, formatWebBrowserEvidence, formatExternalDataEvidence } from '../../shared/agent-message'
+import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, pairWindowReleaseAt, AGENT_HOP_MAX, formatWebSearchEvidence, formatWebFetchEvidence, formatWebBrowserEvidence, formatExternalDataEvidence } from '../../shared/agent-message'
 import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto , grantActive} from './permission-rules'
@@ -4762,7 +4762,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             messages.push({ role: 'tool', toolCallId: call.id, content: 'Missing text: write the message for the other bot in the text field.' })
             continue
           }
-          const { enqueueJob, pendingUserMessages, pendingAgentPairJobs, MAX_USER_MESSAGE_QUEUE } = await import('../store/jobs')
+          const { enqueueJob, pendingUserMessages, pendingAgentPairJobs, pendingAgentPairReleaseAt, MAX_USER_MESSAGE_QUEUE, DELEGATION_RETRY_STEP_MS } = await import('../store/jobs')
           const now = Date.now()
           // correzione A1: il limite per coppia si conta AL MOMENTO DELL'INVIO
           // e la fonte comprende i messaggi già ACCODATI (job non ancora
@@ -4777,18 +4777,26 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             : countPairMessagesLastHour([...getEntries(agentId), ...getEntries(toId)], agentId, toId, now) +
               pendingAgentPairJobs(db(), agentId, toId, now)
           const guard = agentSendGuard({ incomingHop, pairLastHour, userTurn: userDelegationTurn, sentThisTurn: agentSendsThisTurn })
-          if (!guard.ok) {
+          // D2 (fase deleghe): i rifiuti DEFINITIVI (hop, tetto per turno)
+          // restano rifiuti; il limite orario della coppia è TEMPORANEO e il
+          // messaggio si ACCODA con runAt = quando la finestra si libera
+          if (!guard.ok && guard.reason !== 'pair') {
             messages.push({ role: 'tool', toolCallId: call.id, content: guard.error })
             continue
           }
-          // correzione A1: stesso tetto di coda dei messaggi dell'utente (fase 2)
-          if (pendingUserMessages(db(), toId) >= MAX_USER_MESSAGE_QUEUE) {
-            messages.push({
-              role: 'tool', toolCallId: call.id,
-              content: `Queue full for ${dest.name} (${MAX_USER_MESSAGE_QUEUE} messages already waiting): message NOT queued. Try again later or summarize everything in a single message.`
-            })
-            continue
-          }
+          // D2: anche la coda PIENA del destinatario è temporanea — la delega
+          // aspetta fuori dalla coda (retry ogni 2 minuti, al massimo 30)
+          const destQueueFull = pendingUserMessages(db(), toId) >= MAX_USER_MESSAGE_QUEUE
+          // D2: quando la finestra oraria della coppia si libera (il più
+          // vecchio messaggio/job della finestra + 1 ora)
+          const pairReleaseAt = !guard.ok
+            ? (() => {
+                const fromEntries = pairWindowReleaseAt([...getEntries(agentId), ...getEntries(toId)], agentId, toId, now)
+                const fromJobs = pendingAgentPairReleaseAt(db(), agentId, toId, now)
+                const candidates = [fromEntries, fromJobs].filter((x): x is number => x !== null)
+                return candidates.length ? Math.max(now + 60_000, Math.min(...candidates)) : now + 60_000
+              })()
+            : now
           // Q1 (fase squadra): la delega tra MEMBRI della stessa squadra (anche
           // quando il turno del mittente non era di squadra) è un turno DELLA
           // SQUADRA; con autonomia box/box_review passa ANCHE col turno
@@ -4867,27 +4875,21 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             }
             setStatus(agentId, 'thinking', emit)
           }
+          // D2 (fase deleghe): l'esito dell'invio — immediato, in coda per la
+          // finestra della coppia, o in attesa che la coda del destinatario
+          // si liberi. Il messaggio accodato ha un runAt VERO e conta come
+          // partito (tetto per turno, risposta collegata al mittente)
+          const queuedHop = guard.ok ? guard.hop : incomingHop + 1
+          const delegationRunAt = destQueueFull
+            ? now + DELEGATION_RETRY_STEP_MS
+            : !guard.ok
+              ? pairReleaseAt
+              : now
           // correzione A2: traccia lato MITTENTE — l'utente vede cosa è stato
           // delegato ("A <nome bot>") e buildMessages riporta l'entry al modello
           // come coppia send_to_agent + esito della coda nel turno successivo
-          appendSend(agentId, call, { type: 'text', text }, emit, {
-            toAgentId: toId, toAgentName: dest.name, hop: guard.hop, agentSend: true,
-            ...(userDelegationTurn ? { userRequested: true } : {})
-          }, opts.taskId)
-          // Q3 (fase squadra): il filo della delega — la risposta collegata
-          // torna al mittente a fine turno di chi riceve
           const threadId = `t-${randomUUID().slice(0, 8)}`
-          sentToAgentIds.add(toId)
-          agentSendsThisTurn++
-          // Q4: lo scambio tra membri entra nella timeline della squadra
-          if (sendSquadId !== null) {
-            addGroupMessage({
-              groupId: sendSquadId, authorKind: 'relay', authorId: agentId, authorName: agent.name,
-              text: JSON.stringify({ to: toId, toName: dest.name, text: text.slice(0, 500) })
-            })
-            emit({ type: 'groups' })
-          }
-          enqueueJob(db(), {
+          const delegatedJob = enqueueJob(db(), {
             agentId: toId,
             kind: 'user-message',
             payload: {
@@ -4896,10 +4898,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               fromAgentId: agentId,
               fromAgentName: agent.name,
               toAgentId: toId,
-              hop: guard.hop,
+              hop: queuedHop,
               // D1 (fase deleghe): la delega nata nel turno dell'utente (e la
               // sua risposta collegata) non consuma il limite della coppia
               ...(userDelegationTurn ? { userRequested: true } : {}),
+              // D2: la delega ferma dalla coda piena aspetta FUORI dalla coda
+              ...(destQueueFull ? { delegationRetry: true } : {}),
               // Q1 (fase squadra): il turno del destinatario è della squadra
               // della delega; se la delega è passata col turno contaminato,
               // la contaminazione passa avanti
@@ -4911,13 +4915,45 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               // mittente (routine/trigger, o catena automatica a sua volta)
               ...(automatic ? { automatic: true } : {})
             },
-            runAt: now,
+            runAt: delegationRunAt,
             now
           })
-          messages.push({
-            role: 'tool', toolCallId: call.id,
-            content: `Message queued for ${dest.name}: it will enter their next turn (hop ${guard.hop} of ${AGENT_HOP_MAX}). They do not see this conversation: if context is needed, put it in the message.`
-          })
+          appendSend(agentId, call, { type: 'text', text }, emit, {
+            toAgentId: toId, toAgentName: dest.name, hop: queuedHop, agentSend: true,
+            ...(userDelegationTurn ? { userRequested: true } : {}),
+            // D2: la riga di stato della chat (In coda per <bot> · parte alle
+            // HH:MM, con Annulla) legge job e orario da qui
+            ...(delegatedJob && delegationRunAt > now ? { delegationQueued: { jobId: delegatedJob.id, runAt: delegationRunAt } } : {})
+          }, opts.taskId)
+          sentToAgentIds.add(toId)
+          agentSendsThisTurn++
+          // Q4: lo scambio tra membri entra nella timeline della squadra
+          if (sendSquadId !== null) {
+            addGroupMessage({
+              groupId: sendSquadId, authorKind: 'relay', authorId: agentId, authorName: agent.name,
+              text: JSON.stringify({ to: toId, toName: dest.name, text: text.slice(0, 500) })
+            })
+            emit({ type: 'groups' })
+          }
+          // D2: il risultato al bot dice la VERITÀ — in coda con l'ORA, o il
+          // rifiuto di prima per l'invio immediato — e gli vieta di promettere
+          // un riprovo suo (la regola sta anche nel prompt, agentsSection)
+          if (!guard.ok) {
+            messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: `Queued: it will be delivered to ${dest.name} at ${formatHHMM(delegationRunAt, sentZone)} (limit reached). Tell the user exactly this; do not promise to retry yourself.`
+            })
+          } else if (destQueueFull) {
+            messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: `Queued: it will be delivered to ${dest.name} as soon as their queue frees (I retry every 2 minutes for up to 30). Tell the user exactly this; do not promise to retry yourself.`
+            })
+          } else {
+            messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: `Message queued for ${dest.name}: it will enter their next turn (hop ${queuedHop} of ${AGENT_HOP_MAX}). They do not see this conversation: if context is needed, put it in the message.`
+            })
+          }
           continue
         }
 

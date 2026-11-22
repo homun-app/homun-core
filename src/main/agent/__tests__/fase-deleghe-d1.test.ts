@@ -127,21 +127,25 @@ describe('D1: le deleghe dell\'utente non consumano il limite della coppia', () 
     expect((toNovita[0]!.payload as Record<string, unknown>).userRequested).toBe(true)
   })
 
-  it('11 messaggi tra due bot nati da una ROUTINE: l\'undicesimo è rifiutato — ma la stessa storia nata dall\'utente passa', async () => {
+  it('11 messaggi tra due bot nati da una ROUTINE: l\'undicesimo non parte adesso — ma la stessa storia nata dall\'utente passa', async () => {
     const capo = makeAgent('Capo D1b')
     const novita = makeAgent('Novità AI D1b')
     activateBots(capo)
     seedPair(capo, novita, AGENT_PAIR_HOURLY_MAX)
     queue = [
       { tool: { name: 'send_to_agent', args: { agentId: novita, text: 'undicesimo' } } },
-      { text: 'rifiutato' }
+      { text: 'in coda' }
     ]
-    // il turno NON è dell'utente: routine → il limite della coppia scatta
+    // il turno NON è dell'utente: routine → il limite della coppia scatta.
+    // D2 (fase deleghe): il limite è TEMPORANEO — il messaggio non parte
+    // adesso ma si ACCODA con runAt futuro, e il tool result lo dice
+    const t0 = Date.now()
     await runTurn(capo, '[recurring routine: Ronda] controlla', emit, undefined, { source: 'routine', title: 'Ronda', initiator: 'ROUTINE' })
-    expect(userJobsFor(novita)).toHaveLength(0)
-    // il rifiuto è tornato al modello come tool result, in inglese
-    expect(bodies.some((b) => b.includes('in the last hour'))).toBe(true)
-    // la STESSA storia, ma nata da richieste dell'utente: la delega passa
+    const queued = userJobsFor(novita)
+    expect(queued).toHaveLength(1)
+    expect(queued[0]!.run_at).toBeGreaterThan(t0 + 30 * 60_000) // tra un'ora circa, non adesso
+    expect(bodies.some((b) => b.includes('Queued: it will be delivered to'))).toBe(true)
+    // la STESSA storia, ma nata da richieste dell'utente: la delega passa SUBITO
     store.db().exec('DELETE FROM entries')
     store.db().exec('DELETE FROM jobs')
     activateBots(capo)
@@ -151,8 +155,11 @@ describe('D1: le deleghe dell\'utente non consumano il limite della coppia', () 
       { tool: { name: 'send_to_agent', args: { agentId: novita, text: 'quinta richiesta' } } },
       { text: 'delegato' }
     ]
+    const t1 = Date.now()
     await runTurn(capo, 'chiedi ancora a Novità AI', emit)
-    expect(userJobsFor(novita)).toHaveLength(1)
+    const now2 = userJobsFor(novita)
+    expect(now2).toHaveLength(1)
+    expect(now2[0]!.run_at).toBeLessThan(t1 + 5_000) // subito, non in coda
   })
 
   it('una catena a hop 3 è rifiutata come oggi (AGENT_HOP_MAX resta 3)', async () => {
