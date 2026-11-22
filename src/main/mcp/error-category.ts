@@ -103,6 +103,22 @@ export function sanitizeServerNoteName(name: string): string {
 /** Il tetto del testo d'errore mostrato nella UI (X2: mai oltre, mai al bot). */
 export const MCP_ERROR_CLIP = 300
 
+/** V6 (fase stato-vivo): la frase del bot nella card offer_enable_plugin (caratteri). */
+export const PLUGIN_REASON_CLIP = 160
+
+/**
+ * V6 (fase stato-vivo): la frase del bot nella scheda di attivazione, ripulita
+ * COME X2 (niente a capo, niente < >, ≤ 160 caratteri): il testo arriva dal
+ * modello e finisce nella chat dell'utente.
+ */
+export function sanitizePluginReason(text: string): string {
+  return text
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[<>]/g, '')
+    .slice(0, PLUGIN_REASON_CLIP)
+    .trim()
+}
+
 /** Il testo d'errore per la UI: integro se corto, tagliato a 300 + ellissi. */
 export function clipErrorText(text: string): string {
   return text.length <= MCP_ERROR_CLIP ? text : text.slice(0, MCP_ERROR_CLIP) + '…'

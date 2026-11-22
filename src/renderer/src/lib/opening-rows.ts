@@ -62,6 +62,10 @@ export function openingRowFor(entry: Pick<TranscriptEntry, 'role' | 'meta'>): Op
     }
     case 'LOOK_AROUND':
       return { kind: 'system', icon: '👋', label: msg`Al tuo rientro` }
+    // V6 (fase stato-vivo): la ripresa dopo il click su «Attiva» di una
+    // scheda offer_enable_plugin — il bot ripete l'operazione chiesta
+    case 'PLUGIN_ENABLED_RESUME':
+      return { kind: 'system', icon: '⚡', label: msg`Plugin attivato — riprendo` }
     // B2 (fase beta.4): il prompt della presentazione NON compare in chat
     // (né bolla, né riga, né dettagli): la domanda che segue è la card ask_user
     case 'BOT_INTRO':

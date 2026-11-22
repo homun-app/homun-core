@@ -16,6 +16,10 @@ import { useLingui, Trans } from '@lingui/react/macro'
 // daemon — qui si mostrano nella lingua attiva (fallback sul campo grezzo per
 // le card salvate prima della 17c)
 import { api, useStore } from '../store'
+import { stradaOfServer, stradaLabel } from '../lib/plugins-view'
+import { logoUrlForName } from '../lib/app-logos'
+import { AppLogo } from './AppsWindow'
+import { i18n } from '../lib/i18n'
 import type { McpServerSetupSpec, TranscriptEntry } from '../../../shared/types'
 import { CardShell } from './DecidedRow'
 import { ServerSetupModule } from './ServerSetup'
@@ -33,7 +37,14 @@ type McpWindowMessage = Extract<
   { type: 'mcp-window' }
 >
 
-/** Il runtime di un server del plugin dal CODICE runtimeKind (fase 17c, C5); fallback sul label salvato (card vecchie). */
+/** V6 (fase stato-vivo): il payload della scheda offer_enable_plugin. */
+type EnablePluginMessage = Extract<
+  import('../../../shared/types').SendMessagePayload,
+  { type: 'enable-plugin' }
+>
+
+/** Il runtime di un server del plugin dal CODICE runtimeKind (fase 17c, C5);
+ *  fallback sul label salvato (card vecchie). */
 function RuntimeOf({ sv }: { sv: { name: string; runtimeKind?: string; runtimeDetail?: string; runtimeLabel?: string } }) {
   const { t } = useLingui()
   if (sv.runtimeKind === 'unsupported') return <>{t`non supportato: valore in argv (${sv.runtimeDetail ?? ''})`}</>
@@ -297,6 +308,97 @@ export function McpWindowCard({ entry }: { entry: TranscriptEntry }) {
           <Trans>Apri Server MCP</Trans>
         </button>
       </div>
+    </CardShell>
+  )
+}
+
+/**
+ * V6 (fase stato-vivo): la scheda per accendere un plugin PRESENTE ma SPENTO
+ * (tool offer_enable_plugin) — logo, nome, la riga grigia PL1 di «I tuoi»,
+ * la frase del bot (già ripulita come X2 dal loop) e i bottoni Attiva /
+ * Non ora. La scheda È la richiesta: niente da approvare. «Attiva» fa
+ * quello che fa l'interruttore V5 (accende, toglie il motivo, lancia il
+ * test): «Attivazione…» → «Attivo · N strumenti» (e il daemon accoda il
+ * turno di ripresa) oppure «Non parte · Vedi perché» (nessuna ripresa).
+ */
+export function EnablePluginCard({ entry }: { entry: TranscriptEntry }) {
+  const { t } = useLingui()
+  const message = (entry.meta?.message ?? {}) as EnablePluginMessage
+  const [status, setStatus] = useState<'pending' | 'activating' | 'activated' | 'failed' | 'declined'>(() => {
+    const st = entry.meta?.status
+    return st === 'activated' || st === 'failed' || st === 'declined' ? st : 'pending'
+  })
+  const [toolsCount, setToolsCount] = useState<number | null>((entry.meta?.toolsCount as number | undefined) ?? null)
+  if (message.type !== 'enable-plugin') return null
+  // la riga grigia PL1: «Server MCP · <strada>» (onesto: senza fonte non si inventa)
+  const openPlugin = useStore((st) => st.openPlugin)
+  const lang = i18n.locale === 'en' ? ('en' as const) : ('it' as const)
+  const strada = stradaOfServer({ id: message.pluginId, name: message.name })
+  const gray = `Server MCP · ${stradaLabel(strada, undefined, lang)}`
+  const logo = logoUrlForName(message.name)
+  const decide = (decision: 'enable' | 'not-now'): void => {
+    if (status !== 'pending') return
+    setStatus(decision === 'enable' ? 'activating' : 'declined')
+    void api.pluginsEnableCard(entry.agentId, entry.id, decision)
+      .then((r) => {
+        if (r.status === 'activated') {
+          setStatus('activated')
+          setToolsCount((entry.meta?.toolsCount as number | undefined) ?? null)
+        } else if (r.status === 'failed') {
+          setStatus('failed')
+        }
+      })
+      .catch(() => {
+        // il click non è partito: la scheda torna cliccabile
+        setStatus('pending')
+      })
+  }
+  return (
+    <CardShell testid="enable-plugin-card">
+      <div className="flex items-center gap-2.5">
+        {logo
+          ? <img src={logo} alt="" className="size-9 shrink-0 rounded-[10px] object-cover dark:bg-white" />
+          : <AppLogo logo={null} name={message.name} className="size-9 text-base" />}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-foreground">{message.name}</span>
+          <span className="block truncate text-xs text-muted-foreground" data-testid="enable-plugin-gray">{gray}</span>
+        </span>
+      </div>
+      {message.reason && <p className="mt-1.5 text-sm text-foreground">{message.reason}</p>}
+      {status === 'pending' && (
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
+            data-testid="enable-plugin-activate"
+            onClick={() => decide('enable')}
+          >
+            <Trans>Attiva</Trans>
+          </button>
+          <button
+            className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
+            data-testid="enable-plugin-not-now"
+            onClick={() => decide('not-now')}
+          >
+            <Trans>Non ora</Trans>
+          </button>
+        </div>
+      )}
+      {status === 'activating' && <p className="mt-2 text-xs text-muted-foreground"><Trans>Attivazione…</Trans></p>}
+      {status === 'activated' && (
+        <p className="mt-2 text-xs text-chart-2" data-testid="enable-plugin-active">
+          <Trans>Attivo · {toolsCount ?? 0} strumenti</Trans>
+        </p>
+      )}
+      {status === 'failed' && (
+        <p className="mt-2 text-xs text-destructive" data-testid="enable-plugin-failed">
+          <Trans>Non parte</Trans>
+          {' · '}
+          <button className="underline" onClick={() => openPlugin({ kind: 'server', serverId: message.pluginId })}>
+            <Trans>Vedi perché</Trans>
+          </button>
+        </p>
+      )}
+      {status === 'declined' && <p className="mt-2 text-xs text-muted-foreground"><Trans>Non ora</Trans></p>}
     </CardShell>
   )
 }

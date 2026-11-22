@@ -123,7 +123,7 @@ export const TOOL_GROUPS: ReadonlyArray<ToolGroup> = [
   {
     id: 'connectors',
     description: 'Search apps and services, propose connectors, add MCP servers and plugins.',
-    tools: ['search_connectors', 'offer_connector', 'add_mcp_server', 'install_plugin', 'offer_mcp_window']
+    tools: ['search_connectors', 'offer_connector', 'add_mcp_server', 'install_plugin', 'offer_mcp_window', 'offer_enable_plugin']
   },
   {
     id: 'apps',

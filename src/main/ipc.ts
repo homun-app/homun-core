@@ -82,7 +82,7 @@ export const DAEMON_RPC_CHANNELS = [
   'connectors:set-enabled-for', 'connectors:uninstall-server', 'connectors:reconnect-server', 'connectors:add-gateway',
   'connectors:server-setup', 'connectors:server-connect',
   'connectors:gateway-presets', 'connectors:set-client-metadata-url',
-  'plugins:resolve', 'plugins:uninstall',
+  'plugins:resolve', 'plugins:uninstall', 'plugins:enable',
   'marketplace:list', 'marketplace:add', 'marketplace:remove',
   'vault:list', 'vault:store', 'vault:delete',
   // fase 14: vault esteso (login, contatti, concessioni fill) e modulo sicuro

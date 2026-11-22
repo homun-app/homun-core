@@ -1265,9 +1265,15 @@ msgstr "Attenzione: con meno di {0} GB di RAM sarà lento e potrebbe bloccare il
 msgid "attiva"
 msgstr "attiva"
 
+#: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/RoutineCreatedRow.tsx
 msgid "Attiva"
 msgstr "Attiva"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "card.enablePlugin"
+msgstr "Attiva {name}"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Attiva con la chiave ak_ del tuo progetto."
@@ -1281,6 +1287,10 @@ msgstr "attivare la routine \"{title}\" — prompt: {preview}"
 #: src/renderer/src/components/RoutineCreatedRow.tsx
 msgid "attivata"
 msgstr "attivata"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Attivazione…"
+msgstr "Attivazione…"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "attive"
@@ -1297,6 +1307,11 @@ msgstr "Attività"
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Attivo"
 msgstr "Attivo"
+
+#. placeholder {0}: toolsCount ?? 0
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Attivo · {0} strumenti"
+msgstr "Attivo · {0} strumenti"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -5612,6 +5627,14 @@ msgstr "Non ora"
 msgid "dialog.moveToApplications.replaceNo"
 msgstr "Non ora"
 
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Non ora"
+msgstr "Non ora"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Non parte"
+msgstr "Non parte"
+
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Non posso ora: controlla lo spazio e riprova."
 msgstr "Non posso ora: controlla lo spazio e riprova."
@@ -6093,6 +6116,10 @@ msgstr "Plugin \"{name}\" NON installato: {error}"
 #: src/shared/ui-messages.ts
 msgid "rpc.pluginNotFound"
 msgstr "plugin {id} non trovato"
+
+#: src/renderer/src/lib/opening-rows.ts
+msgid "Plugin attivato — riprendo"
+msgstr "Plugin attivato — riprendo"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Plugin nel formato di Claude Code. Predefinito: <0>anthropics/claude-plugins-official</0> (puoi rimuoverlo). Di un plugin Homun importa SOLO skill e server MCP; hook, bin/ e comandi non girano mai."
@@ -8345,6 +8372,7 @@ msgstr "Vedi"
 msgid "Vedi i collegati →"
 msgstr "Vedi i collegati →"
 
+#: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Vedi perché"
 msgstr "Vedi perché"

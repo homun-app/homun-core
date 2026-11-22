@@ -44,6 +44,7 @@ import { generateWebhookToken } from './webhooks'
 import { enqueueJob } from '../main/store/jobs'
 import { enqueueUserMessage, enqueueWidgetResponse } from './enqueue'
 import { recordNotifiedServerState } from './mcp-state-sync'
+import { PLUGIN_ENABLED_RESUME } from '../main/agent/connectors-policy'
 // fase pagine · ritocchi (P1): la pagina letta si risolve sul daemon, sulla
 // voce della libreria (il renderer manda solo l'identità)
 import { resolveReadingPage } from '../main/agent/reading-page'
@@ -1771,6 +1772,11 @@ export function buildApiMethods(
       return r
     },
     /** Il click su Installa/No della card "Installa plugin" (codice del daemon). */
+    // V6 (fase stato-vivo): il click su Attiva/Non ora della scheda offer_enable_plugin
+    'plugins:enable': async ([agentId, entryId, decision]) => {
+      const aid = agentId as string
+      return resolveEnablePluginCard(aid, Number(entryId), decision === 'enable' ? 'enable' : 'not-now', emit, worker)
+    },
     'plugins:resolve': async ([agentId, entryId, decision]) => {
       const aid = agentId as string
       const entry = store.getEntries(aid).find((e) => e.id === (entryId as number))
@@ -3047,6 +3053,80 @@ export async function notifyMcpServerState(
   // V3 (fase stato-vivo): l'ultimo stato notificato si ricorda (senza id non
   // c'è niente da ricordare: le chiamate storiche passano solo il nome)
   if (cfg.id !== undefined) recordNotifiedServerState(cfg.id, test.ok ? 'ok' : 'fail')
+}
+
+/**
+ * V6 (fase stato-vivo): il click su Attiva / Non ora della scheda
+ * offer_enable_plugin. «Attiva» fa esattamente quello che fa l'interruttore
+ * V5 (accende, toglie disabledReason, lancia il test U5) e — SOLO se il test
+ * riesce — accoda un TURNO NUOVO dello stesso bot (initiator
+ * PLUGIN_ENABLED_RESUME) con la nota fissa inglese (nome ripulito, nessun
+ * testo del server): gli strumenti si caricano all'inizio del turno
+ * (activeTools), cambiarli a metà romperebbe la cache del prompt e il
+ * catalogo di find_tools. Se il test fallisce: nessuna ripresa, la scheda
+ * mostra la categoria X2 (e il server resta ACCESO con «non parte · Vedi
+ * perché», non si rispegne da solo). «Non ora» chiude la scheda senza
+ * accendere niente. Un secondo click mentre sta attivando non accoda due
+ * job (lo stato 'activating' blocca).
+ */
+export async function resolveEnablePluginCard(
+  agentId: string,
+  entryId: number,
+  decision: 'enable' | 'not-now',
+  emit: Emitter,
+  worker: JobWorker
+): Promise<{ ok: true; status: 'activated' | 'failed' | 'declined' }> {
+  const entry = store.getEntries(agentId).find((e) => e.id === entryId)
+  const message = entry?.meta?.message as SendMessagePayload | undefined
+  if (!entry || entry.kind !== 'send-message' || message?.type !== 'enable-plugin') throw uiError(UI.rpcMcpProposalNotFound)
+  const status = entry.meta?.status as string | undefined
+  if (status === 'activated' || status === 'declined' || status === 'failed') throw uiError(UI.rpcProposalHandled)
+  if (status === 'activating') throw uiError(UI.rpcInstalling)
+  const closeCard = (patch: Record<string, unknown>): void => {
+    store.updateEntryMeta(entryId, { ...entry.meta, ...patch })
+    const updated = store.getEntries(agentId).find((e) => e.id === entryId)
+    if (updated) emit({ type: 'entries', agentId, entries: [updated] })
+  }
+  if (decision === 'not-now') {
+    closeCard({ status: 'declined' })
+    return { ok: true, status: 'declined' }
+  }
+  closeCard({ status: 'activating' })
+  const mcpMod = await import('../main/mcp')
+  const cfg = mcpMod.listServers().find((x) => x.id === message.pluginId)
+  if (!cfg) {
+    closeCard({ status: 'failed', error: 'server not found' })
+    return { ok: true, status: 'failed' }
+  }
+  // come l'interruttore V5: accende, TOGLIE IL MOTIVO, lancia il test
+  const { disabledReason: _r, ...rest } = cfg
+  mcpMod.saveServers(mcpMod.listServers().map((x) => (x.id === cfg.id ? { ...rest, enabled: true } : x)))
+  let test: { ok: boolean; tools?: string[]; error?: string; category?: McpErrorCategory }
+  try {
+    test = await mcpMod.testServer(cfg.id)
+  } catch (e) {
+    test = { ok: false, error: e instanceof Error ? e.message : String(e), category: 'unknown-error' }
+  }
+  // V3: anche questa è una notifica — lo stato si ricorda, il sync non ri-notifica
+  recordNotifiedServerState(cfg.id, test.ok ? 'ok' : 'fail')
+  if (!test.ok) {
+    closeCard({ status: 'failed', category: test.category ?? 'unknown-error' })
+    return { ok: true, status: 'failed' }
+  }
+  const n = test.tools?.length ?? 0
+  closeCard({ status: 'activated', toolsCount: n })
+  // la ripresa automatica, SOLO se il test riesce: un TURNO NUOVO con la nota
+  // fissa (inglese, nome ripulito come X2: niente a capo né < >, nessun testo
+  // del server) — il bot ripete l'operazione chiesta senza che glielo si chieda
+  const { sanitizeServerNoteName } = await import('../main/mcp/error-category')
+  const name = sanitizeServerNoteName(mcpMod.listServers().find((x) => x.id === cfg.id)?.name ?? cfg.name)
+  enqueueUserMessage(
+    db(), agentId,
+    `The user turned on ${name} (${n} tools). Resume the user's last request.`,
+    undefined, emit, undefined, PLUGIN_ENABLED_RESUME
+  )
+  worker.poke()
+  return { ok: true, status: 'activated' }
 }
 
 /**

@@ -2158,6 +2158,140 @@ describe('fase 5: funnel dei connettori (offer_connector) e card Riconnetti', ()
   })
 })
 
+// ---- V6 (fase stato-vivo): offer_enable_plugin — la scheda del plugin SPENTO ----
+
+describe('V6: offer_enable_plugin — la scheda per accendere un plugin spento', () => {
+  const OFF = { id: 'orion-moon', name: 'orion-moon', transport: 'http' as const, url: 'https://orion.example/mcp', enabled: false, firstOkAt: 1 }
+  const withServers = (servers: unknown[]): { restore(): void } => {
+    const patched = mcpMock as unknown as { listServers: unknown }
+    const prev = patched.listServers
+    patched.listServers = () => servers
+    return { restore: () => { patched.listServers = prev } }
+  }
+  const enableCards = () =>
+    h.db.entries.filter((e) => (e.meta?.message as { type?: string } | undefined)?.type === 'enable-plugin')
+
+  it('la scheda nasce dal tool: payload enable-plugin con pluginId e nome, frase RIPULITA, NESSUNA accensione', async () => {
+    const s = withServers([OFF])
+    try {
+      h.llm.calls.length = 0
+      h.llm.queue = [
+        { toolCalls: [{ id: 'oep1', name: 'offer_enable_plugin', arguments: JSON.stringify({ plugin_id: 'orion-moon', reason: 'mi serve orion-moon\nper la <b>richiesta</b> dell\'utente' }) }] },
+        { text: 'Posso accenderlo?' }
+      ]
+      await runTurn(AGENT, 'vedo che orion moon è spento, usalo per la mia richiesta', emit)
+      const card = enableCards()[0]
+      expect(card).toBeDefined()
+      expect((card!.meta!.message as Record<string, unknown>)).toMatchObject({ type: 'enable-plugin', pluginId: 'orion-moon', name: 'orion-moon' })
+      const reason = String((card!.meta!.message as { reason?: string }).reason ?? '')
+      expect(reason).not.toMatch(/[\r\n]/)
+      expect(reason).not.toContain('<')
+      expect(card!.meta!.status).toBe('pending')
+      // NON accende niente da sola: il server resta SPENTO
+      expect(((mcpMock as unknown as { listServers(): Array<{ enabled: boolean }> }).listServers())[0]!.enabled).toBe(false)
+    } finally {
+      s.restore()
+    }
+  })
+
+  it('fuori da un turno dell\'utente è negato come le altre proposte', async () => {
+    const s = withServers([OFF])
+    try {
+      h.llm.calls.length = 0
+      h.llm.queue = [
+        { toolCalls: [{ id: 'oep2', name: 'offer_enable_plugin', arguments: '{"plugin_id":"orion-moon","reason":"x"}' }] },
+        { text: 'ok' }
+      ]
+      await runTurn(AGENT, '[routine]', emit, undefined, { source: 'routine', title: 'Routine' })
+      expect(enableCards()).toHaveLength(0)
+      const second = h.llm.calls[1]!
+      expect(second.some((m) => m.role === 'tool' && String(m.content).includes('only when the user asks you in chat'))).toBe(true)
+    } finally {
+      s.restore()
+    }
+  })
+
+  it('una scheda per plugin finché l\'utente non risponde; «Non ora» vale per tutta la conversazione', async () => {
+    const s = withServers([OFF])
+    try {
+      h.llm.calls.length = 0
+      h.llm.queue = [
+        { toolCalls: [{ id: 'oep3', name: 'offer_enable_plugin', arguments: '{"plugin_id":"orion-moon","reason":"prima"}' }] },
+        { text: 'ok' }
+      ]
+      await runTurn(AGENT, 'usa orion', emit)
+      expect(enableCards()).toHaveLength(1)
+      // con la scheda PENDENTE la seconda offerta non crea un\'altra scheda
+      h.llm.calls.length = 0
+      h.llm.queue = [
+        { toolCalls: [{ id: 'oep4', name: 'offer_enable_plugin', arguments: '{"plugin_id":"orion-moon","reason":"seconda"}' }] },
+        { text: 'ok' }
+      ]
+      await runTurn(AGENT, 'dai', emit)
+      expect(enableCards()).toHaveLength(1)
+      const second = h.llm.calls[1]!
+      expect(second.some((m) => m.role === 'tool' && /already offered|waiting for the user/i.test(String(m.content)))).toBe(true)
+      // «Non ora»: chiusa la scheda, NESSUNA nuova scheda nella conversazione
+      const { updateEntryMeta } = await import('../../store/db')
+      const card = enableCards()[0]!
+      updateEntryMeta(card.id, { ...(card.meta ?? {}), status: 'declined' })
+      h.llm.calls.length = 0
+      h.llm.queue = [
+        { toolCalls: [{ id: 'oep5', name: 'offer_enable_plugin', arguments: '{"plugin_id":"orion-moon","reason":"terza"}' }] },
+        { text: 'ok' }
+      ]
+      await runTurn(AGENT, 'per favore', emit)
+      expect(enableCards()).toHaveLength(1)
+      const third = h.llm.calls[1]!
+      expect(third.some((m) => m.role === 'tool' && /not now/i.test(String(m.content)))).toBe(true)
+    } finally {
+      s.restore()
+    }
+  })
+
+  it('plugin inesistente o GIÀ ACCESO: nessuna scheda, la risposta lo dice', async () => {
+    const s = withServers([{ ...OFF, enabled: true }])
+    try {
+      h.llm.calls.length = 0
+      h.llm.queue = [
+        { toolCalls: [
+          { id: 'oep6', name: 'offer_enable_plugin', arguments: '{"plugin_id":"orion-moon","reason":"x"}' },
+          { id: 'oep7', name: 'offer_enable_plugin', arguments: '{"plugin_id":"manca","reason":"x"}' }
+        ] },
+        { text: 'ok' }
+      ]
+      await runTurn(AGENT, 'usa orion', emit)
+      expect(enableCards()).toHaveLength(0)
+      const second = h.llm.calls[1]!
+      const tools = second.filter((m) => m.role === 'tool').map((m) => String(m.content)).join('\n')
+      expect(tools).toMatch(/already on|is on/i)
+      expect(tools).toMatch(/does not exist|not installed/i)
+    } finally {
+      s.restore()
+    }
+  })
+
+  it('il turno di ripresa PLUGIN_ENABLED_RESUME offre il tool (può proporne un ALTRO spento)', async () => {
+    const s = withServers([OFF])
+    try {
+      h.llm.calls.length = 0
+      let offered: string[] = []
+      h.llm.queue = [
+        // la coda in forma di FUNZIONE riceve la lista dei tool del turno
+        async (_m: unknown[], tools: Array<{ name: string }>) => {
+          offered = tools.map((t) => t.name)
+          return { toolCalls: [] }
+        },
+        { text: 'riprendo la richiesta' }
+      ]
+      await runTurn(AGENT, "The user turned on orion-moon (9 tools). Resume the user's last request.", emit, undefined, { initiator: 'PLUGIN_ENABLED_RESUME' })
+      expect(offered).toContain('offer_enable_plugin')
+    } finally {
+      s.restore()
+    }
+  })
+})
+
 // ---- fase 6: outbox — i send_to_user non urgenti dei turni AUTOMATICI ----
 
 describe('fase 6: outbox dei turni automatici', () => {

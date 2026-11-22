@@ -256,6 +256,21 @@ export type SendMessagePayload =
     }
   | {
       /**
+       * V6 (fase stato-vivo): la scheda per accendere un plugin PRESENTE ma
+       * SPENTO (tool offer_enable_plugin) — logo, nome, riga grigia PL1 e la
+       * frase del bot (ripulita come X2), coi bottoni Attiva / Non ora. Non
+       * accende niente da sola: il click fa quello che fa l'interruttore V5
+       * e, se il test riesce, accoda il turno PLUGIN_ENABLED_RESUME.
+       */
+      type: 'enable-plugin'
+      /** l'id del server/plugin come lo nomina la riga «switched off» */
+      pluginId: string
+      /** il nome per la scheda (il id non si mostra) */
+      name: string
+      reason?: string
+    }
+  | {
+      /**
        * Fase 13 (punto 4): proposta di installare un plugin di un marketplace
        * (formato Claude Code). L'installazione parte SOLO dal click su
        * Installa; hook/bin/monitor/LSP non si importano MAI (elenco "ignored").
@@ -1368,6 +1383,8 @@ export interface SandbotApi {
   connectorsGatewayPresets(): Promise<{ presets: Array<{ id: string; name: string; auth: string; headerName?: string; help: string }>; warning: string }>
   connectorsSetClientMetadataUrl(url: string): Promise<{ ok: boolean }>
   pluginsResolve(agentId: string, entryId: number, decision: 'install' | 'no'): Promise<{ ok: boolean; installed?: boolean; message?: string; error?: string }>
+  /** V6 (fase stato-vivo): il click su Attiva/Non ora della scheda offer_enable_plugin */
+  pluginsEnableCard(agentId: string, entryId: number, decision: 'enable' | 'not-now'): Promise<{ ok: true; status: 'activated' | 'failed' | 'declined' }>
   pluginsUninstall(name: string, marketplace: string): Promise<{ ok: boolean }>
   // fase app (A2): attivazione di Composio con la chiave dell'utente
   composioStatus(): Promise<ComposioStatusInfo>

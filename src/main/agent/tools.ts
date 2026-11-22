@@ -397,6 +397,20 @@ export const toolDefs: ToolDef[] = [
     }
   },
   {
+    // V6 (fase stato-vivo): un plugin PRESENTE ma SPENTO non è «uno
+    // strumento che non esiste» — la scheda chiede all'utente di accenderlo
+    name: 'offer_enable_plugin',
+    description: 'For a plugin in the switched-off list of "# Connections now": a card with an "Attiva" button. Enables nothing itself: the user click turns it on; if it starts, your turn resumes with its tools.',
+    parameters: {
+      type: 'object',
+      properties: {
+        plugin_id: { type: 'string', description: 'Plugin id exactly as the switched-off line names it' },
+        reason: { type: 'string', description: 'One line for the card (why you need it)' }
+      },
+      required: ['plugin_id', 'reason']
+    }
+  },
+  {
     name: 'add_mcp_server',
     description: 'Proposes an MCP server: registry:<name>, url:https://…, or npm:<package>[@<version>] (pinned; isolated computer, network only to allowHosts). Card with trust and needs; user clicks to add.',
     parameters: {

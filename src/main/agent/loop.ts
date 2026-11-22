@@ -139,7 +139,8 @@ import {
 import { MAX_CREATE_AGENTS_PER_TURN, wakeParentToolDef } from './tools'
 // fase 13 (punto 3): add_mcp_server/install_plugin SOLO nei turni dell'utente;
 // (punto 5): tool MCP deferiti oltre connectors.maxInlineTools
-import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED, GROUP_EXCLUDED_TOOLS, isMcpId, offerConnectorMcpGuidance, offerConnectorMissingText, isBotIntroTurn } from './connectors-policy'
+import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED, GROUP_EXCLUDED_TOOLS, isMcpId, offerConnectorMcpGuidance, offerConnectorMissingText, isBotIntroTurn, PLUGIN_ENABLED_RESUME } from './connectors-policy'
+import { sanitizePluginReason } from '../mcp/error-category'
 import { connectionsNowSection } from './connected-apps'
 import { PROPOSAL_RESULT } from '../connectors/install'
 import {
@@ -614,6 +615,7 @@ function appendSend(
     message.type === 'mcp-server' ? ui(UI.cardMcpServer, { name: message.name })
     : message.type === 'mcp-window' ? ui(UI.cardOpenMcpWindow, { service: message.service ?? '' })
     : message.type === 'plugin' ? ui(UI.cardPlugin, { name: message.name })
+    : message.type === 'enable-plugin' ? ui(UI.cardEnablePlugin, { name: message.name })
     : message.type === 'fill' ? ui(UI.cardFill, { label: message.label, origin: message.origin })
     : message.type === 'secure-input' ? ui(UI.cardSecureInput, { reason: message.reason })
     : message.type === 'contact' ? ui(UI.cardContact, { name: message.name })
@@ -4457,6 +4459,75 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: `card shown to the user with a button that opens the MCP servers window: they add the server themselves, with the same command or address they may already use in Cursor, Claude or ZCode — the window imports their servers in one click. Ask them if they already have one; never say the service cannot be connected. When they add and enable the server you will receive its tools in a later turn.`
+          })
+          continue
+        }
+
+        // V6 (fase stato-vivo): un plugin PRESENTE ma SPENTO non è «uno
+        // strumento che non esiste» — la scheda chiede all'utente di
+        // accenderlo. NON accende niente: il click su Attiva fa quello che fa
+        // l'interruttore V5 e, se il test riesce, il daemon accoda un TURNO
+        // NUOVO (PLUGIN_ENABLED_RESUME) col gli strumenti già caricati. Come
+        // le altre proposte: SOLO nei turni dell'utente (la ripresa conta come
+        // turno suo), una scheda per plugin finché l'utente non risponde, un
+        // «Non ora» per tutta la conversazione.
+        if (call.name === 'offer_enable_plugin') {
+          const offerFacts = {
+            source, groupTurn: opts.groupTurn, subagent: opts.subagent, taskId: opts.taskId,
+            automatic, agentMessage: opts.agentMessage, initiator: opts.initiator
+          }
+          if (!connectorProposalOffered(offerFacts)) {
+            const refused = CONNECTOR_PROPOSAL_DENIED
+            messages.push({ role: 'tool', toolCallId: call.id, content: refused })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
+          const pluginId = String(input.plugin_id ?? '').trim()
+          if (!pluginId) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: 'Invalid offer: plugin_id is required (as the switched-off line names it).' })
+            continue
+          }
+          // il plugin dev'essere PRESENTE e SPENTO (per quelli mai installati
+          // restano offer_connector / offer_mcp_window: V6 è solo per questi)
+          let cfg: import('../../shared/types').McpServerInfo | undefined
+          try {
+            const { listServers } = await import('../mcp')
+            cfg = listServers().find((x) => x.id === pluginId)
+          } catch {
+            // elenco non disponibile: niente scheda
+          }
+          if (!cfg) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: `Plugin "${pluginId}" does not exist or is not installed: for a missing service use offer_mcp_window or offer_connector instead.` })
+            continue
+          }
+          if (cfg.enabled) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: `Plugin "${cfg.name}" is on (or waiting for its setup): its tools are already offered — use them, do not offer again.` })
+            continue
+          }
+          // una scheda per plugin finché l'utente non risponde; «Non ora»
+          // vale per tutta la conversazione
+          const prior = getEntries(agentId).filter(
+            (e) => e.kind === 'send-message' &&
+              (e.meta?.message as SendMessagePayload | undefined)?.type === 'enable-plugin' &&
+              (e.meta?.message as { pluginId?: string }).pluginId === pluginId
+          )
+          if (prior.some((e) => e.meta?.status === undefined || e.meta?.status === 'pending')) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: `Already offered: the card for "${cfg.name}" is waiting for the user. Do not offer again.` })
+            continue
+          }
+          if (prior.some((e) => e.meta?.status === 'declined')) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: `The user said "not now" to "${cfg.name}" in this conversation: do not offer it again here.` })
+            continue
+          }
+          const message: SendMessagePayload = {
+            type: 'enable-plugin', pluginId, name: cfg.name,
+            ...(input.reason !== undefined ? { reason: sanitizePluginReason(String(input.reason)) } : {})
+          }
+          appendSend(agentId, call, message, emit, { status: 'pending' }, opts.taskId)
+          messages.push({
+            role: 'tool', toolCallId: call.id,
+            content: `card shown to the user with an "Attiva" button: turning "${cfg.name}" on happens ONLY from their click — never say you have no tool for it, and do not use curl. If they click and it starts, you will receive a new turn with its tools; if they say not now, offer nothing else for it in this conversation.`
           })
           continue
         }

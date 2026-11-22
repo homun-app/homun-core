@@ -37,7 +37,7 @@ import { AgentSendRow } from './AgentSendRow'
 import { RoutineCreatedRow } from './RoutineCreatedRow'
 import { DraftCard } from './DraftCard'
 import { ConnectorCard } from './ConnectorCard'
-import { McpServerCard, PluginCard, McpWindowCard } from './ConnectorCards13'
+import { McpServerCard, PluginCard, McpWindowCard, EnablePluginCard } from './ConnectorCards13'
 import { RuleProposalCard } from './RuleProposalCard'
 import { TaskCard } from './TaskCard'
 import { SubagentCard } from './SubagentCard'
@@ -927,6 +927,8 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
       if (message?.type === 'plugin') return <PluginCard entry={entry} />
       // M3 (fase beta12-correzioni): il rimando alla finestra «Server MCP»
       if (message?.type === 'mcp-window') return <McpWindowCard entry={entry} />
+      // V6 (fase stato-vivo): la scheda per accendere un plugin spento
+      if (message?.type === 'enable-plugin') return <EnablePluginCard entry={entry} />
       // fase 8: regola di auto-review proposta dal bot
       if (message?.type === 'rule') return <RuleProposalCard entry={entry} />
       // fase 8/12/14: task, sottoagenti, documenti, fill, modulo sicuro, contatti

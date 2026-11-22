@@ -9,8 +9,18 @@ import type { ToolDef } from './llm'
 export const CONNECTOR_PROPOSAL_DENIED =
   'you may propose connectors only when the user asks you in chat'
 
-/** I tool che il turno può offrire SOLO se è dell'utente (M3: anche offer_mcp_window). */
-export const CONNECTOR_PROPOSAL_TOOLS = new Set(['add_mcp_server', 'install_plugin', 'offer_mcp_window'])
+/**
+ * V6 (fase stato-vivo): l'initiator del TURNO NUOVO che il daemon accoda dopo
+ * il click su «Attiva» della scheda offer_enable_plugin (solo se il test
+ * riesce: gli strumenti si caricano a inizio turno). Il turno nasce da un
+ * click dell'utente, quindi per le regole dei connettori è un turno
+ * dell'utente: il bot può persino proporre un ALTRO plugin spento (una
+ * ripresa sola per clic, nessuna catena automatica).
+ */
+export const PLUGIN_ENABLED_RESUME = 'PLUGIN_ENABLED_RESUME'
+
+/** I tool che il turno può offrire SOLO se è dell'utente (M3: anche offer_mcp_window; V6: offer_enable_plugin). */
+export const CONNECTOR_PROPOSAL_TOOLS = new Set(['add_mcp_server', 'install_plugin', 'offer_mcp_window', 'offer_enable_plugin'])
 
 /**
  * E3 (fase mcp-env): la guida che accompagna l'esito NEGATIVO del click su
@@ -77,7 +87,9 @@ export function connectorProposalOffered(f: TurnSourceFacts): boolean {
   if (f.taskId !== undefined) return false
   if (f.automatic === true) return false
   if (f.agentMessage !== undefined) return false
-  if (f.initiator !== undefined && f.initiator !== '') return false
+  // V6 (fase stato-vivo): la ripresa PLUGIN_ENABLED_RESUME nasce dal click
+  // dell'utente sulla scheda — per le regole dei connettori è un turno suo
+  if (f.initiator !== undefined && f.initiator !== '' && f.initiator !== PLUGIN_ENABLED_RESUME) return false
   return true
 }
 

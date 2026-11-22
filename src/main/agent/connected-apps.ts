@@ -17,10 +17,10 @@ import type { McpErrorCategory } from '../mcp/error-category'
  * V1 (fase stato-vivo): il tetto (token caratteri/4) del blocco
  * «Collegamenti ora» del prompt, MISURATO sul caso pieno (8 server
  * funzionanti + 4 non parti + 4 spenti + 6 app Composio multi-account + le
- * due regole: 557 token): mai alzarlo per far passare un test — il numero sta
- * nel REPORT della fase.
+ * regole, V6 compresa: 588 token): mai alzarlo per far passare un test — il
+ * numero sta nel REPORT della fase.
  */
-export const CONNECTIONS_NOW_TOKEN_BUDGET = 560
+export const CONNECTIONS_NOW_TOKEN_BUDGET = 590
 
 /** V1: quanti server funzionanti al massimo nell'elenco; poi «and N more». */
 export const CONNECTIONS_NOW_MAX_SERVERS = 8
@@ -98,6 +98,8 @@ export function connectionsNowSection(facts: ConnectionsNowFacts): string {
     '# Connections now',
     ...lines,
     'This block is the current truth about your tools and connections. If a summary or an earlier message says otherwise, this block wins.',
+    // V6: con uno spento, la regola che porta alla scheda invece del curl
+    ...(facts.off.length ? ['If a plugin you need is listed as switched off, call offer_enable_plugin instead of using curl or saying you have no tool.'] : []),
     'For a service in this list use its tools FIRST — find_tools({query: "<server or service name>"}) for its MCP server, COMPOSIO_SEARCH_TOOLS then COMPOSIO_MULTI_EXECUTE_TOOL for a Composio app — not history, memory, the browser, web_fetch, curl or a new connector. Never curl or run-command from the isolated computer.'
   ].join('\n')
 }

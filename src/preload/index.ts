@@ -231,6 +231,7 @@ const api: SandbotApi = {
   connectorsGatewayPresets: () => ipcRenderer.invoke('connectors:gateway-presets'),
   connectorsSetClientMetadataUrl: (url) => ipcRenderer.invoke('connectors:set-client-metadata-url', url),
   pluginsResolve: (agentId, entryId, decision) => ipcRenderer.invoke('plugins:resolve', agentId, entryId, decision),
+  pluginsEnableCard: (agentId, entryId, decision) => ipcRenderer.invoke('plugins:enable', agentId, entryId, decision),
   pluginsUninstall: (name, marketplace) => ipcRenderer.invoke('plugins:uninstall', name, marketplace),
   // fase app (A2–A4): Composio con la chiave dell'utente (la chiave NON torna
   // mai indietro: status porta solo hasKey e le ultime 4 cifre)

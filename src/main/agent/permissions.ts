@@ -223,7 +223,7 @@ export async function check(
   // installano nulla; l'installazione parte dal click e non passa di qui
   // (mai "Consenti sempre" su quelle card). M3 (fase beta12-correzioni):
   // offer_mcp_window apre SOLO la finestra «Server MCP» — niente da approvare.
-  if (tool === 'search_connectors' || tool === 'offer_connector' || tool === 'add_mcp_server' || tool === 'install_plugin' || tool === 'offer_mcp_window') {
+  if (tool === 'search_connectors' || tool === 'offer_connector' || tool === 'add_mcp_server' || tool === 'install_plugin' || tool === 'offer_mcp_window' || tool === 'offer_enable_plugin') {
     return { kind: 'allow', via: 'rule' }
   }
 
