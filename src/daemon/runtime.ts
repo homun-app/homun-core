@@ -211,13 +211,25 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   }
 
   // P7 (fase uso-permessi): i server http ACCESI mai connessi con successo
-  // (rimasti da aggiunte fallite) si SPENGONO (una tantum, flag idempotente)
+  // (rimasti da aggiunte fallite) si SPENGONO (una tantum, flag idempotente).
+  // V4 (fase stato-vivo): la migrazione PRIMA TESTA — spegne solo chi NON
+  // risponde (firstOkAt nasceva nella stessa fase di P7: ogni server http
+  // esistente risultava «mai connesso», e orion-moon è stato spento da
+  // funzionante). Subito DOPO, la RIPARAZIONE una tantum: i server http
+  // spenti con firstOkAt (la prova che funzionano) e SENZA motivo registrato
+  // si riaccendono se rispondono (una riga di log ciascuno). Un server con
+  // disabledReason 'user' non si tocca MAI.
   {
-    const { migrateHttpNeverConnectedOff } = await import('../main/store/mcp-migrations')
+    const migrations = await import('../main/store/mcp-migrations')
     try {
-      migrateHttpNeverConnectedOff()
+      await migrations.migrateHttpNeverConnectedOff()
     } catch (e) {
       console.error('[sandbotd] spegnimento dei server http mai connessi rimandato al prossimo avvio:', e instanceof Error ? e.message : e)
+    }
+    try {
+      await migrations.runHttpOffFirstOkRepair()
+    } catch (e) {
+      console.error('[sandbotd] riparazione dei server http spenti rimandata al prossimo avvio:', e instanceof Error ? e.message : e)
     }
   }
 

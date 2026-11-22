@@ -120,10 +120,18 @@ describe('R1: migrateToolSlugs (core puro)', () => {
 })
 
 // ---- P7 (fase uso-permessi): i server http MAI CONNESSI si spengono ----
+// V4 (fase stato-vivo): PRIMA TESTA — spegne solo chi NON risponde, e scrive
+// disabledReason 'never-connected'
 
-import { migrateNeverConnectedHttpServers } from '../mcp-migrations'
+import { migrateNeverConnectedHttpServers, repairHttpOffWithFirstOk, runHttpOffFirstOkRepair, migrateHttpNeverConnectedOff, MCP_HTTP_MIGRATION_FLAG, MCP_HTTP_OFF_REPAIR_FLAG, type HttpMigrationsDeps } from '../mcp-migrations'
+import { getSetting, setSetting, setDataDir } from '../db'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { beforeAll, afterAll } from 'vitest'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 
-describe('P7: migrateNeverConnectedHttpServers (puro) — il server rimasto da un\'aggiunta fallita si spegne', () => {
+describe('P7/V4: migrateNeverConnectedHttpServers (puro) — spegne solo chi NON risponde', () => {
   const http = (over: Partial<McpServerConfig>): McpServerConfig => ({
     id: 'x',
     name: 'mattermost.competitoor.com',
@@ -133,34 +141,154 @@ describe('P7: migrateNeverConnectedHttpServers (puro) — il server rimasto da u
     auth: { kind: 'oauth' },
     ...over
   })
-  it('http ABILITATO mai connesso (nessun firstOkAt) → SPENTO', () => {
-    const { servers, changed } = migrateNeverConnectedHttpServers([http({})])
+  it('http ABILITATO mai connesso (nessun firstOkAt) che NON risponde → SPENTO con disabledReason never-connected', () => {
+    const { servers, changed } = migrateNeverConnectedHttpServers([http({ id: 'morto' })], new Set(['morto']))
     expect(changed).toBe(true)
     expect(servers[0]!.enabled).toBe(false)
-    // il resto resta (si riaccende da Impostazioni quando lo si riconfigura)
+    expect(servers[0]!.disabledReason).toBe('never-connected')
+    // il resto resta (si riaccende quando lo si riconfigura)
     expect(servers[0]!.url).toBe('https://mattermost.competitoor.com/mcp')
+  })
+
+  it('V4: il server http mai connesso che RISPONDE non si spegne più (la migrazione prima testa)', () => {
+    const vivo = http({ id: 'vivo' })
+    const { servers, changed } = migrateNeverConnectedHttpServers([vivo], new Set())
+    expect(changed).toBe(false)
+    expect(servers[0]!.enabled).toBe(true)
   })
 
   it('con firstOkAt (connesso ALMENO una volta) resta ACCESSO; già spento e needsAuth non si toccano', () => {
     const ok = http({ id: 'ok', firstOkAt: 123 })
     const off = http({ id: 'off', enabled: false })
     const setup = http({ id: 'setup', needsAuth: { kind: 'setup', keys: ['url'] } })
-    const { servers, changed } = migrateNeverConnectedHttpServers([ok, off, setup])
+    const { servers, changed } = migrateNeverConnectedHttpServers([ok, off, setup], new Set(['ok', 'off', 'setup']))
     expect(changed).toBe(false)
     expect(servers).toEqual([ok, off, setup])
   })
 
   it('gli stdio non si toccano (il confine è dei server http)', () => {
     const stdio: McpServerConfig = { id: 'npm', name: 'npm', transport: 'stdio', enabled: true, box: { workdir: '/w', home: '/h', command: 'npx', args: [] } }
-    const { servers, changed } = migrateNeverConnectedHttpServers([stdio])
+    const { servers, changed } = migrateNeverConnectedHttpServers([stdio], new Set(['npm']))
     expect(changed).toBe(false)
     expect(servers[0]!.enabled).toBe(true)
   })
 
   it('idempotente: al secondo giro non c\'è niente da spegnere', () => {
-    const first = migrateNeverConnectedHttpServers([http({})])
-    const second = migrateNeverConnectedHttpServers(first.servers)
+    const first = migrateNeverConnectedHttpServers([http({ id: 'morto' })], new Set(['morto']))
+    const second = migrateNeverConnectedHttpServers(first.servers, new Set(['morto']))
     expect(second.changed).toBe(false)
     expect(second.servers).toEqual(first.servers)
+  })
+})
+
+// ---- V4 (fase stato-vivo): la riparazione del caso vero ----
+// orion-moon (http, header, importato con la beta.15): enabled:false con
+// firstOkAt del 21/11 18:46 — la migrazione P7 l'aveva spento al primo avvio
+// perché OGNI server http risultava «mai connesso» (firstOkAt nasceva nella
+// stessa fase), e un test successivo l'ha visto funzionare senza riaccenderlo.
+
+describe('V4: repairHttpOffWithFirstOk (core puro) — il caso vero di orion-moon', () => {
+  const orion = (over: Partial<McpServerConfig> = {}): McpServerConfig => ({
+    id: 'orion',
+    name: 'orion-moon',
+    transport: 'http',
+    url: 'https://orion.example/mcp',
+    enabled: false,
+    auth: { kind: 'headers' },
+    firstOkAt: 1732227960000,
+    ...over
+  })
+  it('spento, firstOkAt, SENZA motivo, e il server RISPONDE → RIACCESSO', () => {
+    const { servers, changed, repaired } = repairHttpOffWithFirstOk([orion()], new Set(['orion']))
+    expect(changed).toBe(true)
+    expect(servers[0]!.enabled).toBe(true)
+    expect(repaired).toEqual([{ id: 'orion', name: 'orion-moon' }])
+  })
+
+  it('il server NON risponde → resta SPENTO', () => {
+    const { servers, changed } = repairHttpOffWithFirstOk([orion()], new Set())
+    expect(changed).toBe(false)
+    expect(servers[0]!.enabled).toBe(false)
+  })
+
+  it("disabledReason 'user' → MAI toccato (l'ha spento l'utente)", () => {
+    const user = orion({ id: 'dellutente', disabledReason: 'user' })
+    const { servers, changed } = repairHttpOffWithFirstOk([user], new Set(['dellutente']))
+    expect(changed).toBe(false)
+    expect(servers[0]!.enabled).toBe(false)
+  })
+
+  it("disabledReason 'add-failed' (e ogni altro motivo registrato) → non toccato", () => {
+    const add = orion({ id: 'add-fallita', disabledReason: 'add-failed' })
+    const { changed } = repairHttpOffWithFirstOk([add], new Set(['add-fallita']))
+    expect(changed).toBe(false)
+  })
+
+  it('un server SPENTO SENZA firstOkAt non è di questa riparazione (P7 lo giudica a modo suo)', () => {
+    const { changed } = repairHttpOffWithFirstOk([orion({ id: 'senza-ok', firstOkAt: undefined })], new Set(['senza-ok']))
+    expect(changed).toBe(false)
+  })
+})
+
+describe('V4: i runner (P7 e riparazione) sui settings veri, con testServer finti', () => {
+  let root: string
+  beforeAll(() => {
+    root = mkdtempSync(join(TEST_TMP_BASE ?? tmpdir(), 'sandbot-v4-migr-test-'))
+    setDataDir(root)
+  })
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  const deps = (tests: Record<string, { ok: boolean }>, logs: string[]): HttpMigrationsDeps => ({
+    getServers: () => getSetting<McpServerConfig[]>('mcp.servers', []),
+    saveServers: (s) => setSetting('mcp.servers', s),
+    getFlag: (k) => getSetting<boolean>(k, false),
+    setFlag: (k) => setSetting(k, true),
+    testServer: async (id) => tests[id] ?? { ok: false },
+    log: (m) => logs.push(m)
+  })
+  const orion: McpServerConfig = {
+    id: 'orion', name: 'orion-moon', transport: 'http', url: 'https://orion.example/mcp',
+    enabled: false, auth: { kind: 'headers' }, firstOkAt: 1732227960000
+  }
+
+  it('la migrazione P7 con il server che RISPONDE NON lo spegne (e scrive il flag)', async () => {
+    setSetting(MCP_HTTP_MIGRATION_FLAG, false)
+    setSetting('mcp.servers', [{ ...orion, enabled: true, firstOkAt: undefined }])
+    const logs: string[] = []
+    await migrateHttpNeverConnectedOff(deps({ orion: { ok: true } }, logs))
+    const after = getSetting<McpServerConfig[]>('mcp.servers', [])
+    expect(after[0]!.enabled).toBe(true)
+    expect(getSetting<boolean>(MCP_HTTP_MIGRATION_FLAG, false)).toBe(true)
+    // con il flag già scritto non rigira nemmeno
+    await migrateHttpNeverConnectedOff(deps({}, logs))
+  })
+
+  it('la riparazione del caso vero: il server finto RISPONDE → riacceso, con la riga di log', async () => {
+    setSetting(MCP_HTTP_OFF_REPAIR_FLAG, false)
+    setSetting('mcp.servers', [orion])
+    const logs: string[] = []
+    await runHttpOffFirstOkRepair(deps({ orion: { ok: true } }, logs))
+    const after = getSetting<McpServerConfig[]>('mcp.servers', [])
+    expect(after[0]!.enabled).toBe(true)
+    expect(logs.join('\n')).toContain('orion-moon')
+    expect(logs.join('\n')).toMatch(/riacceso/i)
+    expect(getSetting<boolean>(MCP_HTTP_OFF_REPAIR_FLAG, false)).toBe(true)
+  })
+
+  it('la riparazione con il server che NON risponde → resta spento (flag scritto: una tantum)', async () => {
+    setSetting(MCP_HTTP_OFF_REPAIR_FLAG, false)
+    setSetting('mcp.servers', [orion])
+    const logs: string[] = []
+    await runHttpOffFirstOkRepair(deps({}, logs))
+    expect(getSetting<McpServerConfig[]>('mcp.servers', [])[0]!.enabled).toBe(false)
+    expect(logs).toHaveLength(0)
+    expect(getSetting<boolean>(MCP_HTTP_OFF_REPAIR_FLAG, false)).toBe(true)
+  })
+
+  it("disabledReason 'user' → la riparazione NON lo riaccende (nemmeno se risponde)", async () => {
+    setSetting(MCP_HTTP_OFF_REPAIR_FLAG, false)
+    setSetting('mcp.servers', [{ ...orion, disabledReason: 'user' }])
+    await runHttpOffFirstOkRepair(deps({ orion: { ok: true } }, []))
+    expect(getSetting<McpServerConfig[]>('mcp.servers', [])[0]!.enabled).toBe(false)
   })
 })

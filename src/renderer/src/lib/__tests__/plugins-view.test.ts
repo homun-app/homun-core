@@ -263,3 +263,54 @@ describe('PL6: la riga grigia della skill importata da un\'altra app', () => {
     expect(grayLineOf(rows.find((r) => r.name === 'lavoro')!, 'en')).toBe('Skill · imported from ZCode')
   })
 })
+
+// ---- V4 (fase stato-vivo): il server spento dice CHI l'ha spento ----
+
+describe('V4: server spento — «spento da Homun» con Riaccendi, lo user-off è solo spento', () => {
+  const offServer = (over: Record<string, unknown> = {}) => ({
+    id: 'srv-orion', name: 'orion-moon', enabled: false, ...over
+  }) as never
+  const rowsOf = (servers: unknown[]): YourPluginRow[] => yourPlugins({
+    connectedApps: [], composio: null, composioGateway: null,
+    installed: { servers: servers as never, plugins: [] }, skills: null,
+    agents: AGENTS, query: ''
+  })
+
+  it('spento SENZA motivo (il caso P7/orion-moon) e con never-connected: stato off-homun, etichetta onesta con azione reenable', () => {
+    expect(pluginStateOfServer(offServer())).toBe('off-homun')
+    expect(pluginStateOfServer(offServer({ disabledReason: 'never-connected' }))).toBe('off-homun')
+    expect(pluginStateOfServer(offServer({ disabledReason: 'add-failed' }))).toBe('off-homun')
+    const it = stateLabelOf('off-homun', 'it')
+    expect(it.label).toBe('spento da Homun: non rispondeva')
+    expect(it.action).toBe('reenable')
+    const en = stateLabelOf('off-homun', 'en')
+    expect(en.label).toBe('switched off by Homun: it was not responding')
+    expect(en.action).toBe('reenable')
+  })
+
+  it("spento dall'UTENTE (disabledReason 'user'): «spento», nessuna azione", () => {
+    expect(pluginStateOfServer(offServer({ disabledReason: 'user' }))).toBe('off-user')
+    const it = stateLabelOf('off-user', 'it')
+    expect(it.label).toBe('spento')
+    expect(it.action).toBeNull()
+    const en = stateLabelOf('off-user', 'en')
+    expect(en.label).toBe('switched off')
+    expect(en.action).toBeNull()
+  })
+
+  it('«Da sistemare» conta l\'homun-off ma NON lo user-off (l\'ha deciso l\'utente)', () => {
+    const rows = rowsOf([
+      offServer({ id: 'homun', name: 'a' }),
+      offServer({ id: 'user', name: 'b', disabledReason: 'user' })
+    ])
+    expect(daSistemareCount(rows)).toBe(1)
+    const table = connectedTable({ rows, usage: [], perms: null, filter: 'all', onlyDaSistemare: true })
+    expect(table).toHaveLength(1)
+    expect(table[0]!.row.state).toBe('off-homun')
+  })
+
+  it('il server ACCESO resta attivo anche se gli arrivano campi di stato: il confine è enabled', () => {
+    expect(pluginStateOfServer({ id: 'x', name: 'x', enabled: true, stateStatus: 'error' } as never)).toBe('broken')
+    expect(pluginStateOfServer({ id: 'y', name: 'y', enabled: true } as never)).toBe('active')
+  })
+})

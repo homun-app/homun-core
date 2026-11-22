@@ -172,3 +172,40 @@ describe('PL2: Account e bot', () => {
     void fakeApiCalls
   })
 })
+
+// ---- V4 (fase stato-vivo): il server spento da Homun ha il bottone Riaccendi ----
+
+describe('V4: server spento non dall\'utente — stato onesto e bottone Riaccendi che accende e testa', () => {
+  it('la testata dice «spento da Homun: non rispondeva» e il bottone Riaccendi c\'è', () => {
+    const html = render({ server: { ...SERVER, enabled: false, firstOkAt: 1732227960000 } as never })
+    const root = parseHtml(html)
+    const texts = findAll(root, () => true).map((n) => textOf(n)).join('\n')
+    expect(texts).toContain('spento da Homun: non rispondeva')
+    const btn = findAll(root, (n) => n.attrs['data-testid'] === 'plugin-card-reenable')[0]
+    expect(btn).toBeTruthy()
+    expect(textOf(btn!)).toBe('Riaccendi')
+  })
+
+  it('spento dall\'utente: nessun bottone Riaccendi (lo stato è «spento» e basta)', () => {
+    const html = render({ server: { ...SERVER, enabled: false, disabledReason: 'user' } as never })
+    const root = parseHtml(html)
+    expect(findAll(root, (n) => n.attrs['data-testid'] === 'plugin-card-reenable')).toHaveLength(0)
+    const texts = findAll(root, () => true).map((n) => textOf(n)).join('\n')
+    expect(texts).toContain('spento')
+  })
+
+  it('il click chiama mcpSave con enabled true e SENZA disabledReason (il test U5 parte da lì)', () => {
+    stubApiMethod('mcpSave', () => [])
+    render({ server: { ...SERVER, enabled: false, firstOkAt: 1 } as never })
+    // l'handler VERO sta nell'elemento catturato dal runtime JSX (come i toggle per bot)
+    const btn = capture.els.find((e) => e.props['data-testid'] === 'plugin-card-reenable')!
+    expect(btn).toBeTruthy()
+    const before = callsOf('mcpSave').length
+    ;(btn.props.onClick as () => void)()
+    const calls = callsOf('mcpSave').slice(before)
+    expect(calls).toHaveLength(1)
+    const saved = calls[0]!.args[0] as { enabled: boolean; disabledReason?: string }
+    expect(saved.enabled).toBe(true)
+    expect(saved.disabledReason).toBeUndefined()
+  })
+})

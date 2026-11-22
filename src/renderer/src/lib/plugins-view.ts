@@ -33,8 +33,13 @@ export type PluginStrada =
   | 'gateway'
   | 'skill'
 
-/** Lo stato della riga: attivo, non parte, accesso scaduto, da completare. */
-export type PluginState = 'active' | 'broken' | 'expired' | 'setup' | 'invalid'
+/**
+ * Lo stato della riga: attivo, non parte, accesso scaduto, da completare.
+ * V4 (fase stato-vivo): anche lo SPENTO, con chi l'ha spento — 'off-homun'
+ * («spento da Homun: non rispondeva» con Riaccendi) e 'off-user' («spento»,
+ * la parola dell'utente: nessuna azione).
+ */
+export type PluginState = 'active' | 'broken' | 'expired' | 'setup' | 'invalid' | 'off-homun' | 'off-user'
 
 export interface YourPluginRow {
   key: string
@@ -78,8 +83,15 @@ export type InstalledServerSourceLike = Pick<InstalledServerLike, 'id' | 'name'>
   source?: { kind?: string; name?: string; package?: string; version?: string } | null
 }
 
-/** Lo stato di un server installato, con l'errore che lo separa dal verde. */
+/**
+ * Lo stato di un server installato, con l'errore che lo separa dal verde.
+ * V4: un server SPENTO dice CHI l'ha spento — senza disabledReason (le
+ * versioni di prima) o con never-connected/add-failed è «spento da Homun:
+ * non rispondeva» con l'azione Riaccendi; con 'user' è solo «spento»: la
+ * decisione dell'utente non si discute e non entra in «Da sistemare».
+ */
 export function pluginStateOfServer(s: InstalledServerLike): PluginState {
+  if (s.enabled === false) return s.disabledReason === 'user' ? 'off-user' : 'off-homun'
   if (s.needsAuth) return 'setup'
   if (s.needsReauth) return 'expired'
   if (s.stateStatus === 'error') return 'broken'
@@ -286,7 +298,7 @@ export function grayLineOf(row: YourPluginRow, lang: 'it' | 'en'): string {
 }
 
 /** L'etichetta dello stato, con l'azione che propone. */
-export function stateLabelOf(state: PluginState, lang: 'it' | 'en'): { label: string; action: 'why' | 'reconnect' | 'setup' | null } {
+export function stateLabelOf(state: PluginState, lang: 'it' | 'en'): { label: string; action: 'why' | 'reconnect' | 'setup' | 'reenable' | null } {
   const via = (it: string, en: string): string => (lang === 'en' ? en : it)
   switch (state) {
     case 'active': return { label: via('attivo', 'active'), action: null }
@@ -294,6 +306,9 @@ export function stateLabelOf(state: PluginState, lang: 'it' | 'en'): { label: st
     case 'expired': return { label: via('accesso scaduto', 'access expired'), action: 'reconnect' }
     case 'setup': return { label: via('da completare', 'needs setup'), action: 'setup' }
     case 'invalid': return { label: via('non valida', 'invalid'), action: 'why' }
+    // V4: lo spento non è più un pallino grigio muto
+    case 'off-homun': return { label: via('spento da Homun: non rispondeva', 'switched off by Homun: it was not responding'), action: 'reenable' }
+    case 'off-user': return { label: via('spento', 'switched off'), action: null }
   }
 }
 
@@ -385,7 +400,9 @@ export function connectedTable(input: {
   const out: ConnectedTableRow[] = []
   for (const row of input.rows) {
     if (!stradaOfFilter(input.filter, row)) continue
-    const daSistemare = row.state === 'broken' || row.state === 'expired' || row.state === 'invalid'
+    // V4: anche lo spento da Homun va sistemato; lo SPENTO DALL'UTENTE no
+    // (l'ha deciso lui: resta in tabella, fuori da «Da sistemare»)
+    const daSistemare = row.state === 'broken' || row.state === 'expired' || row.state === 'invalid' || row.state === 'off-homun'
     if (input.onlyDaSistemare && !daSistemare) continue
     out.push({
       row,
@@ -398,7 +415,7 @@ export function connectedTable(input: {
   return out
 }
 
-/** Quanti collegati vanno sistemati (non partono o accesso scaduto). */
+/** Quanti collegati vanno sistemati (non partono, accesso scaduto, spenti da Homun — mai dall'utente). */
 export function daSistemareCount(rows: ReadonlyArray<YourPluginRow>): number {
-  return rows.filter((r) => r.state === 'broken' || r.state === 'expired' || r.state === 'invalid').length
+  return rows.filter((r) => r.state === 'broken' || r.state === 'expired' || r.state === 'invalid' || r.state === 'off-homun').length
 }

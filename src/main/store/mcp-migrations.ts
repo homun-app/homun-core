@@ -126,39 +126,134 @@ export function migrateToolSlugFreeze(): void {
 }
 
 // ---- P7 (fase uso-permessi): i server http MAI CONNESSI si spengono ----
+// V4 (fase stato-vivo): la migrazione PRIMA TESTA — spegne solo chi NON
+// risponde (il campo firstOkAt nasceva nella STESSA fase di P7, quindi ogni
+// server http esistente risultava «mai connesso» e la migrazione lo spegneva
+// al primo avvio ANCHE se funzionava: il caso vero di orion-moon). E chi
+// spegne scrive il MOTIVO (disabledReason).
 
 /** P7: il setting che marca la migrazione fatta (idempotente). */
 export const MCP_HTTP_MIGRATION_FLAG = 'mcp.httpNeverConnectedOff'
 
+/** V4: il setting che marca la RIPARAZIONE una tantum fatta (idempotente). */
+export const MCP_HTTP_OFF_REPAIR_FLAG = 'mcp.httpOffFirstOkRepair'
+
+/** Le dipendenze dei runner http (P7 e riparazione), iniettabili per i test. */
+export interface HttpMigrationsDeps {
+  getServers: () => McpServerConfig[]
+  saveServers: (servers: McpServerConfig[]) => void
+  getFlag: (key: string) => boolean
+  setFlag: (key: string) => void
+  testServer: (id: string) => Promise<{ ok: boolean }>
+  log: (message: string) => void
+}
+
+/** I runner sui setting veri (il daemon); i test iniettano i loro finti. */
+async function realHttpDeps(): Promise<HttpMigrationsDeps> {
+  const mcpMod = await import('../mcp')
+  return {
+    getServers: () => getSetting<McpServerConfig[]>('mcp.servers', []),
+    saveServers: (servers) => setSetting('mcp.servers', servers),
+    getFlag: (key) => getSetting<boolean>(key, false),
+    setFlag: (key) => setSetting(key, true),
+    testServer: (id) => mcpMod.testServer(id),
+    log: (message) => console.log(message)
+  }
+}
+
 /**
  * P7 (core puro): un'aggiunta http FALLITA di una volta lasciava il server in
- * mcp.servers e ABILITATO (il caso Competitoor: «Server … NOT added:
- * authorization failed», e il server restava acceso). La migrazione SPENGE i
- * server http accesi che non si sono MAI connessi con successo (nessun
- * firstOkAt, il timestamp che ensure() scrive alla prima connessione riuscita
- * da questa fase in poi). NON si toccano: i server con firstOkAt (hanno
+ * mcp.servers e ABILITATO. La migrazione SPENGE i server http accesi che non
+ * si sono MAI connessi con successo (nessun firstOkAt) — ma dal V4 SOLO
+ * quelli che al test di connessione NON rispondono (`failing`: gli id che il
+ * runner ha appena provato). NON si toccano: i server con firstOkAt (hanno
  * funzionato), quelli già spenti, quelli che aspettano la configurazione
- * (needsAuth: il modulo è già «da riconfigurare») e gli stdio. Il server
- * spento resta nella config: si riaccende dalla finestra «Server MCP».
+ * (needsAuth) e gli stdio. Chi spegne scrive disabledReason 'never-connected'
+ * (V4): così la UI può dire «spento da Homun» e offrire Riaccendi.
  */
-export function migrateNeverConnectedHttpServers(servers: McpServerConfig[]): { servers: McpServerConfig[]; changed: boolean } {
+export function migrateNeverConnectedHttpServers(servers: McpServerConfig[], failing: ReadonlySet<string>): { servers: McpServerConfig[]; changed: boolean } {
   let changed = false
   const out = servers.map((s) => {
     if (s.transport !== 'http' || !s.enabled || s.firstOkAt !== undefined || s.needsAuth) return s
+    if (!failing.has(s.id)) return s
     changed = true
-    return { ...s, enabled: false }
+    return { ...s, enabled: false, disabledReason: 'never-connected' as const }
   })
   return { servers: out, changed }
 }
 
-/** P7 (runner, primo avvio del daemon): una riga di log, idempotente per flag. */
-export function migrateHttpNeverConnectedOff(): void {
-  if (getSetting<boolean>(MCP_HTTP_MIGRATION_FLAG, false)) return
-  const { servers, changed } = migrateNeverConnectedHttpServers(getSetting<McpServerConfig[]>('mcp.servers', []))
-  if (changed) {
-    setSetting('mcp.servers', servers)
-    const n = servers.filter((s) => s.transport === 'http' && !s.enabled && s.firstOkAt === undefined && !s.needsAuth).length
-    console.log(`[sandbotd] migrazione server http: ${n} mai connessi rimasti accesi da aggiunte fallite → spenti`)
+/** P7 (runner, primo avvio del daemon): PRIMA TESTA i candidati, poi spegne chi non risponde. */
+export async function migrateHttpNeverConnectedOff(deps?: HttpMigrationsDeps): Promise<void> {
+  const d = deps ?? (await realHttpDeps())
+  if (d.getFlag(MCP_HTTP_MIGRATION_FLAG)) return
+  const servers = d.getServers()
+  // i candidati: http accesi, mai connessi, non in attesa di configurazione
+  const candidates = servers.filter((s) => s.transport === 'http' && s.enabled && s.firstOkAt === undefined && !s.needsAuth)
+  const failing = new Set<string>()
+  for (const c of candidates) {
+    try {
+      if (!(await d.testServer(c.id)).ok) failing.add(c.id)
+    } catch {
+      failing.add(c.id)
+    }
   }
-  setSetting(MCP_HTTP_MIGRATION_FLAG, true)
+  const { servers: out, changed } = migrateNeverConnectedHttpServers(servers, failing)
+  if (changed) {
+    d.saveServers(out)
+    const n = out.filter((s) => s.transport === 'http' && !s.enabled && s.firstOkAt === undefined && !s.needsAuth && s.disabledReason === 'never-connected').length
+    d.log(`[sandbotd] migrazione server http: ${n} mai connessi e che NON rispondono → spenti`)
+  }
+  d.setFlag(MCP_HTTP_MIGRATION_FLAG)
+}
+
+/**
+ * V4 (fase stato-vivo — core puro): la RIPARAZIONE del caso vero. orion-moon
+ * (http, header, importato con la beta.15) era `enabled: false` con
+ * `firstOkAt` del 21/11 18:46: la migrazione P7 l'aveva spento al primo avvio
+ * (ogni server http risultava «mai connesso»), e un test successivo l'aveva
+ * visto funzionare senza riaccenderlo. Qui: i server http SPENTI con
+ * firstOkAt (la prova che funzionano) e SENZA un motivo di spegnimento
+ * registrato si RIACCENDONO se il test risponde (`ok`: gli id che il runner
+ * ha appena provato). Se non risponde, resta spento. Un server con
+ * disabledReason (l'utente, un'aggiunta fallita, la P7 di oggi) non si tocca
+ * MAI: il motivo è la parola dell'utente o del sistema, e vale più del test.
+ */
+export function repairHttpOffWithFirstOk(servers: McpServerConfig[], ok: ReadonlySet<string>): { servers: McpServerConfig[]; changed: boolean; repaired: Array<{ id: string; name: string }> } {
+  let changed = false
+  const repaired: Array<{ id: string; name: string }> = []
+  const out = servers.map((s) => {
+    if (s.transport !== 'http' || s.enabled || s.firstOkAt === undefined || s.disabledReason !== undefined) return s
+    if (!ok.has(s.id)) return s
+    changed = true
+    const { disabledReason: _r, ...rest } = s
+    repaired.push({ id: s.id, name: s.name })
+    return { ...rest, enabled: true }
+  })
+  return { servers: out, changed, repaired }
+}
+
+/**
+ * V4 (runner, una tantum al primo avvio dopo la fase): testa i server http
+ * spenti con firstOkAt e senza motivo, e riaccende quelli che rispondono —
+ * una riga di log per ciascuno, mai dati sensibili. Idempotente per flag.
+ */
+export async function runHttpOffFirstOkRepair(deps?: HttpMigrationsDeps): Promise<void> {
+  const d = deps ?? (await realHttpDeps())
+  if (d.getFlag(MCP_HTTP_OFF_REPAIR_FLAG)) return
+  const servers = d.getServers()
+  const candidates = servers.filter((s) => s.transport === 'http' && !s.enabled && s.firstOkAt !== undefined && s.disabledReason === undefined)
+  const ok = new Set<string>()
+  for (const c of candidates) {
+    try {
+      if ((await d.testServer(c.id)).ok) ok.add(c.id)
+    } catch {
+      // non risponde: resta spento
+    }
+  }
+  const { servers: out, changed, repaired } = repairHttpOffWithFirstOk(servers, ok)
+  if (changed) {
+    d.saveServers(out)
+    for (const r of repaired) d.log(`[sandbotd] riparazione server http: "${r.name}" riacceso — funziona (firstOkAt) ma era stato spento dalla migrazione P7`)
+  }
+  d.setFlag(MCP_HTTP_OFF_REPAIR_FLAG)
 }

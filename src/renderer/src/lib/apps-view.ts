@@ -24,6 +24,10 @@ export interface InstalledServerLike {
   /** N1 (fase mcp-egress-sicurezza): l'errore dell'ultima prova, in parole (il foglio lo mostra) */
   stateError?: string
   source?: { kind?: string; name?: string } | null
+  /** V4 (fase stato-vivo): il server è SPENTO (il pallino grigio muto diventa stato con azione) */
+  enabled?: boolean
+  /** V4: CHI l'ha spento — 'user' non si tocca, il resto è «spento da Homun» con Riaccendi */
+  disabledReason?: 'user' | 'add-failed' | 'never-connected'
 }
 
 export interface InstalledPluginLike {

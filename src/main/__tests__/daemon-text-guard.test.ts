@@ -89,6 +89,10 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   // console.log nel runner (migrazione impostazioni), come le righe di LOG
   // di box-setup qui sopra; MAI nella UI (lì c'è il catalogo)
   { file: 'src/main/store/settings-migrations.ts', text: 'modalità del computer del bot = ' },
+  // V4 (fase stato-vivo): la riga di LOG della migrazione P7 (che da ora
+  // spegne solo chi NON risponde) — d.log nel runner con deps iniettabili
+  // (i test passano il loro log), come box-setup; MAI nella UI
+  { file: 'src/main/store/mcp-migrations.ts', text: ' mai connessi e che NON rispondono → spenti' },
   // messaggio del keychain FINTO dei test (strumento di test, non UI)
   { file: 'src/daemon/keychain.ts', text: 'operazione non supportata dal keychain finto' },
   // nome app localizzato → bundle (parser di open_app, C7)

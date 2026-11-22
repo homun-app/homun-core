@@ -12,8 +12,8 @@ import { Lock, ChevronLeft } from 'lucide-react'
 import { api, useStore } from '../store'
 import { i18n } from '../lib/i18n'
 import type { McpServerInfo, PermissionsConfig, ConnectorInfo } from '../../../shared/types'
-import type { CatalogRowView, InstalledServerLike } from '../lib/apps-view'
-import { stateLabelOf, stradaOfServer, stradaLabel } from '../lib/plugins-view'
+import type { CatalogRowView } from '../lib/apps-view'
+import { stateLabelOf, stradaOfServer, stradaLabel, pluginStateOfServer } from '../lib/plugins-view'
 import { classifyPluginTool, type FixedAskKind, type ToolGroup } from '../../../shared/tool-classify'
 import { toolRuleOf, withToolRule } from '../../../shared/permissions-tools'
 import { serverCommandLine } from '../lib/mcp-row'
@@ -118,8 +118,17 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
   }
 
   const state = isServer
-    ? stateLabelOf(pluginServerState(server), lang)
+    ? stateLabelOf(pluginStateOfServer(server), lang)
     : stateLabelOf(app!.row.connected === 'connected' ? 'active' : 'expired', lang)
+
+  /** V4 (fase stato-vivo): Riaccendi — il server spento NON dall'utente si
+   *  riaccende e parte il test U5 di mcp:save (che se fallisce lascia il
+   *  server ACCESO con «non parte · Vedi perché»: non si rispegne da solo). */
+  const reenableServer = (): void => {
+    if (!server) return
+    const { disabledReason: _r, ...rest } = server
+    void api.mcpSave({ ...rest, enabled: true }).then(() => onChanged()).catch(() => undefined)
+  }
 
   return (
     <div className="no-drag absolute inset-0 z-30 flex flex-col bg-background" data-testid="plugin-card">
@@ -151,6 +160,17 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
               onClick={() => onConnect(app!.row)}
             >
               <Trans>Connetti</Trans>
+            </button>
+          )}
+          {/* V4 (fase stato-vivo): spento da Homun → Riaccendi, che accende e
+              testa; spento dall'utente non si propone niente (è la sua parola) */}
+          {isServer && state.action === 'reenable' && (
+            <button
+              className="h-8 shrink-0 rounded-full bg-foreground px-4 text-[13px] font-medium text-background transition hover:opacity-90"
+              data-testid="plugin-card-reenable"
+              onClick={reenableServer}
+            >
+              <Trans>Riaccendi</Trans>
             </button>
           )}
         </div>
@@ -356,15 +376,6 @@ function GroupSelect({ testid, fixed, value, onChange }: {
       ))}
     </select>
   )
-}
-
-/** Lo stato di un server per la scheda (la stessa scala di plugins-view). */
-function pluginServerState(s: InstalledServerLike): 'active' | 'broken' | 'expired' | 'setup' {
-  if (s.needsAuth) return 'setup'
-  if (s.needsReauth) return 'expired'
-  if (s.stateStatus === 'error') return 'broken'
-  if (s.stateStatus === 'needs_auth') return 'expired'
-  return 'active'
 }
 
 /** Gli strumenti di un server/lista → le righe della scheda (nome completo

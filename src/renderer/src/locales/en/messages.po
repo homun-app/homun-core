@@ -6610,6 +6610,11 @@ msgstr "revoke"
 msgid "Revoca"
 msgstr "Revoke"
 
+#: src/renderer/src/components/PluginCard.tsx
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Riaccendi"
+msgstr "Turn on again"
+
 #: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Riapri"
 msgstr "Reopen"

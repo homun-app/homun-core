@@ -15,11 +15,11 @@ const tok = (s: string): number => Math.ceil(s.length / 4)
 
 describe("V1: connectionsNowSection — il blocco «Collegamenti ora» del prompt", () => {
   it('vuoto senza nulla; con il server X funzionante il blocco c\'è, con la REGOLA che vince sui riassunti', () => {
-    expect(connectionsNowSection({ working: [], failing: [], composioApps: [] })).toBe('')
+    expect(connectionsNowSection({ working: [], failing: [], off: [], composioApps: [] })).toBe('')
     // il caso della chat del 21/11: il riassunto dice «non ho accesso a X» ma
     // il server X FUNZIONA — la verifica è sul TESTO del prompt, non sul
     // modello: il blocco contiene X e la regola che vince sul riassunto
-    const s = connectionsNowSection({ working: [{ name: 'mattermost', toolCount: 14 }], failing: [], composioApps: [] })
+    const s = connectionsNowSection({ working: [{ name: 'mattermost', toolCount: 14 }], failing: [], off: [], composioApps: [] })
     expect(s).toContain('# Connections now')
     expect(s).toContain('- mattermost: 14 tools')
     expect(s).toContain('This block is the current truth about your tools and connections. If a summary or an earlier message says otherwise, this block wins.')
@@ -29,6 +29,7 @@ describe("V1: connectionsNowSection — il blocco «Collegamenti ora» del promp
     const s = connectionsNowSection({
       working: [],
       failing: [{ name: 'studio-mcp', category: 'unreachable' }, { name: 'vecchio-mcp', category: 'command-not-found' }],
+      off: [],
       composioApps: []
     })
     expect(s).toContain('- studio-mcp: does not start (unreachable)')
@@ -41,15 +42,22 @@ describe("V1: connectionsNowSection — il blocco «Collegamenti ora» del promp
     const s = connectionsNowSection({
       working: [{ name: 'Notion', toolCount: 5 }],
       failing: [],
+      off: [],
       composioApps: [{ name: 'Trello', accounts: [] }]
     })
     expect(s).toContain('- Composio: Trello')
     expect(s).toContain('- Notion: 5 tools')
   })
 
-  it(`il tetto: 8 funzionanti + 4 non parti + 6 app multi-account ≤ ${CONNECTIONS_NOW_TOKEN_BUDGET} token (caratteri/4, misurato)`, () => {
+  it('V4: i server SPENTI hanno la loro riga corta — il bot sa che lo strumento ESISTE ma è spento', () => {
+    const s = connectionsNowSection({ working: [], failing: [], off: [{ name: 'orion-moon' }], composioApps: [] })
+    expect(s).toContain('- orion-moon: switched off — ask the user to turn it on in Plugin')
+  })
+
+  it(`il tetto: 8 funzionanti + 4 non parti + 4 spenti + 6 app multi-account ≤ ${CONNECTIONS_NOW_TOKEN_BUDGET} token (caratteri/4, misurato)`, () => {
     const working = Array.from({ length: 8 }, (_, i) => ({ name: `server-con-nome-lungo-${i}`, toolCount: 10 + i }))
     const failing = Array.from({ length: 9 }, (_, i) => ({ name: `rotto-${i}`, category: 'startup-error' as const }))
+    const off = Array.from({ length: 9 }, (_, i) => ({ name: `spento-${i}` }))
     const composioApps = Array.from({ length: 6 }, (_, i) => ({
       name: `App${i}`,
       accounts: [
@@ -58,12 +66,13 @@ describe("V1: connectionsNowSection — il blocco «Collegamenti ora» del promp
         { alias: `altro${i}`, email: `utente${i}@altra.test` }
       ]
     }))
-    const s = connectionsNowSection({ working, failing, composioApps })
+    const s = connectionsNowSection({ working, failing, off, composioApps })
     expect(tok(s)).toBeLessThanOrEqual(CONNECTIONS_NOW_TOKEN_BUDGET)
     // oltre i tetti gli elenchi si tagliano (il tetto non si sposta)
     const tanti = connectionsNowSection({
       working: Array.from({ length: 30 }, (_, i) => ({ name: `s-${i}`, toolCount: 5 })),
       failing: [],
+      off: [],
       composioApps: []
     })
     expect(tok(tanti)).toBeLessThanOrEqual(CONNECTIONS_NOW_TOKEN_BUDGET)
@@ -71,7 +80,7 @@ describe("V1: connectionsNowSection — il blocco «Collegamenti ora» del promp
   })
 
   it('la regola d\'uso resta: gli strumenti PRIMA di ogni altra strada, mai curl dal computer isolato', () => {
-    const s = connectionsNowSection({ working: [{ name: 'orion-moon', toolCount: 3 }], failing: [], composioApps: [] })
+    const s = connectionsNowSection({ working: [{ name: 'orion-moon', toolCount: 3 }], failing: [], off: [], composioApps: [] })
     expect(s).toMatch(/FIRST/)
     expect(s).toContain('find_tools')
     expect(s).toMatch(/never (use )?curl/i)

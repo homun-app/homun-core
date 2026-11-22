@@ -651,7 +651,9 @@ function disableFailedServer(cfg: McpServerConfig, deps: InstallDeps): void {
   const all = [...deps.listServers()]
   const i = all.findIndex((s) => s.id === cfg.id)
   if (i !== -1 && all[i]!.enabled) {
-    all[i] = { ...all[i]!, enabled: false }
+    // V4 (fase stato-vivo): lo spegnimento scrive il MOTIVO — la UI può dire
+    // «spento da Homun» e offrire Riaccendi, e la riparazione non lo tocca
+    all[i] = { ...all[i]!, enabled: false, disabledReason: 'add-failed' as const }
     deps.saveServers(all)
     deps.onChange()
   }

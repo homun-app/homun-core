@@ -35,6 +35,7 @@ describe('V1 (ex B4): connectionsNowSection — le app collegate nel blocco «Co
     const s = connectionsNowSection({
       working: [{ name: 'Notion', toolCount: 5 }],
       failing: [],
+      off: [],
       composioApps: [{ name: 'Trello', accounts: [] }, { name: 'Gmail', accounts: [] }]
     })
     expect(s).toContain('- Composio: Trello; Gmail')
@@ -45,13 +46,13 @@ describe('V1 (ex B4): connectionsNowSection — le app collegate nel blocco «Co
   })
 
   it('SENZA app, senza server non parti e senza Composio il blocco NON c\'è (stringa vuota)', () => {
-    expect(connectionsNowSection({ working: [], failing: [], composioApps: [] })).toBe('')
+    expect(connectionsNowSection({ working: [], failing: [], off: [], composioApps: [] })).toBe('')
   })
 
   it('l\'ordine dei nomi resta quello dato; massimo 6 app, poi «and N more»', () => {
     expect(CONNECTIONS_NOW_MAX_APPS).toBe(6)
     const many = Array.from({ length: 25 }, (_, i) => ({ name: `App${i}`, accounts: [] as Array<{ alias?: string; email?: string }> }))
-    const s = connectionsNowSection({ working: [], failing: [], composioApps: many })
+    const s = connectionsNowSection({ working: [], failing: [], off: [], composioApps: many })
     expect(s).toContain('App0; App1')
     expect(s).toMatch(/App5, and 19 more/)
     expect(s).not.toContain('App6')
@@ -199,7 +200,7 @@ const ACC = (alias?: string, email?: string, accountId?: string) => ({ ...(accou
 
 describe('CA3: connectionsNowSection — il blocco porta gli ACCOUNT', () => {
   it('un SOLO account: l\'email accanto al nome («quale casella ho collegato?» ha risposta)', () => {
-    const s = connectionsNowSection({ working: [], failing: [], composioApps: [{ name: 'Gmail', accounts: [ACC(undefined, 'fabio@gmail.test')] }] })
+    const s = connectionsNowSection({ working: [], failing: [], off: [], composioApps: [{ name: 'Gmail', accounts: [ACC(undefined, 'fabio@gmail.test')] }] })
     expect(s).toContain('Gmail — fabio@gmail.test')
     expect(s).not.toContain('accounts:')
   })
@@ -208,6 +209,7 @@ describe('CA3: connectionsNowSection — il blocco porta gli ACCOUNT', () => {
     const s = connectionsNowSection({
       working: [],
       failing: [],
+      off: [],
       composioApps: [{ name: 'Gmail', accounts: [ACC('lavoro', 'fabio@azienda.test'), ACC('personale', 'fabio@gmail.test')] }]
     })
     expect(s).toContain('Gmail — accounts: lavoro (fabio@azienda.test), personale (fabio@gmail.test)')
@@ -218,6 +220,7 @@ describe('CA3: connectionsNowSection — il blocco porta gli ACCOUNT', () => {
     const s = connectionsNowSection({
       working: [{ name: 'Notion', toolCount: 3 }],
       failing: [],
+      off: [],
       composioApps: [{ name: 'Trello', accounts: [] }, { name: 'Gmail', accounts: [ACC('lavoro', 'f@azienda.test')] }]
     })
     expect(s).toContain('COMPOSIO_SEARCH_TOOLS')
@@ -230,6 +233,7 @@ describe('CA3: connectionsNowSection — il blocco porta gli ACCOUNT', () => {
     const s = connectionsNowSection({
       working: [],
       failing: [],
+      off: [],
       composioApps: [{ name: 'Gmail', accounts: [ACC('a'), ACC('b'), ACC('c'), ACC('d')] }]
     })
     expect(s).toContain('accounts: a, b, c, and 1 more')
@@ -244,6 +248,7 @@ describe('CA3: connectionsNowSection — il blocco porta gli ACCOUNT', () => {
     const s = connectionsNowSection({
       working: [],
       failing: [],
+      off: [],
       composioApps: [{ name: 'Gmail', accounts: [ACC('lavoro', 'fabio@azienda.test', 'a1'), ACC(undefined, undefined, 's2-dashboard')] }]
     })
     expect(s).toContain('Gmail — accounts: lavoro (fabio@azienda.test), s2-dashboard')
@@ -253,6 +258,7 @@ describe('CA3: connectionsNowSection — il blocco porta gli ACCOUNT', () => {
     const s = connectionsNowSection({
       working: [],
       failing: [],
+      off: [],
       composioApps: [{ name: 'Trello', accounts: [ACC(undefined, undefined, 't9')] }]
     })
     expect(s).toContain('Trello — t9')
@@ -260,7 +266,7 @@ describe('CA3: connectionsNowSection — il blocco porta gli ACCOUNT', () => {
 
   it('il tetto delle app resta: conta le APP (6, poi «and N more»)', () => {
     const many = Array.from({ length: 25 }, (_, i) => ({ name: `App${i}`, accounts: [] }))
-    const s = connectionsNowSection({ working: [], failing: [], composioApps: many })
+    const s = connectionsNowSection({ working: [], failing: [], off: [], composioApps: many })
     expect(s).toContain('App0')
     expect(s).toMatch(/App5, and 19 more/)
     expect(s).not.toContain('App6')

@@ -785,6 +785,8 @@ vi.mock('../../mcp', () => ({
   activeServersForAgent: async () => [],
   // V1 (fase stato-vivo): nessun server non parte nei test del loop
   failingServersForAgent: () => [],
+  // V4 (fase stato-vivo): nessun server spento nei test del loop
+  offServersForAgent: () => [],
   listServers: () => [],
   McpNeedsReconnectError: class extends Error {},
   // fase chat-limiti (CL6): nessuna app collegata nei test del loop

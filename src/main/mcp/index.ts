@@ -65,6 +65,14 @@ export interface McpServerConfig {
    * server http rimasti accesi da un'aggiunta FALLITA mai connessa.
    */
   firstOkAt?: number
+  /**
+   * V4 (fase stato-vivo): CHI ha spento il server — 'user' (il toggle
+   * dell'utente: non si tocca MAI, né migrazioni né riparazioni),
+   * 'add-failed' (disableFailedServer), 'never-connected' (migrazione P7).
+   * Assente = acceso, o spento dalle versioni di prima (la riparazione V4 lo
+   * giudica con un test).
+   */
+  disabledReason?: 'user' | 'add-failed' | 'never-connected'
   /** fase 13 (punto 5): per quali bot è abilitato il server (['*'] = tutti) */
   enabledFor?: string[]
   /** fase 13: da dove arriva il server (registro pubblico, plugin, gateway) */
@@ -674,6 +682,20 @@ export function failingServersForAgent(agentId?: string): Array<{ id: string; na
     }
   }
   return out
+}
+
+/**
+ * V4 (fase stato-vivo): i server SPENTI per questo bot (enabled false, i
+ * needsAuth aspettano la configurazione) — per la riga corta del blocco
+ * «Collegamenti ora»: «- <nome>: switched off — ask the user to turn it on in
+ * Plugin». Così il bot sa che lo strumento ESISTE ma è spento (chi l'ha
+ * spento lo sa la UI, non il bot: per lui vale chiedere all'utente), invece
+ * di rispondere «nessun tool dedicato» o peggio fare curl.
+ */
+export function offServersForAgent(agentId?: string): Array<{ id: string; name: string }> {
+  const owner = agentId !== undefined ? boxOwnerOf(agentId) : undefined
+  const servers = agentId !== undefined ? serversForAgent(listServers(), agentId, owner) : listServers()
+  return servers.filter((s) => !s.enabled && !s.needsAuth).map((s) => ({ id: s.id, name: s.name }))
 }
 
 /**

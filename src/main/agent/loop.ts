@@ -2193,10 +2193,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // CONNECTIONS_NOW_TOKEN_BUDGET — parte VARIABILE del prompt, mai nel
       // prefisso in cache
       try {
-        const { failingServersForAgent } = await import('../mcp')
+        const { failingServersForAgent, offServersForAgent } = await import('../mcp')
         connectionsNow = connectionsNowSection({
           working: activeMcpServers.map((s) => ({ name: s.name, toolCount: s.tools.length })),
           failing: failingServersForAgent(agentId),
+          // V4: anche i server SPENTI — il bot sa che lo strumento esiste
+          off: offServersForAgent(agentId),
           composioApps: composioAppFacts
         })
       } catch {

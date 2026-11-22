@@ -16,17 +16,20 @@ import type { McpErrorCategory } from '../mcp/error-category'
 /**
  * V1 (fase stato-vivo): il tetto (token caratteri/4) del blocco
  * «Collegamenti ora» del prompt, MISURATO sul caso pieno (8 server
- * funzionanti + 4 non parti + 6 app Composio multi-account + le due regole:
- * 487 token): mai alzarlo per far passare un test — il numero sta nel REPORT
- * della fase.
+ * funzionanti + 4 non parti + 4 spenti + 6 app Composio multi-account + le
+ * due regole: 557 token): mai alzarlo per far passare un test — il numero sta
+ * nel REPORT della fase.
  */
-export const CONNECTIONS_NOW_TOKEN_BUDGET = 490
+export const CONNECTIONS_NOW_TOKEN_BUDGET = 560
 
 /** V1: quanti server funzionanti al massimo nell'elenco; poi «and N more». */
 export const CONNECTIONS_NOW_MAX_SERVERS = 8
 
 /** V1: quanti server NON PARTI al massimo nell'elenco; il resto si conta. */
 export const CONNECTIONS_NOW_MAX_FAILING = 4
+
+/** V4 (fase stato-vivo): quanti server SPENTI al massimo nell'elenco; il resto si conta. */
+export const CONNECTIONS_NOW_MAX_OFF = 4
 
 /** V1: quante app Composio al massimo sulla riga (poi «and N more»): le altre restano in find_tools. */
 export const CONNECTIONS_NOW_MAX_APPS = 6
@@ -43,6 +46,8 @@ export interface ConnectionsNowFacts {
   working: ReadonlyArray<{ name: string; toolCount: number }>
   /** i server ACCESI che non partono, con la categoria X2 dell'ultima prova */
   failing: readonly FailingServerFacts[]
+  /** i server SPENTI (V4): il bot sa che lo strumento esiste ma è off */
+  off: ReadonlyArray<{ name: string }>
   /** le app Composio attive (nome umano + account ATTIVI, CA3) */
   composioApps: readonly ConnectedAppFacts[]
 }
@@ -66,7 +71,7 @@ export function connectionsNowSection(facts: ConnectionsNowFacts): string {
     const n = s.name.trim().toLowerCase()
     return n !== 'composio' && !appsSet.has(n)
   })
-  if (!working.length && !facts.failing.length && !facts.composioApps.length) return ''
+  if (!working.length && !facts.failing.length && !facts.off.length && !facts.composioApps.length) return ''
   const lines: string[] = []
   const shown = working.slice(0, CONNECTIONS_NOW_MAX_SERVERS)
   for (const s of shown) lines.push(`- ${s.name}: ${s.toolCount} tools`)
@@ -76,6 +81,13 @@ export function connectionsNowSection(facts: ConnectionsNowFacts): string {
   for (const s of failShown) lines.push(`- ${s.name}: does not start (${mcpErrorCategoryText(s.category)})`)
   const overFailing = facts.failing.length - failShown.length
   if (overFailing > 0) lines.push(`- and ${overFailing} more do not start`)
+  // V4: i server SPENTI — il bot sa che lo strumento ESISTE ma è off, e che
+  // la decisione è dell'utente (la pagina Plugin), invece di rispondere
+  // «nessun tool dedicato» o fare curl dal computer isolato
+  const offShown = facts.off.slice(0, CONNECTIONS_NOW_MAX_OFF)
+  for (const s of offShown) lines.push(`- ${s.name}: switched off — ask the user to turn it on in Plugin`)
+  const overOff = facts.off.length - offShown.length
+  if (overOff > 0) lines.push(`- and ${overOff} more switched off`)
   if (facts.composioApps.length) {
     const appsShown = facts.composioApps.slice(0, CONNECTIONS_NOW_MAX_APPS)
     const overApps = facts.composioApps.length - appsShown.length

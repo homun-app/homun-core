@@ -2165,6 +2165,15 @@ export interface McpServerInfo {
   args?: string[]
   url?: string
   enabled: boolean
+  /**
+   * V4 (fase stato-vivo): CHI ha spento il server — 'user' (l'utente, non si
+   * tocca MAI), 'add-failed' (aggiunta fallita, disableFailedServer),
+   * 'never-connected' (migrazione P7). Assente = acceso, o spento dalle
+   * versioni di prima della fase (la riparazione V4 lo riaccende se risponde).
+   */
+  disabledReason?: 'user' | 'add-failed' | 'never-connected'
+  /** P7: la PRIMA connessione riuscita del server http — la prova che funziona */
+  firstOkAt?: number
   /** fase 5: autenticazione http — i valori segreti vivono cifrati, non qui */
   auth?: { kind: 'oauth' | 'bearer' | 'headers' }
   /** fase 5: id del connettore del catalogo che ha creato questo server */

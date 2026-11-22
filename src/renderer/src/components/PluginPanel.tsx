@@ -833,7 +833,7 @@ function YourRow({ row, lang, onOpen }: {
       </span>
       {/* lo stato con l'azione (tavola 8) */}
       <span className={`shrink-0 text-[13px] ${row.state === 'active' ? 'text-chart-2' : row.state === 'broken' || row.state === 'invalid' ? 'text-destructive' : 'text-foreground'}`}>
-        {st.label}{st.action === 'why' ? ` · ${t`Vedi perché`}` : st.action === 'reconnect' ? ` · ${t`Ricollega`}` : st.action === 'setup' ? ` · ${t`Completa`}` : ''}
+        {st.label}{st.action === 'why' ? ` · ${t`Vedi perché`}` : st.action === 'reconnect' ? ` · ${t`Ricollega`}` : st.action === 'setup' ? ` · ${t`Completa`}` : st.action === 'reenable' ? ` · ${t`Riaccendi`}` : ''}
       </span>
     </button>
   )
