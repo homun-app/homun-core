@@ -125,3 +125,68 @@ describe('fase pagine · ritocchi (P2): pageBody — il titolo non compare due v
     expect(pageHeadings(body).map((h) => h.id)).toEqual(pageHeadings(md).map((h) => h.id))
   })
 })
+
+// ---- R2 (fase ritocchi-beta18): l'anteprima è TESTO, non markdown ----
+// Il difetto (cattura fase-deleghe/2): l'anteprima della card «Ricettario —
+// indice» mostrava `[Pastiera napoletana](libe7eeadc6)` — il link restava in
+// markdown grezzo e il `_` di `lib_` spariva (la pulizia toglieva i `_` come
+// se fossero corsivo). previewLineText è la funzione UNICA del testo
+// dell'anteprima, usata dalle card della Libreria (pagePreview) e dalla
+// vista a elenco (LibraryPanel).
+import { previewLineText } from '../page-view'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+describe('R2 (ritocchi-beta18): previewLineText — il testo, non il markdown', () => {
+  it('il testo dell\'indice della spec D6 → «Pastiera napoletana — il classico della domenica.», senza ](', () => {
+    const md = [
+      '# Ricettario — indice',
+      '',
+      '## Dolci',
+      '- [Pastiera napoletana](lib_e7eeadc6) — il classico della domenica.',
+      '- Ispirazioni esterne: [raccolta napoletana](https://ricette.example/pastiera).',
+      '- La ricetta completa sta in [pastiera-napoletana.md](/workspace/ricettario/pastiera-napoletana.md).',
+      ''
+    ].join('\n')
+    const p = pagePreview(md)
+    expect(p.intro).toBeTruthy()
+    expect(p.intro!.startsWith('Pastiera napoletana — il classico della domenica.')).toBe(true)
+    expect(p.intro).not.toContain('](')
+    expect(p.intro).not.toContain('lib_')
+  })
+
+  it('[testo](url) → testo; le immagini → niente', () => {
+    expect(previewLineText('- [Pastiera napoletana](lib_e7eeadc6) — il classico della domenica.'))
+      .toBe('Pastiera napoletana — il classico della domenica.')
+    expect(previewLineText('[raccolta napoletana](https://ricette.example/pastiera).'))
+      .toBe('raccolta napoletana.')
+    expect(previewLineText('![logo](data:image/png;base64,xxx)')).toBe('')
+    expect(previewLineText('prima ![img](u.png) e dopo')).toBe('prima  e dopo')
+  })
+
+  it('snake_case e lib_e7eeadc6 restano INTATTI (mai un `_` dentro una parola)', () => {
+    expect(previewLineText('il nome snake_case resta')).toBe('il nome snake_case resta')
+    expect(previewLineText('vede [Pastiera](lib_e7eeadc6) qui')).toBe('vede Pastiera qui')
+    expect(previewLineText('lib_e7eeadc6')).toBe('lib_e7eeadc6')
+  })
+
+  it('*corsivo*, **grassetto** e _corsivo_ perdono i marcatori (solo inizio/fine parola)', () => {
+    expect(previewLineText('*corsivo*')).toBe('corsivo')
+    expect(previewLineText('**grassetto**')).toBe('grassetto')
+    expect(previewLineText('_corsivo_')).toBe('corsivo')
+    expect(previewLineText('un *corsivo* in **mezzo** alla riga')).toBe('un corsivo in mezzo alla riga')
+    expect(previewLineText('**grassetto su più parole**')).toBe('grassetto su più parole')
+  })
+
+  it('i marcatori di riga (titolo, lista, citazione) spariscono, come oggi', () => {
+    expect(previewLineText('## Dolci')).toBe('Dolci')
+    expect(previewLineText('- una voce')).toBe('una voce')
+    expect(previewLineText('> una citazione')).toBe('una citazione')
+  })
+
+  it('la vista a elenco della Libreria usa la STESSA funzione (niente più replace dei soli caratteri)', () => {
+    const src = readFileSync(fileURLToPath(new URL('../../components/LibraryPanel.tsx', import.meta.url)), 'utf8')
+    expect(src).toContain('previewLineText')
+    expect(src).not.toContain('replace(/[#*_')
+  })
+})

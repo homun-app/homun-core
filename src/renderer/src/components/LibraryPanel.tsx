@@ -19,6 +19,9 @@ import { api, useStore } from '../store'
 // fase pagine (G2): il corpo del documento, condiviso con la pagina aperta
 import { DocumentBody, InlineChart, svgDataUrl } from './DocumentMarkdown'
 import { libraryRows, type LibraryKindFilter } from '../lib/library-view'
+// R2 (fase ritocchi-beta18): il testo dell'anteprima dei documenti — la
+// STESSA funzione pura delle card della Libreria (mai markdown grezzo)
+import { previewLineText } from '../lib/page-view'
 import type { LibraryItemInfo, LibraryContentInfo } from '../../../shared/types'
 
 /** La scelta griglia/elenco resta nel localStorage (try/catch: può mancare). */
@@ -91,8 +94,8 @@ function LibraryPreview({ item }: { item: LibraryItemInfo }) {
       <div className="flex h-full w-full flex-col justify-center gap-2 px-6" aria-hidden="true">
         {doc === null
           ? [70, 90, 80].map((w, i) => <span key={i} className="h-2 rounded-full bg-muted-foreground/20" style={{ width: `${w}%` }} />)
-          : doc.split(/\n+/).filter((l) => l.trim()).slice(0, 4).map((line, i) => (
-            <span key={i} className="line-clamp-1 text-[11px] leading-4 text-muted-foreground">{line.replace(/[#*_`>-]/g, '').slice(0, 90)}</span>
+          : doc.split(/\n+/).map(previewLineText).filter(Boolean).slice(0, 4).map((line, i) => (
+            <span key={i} className="line-clamp-1 text-[11px] leading-4 text-muted-foreground">{line.slice(0, 90)}</span>
           ))}
       </div>
     )

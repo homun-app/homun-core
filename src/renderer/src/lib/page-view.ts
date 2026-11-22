@@ -23,6 +23,33 @@ const isBlank = (line: string): boolean => !line.trim()
 /** La riga è un'immagine Markdown (`![alt](…)`, anche su più righe no: qui basta l'inizio)? */
 const isImage = (line: string): boolean => /^\s*!\[[^\]]*\]\([^)]*\)/.test(line)
 
+/**
+ * R2 (fase ritocchi-beta18): il TESTO di una riga di Markdown per
+ * l'anteprima — la funzione UNICA delle card della Libreria (pagePreview) e
+ * della vista a elenco. Trasforma `[testo](url)` in `testo` e le immagini in
+ * niente; toglie corsivo e grassetto SOLO come marcatori di inizio e fine
+ * parola, mai un `_` dentro una parola (`lib_x`, `snake_case` restano
+ * intatti); i marcatori di riga (titolo, lista, citazione) e i backtick del
+ * codice inline spariscono. Pura.
+ */
+export function previewLineText(line: string): string {
+  let s = line.trim()
+  // le immagini spariscono; i link diventano il loro testo
+  s = s.replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+  s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+  // i marcatori di riga: titolo, lista, citazione
+  s = s.replace(/^(?:>+\s*|#{1,6}\s*|[-*+]\s+|\d+[.)]\s+)/, '')
+  // corsivo e grassetto SOLO a confini di parola: il marcatore non è mai
+  // attaccato a una parola da un lato e staccato dall'altro — un `_` DENTRO
+  // una parola (lib_x, snake_case) non è un marcatore e resta
+  s = s.replace(/(?<![A-Za-z0-9_`])\*\*(\S(?:[\s\S]*?\S)?)\*\*(?![A-Za-z0-9_`])/g, '$1')
+  s = s.replace(/(?<![A-Za-z0-9_`])\*(\S(?:[\s\S]*?\S)?)\*(?![A-Za-z0-9_`])/g, '$1')
+  s = s.replace(/(?<![A-Za-z0-9_`])_(\S(?:[\s\S]*?\S)?)_(?![A-Za-z0-9_`])/g, '$1')
+  // codice inline: i backtick spariscono (come faceva la vista a elenco)
+  s = s.replace(/`([^`]*)`/g, '$1')
+  return s.trim()
+}
+
 /** Il testo di un titolo senza i # e spazi/adiacenti (#). */
 const headingText = (line: string): string => line.replace(/^#{1,6}\s+/, '').replace(/\s+#+\s*$/, '').trim()
 
@@ -38,8 +65,9 @@ const inFence = (lines: string[]): boolean => {
 /**
  * G1: l'anteprima della card della pagina, dal Markdown della versione
  * corrente. Il titolo è il primo `# `; l'intro è il primo paragrafo utile
- * (si saltano le righe vuote, le immagini e i titoli); l'indice sono i
- * titoli ## e ### in ordine. Pura: stesso Markdown → stesso risultato.
+ * (si saltano le righe vuote, le immagini e i titoli; il testo è quello di
+ * previewLineText, mai il markdown grezzo — R2); l'indice sono i titoli ##
+ * e ### in ordine. Pura: stesso Markdown → stesso risultato.
  */
 export function pagePreview(markdown: string): PagePreview {
   const lines = markdown.split('\n')
@@ -75,7 +103,10 @@ export function pagePreview(markdown: string): PagePreview {
       continue
     }
     if (isImage(line)) continue
-    paragraph.push(line.trim())
+    // R2: il testo dell'anteprima, non il markdown (link e immagini
+    // compresi); una riga che diventa vuota (solo immagini inline) non conta
+    const txt = previewLineText(line)
+    if (txt) paragraph.push(txt)
   }
   flush()
   return { title, intro, headings }
