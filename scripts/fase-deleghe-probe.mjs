@@ -43,6 +43,9 @@ const TMP_BASE = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'
 const PREFIX = 'sandbot-fase-deleghe'
 const SHOTS = join(ROOT, 'docs', 'catture', 'fase-deleghe')
 mkdirSync(SHOTS, { recursive: true })
+// fase ritocchi-beta18: la copia del documento coi link per la fase nuova
+const SHOTS_RITOCCHI = join(ROOT, 'docs', 'catture', 'fase-ritocchi-beta18')
+mkdirSync(SHOTS_RITOCCHI, { recursive: true })
 
 const log = (...a) => console.log(`[sonda r${run}]`, ...a)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -286,6 +289,17 @@ const shot = async (name) => {
   writeFileSync(join(SHOTS, name), Buffer.from(r.data, 'base64'))
   log('cattura', name)
 }
+/**
+ * R3 (fase ritocchi-beta18): la cattura FOTOGRAFA quello che dice — prima
+ * dello scatto si VERIFICA (check) che la vista attesa sia a schermo; lo
+ * scatto parte solo allora. Vale per OGNI cattura della sonda.
+ */
+const shotChecked = async (name, viewExpr, what) => {
+  const ok = await waitDom(viewExpr, 10_000, 400)
+  check(`R3: «${what}» a schermo PRIMA dello scatto di ${name}`, ok)
+  if (ok) await shot(name)
+  return ok
+}
 const selectBot = async (name) => {
   const deadline = Date.now() + 5_000
   for (;;) {
@@ -442,7 +456,12 @@ try {
   if (rowSeen) {
     const rowText = await pageEval(`return document.querySelector('[data-testid="delegation-status"]').textContent`)
     check('D2: la riga porta l\'ORARIO di partenza (parte alle HH:MM)', /parte alle \d{2}:\d{2}/.test(rowText), rowText)
-    await shot('1-riga-di-stato-delega.png')
+    // R3 (ritocchi-beta18): lo scatto SOLO se la vista attesa è a schermo
+    // (la verifica è un check, non un'attesa muta)
+    const shotRow = await shotChecked('1-riga-di-stato-delega.png',
+      `document.querySelector('[data-testid="delegation-status"]')?.textContent.includes('In coda per Novità AI') && !!document.querySelector('[data-testid="delegation-cancel"]')`,
+      'la riga di stato con Annulla')
+    check('R3: la cattura della riga di stato è avvenuta a vista verificata', shotRow)
     // ANNULLA: il job esce e la riga sparisce
     await pageEval(`document.querySelector('[data-testid="delegation-cancel"]').click(); return true`)
     const rowGone = await waitDom(`!document.querySelector('[data-testid="delegation-cancel"]')`, 15_000, 500)
@@ -535,19 +554,41 @@ try {
     // torna all'indice per il link https
     await pageEval(`document.querySelector('[data-testid="page-close"]')?.click(); return true`)
     await sleep(400)
-    await pageEval(`
+    // R3 (fase ritocchi-beta18): la RIAPERTURA dell'indice prima dello scatto
+    // è un CHECK («D6: l'indice riaperto prima della cattura»), non
+    // un'attesa muta — la cattura scatta SOLO a documento aperto, con i TRE
+    // tipi di link a schermo
+    const reopened = await pageEval(`
       const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim().includes('Ricettario — indice'))
       if (b) { b.click(); return true }
       return false
     `)
-    await waitDom(`document.querySelector('[data-testid="page-view"]') !== null && document.body.textContent.includes('Dolci')`, 10_000, 400)
-    await shot('2-documento-con-link.png')
-    const extClick = await pageEval(`
+    const viewAperta = reopened === true && await waitDom(
+      `document.querySelector('[data-testid="page-view"]') !== null && document.body.textContent.includes('Dolci')`,
+      10_000, 400)
+    check('D6: l\'indice riaperto prima della cattura', viewAperta, reopened === true ? 'page-view aperta' : 'bottone dell\'indice non trovato')
+    // la cattura si scatta solo a documento APERTO, coi TRE tipi di link
+    const treLink = viewAperta === true ? await pageEval(`
+      return !!document.querySelector('[data-testid="doc-link"][data-doc^="lib_"]') &&
+        [...document.querySelectorAll('a')].some((x) => (x.getAttribute('href') ?? '').startsWith('https://')) &&
+        !!document.querySelector('[data-testid="doc-path"]')
+    `) : false
+    check('D6: la cattura mostra i TRE tipi di link (lib_, https, /workspace)', treLink === true)
+    if (viewAperta === true && treLink === true) {
+      await settle()
+      const r = await page.send('Page.captureScreenshot', { format: 'png' })
+      const buf = Buffer.from(r.data, 'base64')
+      writeFileSync(join(SHOTS, '2-documento-con-link.png'), buf)
+      // fase ritocchi-beta18: la stessa cattura documenta anche la fase nuova
+      writeFileSync(join(SHOTS_RITOCCHI, '3-documento-con-link.png'), buf)
+      log('cattura 2-documento-con-link.png (+ copia in fase-ritocchi-beta18)')
+    }
+    const extClick = viewAperta === true ? await pageEval(`
       const a = [...document.querySelectorAll('a')].find((x) => (x.getAttribute('href') ?? '').startsWith('https://'))
       if (!a) return false
       a.click()
       return true
-    `)
+    `) : false
     await sleep(900)
     const urlAfter = await pageEval(`return location.href`)
     check('D6: il clic su https lascia la finestra SULL\'APP (URL invariato, nessun «Not found»)', extClick && urlAfter === urlBefore, `${urlBefore} → ${urlAfter}`)
