@@ -506,19 +506,23 @@ try {
   const T6 = ['You are Ricerche', 'compito-figlio']
   callTool('spawn_subagent', { title: 'Controllo fattura', brief: 'Obiettivo: eseguire un comando echo innocuo (compito-figlio) e riferire l\'esito. Confini: nessuna rete, non toccare file fuori dalla cartella temporanea, nessun altro strumento. Risultato: una riga con l\'output del comando.' }, T6)
   sayText('Ho lanciato l\'aiutante per il controllo: ti chiede il permesso.', T6)
-  const CHILD = (_body, tools) => tools.includes('wake_parent')
-  callTool('run-command', { command: 'echo controllo-fattura' }, CHILD)
-  callTool('wake_parent', { summary: 'Il comando è stato rifiutato: controllo non eseguito.' }, CHILD)
-  sayText('Fatto.', CHILD)
   // R1 (fase ritocchi-beta18): l'AIUTANTE di Alloggio — la sua richiesta conta
   // per ALLOGGIO (bot aperto): due richieste dello stesso bot nel riquadro
-  // sopra il campo → «1 di 2» con le frecce. Le voci del figlio si consumano
-  // DOPO quelle di T6 (findIndex FIFO)
+  // sopra il campo → «1 di 2» con le frecce. Le sue voci stanno PRIMA di
+  // quelle del figlio di T6 nell'array (findIndex FIFO) e si riconoscono
+  // dal BRIEF («Controllo camera»): il figlio di T6 non le consuma e la
+  // voce «Fatto.» di T6 — che quel figlio non consuma mai — non ruba il
+  // turno a questo
+  const CHILD2 = (body) => body.includes('Controllo camera')
   const T7 = ['You are Alloggio', 'figlio-alloggio']
   callTool('spawn_subagent', { title: 'Controllo camera', brief: 'Obiettivo: eseguire un comando echo innocuo (figlio-alloggio) e riferire l\'esito. Confini: nessuna rete, non toccare file fuori dalla cartella temporanea, nessun altro strumento. Risultato: una riga con l\'output del comando.' }, T7)
   sayText('Ho lanciato l\'aiutante: ti chiede il permesso.', T7)
-  callTool('run-command', { command: 'echo controllo-camera' }, CHILD)
-  callTool('wake_parent', { summary: 'Permesso concesso: controllo eseguito.' }, CHILD)
+  callTool('run-command', { command: 'echo controllo-camera' }, CHILD2)
+  callTool('wake_parent', { summary: 'Permesso concesso: controllo eseguito.' }, CHILD2)
+  sayText('Fatto.', CHILD2)
+  const CHILD = (_body, tools) => tools.includes('wake_parent')
+  callTool('run-command', { command: 'echo controllo-fattura' }, CHILD)
+  callTool('wake_parent', { summary: 'Il comando è stato rifiutato: controllo non eseguito.' }, CHILD)
   sayText('Fatto.', CHILD)
 
   // ---- i turni: un messaggio privato a ogni bot (il sottoagente parte da solo).
@@ -710,7 +714,9 @@ try {
   await shot3('1-chat-riga-compatta-e-riquadro.png')
 
   // =========== A1+A2: «Consenti sempre a Alloggio» DAL CAMPO → la grant, il registro la dice ===========
-  const menuComposer = await openMenu('composer-altre-scelte')
+  // R1: il menu del riquadro è quello del PEZZO UNICO (approval-altre-scelte,
+  // le stesse voci della card e del centro)
+  const menuComposer = await openMenu('approval-altre-scelte')
   const vociComposer = menuComposer
     ? await pageEval(`return [...document.querySelectorAll('[role="menuitem"]')].map((x) => x.textContent.trim())`)
     : []

@@ -86,7 +86,7 @@ export function ComposerApproval({ botId }: { botId: string }): React.ReactNode 
         </div>
       )}
       <CardShell tone="waiting" testid="composer-approval-card">
-        <ApprovalRequestContent entry={entry} agentName={r.botName} fromSubagent={r.fromSubagent} />
+        <ApprovalRequestContent entry={entry} agentName={r.botName} fromSubagent={r.fromSubagent} squad={r.squad !== null} />
       </CardShell>
     </div>
   )
