@@ -260,6 +260,91 @@ export function approvalOptionFlags(
   return { noAlways, noTurn }
 }
 
+// ---- A1 (fase approvazioni-chiare): UN SOLO modello delle scelte ----
+
+/** Una scelta della richiesta: il kind dice QUALE, i parametri dicono di chi. */
+export interface ApprovalChoice {
+  kind: 'turn' | 'minutes10' | 'always' | 'server-reads' | 'site' | 'mission'
+  /** offerta ma spenta (il titolo del posto che la rende spiega perché) */
+  disabled?: boolean
+  /** minutes10: l'app dei 10 minuti */
+  app?: string
+  /** server-reads: slug e nome del server MCP */
+  slug?: string
+  name?: string
+  /** site: il dominio registrabile del grant di sito */
+  domain?: string
+}
+
+/** Il contesto che solo il POSTO conosce: la riga del centro lo ha, la card lo ricava dal meta. */
+export interface ApprovalChoiceContext {
+  /** la bozza d'invio: solo Invia/Modifica/Rifiuta, niente menu */
+  isDraft?: boolean
+  /** la richiesta è di una squadra (il centro: la riga; la card: meta.squadId) */
+  squad?: boolean
+  /** la categoria della card, quando il posto la conosce già */
+  category?: string
+}
+
+/**
+ * A1: le scelte di UNA richiesta — il modello PURO che la card in chat e il
+ * centro «Da approvare» leggono ENTRAMBI (il difetto del 22/11: due posti,
+ * scelte diverse). Le regole di esclusione sono quelle di oggi, prese
+ * dall'UNIONE delle due UI:
+ * - l'insieme fisso (meta.squadAlwaysAsk, il why 'fisso' del centro) non
+ *   offre NIENTE oltre a «Consenti una volta»;
+ * - le bozze non hanno menu;
+ * - update_state e i tasti di invio di use-app spendono turno e sempre
+ *   (come approvalOptionFlags); i comandi never-auto spendono il turno;
+ * - la missione dove Q2 la permette GIÀ: squadra o sito interattivo, con
+ *   squadra, mai insieme fisso né bozze né create_agent/create_group.
+ */
+export function approvalChoicesOf(
+  tool: string,
+  meta: Record<string, unknown> | null | undefined,
+  ctx: ApprovalChoiceContext = {}
+): ApprovalChoice[] {
+  const m = (meta ?? {}) as Record<string, unknown>
+  // l'insieme fisso: il marcatore che il loop scrive nelle card nate dall'insieme
+  if (m.squadAlwaysAsk === true) return []
+  // le bozze: Invia/Modifica/Rifiuta, niente menu
+  if (ctx.isDraft === true || (m.message as { type?: string } | undefined)?.type === 'draft') return []
+  const { noAlways, noTurn } = approvalOptionFlags(tool, m)
+  const out: ApprovalChoice[] = [{ kind: 'turn', ...(noTurn ? { disabled: true } : {}) }]
+  // i 10 minuti di use-app: SOLO per un'app vera, mai sui tasti di invio
+  const useApp = tool === 'use-app' ? useAppCardModel(m.input as Record<string, unknown> | undefined) : null
+  const useAppSend = (m.ui as { id?: string } | undefined)?.id === 'approval.useAppSend'
+  if (useApp?.kind === 'app' && useApp.app && !useAppSend) {
+    out.push({ kind: 'minutes10', app: useApp.app })
+  }
+  out.push({ kind: 'always', ...(noAlways ? { disabled: true } : {}) })
+  const read = (m.mcpServerRead as { slug?: unknown; name?: unknown } | undefined)
+  if (typeof read?.slug === 'string' && read.slug) {
+    out.push({ kind: 'server-reads', slug: read.slug, name: typeof read.name === 'string' ? read.name : read.slug })
+  }
+  const site = siteGrantOptionOf(m)
+  if (site) out.push({ kind: 'site', domain: site.domain })
+  // la missione: dove Q2 la permette — squadra (o sito interattivo) CON
+  // squadra, mai create_agent/create_group; la card la offre quando il meta
+  // porta la squadra del turno (meta.squadId), il centro quando la riga ce l'ha
+  const squadOfTurn = ctx.squad === true || (typeof m.squadId === 'number' && m.squadId > 0) || typeof m.squadId === 'string'
+  if (
+    squadOfTurn && tool !== 'create_agent' && tool !== 'create_group' &&
+    (ctx.category === 'sito-interattivo' || ctx.category === 'squadra' || missionShapeOf(tool))
+  ) {
+    out.push({ kind: 'mission' })
+  }
+  return out
+}
+
+/** Le forme di tool che ammettono la missione quando la categoria non è nota
+ *  (la card in chat): il browser (sito interattivo) e gli strumenti del team —
+ *  la stessa mappa di squadApprovalCategory per quelle due categorie. */
+function missionShapeOf(tool: string): boolean {
+  if (tool.startsWith('browser_')) return true
+  return tool === 'send_to_agent' || tool === 'update_group' || tool === 'update_agent' || tool === 'delete_agent'
+}
+
 // ---- fase use-app (U3): la card parla di APP o di HOST, mai di chiavi tecniche ----
 
 /** Il modello della card di use-app: l'app che riceve l'azione, o l'host da aprire. */

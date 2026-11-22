@@ -56,7 +56,8 @@ describe('U7: la pagina e la card (guarda sul sorgente)', () => {
   })
 
   it("la card dice «Consenti sempre a <bot>» (per un aiutante: il bot che l'ha lanciato)", () => {
-    expect(CARD).toContain('Consenti sempre a {agentName}')
+    // A1 (fase approvazioni-chiare): l'etichetta vive nel t`…` del modello unico
+    expect(CARD).toMatch(/Consenti sempre a \$\{agentName\}/)
     expect(CARD).not.toMatch(/<Trans>Sempre<\/Trans>/)
   })
 })

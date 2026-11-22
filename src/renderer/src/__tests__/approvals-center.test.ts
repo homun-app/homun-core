@@ -23,6 +23,24 @@ vi.mock('react/jsx-dev-runtime', async (orig) => {
     }
   }
 })
+// A1 (fase approvazioni-chiare): il menu «Altre scelte ▾» si rende PASSANTE
+// (come sidebar-row-menu), così trigger e voci si vedono nell'HTML statico
+vi.mock('../components/ui/dropdown-menu', () => {
+  const pass = (tag: string) => ({ children, ...rest }: { children?: unknown } & Record<string, unknown>) =>
+    createElement('div', { 'data-mock': tag, ...rest }, children as never)
+  return {
+    DropdownMenu: pass('dropdown'),
+    DropdownMenuTrigger: pass('dropdown-trigger'),
+    DropdownMenuContent: pass('dropdown-content'),
+    DropdownMenuItem: pass('dropdown-item'),
+    DropdownMenuSeparator: pass('dropdown-sep'),
+    DropdownMenuSub: pass('dropdown-sub'),
+    DropdownMenuSubTrigger: pass('dropdown-sub-trigger'),
+    DropdownMenuSubContent: pass('dropdown-sub-content'),
+    DropdownMenuRadioGroup: pass('dropdown-radio-group'),
+    DropdownMenuRadioItem: pass('dropdown-radio-item')
+  }
+})
 
 const { ApprovalsCenter } = await import('../components/ApprovalsCenter')
 const { visibleApprovalsRows, groupApprovalsRows } = await import('../lib/approvals-center')
@@ -106,9 +124,11 @@ describe('A2: il centro «Da approvare» (tavola 4)', () => {
     // l'anteprima già nella card: destinatario e oggetto della bozza
     expect(text).toContain('A: amministrazione@rossi.example')
     expect(text).toContain('Oggetto: Fattura 214')
-    // i bottoni di oggi: missione SOLO dove Q2 la permette (sito, squadra, non fisso)
+    // i bottoni di oggi: «Consenti una volta» resta il principale; le altre
+    // scelte stanno nel menu «Altre scelte ▾» del modello unico A1 (il trigger
+    // si rende anche a menu chiuso; l'insieme fisso e le bozze non ce l'hanno)
     expect(buttonsWithTestid('approval-allow-once').length).toBe(3)
-    expect(buttonsWithTestid('approval-mission').length).toBe(1)
+    expect(capture.els.filter((e) => e.props['data-testid'] === 'approval-altre-scelte').length).toBe(2)
     expect(buttonsWithTestid('approval-deny').length).toBe(4)
     expect(buttonsWithTestid('approval-draft-send').length).toBe(1)
     expect(buttonsWithTestid('approval-draft-edit').length).toBe(1)

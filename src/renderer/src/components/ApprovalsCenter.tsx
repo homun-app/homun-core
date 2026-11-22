@@ -19,6 +19,9 @@ import { ShieldCheck, ArrowLeft, ChevronRight } from 'lucide-react'
 import { api, useStore } from '../store'
 import type { ApprovalsCenterRow, SquadPendingApprovalInfo } from '../../../shared/types'
 import { visibleApprovalsRows, groupApprovalsRows, approvalsFilterCounts, APPROVALS_FILTERS, type ApprovalsGroup } from '../lib/approvals-center'
+// A1 (fase approvazioni-chiare): il modello UNICO delle scelte, come la card
+import { approvalChoicesOf, type ApprovalChoice } from '../lib/approval-app'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 
 /** Le etichette dei chip di categoria (come la coda della squadra, tavola 2). */
 const CATEGORY_LABEL: Record<SquadPendingApprovalInfo['category'], MessageDescriptor> = {
@@ -48,29 +51,61 @@ function timeAgo(when: number, now: number): string {
   return `${Math.round(h / 24)} g`
 }
 
-/** «Consenti per questa missione» dove Q2 lo permette GIÀ: sito o squadra,
- *  con squadra, mai per l'insieme fisso e mai per le bozze. S3 (fase
- *  squadra-sicurezza-2): nemmeno per create_agent/create_group — quei turni
- *  li protegge l'origine (forcedOriginAsk), la card vale «una volta». */
-function missionOffered(r: ApprovalsCenterRow): boolean {
-  return !r.isDraft && r.squad !== null && r.why !== 'fisso' &&
-    r.tool !== 'create_agent' && r.tool !== 'create_group' &&
-    (r.category === 'sito-interattivo' || r.category === 'squadra')
-}
+/** «Consenti per questa missione» dove Q2 lo permette GIÀ: la regola vive nel
+ *  modello unico A1 (approvalChoicesOf) — il centro e la card leggono quello. */
 
 /** Una card del centro. */
 function CenterCard({ r, now }: { r: ApprovalsCenterRow; now: number }) {
   const { i18n } = useLingui()
+  const { t } = useLingui()
   const resolveApproval = useStore((s) => s.resolveApproval)
   const refreshSquadData = useStore((s) => s.refreshSquadData)
   const snooze = useStore((s) => s.approvalsSnooze)
   const [editing, setEditing] = useState(false)
   const [body, setBody] = useState('')
+  // A1 (fase approvazioni-chiare): le scelte dal modello UNICO della card —
+  // il difetto del 22/11 era «In Da approvare ho sempre e solo una volta».
+  // Il why 'fisso' della riga vale come il marcatore del meta (stessa fonte)
+  const choices = approvalChoicesOf(
+    r.tool,
+    { ...(r.meta ?? {}), ...(r.why === 'fisso' ? { squadAlwaysAsk: true } : {}) },
+    { isDraft: r.isDraft, squad: r.squad !== null, category: r.category }
+  )
+  const choiceLabelOf = (c: ApprovalChoice): string => {
+    switch (c.kind) {
+      case 'turn': return t`Per questo turno`
+      case 'minutes10': return t`Consenti per 10 minuti a ${c.app ?? ''}`
+      case 'always': return t`Consenti sempre a ${r.botName}`
+      case 'server-reads': return t`Consenti sempre le letture di ${c.name ?? c.slug ?? ''}`
+      case 'site': return t`Consenti sempre su ${c.domain ?? ''}`
+      case 'mission': return t`Consenti per questa missione`
+    }
+  }
+  const choiceTitleOf = (c: ApprovalChoice): string | undefined => {
+    switch (c.kind) {
+      case 'turn': return c.disabled ? t`Questa azione chiede sempre l'approvazione` : t`Vale per lo stesso tool fino alla fine di questo turno`
+      case 'minutes10': return t`Le azioni su ${c.app ?? ''} non chiederanno per 10 minuti`
+      case 'always': return c.disabled ? t`Questa azione chiede sempre l'approvazione` : undefined
+      case 'server-reads': return t`Le letture di questo server non chiederanno più (solo i tool dichiarati in sola lettura)`
+      case 'site':
+        return t`Navigare, aprire link e cliccare controlli non di conferma su ${c.domain ?? ''} non chiederanno più; le conferme, i pagamenti e i dati tuoi sì. Revocabile in Impostazioni › Approvazioni.`
+      case 'mission': return t`Un consenso di 8 ore per tutto il team, solo per questo`
+    }
+  }
   // la decisione passa dai percorsi di oggi: resolveApproval per le card,
-  // i bottoni della bozza per gli invii (con l'agente DELLA card)
-  const resolve = (decision: 'allow' | 'deny', mode: 'once' | 'mission'): void => {
+  // i bottoni della bozza per gli invii (con l'agente DELLA card); per le
+  // letture del server la grant dedicata + once, come la card in chat
+  const resolve = (decision: 'allow' | 'deny', mode: 'once' | 'turn' | 'minutes10' | 'always' | 'site' | 'mission'): void => {
     resolveApproval(r.agentId, r.approvalId, decision, mode)
     refreshSquadData({ forceBadges: true })
+  }
+  const decideChoice = (c: ApprovalChoice): void => {
+    if (c.kind === 'server-reads') {
+      void api.grantServerReads(c.slug!).catch(() => undefined)
+      resolve('allow', 'once')
+      return
+    }
+    resolve('allow', c.kind)
   }
   return (
     <article
@@ -157,15 +192,30 @@ function CenterCard({ r, now }: { r: ApprovalsCenterRow; now: number }) {
               >
                 <Trans>Consenti una volta</Trans>
               </button>
-              {missionOffered(r) && (
-                <button
-                  className="rounded-full bg-muted px-4 py-2 text-sm transition hover:bg-accent"
-                  data-testid="approval-mission"
-                  title={i18n.t(msg`Un consenso di 8 ore per tutto il team, solo per questo`)}
-                  onClick={() => resolve('allow', 'mission')}
-                >
-                  <Trans>Consenti per questa missione</Trans>
-                </button>
+              {/* A1: le altre scelte nel menu «Altre scelte ▾» — le STESSE
+                  della card in chat, dal modello unico approvalChoicesOf */}
+              {choices.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    data-testid="approval-altre-scelte"
+                    className="rounded-full bg-muted px-4 py-2 text-sm transition hover:bg-accent"
+                  >
+                    <Trans>Altre scelte ▾</Trans>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    {choices.map((c) => (
+                      <DropdownMenuItem
+                        key={c.kind}
+                        data-testid={`approval-choice-${c.kind}`}
+                        disabled={c.disabled === true}
+                        title={choiceTitleOf(c)}
+                        onClick={() => decideChoice(c)}
+                      >
+                        {choiceLabelOf(c)}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
               <button
                 className="rounded-full px-4 py-2 text-sm text-muted-foreground transition hover:text-destructive"

@@ -2025,6 +2025,9 @@ export interface ApprovalsCenterRow {
   /** l'anteprima GIÀ presente nella card — destinatario e oggetto per gli
    *  invii, URL e campi per i moduli — solo se c'è nel meta */
   preview: { to?: string; subject?: string; url?: string; origin?: string } | null
+  /** A1 (fase approvazioni-chiare): il meta della card (già letto
+   *  dall'indice), per le STESSE scelte della chat (approvalChoicesOf) */
+  meta?: Record<string, unknown> | null
 }
 
 /** Un messaggio di gruppo come lo vede la UI. */

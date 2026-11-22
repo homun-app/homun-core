@@ -137,7 +137,10 @@ export function pendingApprovalsAll(): ApprovalsCenterRow[] {
       // la BOZZA si riconosce dal payload (le card fill/modulo sono anch'esse
       // kind 'send-message' ma non hanno message.type 'draft')
       isDraft: ((meta?.message as { type?: string } | null)?.type) === 'draft',
-      preview: centerPreviewOf(meta)
+      preview: centerPreviewOf(meta),
+      // A1 (fase approvazioni-chiare): il meta della card, perché il centro
+      // calcola le STESSE scelte della chat (approvalChoicesOf)
+      meta
     })
   }
   return out.sort((a, b) => {

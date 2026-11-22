@@ -930,6 +930,10 @@ msgstr "More actions"
 msgid "Altre opzioni ▾"
 msgstr "More options ▾"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Altre scelte ▾"
+msgstr "More choices ▾"
+
 #. placeholder {0}: cut.hidden
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Altri {0}"
@@ -2250,11 +2254,13 @@ msgstr "Saved consents"
 msgid "Consenti"
 msgstr "Allow"
 
-#. placeholder {0}: useApp.app
+#. placeholder {0}: c.app ?? ''
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Consenti per 10 minuti a {0}"
 msgstr "Allow for 10 minutes on {0}"
 
+#: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "Consenti per questa missione"
@@ -2265,6 +2271,11 @@ msgstr "Allow for this mission"
 msgid "Consenti sempre"
 msgstr "Always allow"
 
+#. placeholder {0}: r.botName
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Consenti sempre a {0}"
+msgstr "Always allow {0}"
+
 #. placeholder {0}: useApp.app
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Consenti sempre a {0} (per {agentName})"
@@ -2274,13 +2285,15 @@ msgstr "Always allow {0} (for {agentName})"
 msgid "Consenti sempre a {agentName}"
 msgstr "Always allow for {agentName}"
 
-#. placeholder {0}: mcpServerRead.name ?? mcpServerRead.slug
+#. placeholder {0}: c.name ?? c.slug ?? ''
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Consenti sempre le letture di {0}"
 msgstr "Always allow reads from {0}"
 
-#. placeholder {0}: siteGrant.domain
+#. placeholder {0}: c.domain ?? ''
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Consenti sempre su {0}"
 msgstr "Always allow on {0}"
 
@@ -4648,8 +4661,9 @@ msgstr "Everyday work"
 msgid "lavoro, personale…"
 msgstr "work, personal…"
 
-#. placeholder {0}: useApp.app
+#. placeholder {0}: c.app ?? ''
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Le azioni su {0} non chiederanno per 10 minuti"
 msgstr "Actions on {0} will not ask again for 10 minutes"
 
@@ -4666,6 +4680,7 @@ msgid "Le concessioni \"Sempre per questo sito\" del fill dei login: il bot comp
 msgstr "The \"Always for this site\" grants for login fills: the bot fills THAT login on THAT origin without asking every time. Revocable one by one; generic grants don't exist."
 
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Le letture di questo server non chiederanno più (solo i tool dichiarati in sola lettura)"
 msgstr "Reads from this server will not ask again (only tools declared read-only)"
 
@@ -5240,8 +5255,9 @@ msgstr "Hide the bot panel"
 msgid "naviga…"
 msgstr "browsing…"
 
-#. placeholder {0}: siteGrant.domain
+#. placeholder {0}: c.domain ?? ''
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Navigare, aprire link e cliccare controlli non di conferma su {0} non chiederanno più; le conferme, i pagamenti e i dati tuoi sì. Revocabile in Impostazioni › Approvazioni."
 msgstr "Navigating, opening links and clicking non-confirm controls on {0} will not ask again; confirmations, payments and your data still will. Revocable in Settings › Approvals."
 
@@ -6046,6 +6062,7 @@ msgid "per origine"
 msgstr "by source"
 
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Per questo turno"
 msgstr "For this turn"
 
@@ -6471,6 +6488,7 @@ msgid "Quello del bot"
 msgstr "The bot’s one"
 
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Questa azione chiede sempre l'approvazione"
 msgstr "This action always asks for approval"
 
@@ -8187,6 +8205,7 @@ msgstr "Another server"
 msgid "Un computer tutto suo, dentro il tuo Mac: lavora lì senza toccare i tuoi file, e tu decidi cosa può vedere."
 msgstr "A computer of its own, inside your Mac: it works there without touching your files, and you decide what it can see."
 
+#: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "Un consenso di 8 ore per tutto il team, solo per questo"
@@ -8330,6 +8349,7 @@ msgid "Vale per gli strumenti senza una regola loro."
 msgstr "Applies to tools without a rule of their own."
 
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Vale per lo stesso tool fino alla fine di questo turno"
 msgstr "Applies to the same tool until the end of this turn"
 

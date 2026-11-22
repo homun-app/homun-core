@@ -16,7 +16,7 @@ import { uiTextOfMetaTools, toolCtxOfMeta } from '../lib/ui-text'
 import { i18n } from '../lib/i18n'
 // R3 (fase app — ritocchi): il modello puro della card per Composio e MCP
 // fase Composio OAuth (C7): anche il modello del blocco
-import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, approvalAskTitle, approvalOptionFlags, useAppCardModel, useAppDecidedSummary, siteGrantOptionOf, type ComposioBatchActionMeta } from '../lib/approval-app'
+import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, approvalAskTitle, approvalOptionFlags, approvalChoicesOf, useAppCardModel, useAppDecidedSummary, siteGrantOptionOf, type ComposioBatchActionMeta, type ApprovalChoice } from '../lib/approval-app'
 import { accountLabelOf } from '../lib/apps-view'
 import { toolDisplayName } from '../../../shared/tool-names'
 import type { TranscriptEntry } from '../../../shared/types'
@@ -88,10 +88,11 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
   // P2 (fase pulizia): il valore {tool} in parole, mai il nome tecnico
   const reasonText = uiTextOfMetaTools(entry.meta, activeLang) ?? entry.content
 
-  // M4 (fase 0.3.1001): tool MCP readOnly di un server manuale — la card offre
-  // «Consenti sempre le letture di <server>» (grant scope readOnly, controllata
-  // sulle annotazioni a ogni chiamata); dopo il click QUESTA chiamata passa once
-  const mcpServerRead = entry.meta?.mcpServerRead as { slug?: string; name?: string } | undefined
+  // M4 (fase 0.3.1001): tool MCP readOnly di un server manuale — la scelta
+  // «Consenti sempre le letture di <server>» vive nel modello unico A1
+  // (approvalChoicesOf legge meta.mcpServerRead): grant scope readOnly,
+  // controllata sulle annotazioni a ogni chiamata; dopo il click QUESTA
+  // chiamata passa once
 
   // P3 (fase uso-permessi): «Consenti sempre su <dominio registrabile>» — la
   // card di un'azione del browser «sito interattivo» che il grant copre (mai
@@ -167,6 +168,52 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
   const composioArgs = !composioBatch && composioAction && input && typeof input === 'object'
     ? Object.entries(input).filter(([, v]) => v !== undefined && v !== null && (typeof v !== 'object' || Array.isArray(v)))
     : null
+
+  // A1 (fase approvazioni-chiare): le scelte dal modello UNICO — le stesse
+  // del centro «Da approvare» (il difetto del 22/11: «In Da approvare ho
+  // sempre e solo una volta»). La card sa della squadra dal meta del turno.
+  const choices = approvalChoicesOf(tool, entry.meta, {
+    squad: typeof entry.meta?.squadId === 'number' || typeof entry.meta?.squadId === 'string'
+  })
+  const choiceLabelOf = (c: ApprovalChoice): string => {
+    switch (c.kind) {
+      case 'turn': return t`Per questo turno`
+      case 'minutes10': return t`Consenti per 10 minuti a ${c.app ?? ''}`
+      case 'always':
+        // U7 (fase prima-release): la concessione vale per il BOT — il nome
+        // lo dice (per un aiutante: il bot che l'ha lanciato)
+        return useApp?.kind === 'app' && useApp.app && !useAppSend
+          ? t`Consenti sempre a ${useApp.app} (per ${agentName})`
+          : t`Consenti sempre a ${agentName}`
+      case 'server-reads': return t`Consenti sempre le letture di ${c.name ?? c.slug ?? ''}`
+      case 'site': return t`Consenti sempre su ${c.domain ?? ''}`
+      case 'mission': return t`Consenti per questa missione`
+    }
+  }
+  const choiceTitleOf = (c: ApprovalChoice): string | undefined => {
+    switch (c.kind) {
+      case 'turn': return noTurn ? t`Questa azione chiede sempre l'approvazione` : t`Vale per lo stesso tool fino alla fine di questo turno`
+      case 'minutes10': return t`Le azioni su ${c.app ?? ''} non chiederanno per 10 minuti`
+      case 'always':
+        return noAlways
+          ? (useAppSend || entry.meta?.composioDestructive === true
+              ? t`Questa azione chiede sempre l'approvazione`
+              : t`Le modifiche di automazione chiedono ogni volta`)
+          : undefined
+      case 'server-reads': return t`Le letture di questo server non chiederanno più (solo i tool dichiarati in sola lettura)`
+      case 'site':
+        return t`Navigare, aprire link e cliccare controlli non di conferma su ${c.domain ?? ''} non chiederanno più; le conferme, i pagamenti e i dati tuoi sì. Revocabile in Impostazioni › Approvazioni.`
+      case 'mission': return t`Un consenso di 8 ore per tutto il team, solo per questo`
+    }
+  }
+  const decideChoice = (c: ApprovalChoice): void => {
+    if (c.kind === 'server-reads') {
+      void api.grantServerReads(c.slug!).catch(() => undefined)
+      resolve(entry.agentId, approvalId, 'allow', 'once')
+      return
+    }
+    resolve(entry.agentId, approvalId, 'allow', c.kind)
+  }
 
   const body = (
     <>
@@ -294,54 +341,19 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
               <Trans>Altre opzioni ▾</Trans>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
-              <DropdownMenuItem
-                disabled={noTurn}
-                title={noTurn ? t`Questa azione chiede sempre l'approvazione` : t`Vale per lo stesso tool fino alla fine di questo turno`}
-                onClick={() => resolve(entry.agentId, approvalId, 'allow', 'turn')}
-              >
-                <Trans>Per questo turno</Trans>
-              </DropdownMenuItem>
-              {useApp?.kind === 'app' && useApp.app && !useAppSend && (
+              {/* A1 (fase approvazioni-chiare): le scelte vengono dal modello
+                  UNICO approvalChoicesOf — le stesse del centro «Da approvare» */}
+              {choices.map((c) => (
                 <DropdownMenuItem
-                  title={t`Le azioni su ${useApp.app} non chiederanno per 10 minuti`}
-                  onClick={() => resolve(entry.agentId, approvalId, 'allow', 'minutes10')}
+                  key={c.kind}
+                  data-testid={`approval-choice-${c.kind}`}
+                  disabled={c.disabled === true}
+                  title={choiceTitleOf(c)}
+                  onClick={() => decideChoice(c)}
                 >
-                  <Trans>Consenti per 10 minuti a {useApp.app}</Trans>
+                  {choiceLabelOf(c)}
                 </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                disabled={noAlways}
-                title={noAlways ? (useAppSend ? t`Questa azione chiede sempre l'approvazione` : entry.meta?.composioDestructive === true ? t`Questa azione chiede sempre l'approvazione` : t`Le modifiche di automazione chiedono ogni volta`) : undefined}
-                onClick={() => resolve(entry.agentId, approvalId, 'allow', 'always')}
-              >
-                {/* U7 (fase prima-release): la concessione vale per il BOT —
-                    il nome lo dice (per un aiutante: il bot che l'ha lanciato) */}
-                {useApp?.kind === 'app' && useApp.app && !useAppSend ? (
-                  <Trans>Consenti sempre a {useApp.app} (per {agentName})</Trans>
-                ) : (
-                  <Trans>Consenti sempre a {agentName}</Trans>
-                )}
-              </DropdownMenuItem>
-              {mcpServerRead?.slug && (
-                <DropdownMenuItem
-                  title={t`Le letture di questo server non chiederanno più (solo i tool dichiarati in sola lettura)`}
-                  onClick={() => {
-                    void api.grantServerReads(mcpServerRead.slug!).catch(() => undefined)
-                    resolve(entry.agentId, approvalId, 'allow', 'once')
-                  }}
-                >
-                  <Trans>Consenti sempre le letture di {mcpServerRead.name ?? mcpServerRead.slug}</Trans>
-                </DropdownMenuItem>
-              )}
-              {siteGrant?.domain && (
-                <DropdownMenuItem
-                  data-testid="approval-site-always"
-                  title={t`Navigare, aprire link e cliccare controlli non di conferma su ${siteGrant.domain} non chiederanno più; le conferme, i pagamenti e i dati tuoi sì. Revocabile in Impostazioni › Approvazioni.`}
-                  onClick={() => resolve(entry.agentId, approvalId, 'allow', 'site')}
-                >
-                  <Trans>Consenti sempre su {siteGrant.domain}</Trans>
-                </DropdownMenuItem>
-              )}
+              ))}
               <DropdownMenuItem
                 title={t`Apri Impostazioni → Approvazione automatica con una regola precompilata`}
                 onClick={() => proposeRule(suggestedRule(tool, input))}
