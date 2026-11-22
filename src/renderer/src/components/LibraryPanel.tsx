@@ -57,7 +57,7 @@ export function LibraryPanel() {
   // chat, che Electron calcola ignorando lo z-index — no-drag, o la freccia ‹
   // in alto cade dentro la fascia e il clic trascina la finestra
   return (
-    <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background">
+    <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background" data-testid="library-panel">
       {openLibraryId === '' ? <LibraryList /> : <LibraryItemView id={openLibraryId} />}
     </div>
   )

@@ -522,14 +522,23 @@ try {
   await pageEval(`[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Libreria')?.click(); return true`)
   const libSeen = await waitDom(`document.body.textContent.includes('Ricettario — indice')`, 10_000, 400)
   check('D6: l\'indice è nella Libreria', libSeen)
+  // R3 (fase ritocchi-beta18): il clic mira la RIGA della Libreria — il
+  // bottone omonimo nella chat (la DocumentCard, PRIMA nel DOM) aprirebbe la
+  // pagina SENZA chiudere la Libreria, che resta SOPRA a coprirla: era il
+  // difetto della cattura 2 (la griglia a schermo col documento nel DOM)
   const opened = await pageEval(`
-    const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim().includes('Ricettario — indice'))
+    const panel = document.querySelector('[data-testid="library-panel"]')
+    const b = panel ? [...panel.querySelectorAll('button')].find((x) => x.textContent.trim().includes('Ricettario — indice')) : null
     if (!b) return false
     b.click()
     return true
   `)
-  const pageOpen = opened && await waitDom(`document.querySelector('[data-testid="page-view"]') !== null && document.body.textContent.includes('Dolci')`, 10_000, 400)
-  check('D6: il clic apre l\'indice a pagina intera', pageOpen)
+  // «a pagina intera» vuol dire DAVVERO a schermo: la pagina copre il centro
+  // (elementFromPoint), non solo esiste nel DOM
+  const pageOpen = opened && await waitDom(
+    `document.querySelector('[data-testid="page-view"]') !== null && document.elementFromPoint(innerWidth / 2, innerHeight / 2)?.closest('[data-testid="page-view"]') !== null && document.body.textContent.includes('Dolci')`,
+    10_000, 400)
+  check('D6: il clic apre l\'indice a pagina intera (la pagina COPRE lo schermo)', pageOpen)
   if (pageOpen) {
     // NESSUN anchor con href relativo: solo http(s)/mailto possono avere href
     const badHrefs = await pageEval(`
@@ -556,23 +565,24 @@ try {
     await sleep(400)
     // R3 (fase ritocchi-beta18): la RIAPERTURA dell'indice prima dello scatto
     // è un CHECK («D6: l'indice riaperto prima della cattura»), non
-    // un'attesa muta — la cattura scatta SOLO a documento aperto, con i TRE
-    // tipi di link a schermo
+    // un'attesa muta — la cattura scatta SOLO a documento aperto E a schermo
+    // (la pagina copre il centro), coi TRE tipi di link. Il clic mira la riga
+    // della Libreria, non la DocumentCard della chat (vedi sopra)
     const reopened = await pageEval(`
-      const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim().includes('Ricettario — indice'))
+      const panel = document.querySelector('[data-testid="library-panel"]')
+      const b = panel ? [...panel.querySelectorAll('button')].find((x) => x.textContent.trim().includes('Ricettario — indice')) : null
       if (b) { b.click(); return true }
       return false
     `)
     const viewAperta = reopened === true && await waitDom(
-      `document.querySelector('[data-testid="page-view"]') !== null && document.body.textContent.includes('Dolci')`,
+      `document.querySelector('[data-testid="page-view"]') !== null && document.elementFromPoint(innerWidth / 2, innerHeight / 2)?.closest('[data-testid="page-view"]') !== null && document.body.textContent.includes('Dolci')`,
       10_000, 400)
     check('D6: l\'indice riaperto prima della cattura', viewAperta, reopened === true ? 'page-view aperta' : 'bottone dell\'indice non trovato')
     // la cattura si scatta solo a documento APERTO, coi TRE tipi di link
-    const treLink = viewAperta === true ? await pageEval(`
-      return !!document.querySelector('[data-testid="doc-link"][data-doc^="lib_"]') &&
-        [...document.querySelectorAll('a')].some((x) => (x.getAttribute('href') ?? '').startsWith('https://')) &&
-        !!document.querySelector('[data-testid="doc-path"]')
-    `) : false
+    // (attesa verificata: i link rendono un istante dopo la vista della pagina)
+    const treLink = viewAperta === true && await waitDom(
+      `!!document.querySelector('[data-testid="doc-link"][data-doc^="lib_"]') && [...document.querySelectorAll('a')].some((x) => (x.getAttribute('href') ?? '').startsWith('https://')) && !!document.querySelector('[data-testid="doc-path"]')`,
+      10_000, 400)
     check('D6: la cattura mostra i TRE tipi di link (lib_, https, /workspace)', treLink === true)
     if (viewAperta === true && treLink === true) {
       await settle()
