@@ -173,6 +173,30 @@ describe('D2: pairWindowReleaseAt — quando la finestra oraria della coppia si 
   })
 })
 
+// ---- D3 (fase deleghe): nessuna eco — un risultato non chiede risposta ----
+
+describe('D3: formatAgentMessage col TIPO del messaggio (richiesta / risultato)', () => {
+  it('una richiesta porta tipo="richiesta", un risultato tipo="risultato" (con risposta="si" com\'è oggi)', () => {
+    const ask = formatAgentMessage('Chef Ricette', 'prepara la pastiera', { id: 'agent_chef', type: 'request' })
+    expect(ask).toContain('<messaggio_da_agente nome="Chef Ricette" id="agent_chef" tipo="richiesta">')
+    const res = formatAgentMessage('Chef Ricette', 'pastiera pronta', { id: 'agent_chef', type: 'result', reply: true })
+    expect(res).toContain('tipo="risultato"')
+    expect(res).toContain('risposta="si"')
+  })
+
+  it('la regola dice che un risultato NON si risponde (inglese, col tetto misurato)', () => {
+    expect(AGENT_MESSAGE_RULE).toContain('A result needs no reply: report it to the user if relevant, never acknowledge it to the sender.')
+    // la regola viaggia in OGNI messaggio tra bot: misurata (caratteri/4) sta
+    // sotto i 200 token stimati (misurato: 196,75 — la frase D3 costa ~30
+    // token sulla regola di prima, ~167)
+    expect(AGENT_MESSAGE_RULE.length / 4).toBeLessThanOrEqual(200)
+  })
+
+  it('senza tipo il blocco resta quello di oggi (messaggi legacy)', () => {
+    expect(formatAgentMessage('Bot', 'testo')).toContain('<messaggio_da_agente nome="Bot">')
+  })
+})
+
 // ---- correzione A4: neutralizzazione dei tag di chiusura nel testo ----
 
 describe('neutralizeClosingTag: il testo ostile non chiude il blocco evidenza', () => {

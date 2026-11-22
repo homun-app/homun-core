@@ -157,11 +157,14 @@ describe('Q3: la risposta collegata — la sequenza del treno', () => {
     expect(p.toAgentId).toBe(treni)
     expect(p.threadId).toBe(payloadB.threadId)
     expect(p.autoReply).toBe(true)
-    // la risposta NON è un salto in più: lo stesso hop della domanda
-    expect(p.hop).toBe(payloadB.hop)
+    // D3 (fase deleghe): la risposta è un RISULTATO e OGNI messaggio tra bot
+    // incrementa l'hop (verificato dal vivo il 22/11): hop della domanda + 1
+    expect(p.messageType).toBe('result')
+    expect(p.hop).toBe((payloadB.hop as number) + 1)
     // il blocco è una RISPOSTA con l'id di B, e contiene il testo finale
     expect(String(p.text)).toContain(`id="${alloggio}"`)
     expect(String(p.text)).toContain('risposta="si"')
+    expect(String(p.text)).toContain('tipo="risultato"')
     expect(String(p.text)).toContain('15:00–22:00')
   })
 

@@ -729,6 +729,13 @@ export interface RunTurnOptions {
     /** Q3: questo turno È una risposta collegata automatica (mai un'altra) */
     autoReply?: boolean
     /**
+     * D3 (fase deleghe): il TIPO del messaggio che apre il turno —
+     * 'request' (una delega, una domanda) o 'result' (la risposta collegata
+     * a una delega). Un turno nato da un RISULTATO non risponde da solo al
+     * mittente: niente eco.
+     */
+    messageType?: 'request' | 'result'
+    /**
      * D1 (fase deleghe): il messaggio è una delega nata in un turno
      * dell'UTENTE (o la sua risposta collegata): non consuma il limite
      * orario della coppia, che vale per le catene tra bot.
@@ -1808,11 +1815,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           ...(opts.initiator ? { initiator: opts.initiator } : {}),
           // fase 7: provenienza del messaggio di un altro bot (rate per coppia);
           // D1 (fase deleghe): userRequested dice che il messaggio è nato in un
-          // turno dell'utente — non consuma il limite orario della coppia
+          // turno dell'utente — non consuma il limite orario della coppia;
+          // D3: messageType dice se è una richiesta o un risultato
           ...(opts.agentMessage ? {
             fromAgentId: opts.agentMessage.fromAgentId, fromAgentName: opts.agentMessage.fromAgentName,
             toAgentId: agentId, hop: opts.agentMessage.hop,
-            ...(opts.agentMessage.userRequested ? { userRequested: true } : {})
+            ...(opts.agentMessage.userRequested ? { userRequested: true } : {}),
+            ...(opts.agentMessage.messageType ? { messageType: opts.agentMessage.messageType } : {})
           } : {}),
           ...(opts.extraMeta ?? {}),
           ...(opts.readingPage ? { readingPage: opts.readingPage } : {}),
@@ -4893,12 +4902,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             agentId: toId,
             kind: 'user-message',
             payload: {
-              text: formatAgentMessage(agent.name, text, { id: agentId }),
+              // D3 (fase deleghe): ogni send_to_agent esplicito è una
+              // RICHIESTA (delega o domanda) — il risultato tornerà da solo
+              text: formatAgentMessage(agent.name, text, { id: agentId, type: 'request' }),
               initiator: 'AGENT',
               fromAgentId: agentId,
               fromAgentName: agent.name,
               toAgentId: toId,
               hop: queuedHop,
+              messageType: 'request',
               // D1 (fase deleghe): la delega nata nel turno dell'utente (e la
               // sua risposta collegata) non consuma il limite della coppia
               ...(userDelegationTurn ? { userRequested: true } : {}),
@@ -6024,11 +6036,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // Q3 (fase squadra): la RISPOSTA COLLEGATA — il testo finale del turno di
     // chi riceve torna da solo al mittente del filo e lo risveglia. Non parte
     // se chi riceve ha GIÀ scritto al mittente con send_to_agent in questo
-    // turno, né se QUESTO turno è già una risposta (niente cicli A↔B). La
-    // risposta non è un salto in più (stesso hop), ma il suo risveglio conta
-    // nel tetto orario della coppia come gli altri messaggi.
+    // turno, né se QUESTO turno è già una risposta (niente cicli A↔B).
+    // D3 (fase deleghe): la risposta parte SOLO se il messaggio che ha aperto
+    // il turno era una RICHIESTA — un turno nato da un RISULTATO non risponde
+    // da solo al mittente (niente eco: il testo va all'utente o resta nel
+    // transcript); se il bot vuole chiedere altro, un send_to_agent esplicito
+    // è una richiesta NUOVA che conta per i limiti. E OGNI messaggio tra bot
+    // incrementa l'hop, le risposte automatiche comprese (verificato dal vivo
+    // il 22/11): oltre AGENT_HOP_MAX la risposta non parte.
     if (
       opts.agentMessage?.threadId && !opts.agentMessage.autoReply &&
+      opts.agentMessage.messageType !== 'result' &&
+      opts.agentMessage.hop + 1 <= AGENT_HOP_MAX &&
       threadReplyText !== null && !sentToAgentIds.has(opts.agentMessage.fromAgentId)
     ) {
       const from = getAgent(opts.agentMessage.fromAgentId)
@@ -6046,14 +6065,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           agentId: from.id,
           kind: 'user-message',
           payload: {
-            text: formatAgentMessage(agent.name, threadReplyText, { id: agentId, reply: true }),
+            text: formatAgentMessage(agent.name, threadReplyText, { id: agentId, reply: true, type: 'result' }),
             initiator: 'AGENT',
             fromAgentId: agentId,
             fromAgentName: agent.name,
             toAgentId: from.id,
-            hop: opts.agentMessage.hop,
+            hop: opts.agentMessage.hop + 1,
             threadId: opts.agentMessage.threadId,
             autoReply: true,
+            messageType: 'result',
             // D1 (fase deleghe): la risposta alla delega dell'utente non
             // consuma il limite della coppia (come la domanda)
             ...(opts.agentMessage.userRequested ? { userRequested: true } : {}),
