@@ -5,6 +5,48 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.18] — 2026-11-23
+
+Una casa sola per i Plugin, richieste di permesso che si vedono e si
+ritrovano, e bot che si passano il lavoro senza promesse a vuoto.
+
+### Novità
+
+- **La voce «Plugin» nella barra:** connettori, server MCP e skill stanno
+  in un posto solo. Ogni plugin ha la sua scheda con le autorizzazioni per
+  gruppo e un interruttore Attivo; «Collegati» mostra cosa usano i bot.
+  Le skill si importano anche dalle altre app.
+- **Le richieste si decidono sopra il campo di scrittura:** nella chat del
+  bot la richiesta sta in basso, dove guardi, con un solo «Consenti». Se
+  sono più di una scorri con «1 di N». Fuori dalla finestra trovi il
+  numero sull'icona del Dock e una notifica.
+- **Le stesse scelte ovunque:** «Altre scelte» offre in chat e in «Da
+  approvare» le stesse opzioni (per questo turno, sempre a un bot, sempre
+  su un sito, per la missione).
+- **Il Registro delle approvazioni:** chi ha deciso, cosa, da dove e
+  quando, comprese le azioni passate da sole. In «Consentiti sempre» rivedi
+  i permessi fissi e li revochi.
+- **Deleghe tra bot oneste:** se un bot è al limite il messaggio va
+  davvero in coda e la chat mostra «In coda per … · parte alle HH:MM», con
+  Annulla. I bot non promettono più di riprovare da soli.
+
+### Correzioni
+
+- **I bot sanno quali collegamenti funzionano adesso**, anche dopo un
+  riassunto della conversazione; propongono di accendere un plugin spento e
+  riprendono da soli.
+- **Un server MCP spento da Homun dice perché**, e la riparazione automatica
+  non spegne più quelli buoni.
+- **I riassunti delle conversazioni lunghe** si fanno solo quando servono e
+  costano molti meno token.
+- **I link nei documenti funzionano:** aprono il documento, il sito nel
+  browser o mostrano il percorso del file, senza più rompere la finestra.
+- **`/workspace` esiste davvero nel computer isolato.**
+- **Le anteprime in Libreria sono testo**, senza markdown grezzo.
+- **Due bot non si rispondono più in eco** all'infinito.
+- **Niente più il dialogo «A JavaScript error occurred»** quando un log
+  non trova più dove scrivere.
+
 ## [0.3.1001-beta.17] — 2026-11-21
 
 Meno richieste inutili, server MCP che funzionano davvero, e bot e team
