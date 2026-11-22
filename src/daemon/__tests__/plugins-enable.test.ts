@@ -68,7 +68,7 @@ describe('V6: resolveEnablePluginCard — Attiva / Non ora', () => {
     saveServers([{ id: 'srv-v6-ok', name: 'orion\nmoon<b>', transport: 'stdio', command: process.execPath, args: [fakeServerPath], enabled: false, disabledReason: 'never-connected' }])
     const entryId = mkCard('srv-v6-ok', 'orion\nmoon<b>')
     const r = await resolveEnablePluginCard(agentId, entryId, 'enable', () => undefined, worker)
-    expect(r).toEqual({ ok: true, status: 'activated' })
+    expect(r).toEqual({ ok: true, status: 'activated', toolsCount: 2 })
     const { listServers } = await import('../../main/mcp')
     const cfg = listServers().find((s) => s.id === 'srv-v6-ok')!
     expect(cfg.enabled).toBe(true)
@@ -107,7 +107,7 @@ describe('V6: resolveEnablePluginCard — Attiva / Non ora', () => {
     const resumeJobs = (): number => userMessageJobs().filter((j) => j.agent_id === agentId && JSON.parse(j.payload_json).initiator === 'PLUGIN_ENABLED_RESUME').length
     const before = resumeJobs()
     const first = await resolveEnablePluginCard(agentId, entryId, 'enable', () => undefined, worker)
-    expect(first).toEqual({ ok: true, status: 'activated' })
+    expect(first).toEqual({ ok: true, status: 'activated', toolsCount: 2 })
     await expect(resolveEnablePluginCard(agentId, entryId, 'enable', () => undefined, worker)).rejects.toThrow()
     expect(resumeJobs()).toBe(before + 1)
   })

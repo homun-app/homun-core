@@ -329,6 +329,13 @@ export function EnablePluginCard({ entry }: { entry: TranscriptEntry }) {
     return st === 'activated' || st === 'failed' || st === 'declined' ? st : 'pending'
   })
   const [toolsCount, setToolsCount] = useState<number | null>((entry.meta?.toolsCount as number | undefined) ?? null)
+  // la entry arriva AGGIORNATA dal daemon (stato e conteggio): si segue
+  useEffect(() => {
+    const n = (entry.meta?.toolsCount as number | undefined) ?? null
+    if (n !== null) setToolsCount(n)
+    const st = entry.meta?.status
+    if (st === 'activated' || st === 'failed' || st === 'declined') setStatus(st)
+  }, [entry.meta?.status, entry.meta?.toolsCount])
   if (message.type !== 'enable-plugin') return null
   // la riga grigia PL1: «Server MCP · <strada>» (onesto: senza fonte non si inventa)
   const openPlugin = useStore((st) => st.openPlugin)
@@ -343,7 +350,7 @@ export function EnablePluginCard({ entry }: { entry: TranscriptEntry }) {
       .then((r) => {
         if (r.status === 'activated') {
           setStatus('activated')
-          setToolsCount((entry.meta?.toolsCount as number | undefined) ?? null)
+          if (typeof r.toolsCount === 'number') setToolsCount(r.toolsCount)
         } else if (r.status === 'failed') {
           setStatus('failed')
         }

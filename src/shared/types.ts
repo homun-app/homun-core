@@ -1384,7 +1384,7 @@ export interface SandbotApi {
   connectorsSetClientMetadataUrl(url: string): Promise<{ ok: boolean }>
   pluginsResolve(agentId: string, entryId: number, decision: 'install' | 'no'): Promise<{ ok: boolean; installed?: boolean; message?: string; error?: string }>
   /** V6 (fase stato-vivo): il click su Attiva/Non ora della scheda offer_enable_plugin */
-  pluginsEnableCard(agentId: string, entryId: number, decision: 'enable' | 'not-now'): Promise<{ ok: true; status: 'activated' | 'failed' | 'declined' }>
+  pluginsEnableCard(agentId: string, entryId: number, decision: 'enable' | 'not-now'): Promise<{ ok: true; status: 'activated' | 'failed' | 'declined'; toolsCount?: number }>
   pluginsUninstall(name: string, marketplace: string): Promise<{ ok: boolean }>
   // fase app (A2): attivazione di Composio con la chiave dell'utente
   composioStatus(): Promise<ComposioStatusInfo>

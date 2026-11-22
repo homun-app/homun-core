@@ -6,7 +6,9 @@
 // grigia; il filtro Connettori/Skill; la scheda con Autorizzazioni che cambia
 // una regola e la regola che vale; Account e bot con l'interruttore;
 // Collegati con «Da sistemare»; Aggiungi › Importa skill; i rimandi vecchi
-// che aprono la pagina. Catture CDP delle tre tavole in
+// che aprono la pagina; V5: il clic sull'interruttore Attivo della riga; V6:
+// la scheda offer_enable_plugin in chat, il clic su Attiva e la RIPRESA col
+// modello finto. Catture CDP delle tavole in
 // docs/catture/fase-plugin/. Nessuna rete fuori da 127.0.0.1, nessun Docker,
 // mai i file VERI delle altre app (solo la HOME finta). Verde in 3 corse:
 // node scripts/fase-plugin-probe.mjs --run 1|2|3
@@ -46,8 +48,63 @@ skillDir('zcode', 'lavoro', 'Riassume le email di lavoro') // doppione esatto
 skillDir('cursor', 'prezzi', 'Confronta i prezzi tra i siti')
 skillDir('codex', 'rotta', '', false) // non valida: si dichiara
 
-// ---- il provider finto (per la guida del primo avvio, mai chiamato) ----
+// ---- il provider finto: SSE SCRIPTATO (V6: la scheda, il clic, la ripresa) ----
+// turni: (1) il modello chiama offer_enable_plugin; (2) chiude il turno con
+// una parola all'utente; (3) il turno di RIPRESA dopo il clic su Attiva
+const chunkOf = (delta, finish = null) =>
+  `data: ${JSON.stringify({ id: 'chatcmpl-finto', object: 'chat.completion.chunk', created: 1, model: 'finto', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
+// il provider risponde GUARDANDO la richiesta (il turno di presentazione del
+// bot e le altre chiamate non consumano la sceneggiatura): se l'ultimo
+// messaggio utente è la richiesta dell'utente con orion spento e il tool
+// c'è → la chiamata a offer_enable_plugin; se è la nota di RIPRESA → la
+// parola finale; altrimenti una parola corta.
+const modelCounts = { offer: 0, resume: 0, find: 0, other: 0 }
+const chatRequests = []
+const chatOf = (req, res) => {
+  let body = ''
+  req.on('data', (c) => (body += c))
+  req.on('end', () => {
+    const parsed = JSON.parse(body)
+    chatRequests.push(parsed)
+    const tools = Array.isArray(parsed.tools) ? parsed.tools.map((t) => t?.function?.name ?? '') : []
+    const lastUser = [...(parsed.messages ?? [])].reverse().find((m) => m.role === 'user')
+    const content = typeof lastUser?.content === 'string' ? lastUser.content : JSON.stringify(lastUser?.content ?? '')
+    let next
+    if (content.includes('orion moon ma è spento') && modelCounts.offer === 0 && tools.includes('find_tools') && !tools.includes('offer_enable_plugin')) {
+      // i connettori sono DIFFERITI dietro find_tools: prima il gruppo
+      modelCounts.find++
+      next = { toolCalls: [{ name: 'find_tools', arguments: { group: 'connectors' } }] }
+    } else if (content.includes('orion moon ma è spento') && modelCounts.offer === 0 && tools.includes('offer_enable_plugin')) {
+      modelCounts.offer++
+      next = { toolCalls: [{ name: 'offer_enable_plugin', arguments: { plugin_id: 'srv-orion', reason: 'orion-moon è spento ma serve per la richiesta dell\'utente' } }] }
+    } else if (content.includes('orion moon ma è spento') && modelCounts.offer > 0) {
+      next = { text: 'Orion Moon è spento: ti ho messo in chat la richiesta di accenderlo — quando clicchi Attiva riparto da solo.' }
+    } else if (content.includes('The user turned on')) {
+      modelCounts.resume++
+      next = { text: 'Ripreso: orion-moon è acceso e i suoi strumenti sono nel mio turno.' }
+    } else {
+      modelCounts.other++
+      next = { text: 'Ok.' }
+    }
+    log('modello:', next.text ? 'testo' : next.toolCalls[0].name)
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    res.write(chunkOf({ role: 'assistant', content: '' }))
+    if (next.text) res.write(chunkOf({ content: next.text }))
+    for (const [i, tc] of (next.toolCalls ?? []).entries()) {
+      res.write(chunkOf({ tool_calls: [{ index: i, id: `call_plugin_${i}`, type: 'function', function: { name: tc.name, arguments: JSON.stringify(tc.arguments) } }] }))
+    }
+    res.write(chunkOf({}, next.toolCalls ? 'tool_calls' : 'stop'))
+    res.write('data: [DONE]\n\n')
+    res.end()
+  })
+}
 const provider = createServer((req, res) => {
+  const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+  if (req.method === 'POST' && url.pathname.endsWith('/chat/completions')) return chatOf(req, res)
+  if (url.pathname.endsWith('/models')) {
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ id: 'finto' }] }))
+    return
+  }
   res.writeHead(200, { 'content-type': 'application/json' })
   res.end('{}')
 })
@@ -204,7 +261,7 @@ try {
   log('pagina:', main.url)
 
   // ---- setup: provider finto, guida chiusa, un bot, i server MCP ----
-  await rpc(cdp, `saveProvider(${JSON.stringify({ id: 'finto', name: 'Finto locale', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, enabled: true })})`)
+  await rpc(cdp, `saveProvider(${JSON.stringify({ id: 'finto', name: 'Finto locale', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'chiave-finta-di-prova', enabled: true })})`)
   await rpc(cdp, `settingsSet(${JSON.stringify('models.main')}, ${JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null })})`)
   await rpc(cdp, `settingsSet(${JSON.stringify('sandbox.mode')}, ${JSON.stringify('host')})`).catch(() => undefined)
   for (let round = 0; round < 5; round++) {
@@ -428,6 +485,82 @@ try {
   `)
   check('PL7: Impostazioni ha la scheda App e skill', opened)
   check('PL7: il rimando apre la pagina Plugin (una casa sola)', await clickTestid(cdp, 'settings-open-plugin') && await waitDom(cdp, `document.querySelector('[data-testid="plugin-page"]')`, 5_000))
+
+  // ---- 9. V5: l'interruttore Attivo della riga (clic vero sul DOM vivo) ----
+  await waitDom(cdp, `document.querySelector('[data-testid="plugin-active-server:srv-plugin"]')`, 8_000)
+  const switchState = () => pageEval(cdp, `return document.querySelector('[data-testid="plugin-active-server:srv-plugin"]')?.getAttribute('aria-checked')`)
+  check('V5: l\'interruttore Attivo c\'è nella riga ed è ACCESO', (await switchState()) === 'true')
+  await clickTestid(cdp, 'plugin-active-server:srv-plugin')
+  const offNow = await withTimeout((async () => {
+    for (let i = 0; i < 20; i++) {
+      const r = await rpc(cdp, `connectorsInstalled()`)
+      const sv = (r.servers ?? []).find((x) => x.id === 'srv-plugin')
+      if (sv && sv.enabled === false && sv.disabledReason === 'user') return sv
+      await sleep(300)
+    }
+    return null
+  })(), 8_000, 'interruttore spento')
+  check('V5: il clic SPEGNE: enabled false e disabledReason \'user\' (la parola dell\'utente)', offNow !== null, JSON.stringify(offNow)?.slice(0, 120))
+  await clickTestid(cdp, 'plugin-active-server:srv-plugin')
+  const onAgain = await withTimeout((async () => {
+    for (let i = 0; i < 25; i++) {
+      const r = await rpc(cdp, `connectorsInstalled()`)
+      const sv = (r.servers ?? []).find((x) => x.id === 'srv-plugin')
+      if (sv && sv.enabled === true) return sv
+      await sleep(300)
+    }
+    return null
+  })(), 10_000, 'interruttore riacceso')
+  check('V5: il clic RIACCENDE (e il test U5 parte da mcp:save: il finto risponde)', onAgain !== null && (await switchState()) === 'true', JSON.stringify(onAgain)?.slice(0, 120))
+
+  // ---- 10. V6: la scheda offer_enable_plugin, il clic e la RIPRESA ----
+  // un secondo server MCP FINTO ma SPENTO (l\'utente l\'aveva spento): il
+  // blocco «Collegamenti ora» lo dice al bot, che propone la scheda
+  const orionCfg = { id: 'srv-orion', name: 'orion-moon', transport: 'stdio', command: process.execPath, args: [join(ROOT, 'scripts', 'fake-plugin-mcp.mjs')], enabled: false, disabledReason: 'user', enabledFor: ['*'] }
+  await rpc(cdp, `mcpSave(${JSON.stringify(orionCfg)})`)
+  // la chat del bot: il primo agente della barra laterale
+  await pageEval(cdp, `
+    const btn = [...document.querySelectorAll('aside button, aside [role="button"]')].find((b) => (b.textContent ?? '').trim().startsWith('Competitoor'))
+    btn?.click(); return !!btn
+  `)
+  if (!(await waitDom(cdp, `document.querySelector('form textarea')`, 8_000))) throw new Error('la chat non si è aperta: ' + appLog.slice(-400))
+  const userMsg = 'vedo che c\'è orion moon ma è spento: vuoi accenderlo? mi serve per la mia richiesta'
+  await pageEval(cdp, `
+    const ta = document.querySelector('form textarea')
+    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    set.call(ta, ${JSON.stringify(userMsg).replace(/`/g, '\\`')})
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 150))
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    return true
+  `)
+  const cardCame = await waitDom(cdp, `document.querySelector('[data-testid="enable-plugin-card"]')`, 25_000)
+  check('V6: la scheda compare in chat (logo, nome, riga grigia PL1, frase del bot, Attiva / Non ora)', cardCame)
+  if (cardCame) {
+    const cardText = await pageEval(cdp, `return document.querySelector('[data-testid="enable-plugin-card"]')?.textContent ?? ''`)
+    check('V6: la scheda dice chi è (orion-moon), la riga grigia e la frase del bot', cardText.includes('orion-moon') && cardText.includes('Server MCP ·') && cardText.includes('spento ma serve'), cardText.slice(0, 160))
+    await shot(cdp, '4-scheda-attiva-plugin.png')
+    // il clic su Attiva: accende, testa e la RIPRESA arriva (turno nuovo col modello finto)
+    await clickTestid(cdp, 'enable-plugin-activate')
+    const activated = await waitDom(cdp, `document.querySelector('[data-testid="enable-plugin-active"]')`, 25_000)
+    const activeText = activated ? await pageEval(cdp, `return document.querySelector('[data-testid="enable-plugin-active"]')?.textContent ?? ''`) : ''
+    check('V6: «Attiva» accende e testa: la scheda dice «Attivo · 5 strumenti»', activated && /5/.test(activeText), activeText)
+    const orionAfter = await withTimeout((async () => {
+      for (let i = 0; i < 20; i++) {
+        const r = await rpc(cdp, `connectorsInstalled()`)
+        const sv = (r.servers ?? []).find((x) => x.id === 'srv-orion')
+        if (sv && sv.enabled === true) return sv
+        await sleep(300)
+      }
+      return null
+    })(), 8_000, 'orion riacceso')
+    check('V6: orion-moon è ACCESO (enabled true, senza motivo: l\'ha deciso il clic)', orionAfter !== null && orionAfter.disabledReason === undefined, JSON.stringify(orionAfter)?.slice(0, 120))
+    const resumed = await waitDom(cdp, `document.body.textContent.includes('Ripreso: orion-moon è acceso')`, 25_000)
+    const resumeRow = await waitDom(cdp, `document.body.textContent.includes('Plugin attivato')`, 10_000)
+    check('V6: la RIPRESA arriva: il turno nuovo (riga «Plugin attivato») e la risposta del modello', resumed && resumeRow)
+    // una ripresa sola: UNA chiamata offer, UNA ripresa, nessuna catena
+    check('V6: il modello ha fatto UNA offerta e UNA ripresa (nessuna catena automatica)', modelCounts.offer === 1 && modelCounts.resume === 1, JSON.stringify(modelCounts))
+  }
 
   // ---- pulizia ----
   stopApp()

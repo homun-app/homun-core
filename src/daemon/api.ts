@@ -3075,7 +3075,7 @@ export async function resolveEnablePluginCard(
   decision: 'enable' | 'not-now',
   emit: Emitter,
   worker: JobWorker
-): Promise<{ ok: true; status: 'activated' | 'failed' | 'declined' }> {
+): Promise<{ ok: true; status: 'activated' | 'failed' | 'declined'; toolsCount?: number }> {
   const entry = store.getEntries(agentId).find((e) => e.id === entryId)
   const message = entry?.meta?.message as SendMessagePayload | undefined
   if (!entry || entry.kind !== 'send-message' || message?.type !== 'enable-plugin') throw uiError(UI.rpcMcpProposalNotFound)
@@ -3115,6 +3115,7 @@ export async function resolveEnablePluginCard(
   }
   const n = test.tools?.length ?? 0
   closeCard({ status: 'activated', toolsCount: n })
+
   // la ripresa automatica, SOLO se il test riesce: un TURNO NUOVO con la nota
   // fissa (inglese, nome ripulito come X2: niente a capo né < >, nessun testo
   // del server) — il bot ripete l'operazione chiesta senza che glielo si chieda
@@ -3126,7 +3127,7 @@ export async function resolveEnablePluginCard(
     undefined, emit, undefined, PLUGIN_ENABLED_RESUME
   )
   worker.poke()
-  return { ok: true, status: 'activated' }
+  return { ok: true, status: 'activated', toolsCount: n }
 }
 
 /**
