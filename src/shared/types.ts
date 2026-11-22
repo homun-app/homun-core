@@ -1299,6 +1299,8 @@ export interface SandbotApi {
   skillsGet(name: string): Promise<string>
   skillsDelete(name: string): Promise<void>
   skillsSetEnabledFor(name: string, agentIds: string[]): Promise<void>
+  /** V5 (fase stato-vivo): l'interruttore Attivo della voce (spenta = nel prompt di nessun bot) */
+  skillsSetEnabled(name: string, enabled: boolean): Promise<void>
   skillsReadFile(folder: string, file: string): Promise<string | null>
   skillsVersions(name: string): Promise<SkillVersion[]>
   skillsRestoreVersion(name: string, file: string): Promise<void>
@@ -1370,6 +1372,8 @@ export interface SandbotApi {
   // fase app (A2): attivazione di Composio con la chiave dell'utente
   composioStatus(): Promise<ComposioStatusInfo>
   composioSetKey(key: string): Promise<{ ok: boolean }>
+  /** V5 (fase stato-vivo): l'interruttore Attivo del toolkit (l'account resta collegato) */
+  composioSetConnectorEnabled(slug: string, enabled: boolean): Promise<{ ok: boolean }>
   composioTest(): Promise<{ ok: boolean; reason?: 'invalid-key' | 'unreachable' | 'consumer-key' | 'gateway-active'; error?: string }>
   composioDisable(): Promise<{ ok: boolean }>
   // fase app (A4): collega (browser o subito) e scollega un toolkit
@@ -1723,6 +1727,12 @@ export interface SkillOrigin {
 export interface SkillLibraryEntry {
   /** id dei bot che la usano ('*' = tutti) */
   enabledFor: string[]
+  /**
+   * V5 (fase stato-vivo): l'interruttore Attivo della voce — DISTINTO dagli
+   * enabledFor per bot: false = la skill non entra nel prompt di NESSUN bot.
+   * Assente = accesa (le voci di prima della fase restano accese).
+   */
+  enabled?: boolean
   source: SkillSourceKind
   createdBy?: string
   origin?: SkillOrigin
@@ -1746,6 +1756,8 @@ export interface SkillLibraryItem {
   folder: string
   description: string
   enabledFor: string[]
+  /** V5 (fase stato-vivo): l'interruttore Attivo della voce (assente = accesa) */
+  enabled?: boolean
   source: SkillSourceKind
   createdBy?: string
   origin?: SkillOrigin
@@ -2383,6 +2395,8 @@ export interface ComposioStatusInfo {
   /** il collegamento in attesa del login nel browser (Annulla = composioDisconnect) */
   pending: { slug: string; name: string; since: number } | null
   connected: ComposioConnectedApp[]
+  /** V5 (fase stato-vivo): i toolkit SPENTI dall'interruttore Attivo (l'account resta collegato) */
+  disabled?: string[]
 }
 
 // fase catalogo app (P7): le righe del catalogo Composio per la UI stavano

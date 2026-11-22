@@ -15,7 +15,7 @@ import { isExternalSend, applyDraftBody, DEFAULT_EXTERNAL_SEND_TOOLS, type Exter
 import * as memoryRpc from '../main/memory/memory-rpc'
 // fase skill: la libreria unica (finestra «Skill»), le versioni e l'import
 import {
-  libraryItemsForUi, pluginSkillGroups, readSkillMd, deleteLibrarySkill, setSkillEnabledFor,
+  libraryItemsForUi, pluginSkillGroups, readSkillMd, deleteLibrarySkill, setSkillEnabledFor, setSkillEnabled,
   readSupportFile, listSkillVersions, restoreSkillVersion, exportSkillFolder,
   libraryDir, skillsLibrary, writeLibrarySkill, saveSkillVersion,
   assertSkillFolder, invocableSkillList, renameLibraryFolder
@@ -1436,6 +1436,8 @@ export function buildApiMethods(
       if (!deleteLibrarySkill(String(name))) throw uiError(UI.skillErrNotFound)
     },
     'skills:set-enabled-for': ([name, ids]) => setSkillEnabledFor(assertSkillFolder(String(name)), ids as string[]),
+    // V5 (fase stato-vivo): l'interruttore Attivo della voce di libreria — spenta, la skill non entra nel prompt di nessun bot
+    'skills:set-enabled': ([name, enabled]) => setSkillEnabled(assertSkillFolder(String(name)), Boolean(enabled)),
     'skills:read-file': ([folder, file]) => readSupportFile(assertSkillFolder(String(folder)), String(file)),
     'skills:versions': ([name]) => listSkillVersions(assertSkillFolder(String(name))),
     'skills:restore-version': ([name, file]) => {
@@ -1968,6 +1970,12 @@ export function buildApiMethods(
     'composio:status': () => {
       if (!opts.composio) throw uiError(UI.composioNotActive)
       return opts.composio.status()
+    },
+    // V5 (fase stato-vivo): l'interruttore Attivo del toolkit — spento, nessuno strumento per nessun bot; l'account resta
+    'composio:set-connector-enabled': ([slug, enabled]) => {
+      if (!opts.composio) throw uiError(UI.composioNotActive)
+      opts.composio.setConnectorEnabled(String(slug ?? ''), Boolean(enabled))
+      return { ok: true }
     },
     'composio:set-key': ([key]) => {
       if (!opts.composio) throw uiError(UI.composioNotActive)

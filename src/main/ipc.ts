@@ -67,7 +67,7 @@ export const DAEMON_RPC_CHANNELS = [
   // fase skill (S2/S4/S6): la finestra «Skill» — libreria unica, editor,
   // versioni, abilitazione per bot, import e aggiornamento da GitHub;
   // K2 (ritocchi): skills:invocable per l'elenco `/` del compositore
-  'skills:library', 'skills:invocable', 'skills:get', 'skills:save', 'skills:delete', 'skills:set-enabled-for',
+  'skills:library', 'skills:invocable', 'skills:get', 'skills:save', 'skills:delete', 'skills:set-enabled-for', 'skills:set-enabled',
   'skills:read-file', 'skills:versions', 'skills:restore-version', 'skills:export',
   'skills:github-preview', 'skills:github-add',
   'skills:github-update-preview', 'skills:github-update-apply',
@@ -108,7 +108,7 @@ export const DAEMON_RPC_CHANNELS = [
   // fase app (A2–A4): Composio con la chiave dell'utente — stato, chiave,
   // prova, disattivazione, collega e scollega (tutto nel daemon; il catalogo
   // per la UI è ora il file curato nel repo, fase catalogo app P7)
-  'composio:status', 'composio:set-key', 'composio:test', 'composio:disable',
+  'composio:status', 'composio:set-key', 'composio:test', 'composio:disable', 'composio:set-connector-enabled',
   'composio:connect', 'composio:disconnect',
   // fase Composio OAuth (C5): le app dentro il server Composio collegato col login
   'composio-gateway:status', 'composio-gateway:refresh', 'composio-gateway:connect',

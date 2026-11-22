@@ -13,7 +13,7 @@ const {
   writeLibrarySkill, writeSkillFromBot, deleteLibrarySkill, listLibrarySkills, librarySkillsVisibleTo,
   buildSkillsSection, skillsSectionPrompt, readSkillFor, readSkillFileFor, setSkillEnabledFor,
   libraryDir, skillsLibrary, scanSkillFolder, saveSkillVersion, listSkillVersions, restoreSkillVersion,
-  exportSkillFolder, skillInvocationExpansion, invocableSkillsOf, slugifyBotName, SKILLS_PROMPT_MAX,
+  exportSkillFolder, skillInvocationExpansion, invocableSkillsOf, slugifyBotName, SKILLS_PROMPT_MAX, setSkillEnabled,
   libraryItemsForUi, invocableSkillList, isThirdPartySkill
 } = await import('../skills')
 
@@ -514,5 +514,49 @@ describe('P8 — il plugin del sottoagente: nel prompt E invocabile col /', () =
     expect(invocableSkillsOf(padre.id).some((s) => s.name === 'mio-plugin--abc')).toBe(false)
     deleteAgent(figlio.id)
     deleteAgent(padre.id)
+  })
+})
+
+// ---- V5 (fase stato-vivo): l'interruttore Attivo della skill di libreria ----
+
+describe('V5: il enabled GENERALE della skill (distinto dai toggle per bot)', () => {
+  it('una skill SPENTA non entra nel prompt di NESSUN bot (nemmeno con enabledFor *)', () => {
+    const bot = createAgent('Bot delle skill spente')
+    writeLibrarySkill({ name: 'spenta-da-ui', description: 'non deve comparire', body: 'b' })
+    writeLibrarySkill({ name: 'accesa', description: 'deve comparire', body: 'b' })
+    setSkillEnabled('spenta-da-ui', false)
+    // visibilità: la skill spenta sparisce per TUTTI
+    const vis = librarySkillsVisibleTo(bot.id).map((s) => s.name)
+    expect(vis).toContain('accesa')
+    expect(vis).not.toContain('spenta-da-ui')
+    // e il prompt NON la elenca
+    const section = buildSkillsSection(bot.id)
+    expect(section).toContain('accesa')
+    expect(section).not.toContain('spenta-da-ui')
+    deleteAgent(bot.id)
+  })
+
+  it('setSkillEnabled scrive il campo sulla voce della libreria e riacceso torna visibile', () => {
+    const bot = createAgent('Bot del riaccendo')
+    writeLibrarySkill({ name: 'ciclo', description: 'd', body: 'b' })
+    setSkillEnabled('ciclo', false)
+    expect(skillsLibrary()['ciclo']?.enabled).toBe(false)
+    setSkillEnabled('ciclo', true)
+    expect(skillsLibrary()['ciclo']?.enabled).toBe(true)
+    expect(librarySkillsVisibleTo(bot.id).map((s) => s.name)).toContain('ciclo')
+    // e la UI la vede (SkillLibraryItem porta il campo)
+    expect(libraryItemsForUi().find((i) => i.folder === 'ciclo')?.enabled).toBe(true)
+    deleteAgent(bot.id)
+  })
+
+  it('il enabled è DISTINCT dagli enabledFor: spenta con enabledFor * non si vede; accesa per un SOLO bot si vede da lui', () => {
+    const a = createAgent('Unico')
+    writeLibrarySkill({ name: 'solo-lui', description: 'd', body: 'b' }, { entry: { enabledFor: [a.id], source: 'user' } })
+    writeLibrarySkill({ name: 'tutti-ma-spenta', description: 'd', body: 'b' })
+    setSkillEnabled('tutti-ma-spenta', false)
+    const vis = librarySkillsVisibleTo(a.id).map((s) => s.name)
+    expect(vis).toContain('solo-lui')
+    expect(vis).not.toContain('tutti-ma-spenta')
+    deleteAgent(a.id)
   })
 })

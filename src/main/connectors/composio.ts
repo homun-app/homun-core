@@ -116,6 +116,8 @@ const KEY_FIELD = 'apiKey'
 const S_USER = 'composio.userId'
 const S_ACCOUNTS = 'composio.accounts'
 const S_ENABLED_FOR = 'composio.enabledFor'
+/** V5 (fase stato-vivo): i toolkit spenti dall'interruttore Attivo (slug, minuscoli). */
+const S_DISABLED = 'composio.connectorsDisabled'
 const S_ACTIVE = 'composio.active'
 
 export type ComposioAccountStatus = 'ACTIVE' | 'RECONNECT'
@@ -228,6 +230,8 @@ export interface ComposioStatusRpc {
   keyHint: string | null
   pending: { slug: string; name: string; since: number } | null
   connected: ComposioConnectedAppRpc[]
+  /** V5 (fase stato-vivo): i toolkit SPENTI dall'interruttore Attivo (l'account resta collegato) */
+  disabled: string[]
 }
 
 export interface ComposioCatalogRowRpc {
@@ -300,6 +304,19 @@ export function createComposioManager(deps: ComposioManagerDeps) {
   const accountOf = (slug: string): StoredAccount | undefined => accounts()[slug.toLowerCase()]
 
   const enabledForOf = (slug: string): string[] => deps.getSetting<Record<string, string[]>>(S_ENABLED_FOR, {})[slug.toLowerCase()] ?? ['*']
+  // V5 (fase stato-vivo): i toolkit SPENTI dall'interruttore Attivo — un
+  // enabled sulla VOCE (setting per slug), DISTINTO dagli enabledFor per bot
+  // e SENZA scollegare l'account (Scollega resta un gesto separato)
+  const disabledSlugs = (): string[] => deps.getSetting<string[]>(S_DISABLED, [])
+  const connectorEnabledOf = (slug: string): boolean => !disabledSlugs().includes(slug.toLowerCase())
+  const setConnectorEnabled = (slug: string, enabled: boolean): void => {
+    const key = slug.toLowerCase()
+    const cur = new Set(disabledSlugs())
+    if (enabled) cur.delete(key)
+    else cur.add(key)
+    deps.setSetting(S_DISABLED, [...cur])
+    deps.emit({ type: 'connectors' })
+  }
   const setEnabledFor = (slug: string, ids: string[]): void => {
     const all = deps.getSetting<Record<string, string[]>>(S_ENABLED_FOR, {})
     const key = slug.toLowerCase()
@@ -730,7 +747,9 @@ export function createComposioManager(deps: ComposioManagerDeps) {
               since: pendingRow[1].since
             }
           : null,
-        connected: rows
+        connected: rows,
+        // V5 (fase stato-vivo): i toolkit spenti, per l'interruttore della UI
+        disabled: disabledSlugs()
       }
     },
 
@@ -872,13 +891,22 @@ export function createComposioManager(deps: ComposioManagerDeps) {
     setEnabledFor,
     enabledForOf,
 
+    /**
+     * V5 (fase stato-vivo): l'interruttore Attivo della VOCE — spento, il
+     * toolkit non offre strumenti a nessun bot e non entra nel prompt; NON
+     * scollega l'account (quello è disconnect, un gesto separato).
+     */
+    setConnectorEnabled,
+    connectorEnabledOf,
+
     /** A5: gli schemi collegati (solo ACTIVE) per un bot. */
     toolsForAgent(agentId: string | undefined, parentId?: string): ToolDefLike[] {
+      // V5 (fase stato-vivo): un toolkit SPENTO non offre strumenti a NESSUN bot
       const slugs = connectedActiveSlugs().filter(
-        (slug) => agentId === undefined || (() => {
+        (slug) => connectorEnabledOf(slug) && (agentId === undefined || (() => {
           const ids = enabledForOf(slug)
           return ids.includes('*') || ids.includes(agentId) || (parentId !== undefined && ids.includes(parentId))
-        })()
+        })())
       )
       for (const slug of slugs) ensureToolsFresh(slug)
       return toolDefsFor(slugs)
@@ -886,11 +914,12 @@ export function createComposioManager(deps: ComposioManagerDeps) {
 
     /** A5: i server Composio di un bot per la sezione «Connettori attivi». */
     serversForAgent(agentId: string | undefined, parentId?: string): Array<{ id: string; name: string; tools: ToolDefLike[] }> {
+      // V5: i toolkit spenti restano fuori anche dall'elenco dei server del prompt
       const slugs = connectedActiveSlugs().filter(
-        (slug) => agentId === undefined || (() => {
+        (slug) => connectorEnabledOf(slug) && (agentId === undefined || (() => {
           const ids = enabledForOf(slug)
           return ids.includes('*') || ids.includes(agentId) || (parentId !== undefined && ids.includes(parentId))
-        })()
+        })())
       )
       return slugs.map((slug) => ({
         id: `composio:${slug}`,
@@ -904,8 +933,10 @@ export function createComposioManager(deps: ComposioManagerDeps) {
 
     /** A8: i nomi umani delle app Composio abilitate per un bot. */
     appsOfAgent(agentId: string | undefined, parentId?: string): string[] {
+      // V5: i toolkit spenti non entrano nei nomi delle app del bot
       return connectedActiveSlugs()
         .filter((slug) => {
+          if (!connectorEnabledOf(slug)) return false
           if (agentId === undefined) return true
           const ids = enabledForOf(slug)
           return ids.includes('*') || ids.includes(agentId) || (parentId !== undefined && ids.includes(parentId))

@@ -1293,6 +1293,11 @@ msgstr "active"
 msgid "Attività"
 msgstr "Activity"
 
+#: src/renderer/src/components/PluginCard.tsx
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Attivo"
+msgstr "Active"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "autoreview.disabled"

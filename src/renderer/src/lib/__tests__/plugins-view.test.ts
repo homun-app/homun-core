@@ -314,3 +314,26 @@ describe('V4: server spento — «spento da Homun» con Riaccendi, lo user-off �
     expect(pluginStateOfServer({ id: 'y', name: 'y', enabled: true } as never)).toBe('active')
   })
 })
+
+// ---- V5 (fase stato-vivo): la skill spenta in pagina ----
+
+describe('V5: la skill SPENTA (enabled false) — visibile ma non da sistemare', () => {
+  it('la riga dice «spento» (off-user: l\'ha deciso l\'utente), resta in Collegati e FUORI da «Da sistemare»', () => {
+    const rows = yourPlugins({
+      connectedApps: [], composio: null, composioGateway: null,
+      installed: null,
+      skills: [
+        { name: 'spenta', folder: 'spenta', description: 'd', enabledFor: ['*'], source: 'user', createdAt: 1, updatedAt: 1, files: [], valid: true, enabled: false, issues: [] },
+        { name: 'accesa', folder: 'accesa', description: 'd', enabledFor: ['*'], source: 'user', createdAt: 1, updatedAt: 1, files: [], valid: true, issues: [] }
+      ] as never,
+      agents: AGENTS, query: ''
+    })
+    const off = rows.find((r) => r.name === 'spenta')!
+    expect(off.state).toBe('off-user')
+    expect(stateLabelOf(off.state, 'it').label).toBe('spento')
+    expect(rows.find((r) => r.name === 'accesa')!.state).toBe('active')
+    expect(daSistemareCount(rows)).toBe(0)
+    const table = connectedTable({ rows, usage: [], perms: null, filter: 'all', onlyDaSistemare: false })
+    expect(table.map((t) => t.row.name)).toContain('spenta')
+  })
+})

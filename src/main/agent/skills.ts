@@ -352,11 +352,16 @@ export function listLibrarySkills(): LibrarySkill[] {
   return out.sort((a, b) => a.folder.localeCompare(b.folder))
 }
 
-/** Le skill della libreria visibili a un bot: enabledFor '*' o l'id (S2.3).
- *  K2: SOLO le skill USABILI (formato sano e name = cartella). */
+/**
+ * Le skill della libreria visibili a un bot: enabledFor '*' o l'id (S2.3).
+ * K2: SOLO le skill USABILI (formato sano e name = cartella).
+ * V5 (fase stato-vivo): una skill SPENTA (enabled false, l'interruttore
+ * Attivo della voce) non entra nel prompt di NESSUN bot — è distinto dagli
+ * enabledFor per bot.
+ */
 export function librarySkillsVisibleTo(agentId: string): LibrarySkill[] {
   const owner = skillOwnerOf(agentId)
-  return listLibrarySkills().filter((s) => s.usable && (s.entry.enabledFor.includes('*') || s.entry.enabledFor.includes(owner)))
+  return listLibrarySkills().filter((s) => s.usable && s.entry.enabled !== false && (s.entry.enabledFor.includes('*') || s.entry.enabledFor.includes(owner)))
 }
 
 /** Le skill visibili al bot nella forma dell'espansione `/` (libreria + plugin). */
@@ -720,6 +725,15 @@ export function setSkillEnabledFor(name: string, enabledFor: string[]): void {
   touchLibraryEntry(assertSkillFolder(name), { enabledFor })
 }
 
+/**
+ * V5 (fase stato-vivo): l'interruttore Attivo della voce di libreria —
+ * DISTINTO dagli enabledFor per bot: spenta, la skill non entra nel prompt
+ * di nessun bot. Non toglie i file né l'account di niente: è solo il gate.
+ */
+export function setSkillEnabled(name: string, enabled: boolean): void {
+  touchLibraryEntry(assertSkillFolder(name), { enabled })
+}
+
 // ---- lettura per il tool skill (S3.2) ----
 
 /** Il risultato del tool skill senza `file`: istruzioni ed elenco dei file. */
@@ -817,6 +831,8 @@ export function libraryItemsForUi(): SkillLibraryItem[] {
     folder: s.folder,
     description: s.description,
     enabledFor: s.entry.enabledFor,
+    // V5 (fase stato-vivo): l'interruttore Attivo della voce (assente = accesa)
+    ...(s.entry.enabled === false ? { enabled: false } : { enabled: true }),
     source: s.entry.source,
     ...(s.entry.createdBy ? { createdBy: s.entry.createdBy } : {}),
     ...(s.entry.origin ? { origin: s.entry.origin } : {}),

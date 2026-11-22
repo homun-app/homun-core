@@ -172,6 +172,7 @@ const api: SandbotApi = {
   skillsSave: (rec) => ipcRenderer.invoke('skills:save', rec),
   skillsDelete: (name) => ipcRenderer.invoke('skills:delete', name),
   skillsSetEnabledFor: (name, ids) => ipcRenderer.invoke('skills:set-enabled-for', name, ids),
+  skillsSetEnabled: (name, enabled) => ipcRenderer.invoke('skills:set-enabled', name, enabled),
   skillsReadFile: (folder, file) => ipcRenderer.invoke('skills:read-file', folder, file),
   skillsVersions: (name) => ipcRenderer.invoke('skills:versions', name),
   skillsRestoreVersion: (name, file) => ipcRenderer.invoke('skills:restore-version', name, file),
@@ -235,6 +236,7 @@ const api: SandbotApi = {
   // mai indietro: status porta solo hasKey e le ultime 4 cifre)
   composioStatus: () => ipcRenderer.invoke('composio:status'),
   composioSetKey: (key) => ipcRenderer.invoke('composio:set-key', key),
+  composioSetConnectorEnabled: (slug, enabled) => ipcRenderer.invoke('composio:set-connector-enabled', slug, enabled),
   composioTest: () => ipcRenderer.invoke('composio:test'),
   composioDisable: () => ipcRenderer.invoke('composio:disable'),
   composioConnect: (slug) => ipcRenderer.invoke('composio:connect', slug),

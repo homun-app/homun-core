@@ -189,11 +189,13 @@ function AppPluginRedirect(): React.ReactNode {
 }
 
 /** I5.3: L'unico interruttore delle impostazioni (quello di «Mostra i passaggi»). */
-export function Toggle({ checked, onChange, disabled, label }: {
+export function Toggle({ checked, onChange, disabled, label, testId }: {
   checked: boolean
   onChange(v: boolean): void
   disabled?: boolean
   label: string
+  /** V5 (fase stato-vivo): il testid dell'interruttore Attivo (facoltativo) */
+  testId?: string
 }) {
   return (
     <button
@@ -202,6 +204,7 @@ export function Toggle({ checked, onChange, disabled, label }: {
       aria-checked={checked}
       aria-label={label}
       disabled={disabled}
+      {...(testId ? { 'data-testid': testId } : {})}
       className={`relative h-6 w-10 shrink-0 rounded-full transition ${checked ? 'bg-foreground' : 'bg-muted-foreground/30'} ${disabled ? 'opacity-40' : ''}`}
       onClick={() => onChange(!checked)}
     >

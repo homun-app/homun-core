@@ -209,3 +209,64 @@ describe('V4: server spento non dall\'utente — stato onesto e bottone Riaccend
     expect(saved.disabledReason).toBeUndefined()
   })
 })
+
+// ---- V5 (fase stato-vivo): l'interruttore Attivo in cima alla scheda ----
+
+describe('V5: l\'interruttore Attivo del server in cima alla scheda', () => {
+  it('c\'è, con l\'etichetta Attivo, e riflette lo stato del server', () => {
+    render()
+    const sw = capture.els.find((e) => e.props['data-testid'] === 'plugin-card-active')
+    expect(sw).toBeTruthy()
+    expect(sw!.props['aria-checked']).toBe(true)
+    expect(sw!.props['aria-label']).toBe('Attivo')
+    const html = render({ server: { ...SERVER, enabled: false, disabledReason: 'user' } as never })
+    void html
+    const sw2 = capture.els.filter((e) => e.props['data-testid'] === 'plugin-card-active')
+    expect(sw2.length).toBeGreaterThan(0)
+  })
+
+  it('SPEGNERE: mcpSave con enabled false e disabledReason \'user\' (la riparazione V4 non lo riaccenderà)', () => {
+    stubApiMethod('mcpSave', () => [])
+    render()
+    const sw = capture.els.find((e) => e.props['data-testid'] === 'plugin-card-active')!
+    const before = callsOf('mcpSave').length
+    ;(sw.props.onClick as () => void)()
+    const calls = callsOf('mcpSave').slice(before)
+    expect(calls).toHaveLength(1)
+    const saved = calls[0]!.args[0] as { enabled: boolean; disabledReason?: string }
+    expect(saved.enabled).toBe(false)
+    expect(saved.disabledReason).toBe('user')
+  })
+
+  it('ACCENDERE: mcpSave con enabled true e SENZA motivo (il test U5 parte da lì)', () => {
+    stubApiMethod('mcpSave', () => [])
+    render({ server: { ...SERVER, enabled: false, disabledReason: 'user' } as never })
+    const sw = capture.els.find((e) => e.props['data-testid'] === 'plugin-card-active')!
+    const before = callsOf('mcpSave').length
+    ;(sw.props.onClick as () => void)()
+    const calls = callsOf('mcpSave').slice(before)
+    expect(calls).toHaveLength(1)
+    const saved = calls[0]!.args[0] as { enabled: boolean; disabledReason?: string }
+    expect(saved.enabled).toBe(true)
+    expect(saved.disabledReason).toBeUndefined()
+  })
+
+  it('connettore Composio: l\'interruttore chiama composioSetConnectorEnabled, l\'account non si scollega', () => {
+    stubApiMethod('composioSetConnectorEnabled', () => ({ ok: true }))
+    stubApiMethod('composioDisconnect', () => undefined)
+    const app = { row: { app: { id: 'gmail', name: 'Gmail', logo: null, composioSlug: 'gmail', via: 'composio' }, tagline: null, connected: 'connected' } } as never
+    setStoreStateForRender(useStore, {
+      composio: { active: true, hasKey: true, keyHint: null, pending: null, disabled: [], connected: [{ slug: 'gmail', name: 'Gmail', status: 'ACTIVE', accountId: 'a1', toolsCount: 5, enabledFor: ['*'] }] }
+    })
+    render({ server: undefined, app })
+    const sw = capture.els.find((e) => e.props['data-testid'] === 'plugin-card-active')!
+    expect(sw).toBeTruthy()
+    const before = callsOf('composioSetConnectorEnabled').length
+    ;(sw.props.onClick as () => void)()
+    const calls = callsOf('composioSetConnectorEnabled').slice(before)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.args).toEqual(['gmail', false])
+    // MAI uno Scollega implicito
+    expect(callsOf('composioDisconnect').slice(before)).toHaveLength(0)
+  })
+})

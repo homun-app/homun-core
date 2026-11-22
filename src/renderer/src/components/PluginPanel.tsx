@@ -23,6 +23,7 @@ import { appsCatalogModel, type AppsFilter, type InstalledPluginLike, type Catal
 import { yourPlugins, grayLineOf, stateLabelOf, stradaLabel, connectedTable, daSistemareCount, type PluginSegment, type YourPluginRow, type ConnectedFilter } from '../lib/plugins-view'
 import type { PermissionsConfig } from '../../../shared/types'
 import { humanizeSkillName } from '../../../shared/skill-md'
+import { Toggle } from './Settings'
 import { AppRow, AppLogo, FilterPill, useConnectFlows, DevelopersContent } from './AppsWindow'
 // PL2 (fase plugin): la scheda del plugin (tavola 9) — clic su una riga
 import { PluginCard } from './PluginCard'
@@ -70,6 +71,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
   const connectors = useStore((s) => s.connectors)
   const refreshConnectors = useStore((s) => s.refreshConnectors)
   const composio = useStore((s) => s.composio)
+  const refreshComposio = useStore((s) => s.refreshComposio)
   const composioGateway = useStore((s) => s.composioGateway)
   const refreshComposioGateway = useStore((s) => s.refreshComposioGateway)
   const agents = useStore((s) => s.agents)
@@ -209,6 +211,42 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
       if (sv) setCard({ serverId: sv.id })
     } else {
       setSkillDetail(target.folder)
+    }
+  }
+  /**
+   * V5 (fase stato-vivo): l'interruttore Attivo di una riga — il server MCP
+   * scrive enabled (OFF scrive disabledReason 'user', la parola
+   * dell'utente; ON toglie il motivo e il test U5 parte da mcp:save, se
+   * fallisce resta acceso con «non parte · Vedi perché»), il connettore
+   * Composio scrive l'enabled della VOCE senza scollegare l'account, la
+   * skill di libreria il suo enabled (spenta non entra nel prompt di nessun
+   * bot). I plugin del marketplace passano dai loro server.
+   */
+  const toggleActive = (row: YourPluginRow, next: boolean): void => {
+    const saveServer = (srv: McpServerInfo): void => {
+      const { disabledReason: _r, ...rest } = srv
+      void api.mcpSave(next ? { ...rest, enabled: true } : { ...rest, enabled: false, disabledReason: 'user' })
+        .then(() => refreshInstalled())
+        .catch(() => undefined)
+    }
+    const open = row.open
+    if (open.kind === 'server') {
+      const srv = installed?.servers.find((x) => x.id === open.serverId)
+      if (srv) saveServer(srv)
+    } else if (open.kind === 'app') {
+      if (row.composioSlug) {
+        void api.composioSetConnectorEnabled(row.composioSlug, next)
+          .then(() => refreshComposio())
+          .catch(() => undefined)
+      } else {
+        // connettore DIRETTO: l'interruttore è quello del suo server
+        const srv = installed?.servers.find((x) => x.catalogId === open.appId)
+        if (srv) saveServer(srv)
+      }
+    } else if (open.kind === 'skill' && row.gray.strada === 'skill') {
+      void api.skillsSetEnabled(open.folder, next)
+        .then(() => reloadSkills())
+        .catch(() => undefined)
     }
   }
   // gli oggetti VIVI della scheda (cercati a ogni render: i toggle si vedono)
@@ -488,7 +526,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                 ) : (
                   <div className="mt-2 space-y-1.5">
                     {yourRows.map((row) => (
-                      <YourRow key={row.key} row={row} lang={lang} onOpen={() => openRow(row)} />
+                      <YourRow key={row.key} row={row} lang={lang} onOpen={() => openRow(row)} onToggleActive={toggleActive} />
                     ))}
                   </div>
                 )}
@@ -577,7 +615,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                 <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna skill. Creane una, importala, o chiedi a un bot di salvarne una.</Trans></p>
               )}
               {yourRows.filter((r) => r.kind === 'skill').map((row) => (
-                <YourRow key={row.key} row={row} lang={lang} onOpen={() => openRow(row)} />
+                <YourRow key={row.key} row={row} lang={lang} onOpen={() => openRow(row)} onToggleActive={toggleActive} />
               ))}
 
               {/* il catalogo CURATO di oggi (K2), con le sue categorie: la
@@ -792,12 +830,19 @@ function useBriefOf(usage: { last: number; week: number } | null): string {
   return `${when} · ${usage.week} ${i18n._(msg`questa settimana`)}`
 }
 
-/** Una riga di «I tuoi»: logo, nome, verificato se lo è, la riga grigia
- *  «tipo · strada · origine» e a destra lo stato con l'azione. */
-function YourRow({ row, lang, onOpen }: {
+/**
+ * Una riga di «I tuoi»: logo, nome, verificato se lo è, la riga grigia
+ * «tipo · strada · origine», a destra lo stato con l'azione e — da V5 (fase
+ * stato-vivo) — l'interruttore Attivo (server MCP, connettori Composio e
+ * skill di libreria; spento scrive disabledReason 'user' / l'enabled della
+ * voce). La riga non è più un <button>: l'interruttore dentro un bottone
+ * non è HTML valido — div con ruolo e tasto, il click apre la scheda.
+ */
+function YourRow({ row, lang, onOpen, onToggleActive }: {
   row: YourPluginRow
   lang: 'it' | 'en'
   onOpen(): void
+  onToggleActive(row: YourPluginRow, next: boolean): void
 }): ReactNode {
   const { t } = useLingui()
   const st = stateLabelOf(row.state, lang)
@@ -807,12 +852,21 @@ function YourRow({ row, lang, onOpen }: {
     : row.bots.names.length === 0 ? t`nessun bot`
     : row.bots.extra > 0 ? t`${row.bots.names.join(', ')} +${row.bots.extra}`
     : row.bots.names.join(', ')
+  // V5: chi ha l'interruttore Attivo — i server, i connettori (Composio e
+  // diretti col loro server), le skill di LIBRERIA (quelle dei plugin si
+  // aggiornano col plugin); i plugin del marketplace passano dai server
+  const togglable = row.kind === 'server' || row.kind === 'connector' || (row.kind === 'skill' && row.gray.strada === 'skill')
+  const activeChecked = row.state !== 'off-user' && row.state !== 'off-homun'
   return (
-    <button
-      type="button"
-      className="flex w-full items-center gap-3 rounded-[14px] px-1 py-2 text-left transition hover:bg-muted/60"
+    <div
+      role="button"
+      tabIndex={0}
+      className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] px-1 py-2 text-left transition hover:bg-muted/60"
       data-testid={`plugin-row-${row.key}`}
       onClick={onOpen}
+      onKeyDown={(e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') onOpen()
+      }}
     >
       {url
         ? <img src={url} alt="" className="size-10 shrink-0 rounded-[11px] object-cover dark:bg-white" />
@@ -835,6 +889,16 @@ function YourRow({ row, lang, onOpen }: {
       <span className={`shrink-0 text-[13px] ${row.state === 'active' ? 'text-chart-2' : row.state === 'broken' || row.state === 'invalid' ? 'text-destructive' : 'text-foreground'}`}>
         {st.label}{st.action === 'why' ? ` · ${t`Vedi perché`}` : st.action === 'reconnect' ? ` · ${t`Ricollega`}` : st.action === 'setup' ? ` · ${t`Completa`}` : st.action === 'reenable' ? ` · ${t`Riaccendi`}` : ''}
       </span>
-    </button>
+      {/* V5 (fase stato-vivo): l'interruttore Attivo — il click NON apre la scheda */}
+      {togglable && onToggleActive && (
+        <span
+          className="flex shrink-0 items-center gap-1.5 text-[13px] text-muted-foreground"
+          onClick={(e: React.MouseEvent) => e.stopPropagation()}
+        >
+          <Trans>Attivo</Trans>
+          <Toggle checked={activeChecked} onChange={(v) => onToggleActive(row, v)} label={t`Attivo`} testId={`plugin-active-${row.key}`} />
+        </span>
+      )}
+    </div>
   )
 }

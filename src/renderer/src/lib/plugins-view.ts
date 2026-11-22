@@ -126,8 +126,12 @@ export function yourPlugins(input: PluginViewInput): YourPluginRow[] {
   const q = input.query.trim().toLowerCase()
 
   // -- le app del catalogo COLLEGATE (dirette o Composio) --
+  // V5 (fase stato-vivo): un connettore Composio SPENTO (l'interruttore
+  // Attivo della voce) dice «spento» — l'account resta collegato
+  const composioDisabled = new Set((input.composio?.disabled ?? []).map((x) => x.toLowerCase()))
   for (const r of input.connectedApps) {
     if (q && !matchesQuery(r.app.name.toLowerCase(), q)) continue
+    const offByToggle = r.app.via === 'composio' && r.app.composioSlug !== undefined && composioDisabled.has(r.app.composioSlug.toLowerCase())
     rows.push({
       key: `app:${r.app.id}`,
       kind: 'connector',
@@ -136,7 +140,7 @@ export function yourPlugins(input: PluginViewInput): YourPluginRow[] {
       gray: r.app.via === 'direct'
         ? { type: 'connector', strada: 'direct', origin: r.app.name }
         : { type: 'connector', strada: 'composio' },
-      state: r.connected === 'connected' ? 'active' : 'expired',
+      state: offByToggle ? 'off-user' : r.connected === 'connected' ? 'active' : 'expired',
       verified: r.app.via === 'direct',
       bots: { all: true, names: [], extra: 0 },
       open: { kind: 'app', appId: r.app.id },
@@ -202,6 +206,7 @@ export function yourPlugins(input: PluginViewInput): YourPluginRow[] {
   }
 
   // -- le skill della libreria (PL5 le porta in pagina come le altre) --
+  // V5 (fase stato-vivo): spenta dall'interruttore Attivo della voce → «spento»
   for (const s of input.skills ?? []) {
     if (q && !matchesQuery(s.name.toLowerCase(), q) && !matchesQuery(s.description.toLowerCase(), q)) continue
     rows.push({
@@ -210,7 +215,7 @@ export function yourPlugins(input: PluginViewInput): YourPluginRow[] {
       name: s.name,
       logo: null,
       gray: { type: 'skill', strada: 'skill', origin: skillOriginKey(s) === 'app' && s.importedFromApp ? `app:${s.importedFromApp}` : skillOriginKey(s) },
-      state: s.valid ? 'active' : 'invalid',
+      state: !s.valid ? 'invalid' : s.enabled === false ? 'off-user' : 'active',
       verified: false,
       bots: botsLabelOf(s.enabledFor, input.agents),
       open: { kind: 'skill', folder: s.folder }

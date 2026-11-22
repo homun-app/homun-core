@@ -130,6 +130,30 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
     void api.mcpSave({ ...rest, enabled: true }).then(() => onChanged()).catch(() => undefined)
   }
 
+  // ---- V5 (fase stato-vivo): l'interruttore Attivo in cima alla scheda ----
+  // Server MCP: scrive enabled — OFF scrive disabledReason 'user' (la parola
+  // dell'utente: migrazioni e riparazioni non lo toccano), ON toglie il
+  // motivo e parte il test U5 di mcp:save (se fallisce resta ACCESO con
+  // «non parte · Vedi perché», non si rispegne da solo). Connettore
+  // Composio: l'enabled della VOCE, senza scollegare l'account.
+  const composioSlug = !isServer && app!.row.app.composioSlug ? app!.row.app.composioSlug : null
+  const composioDisabled = new Set(composio?.disabled ?? [])
+  const activeChecked = isServer
+    ? server.enabled !== false
+    : composioSlug !== null
+      ? !composioDisabled.has(composioSlug)
+      : null
+  const setActive = (next: boolean): void => {
+    if (isServer) {
+      const { disabledReason: _r, ...rest } = server
+      void api.mcpSave(next ? { ...rest, enabled: true } : { ...rest, enabled: false, disabledReason: 'user' })
+        .then(() => onChanged())
+        .catch(() => undefined)
+    } else if (composioSlug !== null) {
+      void api.composioSetConnectorEnabled(composioSlug, next).then(() => onChanged()).catch(() => undefined)
+    }
+  }
+
   return (
     <div className="no-drag absolute inset-0 z-30 flex flex-col bg-background" data-testid="plugin-card">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-6 py-5">
@@ -161,6 +185,14 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
             >
               <Trans>Connetti</Trans>
             </button>
+          )}
+          {/* V5 (fase stato-vivo): l'interruttore Attivo — server MCP e
+              connettori Composio; le skill hanno il loro (libreria) */}
+          {activeChecked !== null && (
+            <span className="flex shrink-0 items-center gap-1.5 text-[13px] text-muted-foreground">
+              <Trans>Attivo</Trans>
+              <Toggle checked={activeChecked} onChange={setActive} label={t`Attivo`} testId="plugin-card-active" />
+            </span>
           )}
           {/* V4 (fase stato-vivo): spento da Homun → Riaccendi, che accende e
               testa; spento dall'utente non si propone niente (è la sua parola) */}
