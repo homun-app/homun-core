@@ -12,14 +12,21 @@
 //
 // Controlli: la voce «Da approvare» con 5; i gruppi giusti; i filtri; la
 // decisione dal centro che sblocca il turno del bot; la card nella chat del
-// bot passata a decisa; il riquadro nella chat principale con le 2 più
-// urgenti e «e altre 3»; «Riduci»; «Rimanda»; nessun «approva tutto».
+// bot passata a decisa; il riquadro ridotto «+N altrove» in cima (A3 fase
+// approvazioni-chiare: la richiesta del bot aperto sta SOPRA il campo);
+// «Rimanda»; nessun «approva tutto».
 //
-// Catture CDP delle tavole 4 e 5 in docs/catture/fase-centro/. VERDE in TRE
-// corse di fila: node scripts/fase-centro-probe.mjs --run 1|2|3. Attese dei
-// click UI ≤ 5 s (lezione di fase-squadra). Pulizia K4: 0 cartelle
-// sandbot-fase-centro-*, 0 daemon della sonda, 0 llama-server nati con la
-// corsa.
+// fase approvazioni-chiare — ESTENSIONE: il menu «Altre scelte ▾» del centro
+// (A1, le scelte del modello unico), il REGISTRO con le decisioni complete
+// (A2), «Consentiti sempre» con Revoca → il gate chiede di nuovo, e la
+// richiesta del bot aperto sopra il campo di scrittura (A3).
+//
+// Catture CDP delle tavole 4 e 5 in docs/catture/fase-centro/; quelle della
+// fase approvazioni-chiare (centro col Registro, chat con la richiesta in
+// basso) in docs/catture/fase-approvazioni-chiare/. VERDE in TRE corse di
+// fila: node scripts/fase-centro-probe.mjs --run 1|2|3. Attese dei click UI
+// ≤ 5 s (lezione di fase-squadra). Pulizia K4: 0 cartelle sandbot-fase-centro-*, 0
+// daemon della sonda, 0 llama-server nati con la corsa.
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, readdirSync } from 'node:fs'
@@ -34,6 +41,9 @@ const TMP_BASE = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'
 const PREFIX = 'sandbot-fase-centro'
 const SHOTS = join(ROOT, 'docs', 'catture', 'fase-centro')
 mkdirSync(SHOTS, { recursive: true })
+// fase approvazioni-chiare: le catture della fase nuova
+const SHOTS2 = join(ROOT, 'docs', 'catture', 'fase-approvazioni-chiare')
+mkdirSync(SHOTS2, { recursive: true })
 
 const log = (...a) => console.log(`[sonda r${run}]`, ...a)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -246,6 +256,13 @@ const shot = async (name) => {
   writeFileSync(join(SHOTS, name), Buffer.from(r.data, 'base64'))
   log('cattura', name)
 }
+/** la cattura della fase approvazioni-chiare (cartella della fase) */
+const shot2 = async (name) => {
+  await settle()
+  const r = await page.send('Page.captureScreenshot', { format: 'png' })
+  writeFileSync(join(SHOTS2, name), Buffer.from(r.data, 'base64'))
+  log('cattura (fase approvazioni-chiare)', name)
+}
 /** click per testid (attesa ≤ 5 s: è un click UI, la sonda deve essere rossa se la UI rallenta) */
 const clickTestid = async (testid, timeoutMs = 5_000) => {
   const deadline = Date.now() + timeoutMs
@@ -326,6 +343,42 @@ const sendMessage = async (text) => pageEval(`
   form.requestSubmit()
   return true
 `)
+/** aprire un menu Radix (si apre col POINTERDOWN, non col solo click —
+ *  lezione di fase uso-permessi) e aspettare le voci */
+const openMenu = async (testid, timeoutMs = 5_000) => {
+  const opened = await pageEval(`
+    const b = document.querySelector('[data-testid=${JSON.stringify(testid)}]')
+    if (!b) return false
+    b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, isPrimary: true, button: 0 }))
+    b.click()
+    return true
+  `).catch(() => false)
+  if (!opened) return false
+  return waitDom(`document.querySelectorAll('[role="menuitem"]').length > 0`, timeoutMs)
+}
+/** aprire il menu Radix della CARD che contiene il testo cercato */
+const openMenuInCard = async (cardText, testid, timeoutMs = 5_000) => {
+  const opened = await pageEval(`
+    const cards = [...document.querySelectorAll('[data-testid="approvals-center-card"]')]
+    const card = cards.find((c) => c.textContent.includes(${JSON.stringify(cardText)}))
+    const b = card?.querySelector('[data-testid=${JSON.stringify(testid)}]')
+    if (!b) return false
+    b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, isPrimary: true, button: 0 }))
+    b.click()
+    return true
+  `).catch(() => false)
+  if (!opened) return false
+  return waitDom(`document.querySelectorAll('[role="menuitem"]').length > 0`, timeoutMs)
+}
+
+/** cliccare la voce del menu aperto col testid cercato */
+const clickMenuItem = (testid) => pageEval(`
+  const b = document.querySelector('[data-testid=${JSON.stringify(testid)}]')
+  if (!b) return false
+  b.click()
+  return true
+`).catch(() => false)
+
 /** click su un bottone dentro la CARD che contiene il testo cercato (per decidere LA richiesta giusta) */
 const clickInCard = async (cardText, testid, timeoutMs = 5_000) => {
   const deadline = Date.now() + timeoutMs
@@ -415,6 +468,11 @@ try {
   callTool('browser', { action: 'open', url: 'https://spa.example/prenota' }, T2)
   callTool('browser', { action: 'open', url: 'https://spa.example/prenota' }, T2)
   callTool('browser_type', { ref: 'e4', text: 'rossi@example.com', submit: true }, T2)
+  // 3bis. Alloggio, SECONDA tornata (dopo la Revoca del consenso sempre: il
+  // gate deve chiedere di nuovo) — riconosciuta dal messaggio nuovo
+  const T2b = ['You are Alloggio', 'verifica-alloggio-2']
+  callTool('browser', { action: 'open', url: 'https://spa.example/prenota' }, T2b)
+  callTool('browser_type', { ref: 'e4', text: 'rossi@example.com', submit: true }, T2b)
   // 3. Archivio (Fatture marzo): browser_type con submit sulla pagina della prenota → sito interattivo
   const T3 = ['You are Archivio', 'fatture-archivio']
   callTool('browser', { action: 'open', url: 'https://spa.example/prenota' }, T3)
@@ -538,28 +596,25 @@ try {
     await selectBot('Bot') &&
     await waitDom(`!document.querySelector('[data-testid="approvals-center"]') && (document.querySelector('form textarea')?.placeholder ?? '').includes('Bot')`, 5_000)
   check('dal centro aperto, il clic su un bot della barra laterale porta alla sua chat', botViaSidebar)
+  // A3 (fase approvazioni-chiare): in cima SOLO il riquadro ridotto «+N
+  // altrove» — tutte le richieste sono di ALTRI bot (la chat è del bot Bot)
   const banner = await waitDom(`document.querySelector('[data-testid="approvals-banner"]')`, 10_000)
   const bannerText = banner ? await pageEval(`return document.querySelector('[data-testid="approvals-banner"]').textContent`) : ''
-  check('il riquadro in cima alla chat principale: «5 richieste aspettano te»', banner && bannerText.includes('5 richieste aspettano te'), String(bannerText).slice(0, 160))
-  check('le 2 più urgenti e «e altre 3»', banner && bannerText.includes('e altre 3') && (bannerText.match(/Decidi/g) ?? []).length === 2, String(bannerText).slice(0, 200))
+  check('il riquadro in cima alla chat principale è RIDOTTO: «+5 altrove»', banner && bannerText.includes('+5 altrove') && bannerText.includes('Apri'), String(bannerText).slice(0, 160))
+  check('la richiesta del bot aperto NON sta nel riquadro in cima (nessun «Decidi»)', banner && (bannerText.match(/Decidi/g) ?? []).length === 0, String(bannerText).slice(0, 200))
   // B1: la cattura 5 è la CHAT col riquadro — il centro non deve esserci nel
   // DOM al momento dello shot
   check('la cattura 5 mostra la chat col riquadro: il centro NON c\'è al momento dello shot', banner && !(await pageEval(`return document.querySelector('[data-testid="approvals-center"]') !== null`).catch(() => true)))
   await shot('5-chat-principale-riquadro.png')
 
-  // =========== 7. «Riduci» ===========
-  check('«Riduci» lo porta a una riga sola', await clickTestid('approvals-banner-collapse') &&
-    await waitDom(`(() => { const b = document.querySelector('[data-testid="approvals-banner"]'); return !!b && b.textContent.includes('5 richieste aspettano te') && (b.textContent.match(/Decidi/g) ?? []).length === 0 })()`, 5_000))
-  // la riga ridotta riapre il riquadro
-  check('la riga ridotta riapre il riquadro', await pageEval(`
-    const b = [...document.querySelectorAll('[data-testid="approvals-banner"] button')]
-    const row = b.find((x) => x.textContent.includes('5 richieste aspettano te'))
-    if (!row) return false
-    row.click(); return true
-  `) && await waitDom(`(document.querySelector('[data-testid="approvals-banner"]')?.textContent.match(/Decidi/g) ?? []).length === 2`, 5_000))
-
   // =========== 2/3. il centro: gruppi e filtri ===========
-  check('«Apri «Da approvare»» del riquadro apre il centro', await clickText('Apri «Da approvare»', { exact: true }) &&
+  // A3: il riquadro ridotto È il bottone («+N altrove · Apri "Da approvare"»)
+  const bannerOpened = await pageEval(`
+    const b = document.querySelector('[data-testid="approvals-banner"] button')
+    if (!b) return false
+    b.click(); return true
+  `).catch(() => false)
+  check('«Apri «Da approvare»» del riquadro apre il centro', bannerOpened === true &&
     await waitDom(`document.querySelector('[data-testid="approvals-center"]')`, 5_000))
   const centerText = () => pageEval(`return document.querySelector('[data-testid="approvals-center"]').textContent`)
   let text = await centerText()
@@ -578,6 +633,21 @@ try {
   check('«Tutte · 5» torna tutto', await clickText('Tutte · 5', { exact: true }) &&
     await waitDom(`document.querySelectorAll('[data-testid="approvals-center-card"]').length === 5`, 5_000))
 
+  // =========== A1: il menu «Altre scelte ▾» del centro — le scelte del modello unico ===========
+  const menuAperto = await openMenuInCard('Alloggio', 'approval-altre-scelte')
+  const menuItems = menuAperto
+    ? await pageEval(`return [...document.querySelectorAll('[role="menuitem"]')].map((x) => x.textContent.trim())`)
+    : []
+  // il submit del modulo NON offre il grant di sito (copre navigazione e clic
+  // non di conferma, mai le conferme): turno, sempre a <bot> e — in squadra —
+  // la missione, le STESSE scelte della chat (modello unico A1)
+  check('A1: «Altre scelte ▾» nel centro apre il menu del modello unico (turno, sempre a <bot>, missione)',
+    menuAperto && menuItems.some((x) => x.includes('Per questo turno')) && menuItems.some((x) => x.includes('Consenti sempre a Alloggio')) && menuItems.some((x) => x.includes('Consenti per questa missione')),
+    JSON.stringify(menuItems))
+  // si chiude senza decidere (il tasto Esc)
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).catch(() => undefined)
+  await sleep(400)
+
   // =========== 8. «Rimanda» (solo la vista: il conteggio resta 5) ===========
   check('«Rimanda» toglie LA richiesta dalla vista', await clickInCard('Archivio', 'approval-snooze') &&
     await waitDom(`![...document.querySelectorAll('[data-testid="approvals-center-card"]')].some((c) => c.textContent.includes('Archivio'))`, 5_000))
@@ -590,6 +660,67 @@ try {
   const cardDecisa = await waitDom(`(await window.sandbot.getEntries(${JSON.stringify(turismo.id)})).some((e) => e.meta?.approvalId && e.meta?.status === 'allowed')`, 30_000, 500)
   check('la card nella chat del bot è passata a decisa (allowed)', cardDecisa)
   check('il conteggio della barra scende a 4', await waitDom(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('4')`, 15_000, 500))
+
+  // =========== A3: la richiesta del bot aperto sta SOPRA il campo di scrittura ===========
+  if (!(await selectBot('Alloggio'))) throw new Error('selezione di Alloggio non riuscita')
+  const composerBox = await waitDom(`document.querySelector('[data-testid="composer-approval"]')`, 5_000)
+  const composerText = composerBox ? await pageEval(`return document.querySelector('[data-testid="composer-approval"]').textContent`) : ''
+  check('A3: la richiesta di Alloggio sta nel riquadro SOPRA il campo (frase + Consenti/Rifiuta/Altre scelte)',
+    composerBox && composerText.includes('Alloggio') && composerText.includes('vuole') && composerText.includes('Consenti') && composerText.includes('Rifiuta') && composerText.includes('Altre scelte'),
+    String(composerText).slice(0, 160))
+  check('A3: il campo di scrittura resta usabile, con la richiesta in attesa',
+    await waitDom(`!!document.querySelector('form textarea') && !!document.querySelector('[data-testid="composer-approval"]')`, 5_000))
+  const bannerAltrove = await pageEval(`return document.querySelector('[data-testid="approvals-banner"]')?.textContent ?? ''`)
+  // Archivio è «Rimandata» (solo vista): nel riquadro ridotto contano le
+  // ALTRE visibili — Solleciti e Ricerche
+  check('A3: in cima solo «+2 altrove» (le altre visibili sono di altri bot)', bannerAltrove.includes('+2 altrove') && !bannerAltrove.includes('modulo di verifica'), bannerAltrove.slice(0, 120))
+  await shot2('1-chat-richiesta-sopra-il-campo.png')
+
+  // =========== A1+A2: «Consenti sempre a Alloggio» DAL CAMPO → la grant, il registro la dice ===========
+  const menuComposer = await openMenu('composer-altre-scelte')
+  const vociComposer = menuComposer
+    ? await pageEval(`return [...document.querySelectorAll('[role="menuitem"]')].map((x) => x.textContent.trim())`)
+    : []
+  check('A1: il menu del riquadro sopra il campo offre le STESSE scelte (turno, sempre a Alloggio, missione)',
+    menuComposer && vociComposer.some((x) => x.includes('Consenti sempre a Alloggio')) && vociComposer.some((x) => x.includes('Per questo turno')) && vociComposer.some((x) => x.includes('Consenti per questa missione')),
+    JSON.stringify(vociComposer))
+  check('A1: la scelta «sempre» dal riquadro decide (il conteggio scende a 3)', await clickMenuItem('approval-choice-always') &&
+    await waitDom(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('3')`, 30_000, 500))
+  const grantsDopo = await rpc(`grantsList()`)
+  check('A2: la grant è NATA (Consentiti sempre la conterrà)', (grantsDopo ?? []).length === 1, JSON.stringify(grantsDopo)?.slice(0, 140))
+
+  // =========== A2: il REGISTRO nel centro ===========
+  check('A2: il centro si riapre', await clickTestid('sidebar-approvals') &&
+    await waitDom(`document.querySelector('[data-testid="approvals-center"]')`, 5_000))
+  check('A2: le schede «Richieste | Registro»', await waitDom(`document.querySelector('[data-testid="approvals-tab-registro"]')`, 5_000))
+  check('A2: «Registro di oggi» (in fondo alle richieste) apre il Registro', await clickTestid('approvals-open-registro') &&
+    await waitDom(`document.querySelector('[data-testid="approvals-registro"]')`, 5_000))
+  await sleep(600)
+  const registroText = await pageEval(`return document.querySelector('[data-testid="approvals-registro"]')?.textContent ?? ''`)
+  check('A2: le decisioni complete — chi, scelta, da dove (Rifiutato dal centro, Consentito sempre dalla chat)',
+    registroText.includes('Rifiutato') && registroText.includes('dal centro') && registroText.includes('Consentito sempre') && registroText.includes('dalla chat'),
+    registroText.slice(0, 260))
+  // i filtri con le righe (come il centro: gli a zero restano nascosti —
+  // Scadute e Passate da sole nascono quando succedono, i loro modelli sono
+  // nei test)
+  check('A2: i filtri del registro (Approvate · N, Rifiutate · 1)',
+    registroText.includes('Approvate') && registroText.includes('Rifiutate'),
+    registroText.slice(0, 160))
+  // «Consentiti sempre» con Revoca
+  const grantsSez = await waitDom(`document.querySelector('[data-testid="approvals-registro-grants"]')`, 5_000)
+  const grantsText = grantsSez ? await pageEval(`return document.querySelector('[data-testid="approvals-registro-grants"]').textContent`) : ''
+  check('A2: «Consentiti sempre» elenca la grant di Alloggio con Revoca',
+    grantsSez && grantsText.includes('Alloggio') && grantsText.includes('Revoca'), grantsText.slice(0, 160))
+  await shot2('2-centro-registro.png')
+  check('A2: Revoca cancella la grant', await clickTestid('grant-revoke') &&
+    await waitDom(`(await window.sandbot.grantsList()).length === 0`, 10_000, 500))
+
+  // =========== A2: revocata, il GATE chiede di nuovo ===========
+  if (!(await selectBot('Alloggio'))) throw new Error('selezione di Alloggio non riuscita (2)')
+  await sendMessage('verifica-alloggio-2: scrivi di nuovo la mia email nel modulo (https://spa.example/prenota) e invialo')
+  check('A2: revocata la grant, la STESSA azione torna a chiedere (conteggio risale a 4)',
+    await waitDom(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('4')`, 90_000, 500),
+    (await pageEval(`return document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? ''`).catch(() => '')))
 
   // =========== 9. nessun «approva tutto» ===========
   const approveAll = await pageEval(`return [...document.querySelectorAll('button')].filter((b) => /approva tutto|approve all/i.test(b.textContent + ' ' + (b.getAttribute('aria-label') ?? ''))).length`)

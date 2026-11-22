@@ -315,6 +315,9 @@ try {
   check('PL1: il server rotto dice «non parte · Vedi perché»', brokenLabel.includes('non parte') && brokenLabel.includes('Vedi perché'), brokenLabel.slice(0, 100))
 
   await shot(cdp, '1-pagina-plugin.png')
+  // A4: «Per sviluppatori» in fondo CHIUSO di default — una riga che si apre
+  const devClosed = await waitDom(cdp, `document.querySelector('[data-testid="plugin-developers-toggle"]')`, 5_000) && !(await pageEval(cdp, `return document.querySelector('[data-testid="plugin-advanced"]')?.textContent ?? ''`)).includes('Chiave')
+  check('A4: «Per sviluppatori» chiuso di default (la riga c\'è, il contenuto no)', devClosed)
 
   // ---- 3. i filtri Connettori / Skill ----
   const segButtons = await pageEval(cdp, `return [...document.querySelectorAll('[data-testid="plugin-segments"] button')].map((b) => b.textContent.trim())`)
@@ -349,7 +352,12 @@ try {
     const btn = [...document.querySelectorAll('[data-testid="plugin-card-tabs"] button')].find((b) => b.textContent.trim() === 'Autorizzazioni')
     btn?.click(); return true
   `)
-  check('PL2: la divisione Sola lettura · 2 e Scrittura · 1 (annotazioni vere del server)', await waitDom(cdp, `document.querySelector('[data-testid="plugin-permissions"]')?.textContent?.includes('Sola lettura · 2')`, 5_000) && await waitDom(cdp, `document.querySelector('[data-testid="plugin-permissions"]')?.textContent?.includes('Scrittura · 1')`))
+  // A4 (fase approvazioni-chiare): l'invio send_email dell'insieme fisso sta
+  // nel gruppo SCRITTURA col lucchetto (prima in «Altro»)
+  check('PL2: la divisione Sola lettura · 2, Scrittura · 2 (col fisso send_email) e Altro · 1', await waitDom(cdp, `document.querySelector('[data-testid="plugin-permissions"]')?.textContent?.includes('Sola lettura · 2')`, 5_000) && await waitDom(cdp, `document.querySelector('[data-testid="plugin-permissions"]')?.textContent?.includes('Scrittura · 2')`) && await waitDom(cdp, `document.querySelector('[data-testid="plugin-permissions"]')?.textContent?.includes('Altro · 1')`))
+  // A4: le descrizioni senza il prefisso interno [MCP:<nome>]
+  const permText = await pageEval(cdp, `return document.querySelector('[data-testid="plugin-permissions"]')?.textContent ?? ''`)
+  check('A4: nessun prefisso [MCP:…] nelle descrizioni degli strumenti', !permText.includes('[MCP:'), permText.slice(0, 80))
   const lockOk = await waitDom(cdp, `document.querySelector('[data-testid="plugin-tool-send_email"] svg')`, 5_000)
   const sendOptions = await pageEval(cdp, `return [...(document.querySelector('[data-testid="plugin-tool-send_email"] select')?.options ?? [])].map((o) => o.textContent.trim())`)
   check('PL2: l\'invio è dell\'insieme fisso: lucchetto e NESSUN «Consenti sempre»', lockOk && !sendOptions.includes('Consenti sempre'), JSON.stringify(sendOptions))
