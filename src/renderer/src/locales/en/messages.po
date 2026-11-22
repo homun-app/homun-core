@@ -54,10 +54,6 @@ msgstr "— model —"
 msgid ", fuso {0}"
 msgstr ", {0} time zone"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "…"
-msgstr "…"
-
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "…e una voce senza nome: chiede sempre l'approvazione"
 msgstr "…and an unnamed entry: it always asks for approval"
@@ -148,11 +144,6 @@ msgstr "[task no. {id}{hasTitle, select, yes { \"{title}\"} other {}} — to clo
 msgid "{0, plural, one {# byte} other {# byte}}"
 msgstr "{0, plural, one {# byte} other {# bytes}}"
 
-#. placeholder {0}: model.connectedCount
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "{0, plural, one {# connessa ›} other {# connesse ›}}"
-msgstr "{0, plural, one {# connected ›} other {# connected ›}}"
-
 #. placeholder {0}: group.steps.length
 #: src/renderer/src/components/Chat.tsx
 msgid "{0, plural, one {# passo} other {# passaggi}}"
@@ -163,12 +154,10 @@ msgstr "{0, plural, one {# step} other {# steps}}"
 msgid "{0, plural, one {# segreto} other {# segreti}}"
 msgstr "{0, plural, one {# secret} other {# secrets}}"
 
-#. placeholder {0}: agentName(filterAgent)
 #. placeholder {0}: skillCategoryLabel(c)
 #. placeholder {0}: tk.status
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "{0}"
 msgstr "{0}"
 
@@ -200,12 +189,6 @@ msgstr "{0} ›"
 msgid "{0} {1}"
 msgstr "{0} {1}"
 
-#. placeholder {0}: preview.repo
-#. placeholder {1}: preview.commit.slice(0, 8)
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "{0} @ {1}"
-msgstr "{0} @ {1}"
-
 #. placeholder {0}: fmtUsd(m.cost.input)
 #. placeholder {1}: fmtUsd(m.cost.output)
 #: src/renderer/src/components/ui/ModelPicker.tsx
@@ -227,11 +210,6 @@ msgstr "{0} actions are waiting for you"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "{0} eliminate"
 msgstr "{0} deleted"
-
-#. placeholder {0}: s.fileCount
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "{0} file"
-msgstr "{0} file"
 
 #. placeholder {0}: m.sizeGb
 #. placeholder {1}: m.source
@@ -290,12 +268,6 @@ msgstr "{0} requests from {bots} bots · only you can decide them · each reques
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "{0} selezionate"
 msgstr "{0} selected"
-
-#. placeholder {0}: plugin.skills.length
-#. placeholder {1}: plugin.servers.length
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "{0} skill · {1} server"
-msgstr "{0} skills · {1} servers"
 
 #. placeholder {0}: team.waitingCount
 #: src/renderer/src/components/Sidebar.tsx
@@ -573,10 +545,6 @@ msgstr "{tool}: {direction, select, toBox {Mac {macPath} → box {boxPath}} from
 msgid "approval.contaminated"
 msgstr "{tool}: the turn has read untrusted web content — the action with effects goes back to the user"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "{x}"
-msgstr "{x}"
-
 #. placeholder {0}: provider.keyHint ?? ''
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "•••• {0}"
@@ -749,14 +717,6 @@ msgstr "Access: with a token"
 msgid "Account"
 msgstr "Account"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Account Composio"
-msgstr "Composio account"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Account Composio · connesso"
-msgstr "Composio account · connected"
-
 #: src/renderer/src/components/PluginCard.tsx
 msgid "Account e bot"
 msgstr "Accounts and bots"
@@ -801,6 +761,7 @@ msgstr "Refresh"
 msgid "Aggiorna da GitHub"
 msgstr "Update from GitHub"
 
+#: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Aggiornamento disponibile"
 msgstr "Update available"
@@ -881,7 +842,7 @@ msgstr "Add a marketplace"
 msgid "Aggiungo…"
 msgstr "Adding…"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 msgid "Aggiunta"
 msgstr "Added"
 
@@ -1005,10 +966,6 @@ msgstr "other"
 msgid "Altro"
 msgstr "Other"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Altro ▾"
-msgstr "More ▾"
-
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Altro…"
 msgstr "Other…"
@@ -1075,13 +1032,8 @@ msgid "anteprima"
 msgstr "preview"
 
 #: src/renderer/src/components/ComputerFiles.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Anteprima"
 msgstr "Preview"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "App"
-msgstr "Apps"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "App e skill"
@@ -1212,6 +1164,10 @@ msgstr "Open the app window to authorize."
 #: src/shared/ui-messages.ts
 msgid "conn.needsAuthOpenWindow"
 msgstr "Open the Homun window to authorize"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Apri la pagina Plugin"
+msgstr "Open the Plugin page"
 
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Apri lo schermo"
@@ -1396,7 +1352,6 @@ msgstr "Next"
 msgid "Avanzamento"
 msgstr "Progress"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
@@ -1614,10 +1569,6 @@ msgstr "Uploaded {ok} files."
 msgid "Caricato: {0}"
 msgstr "Uploaded: {0}"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Carriera"
-msgstr "Career"
-
 #: src/renderer/src/components/ComputerFiles.tsx
 msgid "Cartella vuota."
 msgstr "Empty folder."
@@ -1667,17 +1618,9 @@ msgstr "Search the MCP registry"
 msgid "Cerca per titolo…"
 msgstr "Search by title…"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Cerca skill"
-msgstr "Search skills"
-
 #: src/renderer/src/lib/activity.ts
 msgid "cerca sul web…"
 msgstr "searches the web…"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Cerca tra app e skill"
-msgstr "Search apps and skills"
 
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Cerca tra plugin e skill"
@@ -1846,11 +1789,9 @@ msgstr "close"
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/ComputerPanel.tsx
-#: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/PipView.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/ui/dialog.tsx
 #: src/renderer/src/components/WidgetCard.tsx
 msgid "Chiudi"
@@ -1961,10 +1902,6 @@ msgstr "Connection"
 #: src/shared/ui-messages.ts
 msgid "composio.cancelled"
 msgstr "Connection of {name} cancelled."
-
-#: src/renderer/src/components/McpWindow.tsx
-msgid "Collegano Homun ai tuoi strumenti e ai servizi della tua azienda. Se usi già Cursor o Claude, sono gli stessi server: aggiungili qui con lo stesso comando o lo stesso indirizzo."
-msgstr "They connect Homun to your tools and your company’s services. If you already use Cursor or Claude, these are the same servers: add them here with the same command or the same address."
 
 #. placeholder {0}: yourRows.length
 #: src/renderer/src/components/PluginPanel.tsx
@@ -2091,10 +2028,6 @@ msgstr "Composio is already active with the project key (developers). The two pa
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Composio è già collegato con il login. Le due strade non possono stare insieme: disattivo il login e uso la chiave di progetto?"
 msgstr "Composio is already connected with the sign-in. The two paths cannot be active together: deactivate the sign-in and use the project key?"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Composio è un servizio di terzi: i login e le azioni delle app che colleghi lì passano dai suoi server, non restano solo sul tuo Mac. Ha un piano gratuito."
-msgstr "Composio is a third-party service: the sign-ins and the actions of the apps you connect there pass through its servers, they don't stay only on your Mac. It has a free plan."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Composio è un servizio di terzi: i login e le azioni delle app collegate tramite Composio passano dai suoi server, non restano solo sul tuo Mac."
@@ -2239,10 +2172,6 @@ msgstr "connector_poll: missing tool"
 msgid "Connessa"
 msgstr "Connected"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Connesse"
-msgstr "Connected"
-
 #: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Connessione al terminale…"
 msgstr "Connecting to the terminal…"
@@ -2250,10 +2179,6 @@ msgstr "Connecting to the terminal…"
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Connessione allo schermo…"
 msgstr "Connecting to the screen…"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "connesso"
-msgstr "connected"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
@@ -2279,6 +2204,10 @@ msgstr "Connectors"
 #: src/shared/ui-messages.ts
 msgid "rpc.connectorsUnavailable"
 msgstr "connectors not available"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Connettori, server MCP e skill stanno nella pagina «Plugin» della barra."
+msgstr "Connectors, MCP servers and skills live in the «Plugin» page of the sidebar."
 
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Connettori, server MCP e skill: tutto quello che dà capacità ai tuoi bot, in un posto."
@@ -2369,10 +2298,6 @@ msgstr "Allowed once"
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "consigliata"
 msgstr "recommended"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Consigliate per te"
-msgstr "Recommended for you"
 
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Consigliati per il tuo lavoro"
@@ -2549,14 +2474,6 @@ msgstr "created {0} · updated {1}"
 msgid "creata da {0}"
 msgstr "created by {0}"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "creata da un bot"
-msgstr "created by a bot"
-
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Create dai bot"
-msgstr "Created by bots"
-
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/GuideView.tsx
 msgid "Creatura"
@@ -2628,10 +2545,6 @@ msgstr "To approve"
 msgid "Da approvare, {count} richieste"
 msgstr "To approve, {count} requests"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "da autorizzare"
-msgstr "needs authorization"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "conn.needsAuthSettings"
@@ -2641,7 +2554,6 @@ msgstr "to authorize (Settings → Installed → Connect)"
 msgid "da compilare"
 msgstr "to fill in"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Da completare"
 msgstr "To complete"
@@ -2660,21 +2572,9 @@ msgstr "from external content"
 msgid "onboarding.focusAskAny"
 msgstr "Where do you want to start?"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "da GitHub"
-msgstr "from GitHub"
-
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Da GitHub"
-msgstr "From GitHub"
-
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Da installare: serve macOS 26 o successivo"
 msgstr "To install: macOS 26 or later is required"
-
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Da plugin"
-msgstr "From plugins"
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "da preparare"
@@ -2710,10 +2610,6 @@ msgstr "By you"
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Dai un nome al tuo bot"
 msgstr "Give your bot a name"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "dashboard.composio.dev"
-msgstr "dashboard.composio.dev"
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Decide da solo le richieste semplici quando le Approvazioni sono su Automatico."
@@ -2805,14 +2701,6 @@ msgid "Direttamente sul Mac"
 msgstr "Directly on the Mac"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Disattiva"
-msgstr "Deactivate"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Disattiva davvero"
-msgstr "Really deactivate"
-
-#: src/renderer/src/components/AppsWindow.tsx
 msgid "Disattiva il login e riprova"
 msgstr "Deactivate the sign-in and retry"
 
@@ -2824,21 +2712,9 @@ msgstr "Deactivate the key"
 msgid "Disattiva la chiave e collega"
 msgstr "Turn off the key and connect"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Disattivare toglie il server e revoca il token sul tuo Mac: le app collegate restano sul tuo account Composio, le togli da"
-msgstr "Deactivating removes the server and revokes the token on your Mac: the connected apps remain on your Composio account, remove them from"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "disattivate"
 msgstr "disabled"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Disinstalla"
-msgstr "Uninstall"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Disinstalla davvero"
-msgstr "Really uninstall"
 
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Disinstalla lo strumento di Apple"
@@ -3059,7 +2935,6 @@ msgstr "Already running"
 msgid "Era già presente"
 msgstr "Already present"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/DraftCard.tsx
 msgid "errore"
@@ -3096,10 +2971,6 @@ msgstr "e.g. My gateway"
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "es. llama-3.2-3b-instruct"
 msgstr "e.g. llama-3.2-3b-instruct"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
-msgstr "e.g. Use this account for work only; summarize Italian emails as a bulleted list…"
 
 #: src/renderer/src/lib/activity.ts
 msgid "esegue un comando…"
@@ -3362,10 +3233,6 @@ msgstr "Invalid time zone: \"{tz}\""
 msgid "gateway"
 msgstr "gateway"
 
-#: src/renderer/src/components/McpWindow.tsx
-msgid "Gateway, plugin e registro"
-msgstr "Gateways, plugins and the registry"
-
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/GuideView.tsx
 msgid "Gelatina"
@@ -3378,18 +3245,6 @@ msgstr "Gemini CLI"
 #: src/renderer/src/components/Settings.tsx
 msgid "Generali"
 msgstr "General"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Gestisci ›"
-msgstr "Manage ›"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Gestisci su Composio"
-msgstr "Manage on Composio"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "gestiscile su Composio"
-msgstr "manage them on Composio"
 
 #: src/renderer/src/components/McpWindow.tsx
 msgid "già collegato"
@@ -3721,10 +3576,6 @@ msgstr "http://127.0.0.1:11434"
 msgid "http://127.0.0.1:1234"
 msgstr "http://127.0.0.1:1234"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "https://github.com/owner/repo"
-msgstr "https://github.com/owner/repo"
-
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "https://utente.github.io/sandbot/client.json"
 msgstr "https://user.github.io/sandbot/client.json"
@@ -3768,10 +3619,6 @@ msgstr "Secrets are used by the bots' COMMANDS (<0>{SECRET_TEMPLATE}</0>): the v
 #: src/renderer/src/components/PluginCard.tsx
 msgid "i segreti stanno cifrati sul tuo Mac"
 msgstr "secrets are stored encrypted on your Mac"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "I server MCP si gestiscono nella finestra Server MCP"
-msgstr "MCP servers are managed in the MCP Servers window"
 
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "I token stanno cifrati sul tuo Mac."
@@ -4254,14 +4101,6 @@ msgstr "Import from other apps"
 msgid "Importa skill"
 msgstr "Import skills"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "importata · modificata"
-msgstr "imported · edited"
-
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Importate"
-msgstr "Imported"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.screenControlFailed"
@@ -4573,10 +4412,6 @@ msgstr "Instructions"
 msgid "Istruzioni (markdown)"
 msgstr "Instructions (markdown)"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
-msgstr "Custom instructions (they go into the bot prompt when the connector is active)"
-
 #: src/renderer/src/components/BoxSetupProgress.tsx
 msgid "Kernel"
 msgstr "Kernel"
@@ -4713,10 +4548,6 @@ msgstr "The uninstall didn't work: try again."
 msgid "boxSetup.verifySignature"
 msgstr "The package signature doesn't appear to be Apple's: I deleted it."
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "la libreria dei bot: chi le usa, le versioni, l'import da GitHub"
-msgstr "the bots' library: who uses them, versions, GitHub import"
-
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui."
 msgstr "The library is empty: documents, charts and files your bots prepare end up here."
@@ -4788,10 +4619,6 @@ msgstr "working"
 msgid "lavora…"
 msgstr "working…"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Lavoro"
-msgstr "Work"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "onboarding.focusWork"
@@ -4800,14 +4627,6 @@ msgstr "Everyday work"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "lavoro, personale…"
 msgstr "work, personal…"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Le app collegate fuori da Homun non si vedono qui: "
-msgstr "Apps connected outside Homun don't show up here: "
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Le app dell'elenco che passano da qui"
-msgstr "The apps in the list that go through here"
 
 #. placeholder {0}: useApp.app
 #: src/renderer/src/components/ApprovalCard.tsx
@@ -5165,17 +4984,9 @@ msgstr "I need a brain. What do I think with?"
 msgid "boxSetup.noSpace"
 msgstr "I need about {needed} GB of free space, I can see {free}."
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Mie"
-msgstr "Mine"
-
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Migliora la ricerca: scarica il modello (circa 400 MB)"
 msgstr "Improve search: download the model (about 400 MB)"
-
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "migrata"
-msgstr "migrated"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "migrata dalla libreria per bot"
@@ -5547,19 +5358,10 @@ msgstr "No server found."
 msgid "Nessun task."
 msgstr "No tasks."
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "nessun tool elencato"
-msgstr "no tools listed"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "nessun tool riconosciuto nel connettore: configura tool e idField a mano"
 msgstr "no tool recognized in the connector: set tool and idField by hand"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Nessuna app connessa: comincia dalle consigliate."
-msgstr "No connected apps: start from the recommended ones."
-
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Nessuna app trovata. Prova con un altro nome."
 msgstr "No app found. Try another name."
@@ -5607,7 +5409,6 @@ msgid "Nessuna routine."
 msgstr "No routines."
 
 #: src/renderer/src/components/PluginPanel.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Nessuna skill trovata"
 msgstr "No skills found"
 
@@ -5623,10 +5424,6 @@ msgstr "No skills found in the other apps."
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Nessuna skill. Creane una, importala, o chiedi a un bot di salvarne una."
 msgstr "No skills yet. Write one, import one, or ask a bot to save one."
-
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Nessuna skill. Scrivine una, importala da GitHub, o chiedi a un bot di salvare come skill un lavoro che ha appena fatto."
-msgstr "No skills yet. Write one, import it from GitHub, or ask a bot to save a finished job as a skill."
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Nessuna versione precedente."
@@ -5715,10 +5512,6 @@ msgstr "Folder name"
 msgid "rpc.invalidServerSlug"
 msgstr "Invalid server name"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Nome già presente: salva come"
-msgstr "Name already in use: save as"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "skill.nameInvalid"
@@ -5763,10 +5556,6 @@ msgstr "Never ask again"
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Non chiedere più?"
 msgstr "Never ask again?"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "non connesso"
-msgstr "not connected"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -5817,10 +5606,6 @@ msgstr "Not now"
 #: src/shared/ui-messages.ts
 msgid "dialog.moveToApplications.replaceNo"
 msgstr "Not now"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Non più attiva: ricollega per riavere le sue azioni."
-msgstr "No longer active: reconnect to get its actions back."
 
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Non posso ora: controlla lo spazio e riprova."
@@ -5929,10 +5714,6 @@ msgstr "I can't find Apple's uninstall script: I'm not removing anything."
 msgid "non usa i tool: non adatto"
 msgstr "no tools: not suitable"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "non valida"
-msgstr "invalid"
-
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Non valido"
 msgstr "Not valid"
@@ -5965,10 +5746,6 @@ msgstr "New API key"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Nuova routine"
 msgstr "New routine"
-
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Nuova skill"
-msgstr "New skill"
 
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/Sidebar.tsx
@@ -6203,10 +5980,6 @@ msgstr "thinking…"
 msgid "pensando…"
 msgstr "thinking…"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Pensiero"
-msgstr "Thinking"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "Per attivarlo, macOS chiede il tuo via"
 msgstr "To enable it, macOS asks for your approval"
@@ -6215,7 +5988,6 @@ msgstr "To enable it, macOS asks for your approval"
 msgid "per bot"
 msgstr "by bot"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/PluginCard.tsx
 msgid "per bot:"
 msgstr "per bot:"
@@ -6258,10 +6030,6 @@ msgstr "I need a model to answer you."
 msgid "Per sviluppatori"
 msgstr "For developers"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Per sviluppatori: server personalizzati, plugin, registro"
-msgstr "For developers: custom servers, plugins, registry"
-
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Perché lo so?"
 msgstr "Why do I know this?"
@@ -6298,7 +6066,6 @@ msgid "Pixel"
 msgstr "Pixel"
 
 #: src/renderer/src/components/ServerSheet.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "plugin"
 msgstr "plugin"
 
@@ -6316,11 +6083,6 @@ msgstr "Plugin \"{name}\" installed: the bot has received the outcome."
 #: src/shared/ui-messages.ts
 msgid "sistema.pluginInstallFailed"
 msgstr "Plugin \"{name}\" NOT installed: {error}"
-
-#. placeholder {0}: s.plugin
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "plugin {0}"
-msgstr "plugin {0}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -6865,10 +6627,6 @@ msgstr "resume"
 msgid "presence.resumeAll"
 msgstr "Resume all"
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Ricerca"
-msgstr "Research"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "onboarding.focusResearch"
@@ -7364,13 +7122,11 @@ msgstr "Screen"
 msgid "Schermo del bot"
 msgstr "Bot screen"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Scollega"
 msgstr "Disconnect"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/PluginCard.tsx
 msgid "Scollega davvero"
 msgstr "Really disconnect"
@@ -7380,12 +7136,7 @@ msgstr "Really disconnect"
 msgid "Scollegare {0}? I bot che lo usano vanno spostati."
 msgstr "Disconnect {0}? Bots using it need to be moved."
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Scollegare NON cancella l'account su Composio: si gestisce da composio.dev."
-msgstr "Disconnecting does NOT delete the account on Composio: manage it at composio.dev."
-
 #: src/renderer/src/components/PluginCard.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Scrittura"
 msgstr "Writing"
 
@@ -7559,8 +7310,6 @@ msgstr "Third-party server: it can read and do whatever its tools allow"
 msgid "Server esterno"
 msgstr "External server"
 
-#: src/renderer/src/components/AppsWindow.tsx
-#: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Server MCP"
@@ -7655,7 +7404,6 @@ msgid "Sezione"
 msgstr "Section"
 
 #: src/renderer/src/components/PluginPanel.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Sfoglia"
 msgstr "Browse"
 
@@ -7742,10 +7490,6 @@ msgstr "sk-…"
 msgid "Skill"
 msgstr "Skills"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Skill · {skillsCount}"
-msgstr "Skill · {skillsCount}"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "skill.err.notFound"
@@ -7786,10 +7530,6 @@ msgstr "Delivery reminder to the parent (wake_parent)."
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "solo con /"
 msgstr "only with /"
-
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Solo istruzioni: gli script inclusi non vengono eseguiti."
-msgstr "Instructions only: any included scripts are never run."
 
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "Solo tu puoi decidere"
@@ -8306,10 +8046,8 @@ msgstr "Turn superseded by a new message"
 msgid "tutte"
 msgstr "all"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Tutte"
 msgstr "All"
 
@@ -8675,10 +8413,6 @@ msgstr "View"
 msgid "Vista dal vivo del computer del bot"
 msgstr "A live view of the bot’s computer"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Visualizza tutto"
-msgstr "View all"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.itemInconsistent"
@@ -8687,10 +8421,6 @@ msgstr "inconsistent item"
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.itemNotFound"
-msgstr "item not found"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "voce non trovata"
 msgstr "item not found"
 
 #: src/renderer/src/components/McpWindow.tsx
