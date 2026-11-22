@@ -10,6 +10,8 @@ import type { PermissionMode } from '../../shared/types'
 import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, serverReadGrantCovers, grantActive, useAppAlwaysAsk, useAppTargetsMatch, type McpAnnotationsLike } from './permission-rules'
 import { approvalsMode } from './auto-review'
 // fase app (A6): la classificazione delle azioni di Composio (pura)
+// A4 (fase approvazioni-chiare): l'insieme fisso dei PLUGIN (invii, pagamenti)
+import { fixedAskOf } from '../../shared/tool-classify'
 import { classifyComposioToolName } from '../connectors/composio-actions'
 // Q1 (fase squadra): l'autonomia della squadra e l'insieme FISSO (pura)
 import { squadAlwaysAsks, type GroupAutonomy } from './squad-autonomy'
@@ -123,6 +125,24 @@ export type Verdict =
   }
 }
   | { kind: 'deny'; reason: string }
+
+/**
+ * A4 (fase approvazioni-chiare): la regola «Consenti sempre» NON toglie
+ * l'utente dalle azioni verso fuori — gli strumenti di plugin dell'insieme
+ * fisso (invii, pagamenti: send_email, checkout…) chiedono ANCHE fuori dai
+ * team quando la regola che ha fatto passare è always_allow. Per «Blocca»
+ * non cambia niente (il deny è già tornato prima). Null per tutto il resto.
+ */
+function fixedSetAskOfRule(tool: string): Verdict | null {
+  if (!tool.startsWith('mcp__') && !tool.startsWith('composio__')) return null
+  if (!fixedAskOf(tool)) return null
+  return {
+    kind: 'ask',
+    reason: `${tool}: this outgoing action always needs the user's approval`,
+    ui: ui(UI.approvalFixedSet, { tool }),
+    keys: [tool]
+  }
+}
 
 function matchRuleEntry(tool: string, target: string, rules: ReturnType<typeof getPermissions>['rules']): typeof rules[number] | null {
   // regola più specifica vince: tool esatto prima di prefisso (*) prima di '*'
@@ -366,9 +386,13 @@ export async function check(
     }
     const specific = matching.find((r) => r.tool !== '*' && r.tool !== 'composio__*')
     if (specific) {
-      return specific.mode === 'always_allow'
-        ? { kind: 'allow', via: 'rule', ruleTool: specific.tool }
-        : { kind: 'ask', reason: `${tool} requires approval`, ui: ui(UI.approvalToolRequires, { tool }), composio: { destructive: false } }
+      if (specific.mode === 'always_allow') {
+        // A4: l'insieme fisso chiede anche con la regola sempre-consenti
+        const fixedAsk = fixedSetAskOfRule(tool)
+        if (fixedAsk) return fixedAsk
+        return { kind: 'allow', via: 'rule', ruleTool: specific.tool }
+      }
+      return { kind: 'ask', reason: `${tool} requires approval`, ui: ui(UI.approvalToolRequires, { tool }), composio: { destructive: false } }
     }
     {
       const g = listGrants().find((x) => x.tool === tool && x.target === '*' && grantForAgent(x, owner))
@@ -489,9 +513,12 @@ export async function check(
     // regola specifica per QUESTO tool (o suo prefisso), non i wildcard generici
     const specific = matching.find((r) => r.tool !== '*' && r.tool !== 'mcp__*')
     if (specific) {
-      return specific.mode === 'always_allow'
-        ? { kind: 'allow', via: 'rule', ruleTool: specific.tool }
-        : { kind: 'ask', reason: `${tool} requires approval`, ui: ui(UI.approvalToolRequires, { tool }) }
+      if (specific.mode === 'always_allow') {
+        const fixedAsk = fixedSetAskOfRule(tool)
+        if (fixedAsk) return fixedAsk
+        return { kind: 'allow', via: 'rule', ruleTool: specific.tool }
+      }
+      return { kind: 'ask', reason: `${tool} requires approval`, ui: ui(UI.approvalToolRequires, { tool }) }
     }
     {
       const g = listGrants().find((x) => x.tool === tool && x.target === '*' && grantForAgent(x, owner))
@@ -522,7 +549,11 @@ export async function check(
     // annotazioni assenti: regola di default (mcp__* → needs_approval) o default globale
     const matchedStar = matchRuleEntry(tool, '*', cfg.rules)
     const mode = matchedStar?.mode ?? cfg.default
-    if (mode === 'always_allow') return { kind: 'allow', via: 'rule', ruleTool: matchedStar?.tool ?? '*' }
+    if (mode === 'always_allow') {
+      const fixedAsk = fixedSetAskOfRule(tool)
+      if (fixedAsk) return fixedAsk
+      return { kind: 'allow', via: 'rule', ruleTool: matchedStar?.tool ?? '*' }
+    }
     // M4: il tool di un server manuale dichiara readOnly (e non destructive) →
     // la card offre «Consenti sempre le letture di <server>»
     if (
@@ -628,7 +659,11 @@ export async function check(
   )
   if (grant) return { kind: 'allow', via: 'grant', grantId: grant.id }
 
-  if (mode === 'always_allow') return { kind: 'allow', via: 'rule', ruleTool: matched?.tool ?? '*' }
+  if (mode === 'always_allow') {
+    const fixedAsk = fixedSetAskOfRule(tool)
+    if (fixedAsk) return fixedAsk
+    return { kind: 'allow', via: 'rule', ruleTool: matched?.tool ?? '*' }
+  }
   // fase use-app (U3): la card dice l'APP o l'HOST, mai la chiave tecnica
   if (tool === 'use-app') {
     if (String(input.action ?? '') === 'open_url') {

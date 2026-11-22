@@ -105,6 +105,8 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
   // PL2: la scheda del plugin (tavola 9) — si ricordano gli ID e gli oggetti
   // si cercano a OGNI render (vivi: un toggle che cambia enabledFor si vede)
   const [card, setCard] = useState<{ appId?: string; serverId?: string } | null>(null)
+  // A4 (fase approvazioni-chiare): «Per sviluppatori» in fondo — CHIUSO di default
+  const [developersOpen, setDevelopersOpen] = useState(false)
   const [skillDetail, setSkillDetail] = useState<string | null>(null)
   // «Crea con il bot»: la chat con una richiesta precompilata (il meccanismo
   // di fase pagine G4 — composerPrefill — consumato dal composer di Chat)
@@ -500,7 +502,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                 <div className="my-1 h-px bg-border/60" aria-hidden="true" />
                 <button
                   className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                  onClick={() => { setAddOpen(false); document.getElementById('plugin-advanced')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
+                  onClick={() => { setAddOpen(false); setDevelopersOpen(true); document.getElementById('plugin-advanced')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
                 >
                   <Trans>Aggiungi un marketplace</Trans>
                 </button>
@@ -743,11 +745,24 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
             </section>
           )}
 
-          {/* --- AVANZATE: gateway, marketplace, registro, chiave (per sviluppatori) --- */}
+          {/* --- AVANZATE: gateway, marketplace, registro, chiave (per
+              sviluppatori) — A4: CHIUSA di default, una riga che si apre --- */}
           <section className="mt-8" id="plugin-advanced" data-testid="plugin-advanced">
-            <div className="rounded-3xl bg-muted/40 p-5">
-              <DevelopersContent scrollTo={null} />
-            </div>
+            {developersOpen ? (
+              <div className="rounded-3xl bg-muted/40 p-5">
+                <DevelopersContent scrollTo={null} />
+              </div>
+            ) : (
+              <button
+                className="flex w-full items-center justify-between gap-3 rounded-2xl bg-muted/40 px-4 py-2.5 text-left text-[13px] text-muted-foreground transition hover:text-foreground"
+                data-testid="plugin-developers-toggle"
+                aria-expanded={false}
+                onClick={() => setDevelopersOpen(true)}
+              >
+                <Trans>Per sviluppatori</Trans>
+                <span className="text-[11px] text-muted-foreground"><Trans>gateway, marketplace, registro, chiave</Trans></span>
+              </button>
+            )}
           </section>
 
           {/* la frase della strada più diretta (tavola 8, in fondo) */}

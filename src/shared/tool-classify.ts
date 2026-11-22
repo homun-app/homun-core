@@ -126,5 +126,10 @@ export function classifyPluginTool(full: string, annotations?: ToolAnnotationsLi
   } else if (annotations?.destructiveHint === true) {
     group = 'write'
   }
-  return { group, fixedAsk: fixedAskOf(full, annotations) }
+  const fixedAsk = fixedAskOf(full, annotations)
+  // A4 (fase approvazioni-chiare): gli strumenti dell'insieme fisso (invii,
+  // pagamenti — es. send_email) stanno nel gruppo SCRITTURA col lucchetto,
+  // non in «Altro»: chiedono sempre, ma sono azioni che scrivono verso fuori
+  if (fixedAsk !== null && group === TOOL_GROUP_OTHER) group = 'write'
+  return { group, fixedAsk }
 }

@@ -85,9 +85,11 @@ describe('PL2: Autorizzazioni — la divisione e i selettori', () => {
     const texts = findAll(root, () => true).map((n) => textOf(n)).join('\n')
     expect(texts).toMatch(/Sola lettura · 2/)
     expect(texts).toContain('search_emails')
-    expect(texts).toMatch(/Scrittura · 1/)
+    // A4 (fase approvazioni-chiare): Scrittura · 2 — delete_email e l'invio
+    // send_email dell'insieme fisso (col lucchetto), che prima stava in Altro
+    expect(texts).toMatch(/Scrittura · 2/)
     expect(texts).toContain('delete_email')
-    expect(texts).toMatch(/Altro · 2/)
+    expect(texts).toMatch(/Altro · 1/)
     expect(texts).toContain('create_draft')
   })
 

@@ -20,6 +20,9 @@ import { serverCommandLine } from '../lib/mcp-row'
 // il prefisso STABILE degli strumenti (mcp__<toolSlug>__…): lo stesso punto
 // che legge il sistema (modulo puro di main/mcp)
 import { toolSlugOf } from '../../../main/mcp/slug'
+// A4 (fase approvazioni-chiare): il nome e la descrizione senza il prefisso
+// interno [MCP:<nome>] (mcpToolPresentation, la funzione unica della UI)
+import { mcpToolPresentation } from '../../../shared/tool-names'
 import { logoUrlForName } from '../lib/app-logos'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
@@ -107,10 +110,14 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
     setPerms(next)
     void api.setPermissions(next).then(() => onChanged()).catch(() => undefined)
   }
-  /** La scelta del selettore di GRUPPO: tutte le regole del gruppo. */
+  /** La scelta del selettore di GRUPPO: vale per TUTTI gli strumenti del
+   *  gruppo. A4 (fase approvazioni-chiare): «Consenti sempre» non si può per
+   *  l'insieme fisso (il daemon la rifiuta) — quegli strumenti restano a
+   *  «Chiedi»; «Chiedi» e «Blocca» valgono anche per loro. */
   const setGroupRule = (group: ToolGroup, mode: PermissionsConfig['default']): void => {
     let cfg = perms ?? { default: 'needs_approval' as const, rules: [] }
-    for (const tool of (tools ?? []).filter((x) => x.group === group && !x.fixedAsk)) {
+    for (const tool of (tools ?? []).filter((x) => x.group === group)) {
+      if (tool.fixedAsk && mode === 'always_allow') continue
       cfg = withToolRule(cfg, tool.full, mode)
     }
     setPerms(cfg)
@@ -385,17 +392,20 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
 
 // ---- i pezzi piccoli ----
 
-/** Il selettore a tre scelte (l'insieme fisso ne ha due: mai «Consenti sempre»). */
+/** Il selettore a tre scelte (l'insieme fisso ne ha due: mai «Consenti sempre»).
+ *  A4 (fase approvazioni-chiare): col valore «Misto» quando le regole del
+ *  gruppo differiscono — sceglierne uno vale per tutti. */
 function GroupSelect({ testid, fixed, value, onChange }: {
   testid: string
   fixed: boolean
-  value: PermissionsConfig['default']
+  value: PermissionsConfig['default'] | typeof GROUP_VALUE_MIXED
   onChange(mode: PermissionsConfig['default']): void
 }): ReactNode {
   const { t } = useLingui()
-  const options: Array<[PermissionsConfig['default'], string]> = fixed
+  const options: Array<[PermissionsConfig['default'] | typeof GROUP_VALUE_MIXED, string]> = fixed
     ? [['needs_approval', t`Chiedi`], ['blocked', t`Blocca`]]
     : [['always_allow', t`Consenti sempre`], ['needs_approval', t`Chiedi`], ['blocked', t`Blocca`]]
+  if (value === GROUP_VALUE_MIXED) options.unshift([GROUP_VALUE_MIXED, t`Misto`])
   return (
     <select
       className="shrink-0 rounded-full bg-card px-2.5 py-1 text-[12px] outline-none"
@@ -404,7 +414,7 @@ function GroupSelect({ testid, fixed, value, onChange }: {
       onChange={(e) => onChange(e.target.value as PermissionsConfig['default'])}
     >
       {options.map(([mode, label]) => (
-        <option key={mode} value={mode}>{label}</option>
+        <option key={mode} value={mode} disabled={mode === GROUP_VALUE_MIXED}>{label}</option>
       ))}
     </select>
   )
@@ -416,10 +426,10 @@ function toolsOf(list: Array<{ name: string; description: string; annotations?: 
   return list.map((tool) => {
     const full = server && !tool.name.startsWith('mcp__') ? `mcp__${toolSlugOf(server)}__${tool.name}` : tool.name
     const { group, fixedAsk } = classifyPluginTool(full, tool.annotations)
-    // il NOME che si mostra (e nei testid) è senza prefisso mcp__<slug>__,
-    // come il resto dell'app (mcpToolPresentation): il prefisso resta al modello
-    const name = full.startsWith('mcp__') ? full.split('__').slice(2).join('__') : tool.name
-    return { full, name, description: tool.description, group, fixedAsk }
+    // A4: nome e descrizione come li vede l'UTENTE (mcpToolPresentation) —
+    // senza prefisso mcp__<slug>__ e senza il tag [MCP:<nome>]: restano al modello
+    const shown = mcpToolPresentation(full, tool.description)
+    return { full, name: shown.name, description: shown.description, group, fixedAsk }
   })
 }
 
@@ -430,12 +440,15 @@ function groupTools(tools: CardTool[]): Record<ToolGroup, CardTool[]> {
   return out
 }
 
-/** Il valore del selettore di gruppo: la regola comune, o il default se mista. */
-function groupValueOf(perms: PermissionsConfig | null, list: CardTool[]): PermissionsConfig['default'] {
+/** il valore «Misto» del selettore di gruppo: le regole del gruppo differiscono */
+export const GROUP_VALUE_MIXED = 'mixed'
+
+/** Il valore del selettore di gruppo: la regola comune, o «Misto» se differiscono. */
+function groupValueOf(perms: PermissionsConfig | null, list: CardTool[]): PermissionsConfig['default'] | typeof GROUP_VALUE_MIXED {
   if (!perms || list.length === 0) return 'needs_approval'
   const modes = new Set(list.filter((x) => !x.fixedAsk).map((x) => toolRuleOf(perms, x.full)))
   if (modes.size === 1) return [...modes][0]!
-  return perms.default
+  return GROUP_VALUE_MIXED
 }
 
 /** Gli interruttori per bot di un server (enabledFor, come i fogli di oggi). */

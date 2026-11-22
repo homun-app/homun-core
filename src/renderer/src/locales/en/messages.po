@@ -64,6 +64,16 @@ msgstr "…chart…"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "approval.fixedSet"
+msgstr "“{tool}” is an outgoing send or payment: it always asks for your approval."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.fixedSetNoAlways"
+msgstr "“{tool}” is a send or a payment: it always asks for your approval, “Always allow” cannot be set"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "skill.compatibilityTooLong"
 msgstr "\"compatibility\" must be at most 500 characters (now {n})."
 
@@ -3361,6 +3371,10 @@ msgstr "Invalid time zone: \"{tz}\""
 msgid "gateway"
 msgstr "gateway"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "gateway, marketplace, registro, chiave"
+msgstr "gateway, marketplace, log, key"
+
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/GuideView.tsx
 msgid "Gelatina"
@@ -5138,6 +5152,10 @@ msgstr "minutes before the event"
 msgid "minuti tra i poll (minimo 2)"
 msgstr "minutes between polls (minimum 2)"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Misto"
+msgstr "Mixed"
+
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Mmh, questa chiave non entra."
 msgstr "Hmm, this key doesn’t fit."
@@ -6188,6 +6206,7 @@ msgid "notice.needModel"
 msgstr "I need a model to answer you."
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 msgid "Per sviluppatori"
 msgstr "For developers"
 

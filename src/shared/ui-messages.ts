@@ -162,6 +162,9 @@ export const UI = {
   approvalToolRequires: msg({ id: 'approval.toolRequires', message: '{tool} richiede approvazione' }),
   // Q1 (fase squadra): l'insieme FISSO nei turni di squadra — sempre all'utente
   approvalSquadFixed: msg({ id: 'approval.squadFixed', message: 'Nel team «{tool}» lo decidi sempre tu: quest’azione chiede sempre la tua approvazione.' }),
+  // A4 (fase approvazioni-chiare): la regola «Consenti sempre» non toglie
+  // l'utente dalle azioni verso fuori (insieme fisso), nemmeno fuori dai team
+  approvalFixedSet: msg({ id: 'approval.fixedSet', message: '«{tool}» è un invio o un pagamento verso fuori: chiede sempre la tua approvazione.' }),
   approvalToolTargetRequires: msg({ id: 'approval.toolTargetRequires', message: '{tool} ({target}) richiede approvazione' }),
   // fase use-app (U3): la card dice l'app o l'host, mai la chiave tecnica
   approvalUseApp: msg({ id: 'approval.useApp', message: 'Vuole usare {app} sul tuo Mac.' }),
@@ -345,6 +348,9 @@ export const UI = {
   rpcConfigureProvider: msg({ id: 'rpc.configureProvider', message: 'Configura prima provider e modello.' }),
   rpcDraftNotFound: msg({ id: 'rpc.draftNotFound', message: 'Bozza non trovata' }),
   rpcInvalidServerSlug: msg({ id: 'rpc.invalidServerSlug', message: 'Nome del server non valido' }),
+  // A4 (fase approvazioni-chiare): difesa in profondità — «Consenti sempre»
+  // non si può sugli strumenti dell'insieme fisso (invii, pagamenti)
+  rpcFixedSetNoAlways: msg({ id: 'rpc.fixedSetNoAlways', message: '«{tool}» è un invio o un pagamento: chiede sempre la tua approvazione, non si può impostare «Consenti sempre»' }),
   rpcDraftAlreadySent: msg({ id: 'rpc.draftAlreadySent', message: 'Bozza già inviata' }),
   rpcDraftAlreadyDiscarded: msg({ id: 'rpc.draftAlreadyDiscarded', message: 'Bozza già scartata' }),
   rpcDraftAlreadyClosed: msg({ id: 'rpc.draftAlreadyClosed', message: 'Bozza già chiusa' }),

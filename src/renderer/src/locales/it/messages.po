@@ -64,6 +64,16 @@ msgstr "…grafico…"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "approval.fixedSet"
+msgstr "«{tool}» è un invio o un pagamento verso fuori: chiede sempre la tua approvazione."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.fixedSetNoAlways"
+msgstr "«{tool}» è un invio o un pagamento: chiede sempre la tua approvazione, non si può impostare «Consenti sempre»"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "skill.compatibilityTooLong"
 msgstr "«compatibility» può essere al massimo 500 caratteri (ora {n})."
 
@@ -3361,6 +3371,10 @@ msgstr "Fuso orario non valido: \"{tz}\""
 msgid "gateway"
 msgstr "gateway"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "gateway, marketplace, registro, chiave"
+msgstr "gateway, marketplace, registro, chiave"
+
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/GuideView.tsx
 msgid "Gelatina"
@@ -5138,6 +5152,10 @@ msgstr "minuti prima dell'evento"
 msgid "minuti tra i poll (minimo 2)"
 msgstr "minuti tra i poll (minimo 2)"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Misto"
+msgstr "Misto"
+
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Mmh, questa chiave non entra."
 msgstr "Mmh, questa chiave non entra."
@@ -6188,6 +6206,7 @@ msgid "notice.needModel"
 msgstr "Per risponderti mi serve un modello."
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 msgid "Per sviluppatori"
 msgstr "Per sviluppatori"
 

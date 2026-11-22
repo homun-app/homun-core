@@ -83,6 +83,8 @@ import { uiLanguage, uiText, formatUi, ui, uiError } from '../main/ui-language'
 // K1.8 (fase rilascio — correzioni): l'errore tipizzato delle chiavi master
 import { isMasterKeyUnavailableError } from './master-keys'
 import { UI } from '../shared/ui-messages'
+// A4 (fase approvazioni-chiare): l'insieme fisso (invii, pagamenti) — puro condiviso
+import { fixedAskOf } from '../shared/tool-classify'
 import { UiError } from '../shared/ui-text'
 // fase rilascio (A7): lo stato di docker per la UI (percorso risolto, senza spawn)
 import { isToolResolved, resolveTool, invalidateToolCache } from '../main/tool-paths'
@@ -2626,7 +2628,21 @@ export function buildApiMethods(
 
     // ---- permessi & impostazioni ----
     'permissions:get': () => store.getPermissions(),
-    'permissions:set': ([cfg]) => store.setPermissions(cfg as Parameters<typeof store.setPermissions>[0]),
+    'permissions:set': ([cfg]) => {
+      const next = cfg as Parameters<typeof store.setPermissions>[0]
+      // A4 (fase approvazioni-chiare): difesa in profondità — la regola
+      // «Consenti sempre» NON si può sugli strumenti dell'insieme fisso
+      // (invii, pagamenti): chiedono sempre, il gate li fa chiedere anche con
+      // la regola (vedi permissions.ts). Errore leggibile, niente scritture.
+      for (const r of next?.rules ?? []) {
+        if (r.mode !== 'always_allow') continue
+        if ((r.tool.startsWith('mcp__') || r.tool.startsWith('composio__')) && fixedAskOf(r.tool)) {
+          throw uiError(UI.rpcFixedSetNoAlways, { tool: r.tool })
+        }
+      }
+      store.setPermissions(next)
+      return { ok: true }
+    },
     // M4 (fase 0.3.1001): le standing grant («Consenti sempre» delle card) si
     // vedono e si revocano da Impostazioni → Approvazioni
     'grants:list': () => store.listGrants(),
