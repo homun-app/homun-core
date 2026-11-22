@@ -378,6 +378,10 @@ try {
     b.click()
     return true
   `).catch(() => false)
+  // il menu di Radix si CHIIDE (Esc, come fase-centro): non deve restare
+  // aperto sopra la chat nelle catture e nei click che seguono
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).catch(() => undefined)
+  await sleep(400)
   // il grant è salvato (site:127.0.0.1, del tool virtuale browser-site)
   const grants = clicked ? await rpc('grantsList()').catch(() => []) : []
   check('P3: il clic salva il grant site:127.0.0.1 (browser-site)', clicked &&
@@ -401,7 +405,8 @@ try {
     `(await window.sandbot.getEntries(${JSON.stringify(bot.id)})).some((e) => e.kind === 'send-message' && String(e.content).includes('richiede la tua conferma'))`,
     60_000, 400)
   const commitEntry = (await approvalsOf(bot.id)).find((e) => e.meta?.browserAsk?.kind === 'commit')
-  check('P3: il rifiuto ferma il «Conferma acquisto» e il turno chiude', denied && t1Closed && commitEntry?.meta?.status === 'denied')
+  check('P3: il rifiuto ferma il «Conferma acquisto» e il turno chiude', denied && t1Closed && commitEntry?.meta?.status === 'denied',
+    `denied=${denied} t1Closed=${t1Closed} commit=${commitEntry?.meta?.status ?? '?'}`)
 
   // =========== P4: l'aiutante che aspetta te ===========
   await uiSend('lancia-aiutante: fai provare l\'acquisto all\'aiutante.')

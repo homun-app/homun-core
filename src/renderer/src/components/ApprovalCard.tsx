@@ -80,13 +80,17 @@ export function ApprovalRequestContent({
   entry,
   agentName,
   fromSubagent = false,
-  readOnly = false
+  readOnly = false,
+  squad = false
 }: {
   entry: TranscriptEntry
   /** chi chiede: il bot della chat (card) o il bot PADRE della riga (riquadro) */
   agentName: string
   fromSubagent?: boolean
   readOnly?: boolean
+  /** il riquadro lo sa dalla riga del centro (r.squad): vale come meta.squadId
+   *  per le scelte del modello unico (la missione) */
+  squad?: boolean
 }) {
   const { t } = useLingui()
   // fase 17c (C6): la schedule in linguaggio naturale nella lingua attiva
@@ -94,6 +98,10 @@ export function ApprovalRequestContent({
   const resolve = useStore((s) => s.resolveApproval)
   const proposeRule = useStore((s) => s.proposeRule)
   const setApprovalsOpen = useStore((s) => s.setApprovalsOpen)
+  // R1 (fase ritocchi-beta18): il riquadro è l'UNICO posto dove si decide
+  // nella chat del bot — dopo la decisione la lista delle richieste si
+  // rilegge SUBITO (come fa il centro), mai una riga già decisa a schermo
+  const refreshSquadData = useStore((s) => s.refreshSquadData)
   const approvalId = entry.meta?.approvalId as string | undefined
   const status = (entry.meta?.status as string | undefined) ?? 'pending'
   const tool = String(entry.meta?.tool)
@@ -166,9 +174,10 @@ export function ApprovalRequestContent({
 
   // A1 (fase approvazioni-chiare): le scelte dal modello UNICO — le stesse
   // del centro «Da approvare» (il difetto del 22/11: «In Da approvare ho
-  // sempre e solo una volta»). La card sa della squadra dal meta del turno.
+  // sempre e solo una volta»). La card sa della squadra dal meta del turno;
+  // il riquadro anche dalla riga del centro (prop squad).
   const choices = approvalChoicesOf(tool, entry.meta, {
-    squad: typeof entry.meta?.squadId === 'number' || typeof entry.meta?.squadId === 'string'
+    squad: squad || typeof entry.meta?.squadId === 'number' || typeof entry.meta?.squadId === 'string'
   })
   const choiceLabelOf = (c: ApprovalChoice): string => {
     switch (c.kind) {
@@ -206,9 +215,11 @@ export function ApprovalRequestContent({
       void api.grantServerReads(c.slug!).catch(() => undefined)
       // A2: mode 'server-reads' — la chiamata passa, il registro ricorda il modo
       resolve(entry.agentId, approvalId!, 'allow', 'server-reads', 'chat')
+      refreshSquadData({ forceBadges: true })
       return
     }
     resolve(entry.agentId, approvalId!, 'allow', c.kind, 'chat')
+    refreshSquadData({ forceBadges: true })
   }
 
   // R1: le BOZZE si decidono col campo della bozza (come il centro): qui il
@@ -341,13 +352,13 @@ export function ApprovalRequestContent({
               <button
                 data-testid="approval-allow"
                 className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
-                onClick={() => resolve(entry.agentId, approvalId!, 'allow', 'once', 'chat')}
+                onClick={() => { resolve(entry.agentId, approvalId!, 'allow', 'once', 'chat'); refreshSquadData({ forceBadges: true }) }}
               >
                 <Trans>Consenti</Trans>
               </button>
               <button
                 className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
-                onClick={() => resolve(entry.agentId, approvalId!, 'deny', 'once', 'chat')}
+                onClick={() => { resolve(entry.agentId, approvalId!, 'deny', 'once', 'chat'); refreshSquadData({ forceBadges: true }) }}
               >
                 <Trans>Rifiuta</Trans>
               </button>
