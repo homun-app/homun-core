@@ -46,6 +46,11 @@ import { createLifecycleLog, mainLogDir } from './lifecycle-log'
 import { secondInstanceWhileQuitting } from './quit-behavior'
 // U6: il tray si distrugge all'uscita
 import { createTray, refreshTray, destroyTray } from './tray'
+import { guardStdioEpipe } from './stdio-guard'
+
+// un log su uno stdout/stderr ormai chiuso non deve aprire il dialogo
+// «A JavaScript error occurred in the main process» (vale anche per il daemon)
+guardStdioEpipe([process.stdout, process.stderr])
 
 // fase 16 (U0b): la cartella dati reale dell'utente è …/Application
 // Support/sandbot (minuscolo), di prima del cambio di nome visibile in
