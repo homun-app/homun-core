@@ -43,6 +43,7 @@ import { avatarValidationError } from '../shared/avatar'
 import { generateWebhookToken } from './webhooks'
 import { enqueueJob } from '../main/store/jobs'
 import { enqueueUserMessage, enqueueWidgetResponse } from './enqueue'
+import { recordNotifiedServerState } from './mcp-state-sync'
 // fase pagine · ritocchi (P1): la pagina letta si risolve sul daemon, sulla
 // voce della libreria (il renderer manda solo l'identità)
 import { resolveReadingPage } from '../main/agent/reading-page'
@@ -3002,9 +3003,12 @@ export async function notifyConnectorConnected(
  * MCP collegato: <nome> (N strumenti)» con la strada di find_tools, oppure
  * «<nome> non parte: <errore>». Il testo per il modello resta inglese; meta.ui
  * porta la lingua dell'interfaccia. PURA rispetto ai suoi input.
+ * V3 (fase stato-vivo): con l'id, la nota si RICORDA in
+ * mcp.serverNotifiedState — così il sync dell'avvio non ri-notifica quello
+ * che la nota di oggi ha già detto.
  */
 export async function notifyMcpServerState(
-  cfg: { name: string; toolSlug?: string; enabledFor?: string[] },
+  cfg: { id?: string; name: string; toolSlug?: string; enabledFor?: string[] },
   test: { ok: boolean; tools?: string[]; error?: string; category?: McpErrorCategory },
   emit: Emitter,
   worker: JobWorker
@@ -3032,6 +3036,31 @@ export async function notifyMcpServerState(
     })
     worker.poke()
   }
+  // V3 (fase stato-vivo): l'ultimo stato notificato si ricorda (senza id non
+  // c'è niente da ricordare: le chiamate storiche passano solo il nome)
+  if (cfg.id !== undefined) recordNotifiedServerState(cfg.id, test.ok ? 'ok' : 'fail')
+}
+
+/**
+ * V3 (fase stato-vivo): il sync dello stato dei server per il daemon VERO —
+ * all'avvio (runtime.ts, dopo il worker) e a ogni test periodico dal tick
+ * dello scheduler. Delega a syncMcpServerStates (mcp-state-sync.ts) con le
+ * funzioni vere del modulo mcp e notifyMcpServerState come nota.
+ */
+export async function syncDaemonMcpServerStates(emit: Emitter, worker: JobWorker): Promise<{ checked: number; notes: number }> {
+  const mcpMod = await import('../main/mcp')
+  const { syncMcpServerStates, NOTIFIED_STATE_SETTING } = await import('./mcp-state-sync')
+  return syncMcpServerStates(
+    {
+      listServers: () => mcpMod.listServers(),
+      testServer: (id) => mcpMod.testServer(id),
+      notify: (cfg, test, e, w) => notifyMcpServerState(cfg, test, e as Emitter, w as JobWorker),
+      getNotified: () => store.getSetting<Record<string, 'ok' | 'fail'>>(NOTIFIED_STATE_SETTING, {}),
+      setNotified: (states) => store.setSetting(NOTIFIED_STATE_SETTING, states)
+    },
+    emit,
+    worker
+  )
 }
 
 /**

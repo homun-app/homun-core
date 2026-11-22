@@ -79,6 +79,13 @@ import { openMemoryEngine, closeMemoryEngine } from '../main/memory/engine'
 /** Tempo massimo di attesa dei turni in corso durante un riavvio pulito (A2). */
 export const RESTART_DRAIN_MS = 10_000
 
+/**
+ * V3 (fase stato-vivo): ogni quanto il tick dei 30 s ripete il test dei
+ * server MCP (quello dell'avvio, poi uno ogni 10 minuti): il cambio di stato
+ * di un server esistente lo dice ai bot abilitati, una volta sola per cambio.
+ */
+export const MCP_STATE_SYNC_MS = 10 * 60_000
+
 export interface DaemonRuntimeOptions {
   /** Directory dati, GIÀ risolta dal chiamante (UI rule: userData/data; entry Node: --data/env). */
   dataDir: string
@@ -670,6 +677,27 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   )
   pokeWorker = () => worker.poke()
 
+  // V3 (fase stato-vivo): l'ultimo giro del test periodico dei server MCP
+  let lastMcpStateSync = 0
+  // V3 (fase stato-vivo): lo stato dei server MCP si controlla ALL'AVVIO (e
+  // poi a ogni test periodico dal tick dello scheduler): quando un server
+  // ESISTENTE cambia stato — mai notificato, si ripara, si rompe — i bot
+  // abilitati ricevono la nota U5, UNA volta sola per cambio (setting
+  // mcp.serverNotifiedState). È il caso dei server importati con la beta.15,
+  // prima di U5: funzionavano ma la nota non era mai arrivata. Non blocca
+  // l'avvio: i test di connessione partono in coda.
+  try {
+    const { syncDaemonMcpServerStates } = await import('./api')
+    void syncDaemonMcpServerStates(emit, worker)
+      .then((r) => {
+        lastMcpStateSync = Date.now()
+        if (r.notes > 0) console.log(`[sandbotd] stato server MCP: ${r.notes} cambi notificati ai bot abilitati`)
+      })
+      .catch((e) => console.error('[sandbotd] controllo stato server MCP rimandato al prossimo giro:', e instanceof Error ? e.message : e))
+  } catch (e) {
+    console.error('[sandbotd] controllo stato server MCP rimandato al prossimo avvio:', e instanceof Error ? e.message : e)
+  }
+
   // fase memoria-engramma · correzioni (C1): i job della storia fatti o
   // falliti dalle versioni precedenti portano il testo del messaggio nel
   // payload — si svuota UNA volta (i job nuovi portano solo l'id dell'entry)
@@ -1022,6 +1050,15 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
         await purgeRemoved({ emit, worker })
       } catch (e) {
         console.error('[sandbotd] pulizia dei rimossi:', e)
+      }
+      // V3 (fase stato-vivo): il test periodico dei server MCP (uno ogni
+      // MCP_STATE_SYNC_MS, il primo è quello dell'avvio): un server esistente
+      // che CAMBIA stato lo dice ai bot abilitati, una volta sola per cambio
+      if (now - lastMcpStateSync > MCP_STATE_SYNC_MS) {
+        lastMcpStateSync = now
+        void import('./api')
+          .then((m) => m.syncDaemonMcpServerStates(emit, worker))
+          .catch((e) => console.error('[sandbotd] test periodico dei server MCP:', e))
       }
       // fase 12 (punto 4): la scadenza dei figli (queued/running oltre
       // deadline_at) — interrupt, expired, risveglio del lotto
