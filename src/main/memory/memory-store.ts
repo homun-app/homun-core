@@ -32,6 +32,7 @@ import { isSafeMemoryId, memorySectionPrompt, estimateTokensOf, type MemoryRecor
 
 export type { MemoryTier, MemoryScope }
 import { db } from '../store/db'
+import { markEmbedDirtyFor } from './embed-dirty'
 
 export interface WriteMemoryNoteInput {
   content: string
@@ -90,8 +91,11 @@ export async function writeMemoryNote(agentId: string, input: WriteMemoryNoteInp
     confidence,
     extensions: { 'x-homun': { tier: input.tier, scope } }
   })
-  // l'incorporazione semantica gira in fondo alla coda (solo se c'è il modello)
+  // l'incorporazione semantica gira in fondo alla coda (solo se c'è il
+  // modello); D4 (fase deleghe): la scrittura SPORCA la bandiera, così il
+  // tick riprova finché le celle non sono incorporate davvero
   try {
+    markEmbedDirtyFor(db(), agentId)
     enqueueEmbedPending(db(), agentId)
   } catch {
     // niente store (es. test del solo motore): non blocca la scrittura
@@ -175,6 +179,7 @@ export async function updateMemoryNote(agentId: string, input: UpdateMemoryNoteI
     })
     await (await cellFor(agentId, scope, opts.byUser)).delete(found.id)
     try {
+      markEmbedDirtyFor(db(), agentId)
       enqueueEmbedPending(db(), agentId)
     } catch { /* niente store: la scrittura resta */ }
     return born
@@ -189,6 +194,7 @@ export async function updateMemoryNote(agentId: string, input: UpdateMemoryNoteI
       extensions: { 'x-homun': { ...xhomun, tier, scope: nextScope } }
     })
     try {
+      markEmbedDirtyFor(db(), agentId)
       enqueueEmbedPending(db(), agentId)
     } catch { /* niente store */ }
     return updated

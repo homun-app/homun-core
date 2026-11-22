@@ -94,4 +94,45 @@ describe.skipIf(!hasLocalEmbedModel())('fase memoria-engramma · correzioni C7: 
     expect(jobs.map((j) => j.agent_id).sort()).toEqual([A, B])
     await (await import('../engine')).closeMemoryEngine()
   })
+
+  // D4 (fase deleghe): la coda della memoria non cresce a vuoto — il tick
+  // accoda SOLO per i bot con celle davvero da incorporare (bandiera
+  // «sporco» scritta dalle scritture), e la bandiera si toglie quando il job
+  // gira col modello e non resta niente
+  it('D4: la SCRITTURA sporca la bandiera; il tick accoda solo per chi ha novità; finito il lavoro la bandiera si toglie', async () => {
+    const e = await import('../engine')
+    await e.closeMemoryEngine()
+    const DATA2 = join(ROOT, 'data-d4')
+    mkdirSync(join(DATA2, 'models'), { recursive: true })
+    symlinkSync(MODEL_SRC, join(DATA2, 'models', 'granite-embedding-97m-multilingual-r2'))
+    const st = await e.openMemoryEngine({ dataDir: DATA2 })
+    expect(st.available && st.model.present).toBe(true)
+    const { db } = await import('../../store/db')
+    const { listJobs } = await import('../../store/jobs')
+    const { makeJobRunner } = await import('../../../daemon/run-job')
+    const { enqueueEmbedPendingDirty, embedDirtyAgents } = await import('../embed-dirty')
+    db().exec('DELETE FROM jobs')
+    db().exec('DELETE FROM settings')
+    // nessuna novità: 10 tick, 0 job
+    for (let t = 0; t < 10; t++) enqueueEmbedPendingDirty(db(), [A, B], 1_000 + t)
+    expect(listJobs(db()).filter((j) => j.kind === 'memory-embed')).toHaveLength(0)
+    // A scrive in memoria: la bandiera si sporca, il tick accoda SOLO per A
+    const { writeMemoryNote } = await import('../memory-store')
+    await writeMemoryNote(A, { content: 'memoria nuova di A', tier: 'log', source: 's', userTurn: true })
+    expect(embedDirtyAgents(db())).toEqual([A])
+    enqueueEmbedPendingDirty(db(), [A, B], 20_000)
+    const jobs = listJobs(db()).filter((j) => j.kind === 'memory-embed')
+    expect(jobs.map((j) => j.agent_id)).toEqual([A])
+    // il job gira: incorpora tutto, la bandiera si toglie (modello presente,
+    // zero da incorporare alla prossima) e il tick dopo non accoda più
+    await makeJobRunner(db())(jobs[0]!, () => undefined)
+    expect(await (await e.botCell(A)).embedPending()).toBe(0)
+    // la bandiera è tolta (modello presente, zero da incorporare): il tick
+    // dopo NON accoda più — nessun job NUOVO oltre a quello già girato
+    const idsBefore = new Set(listJobs(db()).filter((j) => j.kind === 'memory-embed').map((j) => j.id))
+    enqueueEmbedPendingDirty(db(), [A, B], 30_000)
+    expect(listJobs(db()).filter((j) => j.kind === 'memory-embed' && !idsBefore.has(j.id))).toHaveLength(0)
+    expect(embedDirtyAgents(db())).toEqual([])
+    await e.closeMemoryEngine()
+  }, 120_000)
 })

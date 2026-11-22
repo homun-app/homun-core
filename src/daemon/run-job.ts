@@ -206,8 +206,19 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     // durante un suo turno) e incorpora le celle DI QUELL'AGENTE
     // (bot-<id>, storia-<id> e utente), non tutte a ogni giro
     if (job.kind === 'memory-embed') {
-      const { embedCellsOfAgent } = await import('../main/memory/engine')
+      const { embedCellsOfAgent, embedPendingCountOfAgent } = await import('../main/memory/engine')
       await embedCellsOfAgent(job.agent_id)
+      // D4 (fase deleghe): il lavoro è finito DAVVERO quando non RESTA niente
+      // da incorporare (il conteggio, col modello presente) — solo allora la
+      // bandiera «sporco» si toglie e il tick smette di chiedere job per
+      // questo bot (col modello assente non si sa: la bandiera resta, si
+      // riprova al prossimo giro)
+      if (await embedPendingCountOfAgent(job.agent_id) === 0) {
+        const { clearEmbedDirty } = await import('../main/memory/embed-dirty')
+        try {
+          clearEmbedDirty(db, job.agent_id)
+        } catch { /* niente store: si riprova al prossimo giro */ }
+      }
       return
     }
     // fase memoria-engramma (M5): un messaggio della conversazione entra

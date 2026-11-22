@@ -597,6 +597,35 @@ export async function embedCellsOfAgent(agentId: string, limit = 512): Promise<n
 }
 
 /**
+ * D4 (fase deleghe): quante note delle celle di quest'agente (bot, storia e
+ * utente) aspettano ancora l'incorporazione — il CONTEGGIO, senza incorporare
+ * (il job lo chiama dopo il suo giro: zero = la bandiera «sporco» si toglie
+ * e il tick smette di chiedere job per questo bot). Senza modello o senza
+ * motore: -1 (non si sa, la bandiera resta).
+ */
+export async function embedPendingCountOfAgent(agentId: string): Promise<number> {
+  let engine: EngrammaEngine
+  try {
+    engine = await memoryEngine()
+  } catch {
+    return -1
+  }
+  try {
+    if (!(await engine.modelStatus()).present) return -1
+    const existing = new Set(await engine.cells())
+    let pending = 0
+    for (const name of [botCellName(agentId), storyCellName(agentId), USER_CELL]) {
+      if (!existing.has(name)) continue
+      const cell = await memoryCell(name, 'homun')
+      pending += await cell.embedPending()
+    }
+    return pending
+  } catch {
+    return -1
+  }
+}
+
+/**
  * Il tick dei 30 s (correzioni C7): ACCODA il job memory-embed per ogni
  * agente — col coalesce di enqueueEmbedPending, un solo job per agente — e
  * NON incorpora direttamente (il tick gira fuori dalle corsie: anche DURANTE

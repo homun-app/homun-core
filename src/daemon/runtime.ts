@@ -1078,14 +1078,30 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
       // in docker, scadenza delle 6 ore) — le notifiche SHELL_DONE partono da qui
       void import('../main/agent/shells').then((m) => m.tickShellJobs()).catch((e) => console.error('[sandbotd] shell jobs:', e))
       // fase memoria-engramma · correzioni (C7): il tick ACCODA il job
-      // memory-embed per ogni agente (coalesce), NON incorpora direttamente:
-      // l'incorporazione gira solo nella corsia dell'agente, mai durante un
-      // suo turno — e solo se il modello c'è (il job è un no-op altrimenti)
+      // memory-embed, NON incorpora direttamente: l'incorporazione gira solo
+      // nella corsia dell'agente, mai durante un suo turno — e solo se il
+      // modello c'è (il job è un no-op altrimenti).
+      // D4 (fase deleghe): SOLO per i bot con la bandiera «sporco» (chi ha
+      // davvero celle da incorporare) — prima un job per TUTTI a ogni tick,
+      // 26.000 righe di memory-embed al giorno quasi tutte a vuoto
       try {
-        const engineMod = await import('../main/memory/engine')
-        engineMod.enqueueEmbedPendingAll(database, listAgents().map((a) => a.id), now)
+        const embedDirtyMod = await import('../main/memory/embed-dirty')
+        embedDirtyMod.enqueueEmbedPendingDirty(database, listAgents().map((a) => a.id), now)
       } catch {
         // niente coda in questo momento: al prossimo tick
+      }
+      // D4: la pulizia dei job FINITI oltre 7 giorni, una volta al giorno,
+      // in transazione e a blocchi (la tabella non cresce per sempre)
+      try {
+        const lastCleanup = getSetting<number>('jobs.lastCleanupAt', 0)
+        if (now - lastCleanup > 24 * 3_600_000) {
+          const { cleanupFinishedJobs } = await import('../main/store/jobs')
+          const removed = cleanupFinishedJobs(database, now)
+          setSetting('jobs.lastCleanupAt', now)
+          if (removed > 0) console.log(`[sandbotd] pulizia jobs: ${removed} righe finite oltre 7 giorni`)
+        }
+      } catch (e) {
+        console.error('[sandbotd] pulizia jobs:', e)
       }
       // K2 (fase team-bot): la pulizia dei rimossi — bot e team eliminati
       // da più di 30 giorni si cancellano davvero (la SQL legge solo
@@ -1147,6 +1163,16 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   const requeued = requeueAllLeased(database)
   if (requeued > 0) console.log(`[sandbotd] ${requeued} job con lease orfano rimessi in coda all'avvio`)
   worker.start()
+  // D4 (fase deleghe): alla partenza la bandiera «sporco» per TUTTI — le
+  // celle scritte prima (o col modello assente) restano incorporabili: il
+  // primo job per bot incorpora ciò che c'è, poi il tick torna a chiedere
+  // solo a chi scrive
+  try {
+    const embedDirtyMod = await import('../main/memory/embed-dirty')
+    embedDirtyMod.markAllEmbedDirty(database, listAgents().map((a) => a.id))
+  } catch {
+    // niente store in questo momento: alla prossima scrittura
+  }
 
   // OA1 (fase onboarding-a): il bot lo crea SOLO questa chiamata (il main è
   // fuori dalla corsa); OA2/OA3: la guida riprende dallo stesso passo e il

@@ -386,7 +386,7 @@ export function clearStoryJobPayloads(db: DatabaseSync): number {
 }
 
 /**
- * Correzioni 2 (R3): come clearStoryJobPayloads, ma per i job user-message
+ * Correzioni C1: come clearStoryJobPayloads, ma per i job user-message
  * fatti o falliti dalle versioni precedenti il passaggio a done/failed che
  * svuota il payload: il testo del messaggio dell'utente esce dalla tabella
  * UNA volta al boot (ritorna quante righe ha ripulito).
@@ -396,6 +396,48 @@ export function clearUserMessageJobPayloads(db: DatabaseSync): number {
     "UPDATE jobs SET payload_json = '{}' WHERE kind = 'user-message' AND status IN ('done','failed') AND payload_json != '{}'"
   ).run()
   return Number(r.changes)
+}
+
+// ---- D4 (fase deleghe): la coda non cresce a vuoto ----
+
+/** D4: i job FINITI (done/failed) si cancellano dopo 7 giorni. */
+export const JOB_CLEANUP_AFTER_MS = 7 * 24 * 3_600_000
+
+/** D4: la pulizia va a BLOCCHI di 5.000 righe (mai una DELETE gigante). */
+export const JOB_CLEANUP_BATCH = 5_000
+
+/**
+ * D4: pulizia dei job finiti (done/failed — gli annullati sono già righe
+ * via) più vecchi di 7 giorni (created_at), in transazione e a blocchi di
+ * JOB_CLEANUP_BATCH: il DB non resta mai con una DELETE da milioni di righe
+ * in un colpo solo. I job user-message finiti mantengono la regola di oggi
+ * sul payload ripulito (completeJob/failJob svuotano alla chiusura). Ritorna
+ * quante righe ha tolto.
+ */
+export function cleanupFinishedJobs(
+  db: DatabaseSync,
+  now: number,
+  opts: { olderThanMs?: number; batchSize?: number } = {}
+): number {
+  const cutoff = now - (opts.olderThanMs ?? JOB_CLEANUP_AFTER_MS)
+  const batch = Math.max(1, opts.batchSize ?? JOB_CLEANUP_BATCH)
+  const del = db.prepare(
+    "DELETE FROM jobs WHERE id IN (SELECT id FROM jobs WHERE status IN ('done','failed') AND created_at <= ? ORDER BY id LIMIT ?)"
+  )
+  let total = 0
+  for (;;) {
+    db.exec('BEGIN')
+    try {
+      const n = Number(del.run(cutoff, batch).changes)
+      db.exec('COMMIT')
+      total += n
+      if (n < batch) break
+    } catch (e) {
+      db.exec('ROLLBACK')
+      throw e
+    }
+  }
+  return total
 }
 
 /**

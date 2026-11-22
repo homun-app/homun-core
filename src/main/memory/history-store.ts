@@ -12,7 +12,8 @@
 import { createHash } from 'node:crypto'
 import type { EngrammaSearchHit } from './engine'
 import { memoryCell, memoryEngine, storyCellName, dropCellAndEvict } from './engine'
-import { getEntries, deleteSetting, getSetting, setSetting } from '../store/db'
+import { db, getEntries, deleteSetting, getSetting, setSetting } from '../store/db'
+import { markEmbedDirtyFor } from './embed-dirty'
 
 /** L'actor delle scritture della storia: il demone, per conto della chat. */
 const STORY_ACTOR = 'homun:story'
@@ -76,6 +77,14 @@ export async function indexStoryNote(
     confidence: kind === 'user' ? 'stated' : 'inferred',
     extensions: { 'x-homun': { entryId, kind, ...(opts.tainted ? { tainted: true } : {}) } }
   })
+  // D4 (fase deleghe): la cella storia ha roba nuova da incorporare — la
+  // bandiera sporca la scrive CHI SCRIVE (prima il tick chiedeva un job per
+  // TUTTI a ogni giro); il tick accoderà solo per chi ne ha davvero bisogno
+  try {
+    markEmbedDirtyFor(db(), agentId)
+  } catch {
+    // niente store (es. test del solo motore): non blocca l'indicizzazione
+  }
 }
 
 /** L'entry e il bot di un hit della storia (dal tag entry/<id> e dalla CELLA). */
