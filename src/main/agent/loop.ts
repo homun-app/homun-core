@@ -728,6 +728,12 @@ export interface RunTurnOptions {
     threadId?: string
     /** Q3: questo turno È una risposta collegata automatica (mai un'altra) */
     autoReply?: boolean
+    /**
+     * D1 (fase deleghe): il messaggio è una delega nata in un turno
+     * dell'UTENTE (o la sua risposta collegata): non consuma il limite
+     * orario della coppia, che vale per le catene tra bot.
+     */
+    userRequested?: boolean
   }
   /**
    * Fase 7 (correzione A3): il turno è una catena tra bot partita da un turno
@@ -1269,6 +1275,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // l'unico dove una risposta vuota ha UN recupero senza strumenti (R5)
   const privateHumanTurn =
     source === 'user' && opts.initiator === undefined && opts.agentMessage === undefined
+  // D1 (fase deleghe): il turno della CHAT DIRETTA dell'utente (niente task,
+  // gruppi, figli, risvegli di sistema): le deleghe nate qui sono richieste
+  // dell'utente, non catene tra bot — il limite orario della coppia non vale,
+  // al suo posto il tetto AGENT_USER_TURN_SEND_MAX per turno
+  const userDelegationTurn =
+    privateHumanTurn && opts.taskId === undefined && opts.groupTurn === undefined && opts.subagent === undefined
   // liveReplyTurn: la risposta si mostra in diretta (R6) — chat privata, mai
   // turni automatici (passano dall'outbox), mai gruppi, figli o task
   const liveReplyTurn =
@@ -1309,6 +1321,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // già scritto al mittente del filo, la risposta collegata non parte) e il
   // testo finale consegnato (la risposta collegata da rimandare al mittente)
   const sentToAgentIds = new Set<string>()
+  // D1 (fase deleghe): quanti send_to_agent sono PARTITI in questo turno —
+  // nei turni dell'utente è il tetto AGENT_USER_TURN_SEND_MAX
+  let agentSendsThisTurn = 0
   let threadReplyText: string | null = null
   /**
    * Q4 (fase squadra): le righe di SOLA VISUALIZZAZIONE della timeline —
@@ -1791,8 +1806,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         meta: {
           ...(opts.respondedTo !== undefined ? { respondedTo: opts.respondedTo } : {}),
           ...(opts.initiator ? { initiator: opts.initiator } : {}),
-          // fase 7: provenienza del messaggio di un altro bot (rate per coppia)
-          ...(opts.agentMessage ? { fromAgentId: opts.agentMessage.fromAgentId, fromAgentName: opts.agentMessage.fromAgentName, toAgentId: agentId, hop: opts.agentMessage.hop } : {}),
+          // fase 7: provenienza del messaggio di un altro bot (rate per coppia);
+          // D1 (fase deleghe): userRequested dice che il messaggio è nato in un
+          // turno dell'utente — non consuma il limite orario della coppia
+          ...(opts.agentMessage ? {
+            fromAgentId: opts.agentMessage.fromAgentId, fromAgentName: opts.agentMessage.fromAgentName,
+            toAgentId: agentId, hop: opts.agentMessage.hop,
+            ...(opts.agentMessage.userRequested ? { userRequested: true } : {})
+          } : {}),
           ...(opts.extraMeta ?? {}),
           ...(opts.readingPage ? { readingPage: opts.readingPage } : {}),
           ...(images?.length ? { images: images.length } : {})
@@ -4746,12 +4767,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // correzione A1: il limite per coppia si conta AL MOMENTO DELL'INVIO
           // e la fonte comprende i messaggi già ACCODATI (job non ancora
           // consegnati): con più tool call nella stessa risposta il tetto orario
-          // scatta comunque, non solo quando il turno del destinatario parte
+          // scatta comunque, non solo quando il turno del destinatario parte.
+          // D1 (fase deleghe): il tetto orario vale per le CATENE; nei turni
+          // dell'utente (la delega chiesta dall'utente) vale invece il tetto
+          // per turno AGENT_USER_TURN_SEND_MAX
           const incomingHop = opts.agentMessage?.hop ?? 0
-          const pairLastHour =
-            countPairMessagesLastHour([...getEntries(agentId), ...getEntries(toId)], agentId, toId, now) +
-            pendingAgentPairJobs(db(), agentId, toId, now)
-          const guard = agentSendGuard({ incomingHop, pairLastHour })
+          const pairLastHour = userDelegationTurn
+            ? 0
+            : countPairMessagesLastHour([...getEntries(agentId), ...getEntries(toId)], agentId, toId, now) +
+              pendingAgentPairJobs(db(), agentId, toId, now)
+          const guard = agentSendGuard({ incomingHop, pairLastHour, userTurn: userDelegationTurn, sentThisTurn: agentSendsThisTurn })
           if (!guard.ok) {
             messages.push({ role: 'tool', toolCallId: call.id, content: guard.error })
             continue
@@ -4846,12 +4871,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // delegato ("A <nome bot>") e buildMessages riporta l'entry al modello
           // come coppia send_to_agent + esito della coda nel turno successivo
           appendSend(agentId, call, { type: 'text', text }, emit, {
-            toAgentId: toId, toAgentName: dest.name, hop: guard.hop, agentSend: true
+            toAgentId: toId, toAgentName: dest.name, hop: guard.hop, agentSend: true,
+            ...(userDelegationTurn ? { userRequested: true } : {})
           }, opts.taskId)
           // Q3 (fase squadra): il filo della delega — la risposta collegata
           // torna al mittente a fine turno di chi riceve
           const threadId = `t-${randomUUID().slice(0, 8)}`
           sentToAgentIds.add(toId)
+          agentSendsThisTurn++
           // Q4: lo scambio tra membri entra nella timeline della squadra
           if (sendSquadId !== null) {
             addGroupMessage({
@@ -4870,6 +4897,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               fromAgentName: agent.name,
               toAgentId: toId,
               hop: guard.hop,
+              // D1 (fase deleghe): la delega nata nel turno dell'utente (e la
+              // sua risposta collegata) non consuma il limite della coppia
+              ...(userDelegationTurn ? { userRequested: true } : {}),
               // Q1 (fase squadra): il turno del destinatario è della squadra
               // della delega; se la delega è passata col turno contaminato,
               // la contaminazione passa avanti
@@ -5988,6 +6018,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             hop: opts.agentMessage.hop,
             threadId: opts.agentMessage.threadId,
             autoReply: true,
+            // D1 (fase deleghe): la risposta alla delega dell'utente non
+            // consuma il limite della coppia (come la domanda)
+            ...(opts.agentMessage.userRequested ? { userRequested: true } : {}),
             ...(opts.squadId !== undefined ? { squadId: opts.squadId } : {}),
             // C1 (fase squadra-correzioni): il contagio attraversa la risposta
             // collegata — il valore di `contaminated` A FINE TURNO di chi

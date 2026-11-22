@@ -272,4 +272,14 @@ describe('pendingAgentPairJobs: i send_to_agent accodati e non ancora consegnati
     db().prepare("UPDATE jobs SET status = 'leased' WHERE id = ?").run(leased.id)
     expect(pendingAgentPairJobs(db(), 'a', 'b', NOW)).toBe(1)
   })
+
+  // D1 (fase deleghe): le deleghe nate in un turno dell'utente non sono
+  // catene: non consumano il limite della coppia nemmeno da accodate
+  it('D1: i job userRequested (delega di un turno dell\'utente) NON contano', () => {
+    enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b', { userRequested: true }), runAt: 0, now: NOW - 60_000 })
+    enqueueJob(db(), { agentId: 'a', kind: 'user-message', payload: pairJob('b', 'a', { userRequested: true }), runAt: 0, now: NOW - 60_000 })
+    // uno di catena resta contato
+    enqueueJob(db(), { agentId: 'b', kind: 'user-message', payload: pairJob('a', 'b'), runAt: 0, now: NOW - 60_000 })
+    expect(pendingAgentPairJobs(db(), 'a', 'b', NOW)).toBe(1)
+  })
 })

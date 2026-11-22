@@ -44,6 +44,9 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
         fromAgentId?: string; fromAgentName?: string; hop?: number
         // Q3 (fase squadra): il filo della delega e la risposta collegata
         threadId?: string; autoReply?: boolean
+        // D1 (fase deleghe): delega nata in un turno dell'utente (o sua
+        // risposta collegata): non consuma il limite orario della coppia
+        userRequested?: boolean
         // fase 7 (correzione A3): la catena eredita l'automaticità del mittente
         automatic?: boolean
         // fase 8 (correzione B1): l'origine del task arriva anche al TASK_DONE
@@ -71,7 +74,8 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
               agentMessage: {
                 fromAgentId: p.fromAgentId, fromAgentName: p.fromAgentName, hop: p.hop,
                 ...(p.threadId ? { threadId: p.threadId } : {}),
-                ...(p.autoReply ? { autoReply: true } : {})
+                ...(p.autoReply ? { autoReply: true } : {}),
+                ...(p.userRequested ? { userRequested: true } : {})
               }
             }
           : {}),

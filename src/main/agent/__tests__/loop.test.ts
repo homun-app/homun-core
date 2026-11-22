@@ -2458,7 +2458,7 @@ describe('fase 7: send_to_agent', () => {
     expect(toolResults.some((m) => String(m.content).includes('maximum hop 3'))).toBe(true)
   })
 
-  it('limite per ora: oltre 10 messaggi tra la stessa coppia, rifiuto senza accodare', async () => {
+  it('limite per ora: oltre 10 messaggi tra la stessa coppia, rifiuto senza accodare (D1: nei turni NON dell\'utente)', async () => {
     // 10 messaggi tra la coppia nell'ultima ora nel transcript del destinatario
     const now = Date.now()
     for (let i = 0; i < 10; i++) {
@@ -2472,7 +2472,9 @@ describe('fase 7: send_to_agent', () => {
       { toolCalls: [{ id: 'a4', name: 'send_to_agent', arguments: JSON.stringify({ agentId: OTHER, text: 'uno in più' }) }] },
       { text: 'ok' }
     ]
-    await runTurn(AGENT, 'ancora', emit)
+    // D1 (fase deleghe): il tetto orario vale per le CATENE — il turno qui è
+    // una routine, non il messaggio dell'utente
+    await runTurn(AGENT, 'ancora', emit, undefined, { source: 'routine', title: 'Ronda', initiator: 'ROUTINE' })
     expect(h.db.jobs).toHaveLength(0)
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
     const toolResults = lastCall.filter((m) => m.role === 'tool')
@@ -2528,14 +2530,16 @@ describe('fase 7: send_to_agent', () => {
 
   // ---- correzioni review fase 7 (A1/A2/A3/A5) ----
 
-  it('correzione A1: 11 send_to_agent nella stessa risposta → 10 accodati, l\'11° errore e nessun accodamento', async () => {
+  it('correzione A1 + D1: 11 send_to_agent nella stessa risposta di un turno UTENTE → 5 accodati (tetto per turno), gli altri errore e nessun accodamento', async () => {
     const calls = Array.from({ length: 11 }, (_, i) => ({
       id: `m${i + 1}`, name: 'send_to_agent',
       arguments: JSON.stringify({ agentId: OTHER, text: `msg ${i + 1}` })
     }))
     h.llm.queue = [{ toolCalls: calls }, { text: '' }, { text: 'ho delegato a Specialista' }]
     await runTurn(AGENT, 'delega a raffica', emit)
-    expect(h.db.jobs).toHaveLength(10)
+    // D1 (fase deleghe): nel turno dell'utente il tetto orario della coppia
+    // NON vale; al suo posto AGENT_USER_TURN_SEND_MAX = 5 per turno
+    expect(h.db.jobs).toHaveLength(5)
     // fase 8 (residuo 0a) → fase risposta (R5): le deleghe non sono messaggi
     // all'utente → la chiamata di recupero PARTE anche in un turno che ha
     // solo delegato; il SUO testo è la risposta (terza chiamata, senza tool);
@@ -2543,8 +2547,8 @@ describe('fase 7: send_to_agent', () => {
     expect(h.llm.calls).toHaveLength(3)
     expect(h.llm.toolsList[2]).toEqual([])
     const toolResults = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(toolResults.filter((c) => c.includes('Message queued for Specialista'))).toHaveLength(10)
-    expect(toolResults.some((c) => c.includes('in the last hour'))).toBe(true)
+    expect(toolResults.filter((c) => c.includes('Message queued for Specialista'))).toHaveLength(5)
+    expect(toolResults.filter((c) => c.includes('limit 5'))).toHaveLength(6)
     const sent = h.db.entries.findLast((e) => e.kind === 'send-message' && !e.meta?.agentSend)!
     expect(sent.content).toBe('ho delegato a Specialista')
     expect(sent.meta?.final).toBe(true)

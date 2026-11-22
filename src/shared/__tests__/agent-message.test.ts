@@ -88,6 +88,58 @@ describe('countPairMessagesLastHour', () => {
   })
 })
 
+// ---- D1 (fase deleghe): il limite orario vale per le CATENE, non per le deleghe dell'utente ----
+
+import { AGENT_USER_TURN_SEND_MAX } from '../agent-message'
+
+describe('D1: agentSendGuard — deleghe dell\'utente vs catene tra bot', () => {
+  it('turno dell\'utente: il limite della coppia NON vale (11 messaggi veri passano), vale il tetto per turno', () => {
+    // il caso vero del 22/11: 11 messaggi tra principale e Novità AI nati da
+    // richieste dell'utente — la quinta delega passa uguale
+    expect(agentSendGuard({ incomingHop: 0, pairLastHour: 11, userTurn: true, sentThisTurn: 0 })).toEqual({ ok: true, hop: 1 })
+    expect(agentSendGuard({ incomingHop: 0, pairLastHour: 99, userTurn: true, sentThisTurn: 4 })).toEqual({ ok: true, hop: 1 })
+  })
+
+  it('turno dell\'utente: il sesto send_to_agent del turno è rifiutato, in inglese', () => {
+    const g = agentSendGuard({ incomingHop: 0, pairLastHour: 0, userTurn: true, sentThisTurn: AGENT_USER_TURN_SEND_MAX })
+    expect(g.ok).toBe(false)
+    if (!g.ok) {
+      expect(g.error).toContain(`limit ${AGENT_USER_TURN_SEND_MAX}`)
+      // inglese: solo ASCII, nessuna frase italiana
+      expect(g.error).toMatch(/^[A-Za-z0-9 .,:;'"()\-]+$/)
+    }
+  })
+
+  it('turno NON dell\'utente (routine, evento, risposta a risposta): il limite della coppia resta', () => {
+    const g = agentSendGuard({ incomingHop: 0, pairLastHour: AGENT_PAIR_HOURLY_MAX, userTurn: false, sentThisTurn: 0 })
+    expect(g.ok).toBe(false)
+    if (!g.ok) expect(g.error).toContain('in the last hour')
+    // senza il flag nuovo (chiamate di oggi): stesso comportamento
+    expect(agentSendGuard({ incomingHop: 0, pairLastHour: AGENT_PAIR_HOURLY_MAX }).ok).toBe(false)
+  })
+
+  it('il tetto per turno NON si applica ai turni non dell\'utente (le catene guardano la coppia)', () => {
+    expect(agentSendGuard({ incomingHop: 1, pairLastHour: 0, userTurn: false, sentThisTurn: 99 })).toEqual({ ok: true, hop: 2 })
+  })
+})
+
+describe('D1: countPairMessagesLastHour — le deleghe dell\'utente non consumano la coppia', () => {
+  const now = 2_000_000_000_000
+  const mk = (from: string, to: string, ago: number, over: Partial<TranscriptEntry> = {}): TranscriptEntry => ({
+    id: 1, agentId: to, kind: 'message', role: 'user', content: 'x',
+    meta: { initiator: 'AGENT', fromAgentId: from, toAgentId: to }, createdAt: now - ago, ...over
+  })
+
+  it('i messaggi con meta.userRequested (delega nata in un turno dell\'utente, risposta compresa) NON contano', () => {
+    const entries = [
+      mk('a', 'b', 60_000, { meta: { initiator: 'AGENT', fromAgentId: 'a', toAgentId: 'b', userRequested: true } }),
+      mk('b', 'a', 90_000, { meta: { initiator: 'AGENT', fromAgentId: 'b', toAgentId: 'a', userRequested: true, autoReply: true } }),
+      mk('a', 'b', 120_000) // catena: conta
+    ]
+    expect(countPairMessagesLastHour(entries, 'a', 'b', now)).toBe(1)
+  })
+})
+
 // ---- correzione A4: neutralizzazione dei tag di chiusura nel testo ----
 
 describe('neutralizeClosingTag: il testo ostile non chiude il blocco evidenza', () => {

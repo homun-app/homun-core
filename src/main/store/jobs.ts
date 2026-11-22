@@ -141,6 +141,8 @@ export function pendingUserMessages(db: DatabaseSync, agentId: string): number {
  * la parte del limite orario che il transcript non vede finché il turno del
  * destinatario non parte. I job con entryId sono già diventati entry del
  * destinatario (ripresa dopo crash): contarli conteggierebbe due volte.
+ * D1 (fase deleghe): i job userRequested (deleghe nate in un turno
+ * dell'utente) NON contano — non sono catene.
  */
 export function pendingAgentPairJobs(db: DatabaseSync, a: string, b: string, now: number): number {
   const r = db.prepare(`
@@ -149,6 +151,7 @@ export function pendingAgentPairJobs(db: DatabaseSync, a: string, b: string, now
       AND created_at > ?
       AND json_extract(payload_json, '$.initiator') = 'AGENT'
       AND json_extract(payload_json, '$.entryId') IS NULL
+      AND COALESCE(json_extract(payload_json, '$.userRequested'), 0) = 0
       AND (
         (json_extract(payload_json, '$.fromAgentId') = ? AND json_extract(payload_json, '$.toAgentId') = ?)
         OR (json_extract(payload_json, '$.fromAgentId') = ? AND json_extract(payload_json, '$.toAgentId') = ?)

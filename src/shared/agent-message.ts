@@ -11,6 +11,14 @@ export const AGENT_HOP_MAX = 3
 export const AGENT_PAIR_HOURLY_MAX = 10
 
 /**
+ * D1 (fase deleghe): il limite orario della coppia vale per le CATENE tra
+ * bot, non per le deleghe chieste dall'utente (il caso vero del 22/11: 4
+ * richieste dell'utente → 11 messaggi in 18 minuti e la quarta rifiutata).
+ * Nei turni dell'utente vale invece questo tetto per turno, chiaro.
+ */
+export const AGENT_USER_TURN_SEND_MAX = 5
+
+/**
  * La regola che accompagna il blocco: il destinatario risponde a un BOT, non
  * all'utente. Correzione A4: la delega del bot principale deve FUNZIONARE,
  * quindi il lavoro richiesto si può svolgere se rientra nel ruolo; ciò che non
@@ -191,14 +199,33 @@ export type AgentSendGuard =
  * Protezione contro i cicli (puro): il turno corrente è stato aperto da un
  * messaggio con `incomingHop` rilay; se è già al massimo, non si possono
  * generare altri messaggi tra agenti. Il nuovo messaggio avrebbe hop+1.
+ * D1 (fase deleghe): nei turni dell'UTENTE (`userTurn`) il limite orario
+ * della coppia NON vale — le deleghe chieste dall'utente non sono catene —
+ * al suo posto il tetto per turno `sentThisTurn`/AGENT_USER_TURN_SEND_MAX.
  */
-export function agentSendGuard(input: { incomingHop: number; pairLastHour: number }): AgentSendGuard {
+export function agentSendGuard(input: {
+  incomingHop: number
+  pairLastHour: number
+  /** D1: true se il turno è stato aperto dal messaggio diretto dell'utente in chat */
+  userTurn?: boolean
+  /** D1: quanti send_to_agent ha già spedito questo turno (vale solo con userTurn) */
+  sentThisTurn?: number
+}): AgentSendGuard {
   if (input.incomingHop >= AGENT_HOP_MAX) {
     return {
       // fase risposta: la risposta all'utente è il testo normale della risposta
       ok: false,
       error: `Bot-to-bot message chain too long (maximum hop ${AGENT_HOP_MAX}): answer the user in the text of your final reply, not with other bots.`
     }
+  }
+  if (input.userTurn === true) {
+    if ((input.sentThisTurn ?? 0) >= AGENT_USER_TURN_SEND_MAX) {
+      return {
+        ok: false,
+        error: `Too many messages to other bots in this turn (limit ${AGENT_USER_TURN_SEND_MAX}): reply to the user with what you have, they can ask for more.`
+      }
+    }
+    return { ok: true, hop: input.incomingHop + 1 }
   }
   if (input.pairLastHour >= AGENT_PAIR_HOURLY_MAX) {
     return {
@@ -213,6 +240,9 @@ export function agentSendGuard(input: { incomingHop: number; pairLastHour: numbe
  * Quanti messaggi tra agenti sono passati tra la coppia {a, b} nell'ultima
  * ora (in entrambe le direzioni): conta le entry messaggio con initiator
  * AGENT e from/to che coprono la coppia, create entro l'ora (puro).
+ * D1 (fase deleghe): le deleghe nate in un turno dell'utente (meta.
+ * userRequested, risposta collegata compresa) NON contano — il limite serve
+ * contro le catene, che AGENT_HOP_MAX ferma già per conto suo.
  */
 export function countPairMessagesLastHour(
   entries: Pick<TranscriptEntry, 'kind' | 'meta' | 'createdAt'>[],
@@ -222,6 +252,7 @@ export function countPairMessagesLastHour(
 ): number {
   return entries.filter((e) => {
     if (e.kind !== 'message' || e.meta?.initiator !== 'AGENT') return false
+    if (e.meta?.userRequested === true) return false
     if (e.createdAt <= now - 3_600_000) return false
     const from = String(e.meta?.fromAgentId ?? '')
     const to = String(e.meta?.toAgentId ?? '')
