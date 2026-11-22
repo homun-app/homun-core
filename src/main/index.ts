@@ -12,7 +12,7 @@
 // navigazione resta nella stessa origine, i webview sono vietati e i permessi
 // del browser sono tutti negati salvo la scrittura degli appunti.
 import { app, BrowserWindow, protocol, safeStorage, screen, session, shell } from 'electron'
-import { existsSync } from 'node:fs'
+import { existsSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
 import { setDataDir, dataDir } from './store/db'
@@ -153,7 +153,26 @@ if (isDaemonMode(process.argv)) {
     // SV4 (fase schermo-vivo): l'adattatore Electron della PiP — la logica
     // (bounds, sempre-sopra, sostituzione, Esc) sta nel PipManager puro di
     // pip.ts, qui solo la finestra vera con la SICUREZZA della principale
-    function createPipHandle(options: Record<string, unknown>, url: string): PipWindowHandle {
+    
+/**
+ * D6 (fase deleghe, SOLO TEST): openExternal FINTO — con la variabile
+ * SANDBOT_TEST_OPEN_EXTERNAL_LOG il click su un link http(s) di un documento
+ * REGISTRA l'URL su quel file invece di aprire il browser dell'utente (come
+ * SANDBOT_TEST_OPEN per il comando `open` del daemon). La sonda lo legge e
+ * verifica la CHIAMATA, mai una finestra vera.
+ */
+function openExternalMaybeFake(url: string): void {
+  const log = process.env.SANDBOT_TEST_OPEN_EXTERNAL_LOG
+  if (log) {
+    try {
+      appendFileSync(log, JSON.stringify({ url, at: Date.now() }) + '\n')
+      return
+    } catch { /* si ricade sul vero */ }
+  }
+  void shell.openExternal(url)
+}
+
+function createPipHandle(options: Record<string, unknown>, url: string): PipWindowHandle {
       const win = new BrowserWindow(options as ConstructorParameters<typeof BrowserWindow>[0])
       const appOrigin = process.env.ELECTRON_RENDERER_URL
         ? new URL(process.env.ELECTRON_RENDERER_URL).origin + '/'
@@ -168,7 +187,7 @@ if (isDaemonMode(process.argv)) {
       }
       // niente finestre/popup; i link http(s) al browser esterno dopo il controllo dello schema
       win.webContents.setWindowOpenHandler(({ url: u }) => {
-        if (canOpenExternally(u)) void shell.openExternal(u)
+        if (canOpenExternally(u)) openExternalMaybeFake(u)
         return { action: 'deny' }
       })
       // la navigazione resta nell'origine dell'app (la rotta è #/pip/<bot>);
@@ -231,7 +250,7 @@ if (isDaemonMode(process.argv)) {
       // esterno SOLO dopo il controllo dello schema (mai file:, javascript:,
       // schemi personalizzati)
       win.webContents.setWindowOpenHandler(({ url }) => {
-        if (canOpenExternally(url)) void shell.openExternal(url)
+        if (canOpenExternally(url)) openExternalMaybeFake(url)
         return { action: 'deny' }
       })
       // A5: la navigazione resta nell'origine dell'app (homun://app in
