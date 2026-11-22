@@ -157,6 +157,23 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(s.length / 4).toBeLessThanOrEqual(155)
   })
 
+  // D6 (fase deleghe): il prompt dei documenti dice COME si linka un altro
+  // documento della Libreria (lib_<id>) e che i file del box sono percorsi
+  // mostrati, non aperti — col tetto dei token misurato
+  it('D6: write_document/edit_document portano la regola dei link (lib_<id>, percorsi del box) con la descrizione sotto tetto', async () => {
+    const { toolDefs } = await import('../tools')
+    const write = toolDefs.find((t) => t.name === 'write_document')!
+    const edit = toolDefs.find((t) => t.name === 'edit_document')!
+    for (const t of [write, edit]) {
+      expect(t.description).toContain('To link another library document write [title](lib_<id>)')
+      expect(t.description).toContain('links to box files are shown as paths, not opened')
+    }
+    // descrizioni misurate (caratteri/4): write 76, edit 69 token stimati —
+    // la riga D6 dei link costa ~27 token ciascuna
+    expect(write.description.length / 4).toBeLessThanOrEqual(80)
+    expect(edit.description.length / 4).toBeLessThanOrEqual(75)
+  })
+
   // fase 10 (punto 4): la sezione nuova entra nel prompt base (tutti i bot
   // possono creare team) e il budget complessivo resta quello della fase 9
   it('team e gruppi: coordinatore unico che parla all\'utente, avvio con @menzioni, un solo messaggio all\'utente', () => {
@@ -589,9 +606,16 @@ describe('fase token (T4): il prompt di base scende e le sezioni vanno nelle gui
 })
 
 describe('fase token (T4.3): descrizioni di una riga', () => {
-  it('per ogni tool del catalogo: descrizione ≤ 200 caratteri (facciate e find_tools a parte: righe per azione/indice)', () => {
+  it('per ogni tool del catalogo: descrizione ≤ 200 caratteri (facciate e find_tools a parte: righe per azione/indice; D6: i documenti fino a 320 per la regola dei link, misurata 304/276)', () => {
+    // D6 (fase deleghe): write_document/edit_document portano la regola dei
+    // link richiesta dalla spec («To link another library document write
+    // [title](lib_<id>); links to box files are shown as paths, not opened.»)
+    // — 107 caratteri che alzano il tetto DI QUEI DUE a 320 (misurati: 304 e
+    // 276); tutti gli altri restano sotto 200
+    const D6_LINK_TOOLS = new Set(['write_document', 'edit_document'])
     for (const t of [...toolDefs, ...browserToolDefs, ...computerToolDefs]) {
-      expect(t.description.length, `${t.name}: ${t.description.length}`).toBeLessThanOrEqual(200)
+      const cap = D6_LINK_TOOLS.has(t.name) ? 320 : 200
+      expect(t.description.length, `${t.name}: ${t.description.length}`).toBeLessThanOrEqual(cap)
     }
   })
 

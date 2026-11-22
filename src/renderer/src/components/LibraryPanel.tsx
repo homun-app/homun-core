@@ -303,10 +303,13 @@ function ItemActions({ item, onChanged, compact }: { item: LibraryItemInfo; onCh
 function LibraryItemView({ id }: { id: string }) {
   const { t } = useLingui()
   const openLibrary = useStore((s) => s.openLibrary)
+  const openPage = useStore((s) => s.openPage)
   const [item, setItem] = useState<LibraryItemInfo | null>(null)
   const [content, setContent] = useState<LibraryContentInfo | null>(null)
   const [version, setVersion] = useState<number | null>(null)
   const [err, setErr] = useState('')
+  // D6 (fase deleghe): gli id dei documenti che esistono, per i link lib_…
+  const [docIds, setDocIds] = useState<Set<string>>(new Set())
 
   const refresh = async (v?: number) => {
     try {
@@ -314,6 +317,7 @@ function LibraryItemView({ id }: { id: string }) {
       setContent(c)
       setVersion(v ?? Math.max(...c.versions))
       const items = await api.libraryList(undefined, undefined)
+      setDocIds(new Set(items.map((i) => i.id)))
       setItem(items.find((i) => i.id === id) ?? null)
       setErr('')
     } catch (e) {
@@ -364,7 +368,10 @@ function LibraryItemView({ id }: { id: string }) {
                 </button>
               )}
             </div>
-            <DocumentBody markdown={content.content ?? ''} />
+            <DocumentBody
+              markdown={content.content ?? ''}
+              onOpenDoc={(docId) => openPage(docId, 'library')} docExists={(docId) => docIds.has(docId)}
+            />
           </>
         )}
 

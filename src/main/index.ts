@@ -24,7 +24,7 @@ import { isDaemonMode, resolveDataDirArgv } from './mode'
 import { runDaemonRuntime } from '../daemon/runtime'
 import { APP_BUILD_ID } from './build-id'
 import { createRendererHandler, realFs, RENDERER_CSP } from './protocol'
-import { canOpenExternally } from './external-url'
+import { canOpenExternally, isSpaNavigationBlocked } from './external-url'
 import { permissionAllowed } from './permissions'
 import { cleanupLegacyLaunchAgent } from './launchagent'
 import { findLegacyHomun2Dir, legacyNoticeMarkerPath } from './legacy-homun2'
@@ -171,12 +171,14 @@ if (isDaemonMode(process.argv)) {
         if (canOpenExternally(u)) void shell.openExternal(u)
         return { action: 'deny' }
       })
-      // la navigazione resta nell'origine dell'app (la rotta è #/pip/<bot>)
+      // la navigazione resta nell'origine dell'app (la rotta è #/pip/<bot>);
+      // D6 (fase deleghe): e DENTRO l'origine solo la RADICE — l'app è una
+      // SPA, nessun contenuto può ricaricarla o svuotarla
       win.webContents.on('will-navigate', (event, u) => {
-        if (!isAppNavigation(u)) event.preventDefault()
+        if (!isAppNavigation(u) || isSpaNavigationBlocked(u, appOrigin)) event.preventDefault()
       })
       win.webContents.on('will-redirect', (event, u) => {
-        if (!isAppNavigation(u)) event.preventDefault()
+        if (!isAppNavigation(u) || isSpaNavigationBlocked(u, appOrigin)) event.preventDefault()
       })
       win.webContents.on('will-attach-webview', (event) => event.preventDefault())
       void win.loadURL(url)
@@ -245,11 +247,15 @@ if (isDaemonMode(process.argv)) {
           return false
         }
       }
+      // D6 (fase deleghe): anche DENTRO l'origine dell'app solo la RADICE
+      // passa — l'app è una SPA (verificato: il routing è tutto a hash #/…)
+      // e nessun contenuto di un documento può ricaricare o svuotare la
+      // finestra ([x](y.md) → homun://app/y.md era «Not found» bianco)
       win.webContents.on('will-navigate', (event, url) => {
-        if (!isAppNavigation(url)) event.preventDefault()
+        if (!isAppNavigation(url) || isSpaNavigationBlocked(url, appOrigin)) event.preventDefault()
       })
       win.webContents.on('will-redirect', (event, url) => {
-        if (!isAppNavigation(url)) event.preventDefault()
+        if (!isAppNavigation(url) || isSpaNavigationBlocked(url, appOrigin)) event.preventDefault()
       })
       // A5: nessun <webview>
       win.webContents.on('will-attach-webview', (event) => event.preventDefault())

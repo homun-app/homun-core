@@ -8,7 +8,7 @@ import { describe, expect, it, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { resolveRendererPath, resolveMediaPath, createRendererHandler, realFs, RENDERER_CSP, MIME_TYPES } from '../protocol'
-import { canOpenExternally } from '../external-url'
+import { canOpenExternally, isSpaNavigationBlocked } from '../external-url'
 import { permissionAllowed } from '../permissions'
 import { TEST_TMP_BASE } from '../../test-tmp'
 
@@ -109,5 +109,24 @@ describe('fase rilascio (A5): schema dei permessi', () => {
     expect(permissionAllowed('notifications')).toBe(false)
     expect(permissionAllowed('geolocation')).toBe(false)
     expect(permissionAllowed('unknown')).toBe(false)
+  })
+})
+
+// D6 (fase deleghe): difesa in profondità del will-navigate — l'app è una
+// SPA e non naviga MAI da sé: una navigazione DENTRO l'origine dell'app
+// verso un percorso che non è la radice si BLOCCA (un link relativo in un
+// documento diventava homun://app/x.md e ricaricava o svuotava la finestra)
+describe("D6: will-navigate dentro l'origine dell'app — solo la radice passa", () => {
+  const ORIGIN = 'homun://app/'
+  it('i percorsi NON-radice dell\'origine sono bloccati (workspace, lib_, .md)', () => {
+    expect(isSpaNavigationBlocked('homun://app/workspace/ricettario/pastiera-napoletana.md', ORIGIN)).toBe(true)
+    expect(isSpaNavigationBlocked('homun://app/lib_f52c42f6', ORIGIN)).toBe(true)
+    expect(isSpaNavigationBlocked('homun://app/x.md', ORIGIN)).toBe(true)
+    expect(isSpaNavigationBlocked('homun://app/index.html?x=1', ORIGIN)).toBe(true)
+  })
+  it('la radice passa; fuori origine non è affar suo (la regola di prima decide)', () => {
+    expect(isSpaNavigationBlocked('homun://app/', ORIGIN)).toBe(false)
+    expect(isSpaNavigationBlocked('homun://app/index.html', ORIGIN)).toBe(false)
+    expect(isSpaNavigationBlocked('https://example.com/', ORIGIN)).toBe(false)
   })
 })

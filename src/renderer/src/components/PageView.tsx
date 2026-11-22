@@ -29,11 +29,15 @@ export function PageView() {
   const info = useStore((s) => s.openPageInfo)
   const closePage = useStore((s) => s.closePage)
   const openLibrary = useStore((s) => s.openLibrary)
+  const openPage = useStore((s) => s.openPage)
   const setPageMeta = useStore((s) => s.setPageMeta)
   const [content, setContent] = useState<LibraryContentInfo | null>(null)
   const [item, setItem] = useState<LibraryItemInfo | null>(null)
   const [err, setErr] = useState('')
   const [allHeadings, setAllHeadings] = useState(false)
+  // D6 (fase deleghe): gli id dei documenti che esistono, per i link lib_…
+  // nel corpo (il documento mancante diventa testo col tooltip)
+  const [docIds, setDocIds] = useState<Set<string>>(new Set())
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -49,6 +53,7 @@ export function PageView() {
         setContent(c)
         const items = await api.libraryList(undefined, undefined)
         if (!alive) return
+        setDocIds(new Set(items.map((i) => i.id)))
         const it = items.find((i) => i.id === info.id) ?? null
         setItem(it)
         // il compositore usa titolo e versione corrente nella riga per il modello
@@ -179,7 +184,10 @@ export function PageView() {
               {/* P2: il primo `# ` uguale al titolo non si riduplica nel corpo —
                   il titolo lo mostra già la pagina; l'indice resta sul Markdown
                   intero (un `# ` non c'è mai, gli id non cambiano) */}
-              <DocumentBody markdown={pageBody(markdown, title)} headingIds={headings.map((h) => h.id)} typography="page" />
+              <DocumentBody
+                markdown={pageBody(markdown, title)} headingIds={headings.map((h) => h.id)} typography="page"
+                onOpenDoc={(id) => openPage(id, 'library')} docExists={(id) => docIds.has(id)}
+              />
             </div>
           </div>
         )}

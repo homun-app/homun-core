@@ -727,7 +727,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'write_document',
-    description: 'Saves a library document (Markdown, max 200 KB): no id creates it, with id a NEW version. Charts as ```vega-lite or ```mermaid blocks. The text goes here, NOT in chat: one or two sentences there.',
+    description: 'Saves a library document (Markdown, max 200 KB): no id creates it, with id a NEW version. Charts as ```vega-lite or ```mermaid blocks. To link another library document write [title](lib_<id>); links to box files are shown as paths, not opened. The text goes here, NOT in chat: one or two sentences there.',
     parameters: {
       type: 'object',
       properties: {
@@ -740,7 +740,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'edit_document',
-    description: 'Modifies a library document with EXACT replacements: each edits[i].old must appear EXACTLY ONCE (the error says how many times); edits apply in order as ONE new version.',
+    description: 'Modifies a library document with EXACT replacements: each edits[i].old must appear EXACTLY ONCE (the error says how many times); edits apply in order as ONE new version. To link another library document write [title](lib_<id>); links to box files are shown as paths, not opened.',
     parameters: {
       type: 'object',
       properties: {

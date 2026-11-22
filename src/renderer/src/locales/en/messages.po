@@ -2883,6 +2883,10 @@ msgstr "Docker is not responding: open it and try again"
 msgid "docker.com"
 msgstr "docker.com"
 
+#: src/renderer/src/components/DocumentMarkdown.tsx
+msgid "documento non trovato"
+msgstr "document not found"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.documentNotFound"
@@ -6220,6 +6224,10 @@ msgstr "For developers"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Perché lo so?"
 msgstr "Why do I know this?"
+
+#: src/renderer/src/components/DocumentMarkdown.tsx
+msgid "percorso del computer dei bot — clic per copiare"
+msgstr "path in the bots' computer — click to copy"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
