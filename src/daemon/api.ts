@@ -1249,10 +1249,18 @@ export function buildApiMethods(
 
     // A1 (fase centro-autorizzazioni): tutte le richieste pendenti che
     // spettano all'utente, dalLA tabella approvals (indice su status) unita
-    // alle entry delle card — il costo è del numero delle richieste
+    // alle entry delle card — il costo è del numero delle RICHIESTE
     'approvals:pending-all': async () => {
       const center = await import('../main/store/approvals-center')
       return center.pendingApprovalsAll()
+    },
+
+    // A2 (fase approvazioni-chiare): il REGISTRO — le decisioni (chi, come,
+    // da dove, quando) e le chiamate passate da sole (grant o regola), dal
+    // più recente; query indicizzate col tetto in righe
+    'approvals:log': async ([limit]) => {
+      const center = await import('../main/store/approvals-center')
+      return center.approvalLog(Number(limit) || 200)
     },
 
     // Q4 (fase squadra): le card di approvazione nate nei turni della squadra,
@@ -2293,10 +2301,16 @@ export function buildApiMethods(
     // ---- approvazioni ----
     // fase 8 (punto 2): mode 'once' | 'always' (standing grant) | 'turn' (fino
     // a fine turno) | 'minutes10' (fase use-app U3: standing grant con scadenza)
-    'approvals:resolve': ([agentId, approvalId, decision, mode]) => {
+    'approvals:resolve': ([agentId, approvalId, decision, mode, via]) => {
       // Q2 (fase squadra): 'mission' = «Consenti per questa missione» (un grant
-      // di 8 ore per OGNI membro, solo sito-interattivo e squadra)
-      const m = mode === 'always' ? 'always' : mode === 'turn' ? 'turn' : mode === 'minutes10' ? 'minutes10' : mode === 'mission' ? 'mission' : mode === 'site' ? 'site' : 'once'
+      // di 8 ore per OGNI membro, solo sito-interattivo e squadra).
+      // A2 (fase approvazioni-chiare): 'server-reads' = «Consenti sempre le
+      // letture di <server>» (la grant la scrive permissions:grant-server-reads,
+      // qui la card passa e il registro ricorda IL MODO)
+      const m = mode === 'always' ? 'always' : mode === 'turn' ? 'turn' : mode === 'minutes10' ? 'minutes10' : mode === 'mission' ? 'mission' : mode === 'site' ? 'site' : mode === 'server-reads' ? 'server-reads' : 'once'
+      // A2: DA DOVE si decide (chat / center / notification) — finisce nel
+      // meta e da lì nella riga del REGISTRO quando la card si chiude
+      const v = via === 'center' ? 'center' : via === 'notification' ? 'notification' : 'chat'
       // fase 16b (S6): la modalità finisce nel meta dell'entry — la riga dopo
       // la decisione dice «Consentito una volta / per il turno / sempre»
       const aid = String(agentId)
@@ -2304,7 +2318,7 @@ export function buildApiMethods(
         (x) => (x.kind === 'approval' || x.kind === 'send-message') && x.meta?.approvalId === approvalId
       )
       if (entry) {
-        store.updateEntryMeta(entry.id, { ...entry.meta, resolutionMode: m })
+        store.updateEntryMeta(entry.id, { ...entry.meta, resolutionMode: m, resolvedVia: v })
         const updated = store.getEntries(aid).find((e) => e.id === entry.id)
         if (updated) emit({ type: 'entries', agentId: aid, entries: [updated] })
       }

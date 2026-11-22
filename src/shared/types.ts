@@ -1043,7 +1043,9 @@ export interface SandbotApi {
   draftUpdate(agentId: string, entryId: number, body: string): Promise<void>
   // approvazioni
   /** fase 8: mode 'once' (una volta), 'always' (standing grant), 'turn' (fino a fine turno, in memoria) */
-  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission' | 'site'): Promise<void>
+  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission' | 'site' | 'server-reads', via?: 'chat' | 'center' | 'notification'): Promise<void>
+  /** A2 (fase approvazioni-chiare): il registro — decisioni e chiamate passate da sole */
+  approvalsLog(limit?: number): Promise<ApprovalLogRow[]>
   // provider e modelli
   /** fase 16c (C1): MAI la chiave — apiKey sempre '', hasKey e keyHint al posto */
   listProviders(): Promise<ProviderPublic[]>
@@ -2028,6 +2030,33 @@ export interface ApprovalsCenterRow {
   /** A1 (fase approvazioni-chiare): il meta della card (già letto
    *  dall'indice), per le STESSE scelte della chat (approvalChoicesOf) */
   meta?: Record<string, unknown> | null
+}
+
+/**
+ * A2 (fase approvazioni-chiare): una riga del REGISTRO delle approvazioni —
+ * una decisione presa dall'utente (kind 'decision') o una chiamata passata
+ * da sola per una grant o una regola (kind 'auto', con allowedBy).
+ */
+export interface ApprovalLogRow {
+  kind: 'decision' | 'auto'
+  /** univoco per la riga (l'id della richiesta, o auto-<entry>) */
+  key: string
+  approvalId: string | null
+  agentId: string
+  botName: string
+  /** la frase della richiesta (il content dell'entry); le auto: lo strumento */
+  phrase: string
+  tool: string
+  /** allow | deny | expired per le decisioni; 'auto' per le passate da sole; null = riga vecchia */
+  decision: 'allow' | 'deny' | 'expired' | 'auto' | null
+  mode: 'once' | 'turn' | 'always' | 'site' | 'server-reads' | 'mission' | 'minutes10' | null
+  /** chat | center | notification | expired; null per le righe vecchie */
+  via: string | null
+  /** grant <id> | rule <tool> — solo le passate da sole */
+  allowedBy: string | null
+  at: number
+  /** riga di PRIMA del registro: la UI dice «decisione precedente al registro» */
+  legacy: boolean
 }
 
 /** Un messaggio di gruppo come lo vede la UI. */

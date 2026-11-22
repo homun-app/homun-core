@@ -61,11 +61,14 @@ const api: SandbotApi = {
   draftSend: (agentId, entryId, body) => ipcRenderer.invoke('draft:send', agentId, entryId, body),
   draftDiscard: (agentId, entryId) => ipcRenderer.invoke('draft:discard', agentId, entryId),
   draftUpdate: (agentId, entryId, body) => ipcRenderer.invoke('draft:update', agentId, entryId, body),
-  // fase 8: mode 'once' | 'always' | 'turn' (fino a fine turno); fase use-app: anche 'minutes10'
-  resolveApproval: (agentId, approvalId, decision, mode) =>
-    ipcRenderer.invoke('approvals:resolve', agentId, approvalId, decision, mode),
+  // fase 8: mode 'once' | 'always' | 'turn' (fino a fine turno); fase use-app: anche 'minutes10';
+  // A2 (fase approvazioni-chiare): via 'chat' | 'center' | 'notification' — finisce nel registro
+  resolveApproval: (agentId, approvalId, decision, mode, via) =>
+    ipcRenderer.invoke('approvals:resolve', agentId, approvalId, decision, mode, via),
   // A1 (fase centro-autorizzazioni): tutte le richieste pendenti, per il centro
   approvalsPendingAll: () => ipcRenderer.invoke('approvals:pending-all'),
+  // A2 (fase approvazioni-chiare): il registro delle decisioni (e delle passate da sole)
+  approvalsLog: (limit) => ipcRenderer.invoke('approvals:log', limit),
   // fase 8 (§3bis L5): decisione dell'utente sulla regola proposta dal bot
   autoreviewRuleDecision: (agentId, entryId, action) =>
     ipcRenderer.invoke('autoreview:rule-decision', agentId, entryId, action),

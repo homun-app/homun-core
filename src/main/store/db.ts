@@ -252,6 +252,26 @@ function open(): DatabaseSync {
   const approvalCols = db.prepare("SELECT name FROM pragma_table_info('approvals')").all() as Array<{ name: string }>
   if (!approvalCols.some((c) => c.name === 'entry_id')) db.exec('ALTER TABLE approvals ADD COLUMN entry_id INTEGER')
   db.exec('CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status)')
+  // A2 (fase approvazioni-chiare): il REGISTRO — la riga di una decisione
+  // dice QUANDO (decided_at), COME (decision allow/deny/expired + mode) e DA
+  // DOVE (decided_via chat/center/notification/expired). Le righe vecchie
+  // restano coi campi vuoti: la UI dice «decisione precedente al registro».
+  // L'indice su decided_at tiene la query del registro al costo del limite.
+  for (const [col, ddl] of [
+    ['decided_at', 'ALTER TABLE approvals ADD COLUMN decided_at INTEGER'],
+    ['decision', 'ALTER TABLE approvals ADD COLUMN decision TEXT'],
+    ['mode', 'ALTER TABLE approvals ADD COLUMN mode TEXT'],
+    ['decided_via', 'ALTER TABLE approvals ADD COLUMN decided_via TEXT']
+  ] as const) {
+    if (!approvalCols.some((c) => c.name === col)) db.exec(ddl)
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_approvals_decided ON approvals(decided_at)')
+  // A2: le chiamate passate da sole (grant o regola) si segnano nell'indice
+  // dell'uso con allowed_by ('grant <id>' | 'rule <tool>'): niente tabelle
+  // nuove, l'indice basta — e le letture innocue non lasciano traccia
+  const toolUseCols = db.prepare("SELECT name FROM pragma_table_info('tool_use')").all() as Array<{ name: string }>
+  if (!toolUseCols.some((c) => c.name === 'allowed_by')) db.exec('ALTER TABLE tool_use ADD COLUMN allowed_by TEXT')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tool_use_allowed ON tool_use(allowed_by, at)')
   // K2 (fase team-bot): le colonne dell'archiviazione/eliminazione morbide
   // dei team, per i DB esistenti
   const groupCols = db.prepare("SELECT name FROM pragma_table_info('groups')").all() as Array<{ name: string }>

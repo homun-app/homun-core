@@ -1055,6 +1055,10 @@ msgstr "Apple container"
 msgid "Approvata, la routine nasce attiva e partirà da sola."
 msgstr "Approved, the routine is born active and will run by itself."
 
+#: src/renderer/src/lib/approvals-center.ts
+msgid "Approvate"
+msgstr "Approved"
+
 #. placeholder {0}: String(entry.meta?.ruleMatched ?? '')
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Approvato automaticamente dalla regola: {0}"
@@ -1572,6 +1576,7 @@ msgid "Carica qui"
 msgstr "Upload here"
 
 #: src/renderer/src/components/ActivityPanel.tsx
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
@@ -1855,6 +1860,10 @@ msgstr "Hi! I’m your new bot. What will you call me?"
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Cifrato sul Mac. Il bot non vedrà mai la password."
 msgstr "Encrypted on your Mac. The bot will never see the password."
+
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Ciò che i bot possono fare senza chiedere. Revoca e la chiamata successiva torna a chiedere."
+msgstr "What bots can do without asking. Revoke it and the next call asks again."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "circa (±15 min)"
@@ -2303,21 +2312,36 @@ msgstr "Always allow on {0}"
 msgid "Consenti una volta"
 msgstr "Allow once"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Consentiti sempre"
+msgstr "Always allowed"
+
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Consentito"
 msgstr "Allowed"
 
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/lib/approvals-center.ts
 msgid "Consentito per 10 minuti"
 msgstr "Allowed for 10 minutes"
 
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/lib/approvals-center.ts
 msgid "Consentito per il turno"
 msgstr "Allowed for this turn"
 
+#: src/renderer/src/lib/approvals-center.ts
+msgid "Consentito per la missione"
+msgstr "Allowed for the mission"
+
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/lib/approvals-center.ts
 msgid "Consentito sempre"
 msgstr "Allowed always"
+
+#: src/renderer/src/lib/approvals-center.ts
+msgid "Consentito sempre (sito)"
+msgstr "Always allowed (site)"
 
 #. placeholder {0}: siteGrant?.domain ?? ''
 #: src/renderer/src/components/ApprovalCard.tsx
@@ -2325,6 +2349,7 @@ msgid "Consentito sempre su {0}"
 msgstr "Always allowed on {0}"
 
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/lib/approvals-center.ts
 msgid "Consentito una volta"
 msgstr "Allowed once"
 
@@ -2632,6 +2657,11 @@ msgstr "to be chosen"
 msgid "Da sistemare · {0}"
 msgstr "To fix · {0}"
 
+#. placeholder {0}: r.allowedBy
+#: src/renderer/src/lib/approvals-center.ts
+msgid "da sola · {0}"
+msgstr "on its own · {0}"
+
 #: src/renderer/src/components/GuideView.tsx
 msgid "Da solo"
 msgstr "On my own"
@@ -2643,6 +2673,23 @@ msgstr "By you"
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Dai un nome al tuo bot"
 msgstr "Give your bot a name"
+
+#. placeholder {0}: new Date(g.createdAt).toLocaleDateString()
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "dal {0}"
+msgstr "since {0}"
+
+#: src/renderer/src/lib/approvals-center.ts
+msgid "dal centro"
+msgstr "from the center"
+
+#: src/renderer/src/lib/approvals-center.ts
+msgid "dalla chat"
+msgstr "from the chat"
+
+#: src/renderer/src/lib/approvals-center.ts
+msgid "dalla notifica"
+msgstr "from the notification"
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Decide da solo le richieste semplici quando le Approvazioni sono su Automatico."
@@ -2656,6 +2703,10 @@ msgstr "Decide"
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "Decidono regole fisse e, se scelto, un revisore che vede solo la tua richiesta e l'azione. Il coordinatore non approva al posto tuo: legge le pagine del web, e una pagina ostile potrebbe convincerlo."
 msgstr "Fixed rules decide and, if chosen, a reviewer that sees only your request and the action. The coordinator never approves on your behalf: it reads web pages, and a hostile page could convince it."
+
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "decisione precedente al registro"
+msgstr "decision predates the log"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "dedotto dal bot"
@@ -3198,6 +3249,10 @@ msgstr "Files, commands and reads it does on its own. Your data, payments and se
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "File: {0} ({1} byte) — esportalo per vederlo."
 msgstr "File: {0} ({1} byte) — export it to view it."
+
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Filtra il registro"
+msgstr "Filter the log"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Filtra per tipo"
@@ -4745,6 +4800,10 @@ msgstr "reading mail, searching the web, drafting"
 msgid "Leggo e cerco da solo. Prima di cambiare qualcosa, ti chiedo."
 msgstr "I read and search on my own. Before changing anything, I ask you."
 
+#: src/renderer/src/lib/approvals-center.ts
+msgid "Letture del server consentite"
+msgstr "Server reads allowed"
+
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "Libera nel computer"
 msgstr "Free inside the computer"
@@ -5334,6 +5393,10 @@ msgstr "No connections with these filters."
 msgid "approval.rcNoCommand"
 msgstr "no recognized command"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Nessun consenso sempre attivo."
+msgstr "No standing permissions active."
+
 #: src/renderer/src/components/ComputerFiles.tsx
 msgid "Nessun file caricato."
 msgstr "No file uploaded."
@@ -5409,6 +5472,10 @@ msgstr "No calls in the period."
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Nessuna concessione: ogni fill chiede la card."
 msgstr "No grants: every fill asks with a card."
+
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Nessuna decisione registrata."
+msgstr "No decisions recorded."
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Nessuna descrizione."
@@ -5983,6 +6050,14 @@ msgstr "Start from a template"
 #: src/renderer/src/components/Settings.tsx
 msgid "parziale"
 msgstr "partial"
+
+#: src/renderer/src/lib/approvals-center.ts
+msgid "Passata da sola"
+msgstr "Passed on its own"
+
+#: src/renderer/src/lib/approvals-center.ts
+msgid "Passate da sole"
+msgstr "Passed on their own"
 
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "passi"
@@ -6588,6 +6663,10 @@ msgid "Ragionamento: Predefinito"
 msgstr "Reasoning: Default"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Registro"
+msgstr "Log"
+
+#: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Registro di oggi"
 msgstr "Today's log"
 
@@ -6656,6 +6735,7 @@ msgstr "reviewer unavailable: {error}"
 msgid "revoca"
 msgstr "revoke"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Revoca"
 msgstr "Revoke"
@@ -6709,6 +6789,10 @@ msgstr "Get pre-release versions"
 #: src/shared/ui-messages.ts
 msgid "oauth.errPage"
 msgstr "Invalid request (wrong state): try the connection again from Homun."
+
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Richieste"
+msgstr "Requests"
 
 #: src/renderer/src/components/ApprovalsBanner.tsx
 msgid "Richieste che aspettano te"
@@ -6765,8 +6849,13 @@ msgstr "Start over"
 msgid "Rifiuta"
 msgstr "Deny"
 
+#: src/renderer/src/lib/approvals-center.ts
+msgid "Rifiutate"
+msgstr "Denied"
+
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/lib/approvals-center.ts
 msgid "Rifiutato"
 msgstr "Denied"
 
@@ -7021,6 +7110,11 @@ msgstr "Save contact “{name}” in the vault?"
 msgid "Sblocca"
 msgstr "Unpin"
 
+#. placeholder {0}: new Date(g.expiresAt).toLocaleTimeString()
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "scade alle {0}"
+msgstr "expires at {0}"
+
 #. placeholder {0}: new Date(g.expiresAt).toLocaleTimeString(i18n.locale, { hour: '2-digit', minute: '2-digit' })
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Scade: {0}"
@@ -7030,12 +7124,17 @@ msgstr "Expires: {0}"
 msgid "Scaduta: il bot non aspetta più"
 msgstr "Expired: the bot is no longer waiting"
 
+#: src/renderer/src/lib/approvals-center.ts
+msgid "Scadute"
+msgstr "Expired"
+
 #: src/renderer/src/components/ComputerActivity.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "scaduto"
 msgstr "expired"
 
 #: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/lib/approvals-center.ts
 msgid "Scaduto"
 msgstr "Expired"
 
@@ -7300,6 +7399,10 @@ msgstr "send_to_agent → {name}: untrusted web content in the turn"
 #: src/shared/ui-messages.ts
 msgid "card.untrustedDelegation"
 msgstr "send_to_agent → {name}: the turn has read untrusted web content"
+
+#: src/renderer/src/lib/approvals-center.ts
+msgid "senza risposta"
+msgstr "without an answer"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -8101,6 +8204,7 @@ msgstr "Turn superseded by a new message"
 msgid "tutte"
 msgstr "all"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Tutte"
@@ -8120,6 +8224,7 @@ msgstr "All routes"
 msgid "Tutti"
 msgstr "All"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/PluginCard.tsx

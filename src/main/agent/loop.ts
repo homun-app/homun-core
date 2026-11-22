@@ -30,7 +30,8 @@ import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntr
 // PL3 (fase plugin): l'uso di una skill (/nome) finisce nell'indice tool_use
 import { recordToolUse } from '../store/tool-use'
 // A1 (fase centro-autorizzazioni): l'indice delle richieste pendenti del centro
-import { recordPendingApproval, setApprovalRowStatus } from '../store/approvals-center'
+// A2 (fase approvazioni-chiare): + il registro delle decisioni
+import { recordPendingApproval, setApprovalRowStatus, setApprovalRowDecision, recordAutoAllow } from '../store/approvals-center'
 // R2 (fase app — ritocchi): l'esito degli invii automatici si ripulisce come gli errori Composio
 import { redactComposioSecrets, composioActionOfToolName } from '../connectors/composio-actions'
 // fase Composio OAuth (C2/C4/C5/C7): il blocco, la fiducia per app, le bozze estratte
@@ -282,8 +283,24 @@ function verdictReasonText(verdict: import('./permissions').Verdict): string {
 export function setApprovalStatus(agentId: string, entryId: number, status: string, emit: (e: SandbotEvent) => void): void {
   const freshMeta = getEntries(agentId).find((x) => x.id === entryId)?.meta ?? {}
   updateEntryMeta(entryId, { ...freshMeta, status })
-  // A1: l'indice del centro segue lo stato della card
-  if (typeof freshMeta.approvalId === 'string') setApprovalRowStatus(freshMeta.approvalId, status)
+  // A1: l'indice del centro segue lo stato della card. A2 (fase
+  // approvazioni-chiare): le decisioni (allow/deny) e le scadenze finiscono
+  // anche nel REGISTRO — mode e via le ha scritte l'RPC approvals:resolve nel
+  // meta (resolutionMode, resolvedVia) PRIMA di sbloccare il loop
+  if (typeof freshMeta.approvalId === 'string') {
+    const decision = status === 'allowed' ? 'allow' : status === 'denied' ? 'deny' : status === 'expired' ? 'expired' : null
+    if (decision) {
+      setApprovalRowDecision(
+        freshMeta.approvalId,
+        status,
+        decision,
+        decision === 'expired' ? null : typeof freshMeta.resolutionMode === 'string' ? freshMeta.resolutionMode : 'once',
+        decision === 'expired' ? 'expired' : typeof freshMeta.resolvedVia === 'string' ? freshMeta.resolvedVia : 'chat'
+      )
+    } else {
+      setApprovalRowStatus(freshMeta.approvalId, status)
+    }
+  }
   const updated = getEntries(agentId).find((x) => x.id === entryId)
   if (updated) emit({ type: 'entries', agentId, entries: [updated] })
 }
@@ -5368,6 +5385,23 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // turnGranted: esecuzione senza chiedere di nuovo (grant di turno)
         }
 
+        // A2 (fase approvazioni-chiare): la chiamata passata da SOLE (coperta
+        // da una grant o da una regola dell'utente — NON le letture innocue
+        // sempre consentite, che il gate non marca) lascia la riga leggera
+        // nell'indice tool_use: il Registro la mostra in «Passate da sole»
+        // con CHI l'ha coperta (allowed_by: grant <id> | rule <tool>)
+        if (verdict.kind === 'allow' && (verdict.grantId != null || verdict.ruleTool != null)) {
+          try {
+            recordAutoAllow(db(), {
+              entryId: callEntry.id,
+              tool: call.name,
+              agentId,
+              at: Date.now(),
+              allowedBy: verdict.grantId != null ? `grant ${verdict.grantId}` : `rule ${verdict.ruleTool!}`
+            })
+          } catch { /* il registro non deve mai fermare il turno */ }
+        }
+
         // C4: la chiamata autorizzata (dal gate, dall'utente o dall'auto-review)
         // rende fidati i suoi toolkit per il resto del turno — «elenca poi
         // leggi» non chiede due volte, ma un blocco Gmail non rende fidato Slack
@@ -6040,7 +6074,7 @@ export function resolveApproval(
   agentId: string,
   approvalId: string,
   decision: 'allow' | 'deny',
-  mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission' | 'site' = 'once'
+  mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission' | 'site' | 'server-reads' = 'once'
 ): void {
   const run = running.get(agentId)
   const cb = run?.approvals.get(approvalId)

@@ -45,7 +45,7 @@ describe('AH1: resolveApproval usa l\'agente della card (entry.agentId)', () => 
     useStore.getState().resolveApproval('sub-1', 'a-figlio', 'allow', 'once')
     const calls = callsOf('resolveApproval')
     expect(calls.length).toBeGreaterThan(0)
-    expect(calls[calls.length - 1]!.args).toEqual(['sub-1', 'a-figlio', 'allow', 'once'])
+    expect(calls[calls.length - 1]!.args).toEqual(['sub-1', 'a-figlio', 'allow', 'once', 'chat'])
   })
 
   it('la card nel pannello passa a «consentito» (ottimistico su subEntries)', () => {
@@ -67,7 +67,7 @@ describe('AH1: resolveApproval usa l\'agente della card (entry.agentId)', () => 
     })
     useStore.getState().resolveApproval('bot-padre', 'a-padre', 'deny', 'once')
     const calls = callsOf('resolveApproval')
-    expect(calls[calls.length - 1]!.args).toEqual(['bot-padre', 'a-padre', 'deny', 'once'])
+    expect(calls[calls.length - 1]!.args).toEqual(['bot-padre', 'a-padre', 'deny', 'once', 'chat'])
     const en = useStore.getState().entries.find((e) => e.meta?.approvalId === 'a-padre')
     expect(en?.meta?.status).toBe('denied')
   })

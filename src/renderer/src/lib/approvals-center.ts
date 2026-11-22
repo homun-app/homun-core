@@ -85,3 +85,114 @@ export const CATEGORY_SHORT: Record<SquadPendingApprovalInfo['category'], Messag
   squadra: msg`team`,
   altro: msg`altro`
 }
+
+// ---- A2 (fase approvazioni-chiare): il Registro ----
+
+import type { ApprovalLogRow } from '../../../shared/types'
+
+/** i filtri del registro: Approvate / Rifiutate / Scadute / Passate da sole. */
+export const REGISTRO_FILTERS: Array<{ id: 'approve' | 'deny' | 'expired' | 'auto'; label: MessageDescriptor }> = [
+  { id: 'approve', label: msg`Approvate` },
+  { id: 'deny', label: msg`Rifiutate` },
+  { id: 'expired', label: msg`Scadute` },
+  { id: 'auto', label: msg`Passate da sole` }
+]
+
+/** una riga del registro come la mostra la lista: la scelta e il «da dove» in parole. */
+export interface RegistroRow extends ApprovalLogRow {
+  /** la scelta in parole («Consentito sempre», «Rifiutato»…) — null per le righe vecchie */
+  choice: MessageDescriptor | null
+  choiceDomain: string | null
+  /** il «da dove» in parole («dalla chat», «dal centro»…) — null per le vecchie */
+  viaLabel: MessageDescriptor | null
+  /** l'ora della riga, «HH:MM» */
+  time: string
+}
+
+/** la scelta in parole dal verdetto del registro (PURA). */
+export function registroChoiceOf(r: ApprovalLogRow): { choice: MessageDescriptor | null; domain: string | null } {
+  if (r.legacy || r.decision == null) return { choice: null, domain: null }
+  if (r.decision === 'deny') return { choice: msg`Rifiutato`, domain: null }
+  if (r.decision === 'expired') return { choice: msg`Scaduto`, domain: null }
+  if (r.decision === 'auto') return { choice: msg`Passata da sola`, domain: r.allowedBy }
+  switch (r.mode) {
+    case 'turn': return { choice: msg`Consentito per il turno`, domain: null }
+    case 'minutes10': return { choice: msg`Consentito per 10 minuti`, domain: null }
+    case 'always': return { choice: msg`Consentito sempre`, domain: null }
+    case 'site': return { choice: msg`Consentito sempre (sito)`, domain: null }
+    case 'server-reads': return { choice: msg`Letture del server consentite`, domain: null }
+    case 'mission': return { choice: msg`Consentito per la missione`, domain: null }
+    default: return { choice: msg`Consentito una volta`, domain: null }
+  }
+}
+
+/** il «da dove» in parole (PURA). */
+export function registroViaLabelOf(r: ApprovalLogRow): MessageDescriptor | null {
+  if (r.kind === 'auto') return r.allowedBy ? msg`da sola · ${r.allowedBy}` : null
+  switch (r.via) {
+    case 'chat': return msg`dalla chat`
+    case 'center': return msg`dal centro`
+    case 'notification': return msg`dalla notifica`
+    case 'expired': return msg`senza risposta`
+    default: return null
+  }
+}
+
+/**
+ * Il modello del registro (PURA): le righe nell'ordine dal più recente, con
+ * la scelta e il «da dove» in parole e l'ora — e il filtro (all | approve |
+ * deny | expired | auto).
+ */
+export function registroModel(rows: readonly ApprovalLogRow[], filter: 'all' | 'approve' | 'deny' | 'expired' | 'auto' = 'all'): RegistroRow[] {
+  const wanted = (r: ApprovalLogRow): boolean => {
+    if (filter === 'all') return true
+    if (filter === 'auto') return r.kind === 'auto'
+    if (filter === 'approve') return r.kind === 'decision' && r.decision === 'allow'
+    if (filter === 'deny') return r.kind === 'decision' && r.decision === 'deny'
+    return r.kind === 'decision' && r.decision === 'expired'
+  }
+  return rows.filter(wanted)
+    .map((r) => {
+      const { choice, domain } = registroChoiceOf(r)
+      const d = new Date(r.at)
+      return {
+        ...r,
+        choice,
+        choiceDomain: domain,
+        viaLabel: registroViaLabelOf(r),
+        time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+      }
+    })
+    .sort((a, b) => b.at - a.at)
+}
+
+/** un giorno del registro: le righe di una data, dall'alto il più recente. */
+export interface RegistroDay {
+  /** l'etichetta: «oggi», «ieri» o la data */
+  label: string
+  rows: RegistroRow[]
+}
+
+/** il raggruppamento per giorno (PURA): oggi, ieri, poi le date. */
+export function groupRegistroByDay(rows: readonly RegistroRow[], now = Date.now(), lang: 'it' | 'en' = 'it'): RegistroDay[] {
+  const dayKey = (t: number): string => {
+    const d = new Date(t)
+    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+  }
+  const labelOf = (t: number): string => {
+    const today = new Date(now)
+    const yesterday = new Date(now - 86_400_000)
+    const d = new Date(t)
+    if (dayKey(t) === dayKey(today.getTime())) return lang === 'en' ? 'today' : 'oggi'
+    if (dayKey(t) === dayKey(yesterday.getTime())) return lang === 'en' ? 'yesterday' : 'ieri'
+    return d.toLocaleDateString(lang === 'en' ? 'en-GB' : 'it-IT')
+  }
+  const days: RegistroDay[] = []
+  for (const r of rows) {
+    const label = labelOf(r.at)
+    const cur = days[days.length - 1]
+    if (cur && cur.label === label) cur.rows.push(r)
+    else days.push({ label, rows: [r] })
+  }
+  return days
+}

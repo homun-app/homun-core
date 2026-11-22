@@ -209,10 +209,11 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
   const decideChoice = (c: ApprovalChoice): void => {
     if (c.kind === 'server-reads') {
       void api.grantServerReads(c.slug!).catch(() => undefined)
-      resolve(entry.agentId, approvalId, 'allow', 'once')
+      // A2: mode 'server-reads' — la chiamata passa, il registro ricorda il modo
+      resolve(entry.agentId, approvalId, 'allow', 'server-reads', 'chat')
       return
     }
-    resolve(entry.agentId, approvalId, 'allow', c.kind)
+    resolve(entry.agentId, approvalId, 'allow', c.kind, 'chat')
   }
 
   const body = (
@@ -326,13 +327,13 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
-            onClick={() => resolve(entry.agentId, approvalId, 'allow', 'once')}
+            onClick={() => resolve(entry.agentId, approvalId, 'allow', 'once', 'chat')}
           >
             <Trans>Consenti</Trans>
           </button>
           <button
             className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
-            onClick={() => resolve(entry.agentId, approvalId, 'deny', 'once')}
+            onClick={() => resolve(entry.agentId, approvalId, 'deny', 'once', 'chat')}
           >
             <Trans>Rifiuta</Trans>
           </button>

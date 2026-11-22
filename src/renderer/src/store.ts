@@ -396,7 +396,7 @@ interface Store {
    * (entry.agentId — il figlio quando la card sta nel suo pannello o nella
    * chat del padre), MAI all'agente attivo.
    */
-  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission' | 'site'): void
+  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission' | 'site' | 'server-reads', via?: 'chat' | 'center' | 'notification'): void
   /** fase 8: decisione sulla regola di auto-review proposta dal bot */
   autoreviewRuleDecision(entryId: number, action: 'add' | 'dismiss'): void
   /** fase 8: "Crea regola da questa azione" — apre l'editor precompilato */
@@ -428,6 +428,13 @@ interface Store {
   setApprovalsQueueOpen(open: boolean): void
   /** A2: apre il centro «Da approvare» (eventualmente su UNA richiesta) */
   setApprovalsOpen(open: boolean, focusId?: string | null): void
+  /** A2 (fase approvazioni-chiare): la vista del centro — le richieste o il Registro */
+  approvalsView: 'richieste' | 'registro'
+  setApprovalsView(view: 'richieste' | 'registro'): void
+  /** A2: la richiesta su cui ha portato il clic della NOTIFICA (deciderla qui
+   *  si registra come via 'notification' — la decisione si prende in app) */
+  approvalsNotificationFocus: string | null
+  clearApprovalsNotificationFocus(): void
   /** A2: «Rimanda» — nasconde la richiesta dal centro e dal riquadro per un'ora (setting) */
   approvalsSnooze(approvalId: string): void
   /** A3: il riquadro delle chat ridotto/riaperto (sessione) */
@@ -580,6 +587,8 @@ export const useStore = create<Store>((set, get) => ({
   groupReviewerPassed: [],
   approvalsQueueOpen: false,
   approvalsAll: [],
+  approvalsView: 'richieste' as const,
+  approvalsNotificationFocus: null,
   approvalsOpen: false,
   approvalsFocusId: null,
   approvalsSnoozed: {},
@@ -942,6 +951,9 @@ export const useStore = create<Store>((set, get) => ({
         // sulla richiesta della notifica quando c'è
         case 'open-approvals': {
           s.setApprovalsOpen(true, e.approvalId)
+          // A2 (fase approvazioni-chiare): deciderla da qui, nel registro, è
+          // via 'notification' (la notifica NON decide: porta qui)
+          set({ approvalsNotificationFocus: e.approvalId ?? null })
           const w = window as unknown as { focus?: () => void }
           w.focus?.()
           break
@@ -1034,7 +1046,7 @@ export const useStore = create<Store>((set, get) => ({
     void api.draftUpdate(id, entryId, body)
   },
 
-  resolveApproval(agentId, approvalId, decision, mode) {
+  resolveApproval(agentId, approvalId, decision, mode, via) {
     const s = get()
     // AH1 (fase aiutanti): l'ottimistico tocca la lista dove sta la card —
     // entries per l'agente aperto in chat, subEntries per il figlio aperto
@@ -1045,7 +1057,8 @@ export const useStore = create<Store>((set, get) => ({
         : en
     if (agentId === s.activeId) set({ entries: s.entries.map(decided) })
     if (agentId === s.openSubagentId) set({ subEntries: s.subEntries.map(decided) })
-    void api.resolveApproval(agentId, approvalId, decision, mode)
+    // A2: il «da dove» finisce nel registro — chi non lo dice decide in chat
+    void api.resolveApproval(agentId, approvalId, decision, mode, via ?? 'chat')
   },
 
   // fase 8: la regola proposta si aggiunge SOLO al click (la RPC scrive nei
@@ -1492,8 +1505,17 @@ export const useStore = create<Store>((set, get) => ({
   // A2 (fase centro-autorizzazioni): il centro «Da approvare» — apre su una
   // richiesta precisa (dal riquadro in cima alle chat o dalla notifica) o
   // sull'insieme; copre l'area centrale come Attività e Libreria
+  // A2: «Registro di oggi» e le schede del centro — la vista del registro
+  setApprovalsView(view) {
+    set({ approvalsView: view })
+  },
+
+  clearApprovalsNotificationFocus() {
+    set({ approvalsNotificationFocus: null })
+  },
+
   setApprovalsOpen(open, focusId = null) {
-    set(open ? { approvalsOpen: true, approvalsFocusId: focusId, activityOpen: false, openLibraryId: null, approvalsQueueOpen: false, pluginOpen: false } : { approvalsOpen: false, approvalsFocusId: null })
+    set(open ? { approvalsOpen: true, approvalsFocusId: focusId, approvalsView: 'richieste', activityOpen: false, openLibraryId: null, approvalsQueueOpen: false, pluginOpen: false } : { approvalsOpen: false, approvalsFocusId: null, approvalsView: 'richieste' })
     if (open) get().refreshSquadData({ forceBadges: true })
   },
 

@@ -147,7 +147,7 @@ describe('fase 4: memoria, skill e update_state', () => {
   it('update_memory / recall_memory / skill: SEMPRE consentiti, anche con default needs_approval', async () => {
     for (const tool of ['update_memory', 'recall_memory', 'skill']) {
       const v = await check(tool, { action: 'write', content: 'x', query: 'x', name: 'x' })
-      expect(v, tool).toEqual({ kind: 'allow', via: 'rule' })
+      expect(v, tool).toMatchObject({ kind: 'allow', via: 'rule' })
     }
   })
 
@@ -156,17 +156,17 @@ describe('fase 4: memoria, skill e update_state', () => {
     expect(ask.kind).toBe('ask')
     state.grants = [{ tool: 'update_skill', target: 'skill ricerca-web' }]
     const allow = await check('update_skill', { name: 'ricerca-web', description: 'd', content: 'c' })
-    expect(allow).toEqual({ kind: 'allow', via: 'grant' })
+    expect(allow).toMatchObject({ kind: 'allow', via: 'grant' })
   })
 
   it('update_state routine: create/pause/delete allow; resume ask con nome e schedule; update su attiva solo se tocca schedule/prompt', async () => {
     state.routines = [{ id: 7, title: 'Riepilogo', prompt: 'p', schedule: '30 8 * * 1-5', enabled: 0 }]
-    expect(await check('update_state', { target: 'routine', action: 'create', name: 'X' })).toEqual({ kind: 'allow', via: 'rule' })
-    expect(await check('update_state', { target: 'routine', action: 'pause', id: 7 })).toEqual({ kind: 'allow', via: 'rule' })
-    expect(await check('update_state', { target: 'routine', action: 'delete', id: 7 })).toEqual({ kind: 'allow', via: 'rule' })
-    expect(await check('update_state', { target: 'memory', action: 'write', content: 'x', tier: 'core' })).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check('update_state', { target: 'routine', action: 'create', name: 'X' })).toMatchObject({ kind: 'allow', via: 'rule' })
+    expect(await check('update_state', { target: 'routine', action: 'pause', id: 7 })).toMatchObject({ kind: 'allow', via: 'rule' })
+    expect(await check('update_state', { target: 'routine', action: 'delete', id: 7 })).toMatchObject({ kind: 'allow', via: 'rule' })
+    expect(await check('update_state', { target: 'memory', action: 'write', content: 'x', tier: 'core' })).toMatchObject({ kind: 'allow', via: 'rule' })
     // in pausa: update di schedule allow
-    expect(await check('update_state', { target: 'routine', action: 'update', id: 7, schedule: '0 9 * * *' })).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check('update_state', { target: 'routine', action: 'update', id: 7, schedule: '0 9 * * *' })).toMatchObject({ kind: 'allow', via: 'rule' })
 
     // ATTIVA: resume → ask; update con schedule → ask
     state.routines = [{ id: 7, title: 'Riepilogo', prompt: 'p', schedule: '30 8 * * 1-5', enabled: 1 }]
@@ -181,7 +181,7 @@ describe('fase 4: memoria, skill e update_state', () => {
     const upd = await check('update_state', { target: 'routine', action: 'update', id: 7, schedule: '0 9 * * *' })
     expect(upd.kind).toBe('ask')
     // attiva ma solo il nome: allow
-    expect(await check('update_state', { target: 'routine', action: 'update', id: 7, name: 'Altro' })).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check('update_state', { target: 'routine', action: 'update', id: 7, name: 'Altro' })).toMatchObject({ kind: 'allow', via: 'rule' })
   })
 
   it('update_state resume: fase 5 (M1) "Consenti sempre" NON salva grant e le grant vecchie non coprono più', async () => {
@@ -197,10 +197,10 @@ describe('fase 4: memoria, skill e update_state', () => {
     state.routines = [{ id: 7, title: 'Riepilogo', prompt: 'p', schedule: '30 8 * * 1-5', enabled: 1 }]
     state.grants = [{ tool: 'update_state', target: 'routine 7' }]
     // pausa: allow
-    expect(await check('update_state', { target: 'routine', action: 'pause', id: 7 })).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check('update_state', { target: 'routine', action: 'pause', id: 7 })).toMatchObject({ kind: 'allow', via: 'rule' })
     // in pausa il update del prompt non tocca un'esecuzione attiva: allow
     state.routines[0]!.enabled = 0
-    expect(await check('update_state', { target: 'routine', action: 'update', id: 7, prompt: 'prompt manipolato' })).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check('update_state', { target: 'routine', action: 'update', id: 7, prompt: 'prompt manipolato' })).toMatchObject({ kind: 'allow', via: 'rule' })
     state.routines[0]!.enabled = 0
     // il resume riattiva la routine col prompt cambiato: card SEMPRE, grant o no
     const v = await check('update_state', { target: 'routine', action: 'resume', id: 7 })
@@ -213,9 +213,9 @@ describe('fase 4: memoria, skill e update_state', () => {
     expect(write.kind).toBe('ask')
     if (write.kind === 'ask') expect(write.reason).toContain('scope user')
     if (write.kind === 'ask') expect(write.reason).toContain('regola per tutti i bot')
-    expect(await check('update_memory', { action: 'write', content: 'fatto mio', tier: 'core', scope: 'agent' })).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check('update_memory', { action: 'write', content: 'fatto mio', tier: 'core', scope: 'agent' })).toMatchObject({ kind: 'allow', via: 'rule' })
     // senza scope dichiarato vale lo scope del bot (default agent)
-    expect(await check('update_memory', { action: 'write', content: 'x', tier: 'log' })).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check('update_memory', { action: 'write', content: 'x', tier: 'log' })).toMatchObject({ kind: 'allow', via: 'rule' })
     expect((await check('update_memory', { action: 'delete', id: 'mem_x', scope: 'user' })).kind).toBe('ask')
     // anche update_state target memory con scope user chiede
     expect((await check('update_state', { target: 'memory', action: 'write', content: 'x', tier: 'log', scope: 'user' })).kind).toBe('ask')
@@ -242,7 +242,7 @@ describe('fase 5: permessi dai tool MCP (annotazioni standard)', () => {
 
   it('readOnlyHint=true → allow anche senza regole specifiche (server del catalogo)', async () => {
     setMcpAnnotationsLookup(annotations({ readOnlyHint: true }, true))
-    expect(await check(TOOL, {})).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check(TOOL, {})).toMatchObject({ kind: 'allow', via: 'rule' })
   })
 
   it('fase 6 (0a): readOnlyHint di un server MANUALE non dà allow — vale la regola di default', async () => {
@@ -250,10 +250,10 @@ describe('fase 5: permessi dai tool MCP (annotazioni standard)', () => {
     expect((await check(TOOL, {})).kind).toBe('ask')
     // una regola esplicita dell'utente o una grant continuano a valere
     state.rules.push({ tool: TOOL, pattern: '*', mode: 'always_allow' })
-    expect(await check(TOOL, {})).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check(TOOL, {})).toMatchObject({ kind: 'allow', via: 'rule' })
     state.rules = state.rules.filter((r) => r.tool !== TOOL)
     state.grants = [{ tool: TOOL, target: '*' }]
-    expect(await check(TOOL, {})).toEqual({ kind: 'allow', via: 'grant' })
+    expect(await check(TOOL, {})).toMatchObject({ kind: 'allow', via: 'grant' })
   })
 
   it('fase 6 (0a): destructiveHint/openWorldHint → ask RESTANO validi anche per i server manuali', async () => {
@@ -290,7 +290,7 @@ describe('fase 5: permessi dai tool MCP (annotazioni standard)', () => {
   it('standing grant esatta sul tool MCP → allow', async () => {
     setMcpAnnotationsLookup(() => undefined)
     state.grants = [{ tool: TOOL, target: '*' }]
-    expect(await check(TOOL, {})).toEqual({ kind: 'allow', via: 'grant' })
+    expect(await check(TOOL, {})).toMatchObject({ kind: 'allow', via: 'grant' })
   })
 
   it('idempotentHint da solo non autorizza (non è readOnly)', async () => {
@@ -318,23 +318,23 @@ describe('fase use-app (U3): la chiave è l\'app, non l\'azione', () => {
 
   it('«sempre a Safari» NON vale per Mail: stessa azione, altra app → ask', async () => {
     state.grants = [{ tool: 'use-app', target: 'app:Safari' }]
-    expect(await check('use-app', { action: 'type', app: 'Safari', text: 'x' })).toEqual({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'type', app: 'Safari', text: 'x' })).toMatchObject({ kind: 'allow', via: 'grant' })
     expect((await check('use-app', { action: 'type', app: 'Mail', text: 'x' })).kind).toBe('ask')
     // e copre anche le altre azioni su Safari: una sola card per sessione d'uso
-    expect(await check('use-app', { action: 'click', x: 1, y: 2, app: 'Safari' })).toEqual({ kind: 'allow', via: 'grant' })
-    expect(await check('use-app', { action: 'open_app', app: 'Safari' })).toEqual({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'click', x: 1, y: 2, app: 'Safari' })).toMatchObject({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'open_app', app: 'Safari' })).toMatchObject({ kind: 'allow', via: 'grant' })
   })
 
   it('R4: «sempre a Safari» vale anche scritto «safari» o «Safari.app» (il confronto ignora maiuscole e .app); Mail mai', async () => {
     state.grants = [{ tool: 'use-app', target: 'app:Safari' }]
-    expect(await check('use-app', { action: 'type', app: 'safari', text: 'x' })).toEqual({ kind: 'allow', via: 'grant' })
-    expect(await check('use-app', { action: 'type', app: 'Safari.app', text: 'x' })).toEqual({ kind: 'allow', via: 'grant' })
-    expect(await check('use-app', { action: 'click', x: 1, y: 2, app: 'SAFARI' })).toEqual({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'type', app: 'safari', text: 'x' })).toMatchObject({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'type', app: 'Safari.app', text: 'x' })).toMatchObject({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'click', x: 1, y: 2, app: 'SAFARI' })).toMatchObject({ kind: 'allow', via: 'grant' })
     // per Mail continua a chiedere: il permesso è di QUELLA app
     expect((await check('use-app', { action: 'type', app: 'Mail', text: 'x' })).kind).toBe('ask')
     // anche per url: il confronto dell'host ignora le maiuscole
     state.grants = [{ tool: 'use-app', target: 'url:sora.chatgpt.com' }]
-    expect(await check('use-app', { action: 'open_url', url: 'https://sora.chatgpt.com', app: 'safari' })).toEqual({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'open_url', url: 'https://sora.chatgpt.com', app: 'safari' })).toMatchObject({ kind: 'allow', via: 'grant' })
     // la CHIAVE SALVATA resta come l'ha scritta il modello (serve per mostrarla)
     await grantStanding('use-app', { action: 'type', app: 'safari', text: 'x' })
     expect(state.grants.at(-1)).toEqual({ tool: 'use-app', target: 'app:safari', expiresAt: undefined, agentId: null })
@@ -342,18 +342,18 @@ describe('fase use-app (U3): la chiave è l\'app, non l\'azione', () => {
 
   it('il permesso a 10 minuti vale finché non scade, poi chiede di nuovo', async () => {
     state.grants = [{ tool: 'use-app', target: 'app:Safari', expiresAt: Date.now() + 600_000 }]
-    expect(await check('use-app', { action: 'key', key: 'cmd+l', app: 'Safari' })).toEqual({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'key', key: 'cmd+l', app: 'Safari' })).toMatchObject({ kind: 'allow', via: 'grant' })
     state.grants = [{ tool: 'use-app', target: 'app:Safari', expiresAt: Date.now() - 1 }]
     expect((await check('use-app', { action: 'key', key: 'cmd+l', app: 'Safari' })).kind).toBe('ask')
   })
 
   it('screenshot resta senza card: la regola predefinita di oggi continua a valere', async () => {
-    expect(await check('use-app', { action: 'screenshot' })).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check('use-app', { action: 'screenshot' })).toMatchObject({ kind: 'allow', via: 'rule' })
   })
 
   it('open_url: la grant vale per l\'HOST, non per tutto il web', async () => {
     state.grants = [{ tool: 'use-app', target: 'url:sora.chatgpt.com' }]
-    expect(await check('use-app', { action: 'open_url', url: 'https://sora.chatgpt.com' })).toEqual({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'open_url', url: 'https://sora.chatgpt.com' })).toMatchObject({ kind: 'allow', via: 'grant' })
     expect((await check('use-app', { action: 'open_url', url: 'https://altro.example.com' })).kind).toBe('ask')
   })
 
@@ -369,7 +369,7 @@ describe('fase use-app (U3): la chiave è l\'app, non l\'azione', () => {
     // type che finisce con a-capo in WhatsApp: stesso trattamento
     expect((await check('use-app', { action: 'type', text: 'ciao\n', app: 'WhatsApp' })).kind).toBe('ask')
     // la digitazione normale in Mail resta coperta dalla grant
-    expect(await check('use-app', { action: 'type', text: 'ciao', app: 'Mail' })).toEqual({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'type', text: 'ciao', app: 'Mail' })).toMatchObject({ kind: 'allow', via: 'grant' })
   })
 
   it('grantStanding di use-app salva la chiave PER APP (e la scadenza quando c\'è)', async () => {

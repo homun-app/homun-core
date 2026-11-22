@@ -15,9 +15,11 @@ export const TOOL_USE_DDL = `
       entry_id INTEGER PRIMARY KEY,
       tool TEXT NOT NULL,
       agent_id TEXT NOT NULL,
-      at INTEGER NOT NULL
+      at INTEGER NOT NULL,
+      allowed_by TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_tool_use_tool ON tool_use(tool, at);
+    CREATE INDEX IF NOT EXISTS idx_tool_use_allowed ON tool_use(allowed_by, at);
   `
 
 export interface ToolUseInput {

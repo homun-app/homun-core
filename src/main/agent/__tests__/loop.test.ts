@@ -249,7 +249,13 @@ vi.mock('../../store/approvals-center', () => ({
   setApprovalRowStatus: (id: string, status: string) => {
     const r = approvalsIndex.rows.find((x) => x.id === id)
     if (r) r.status = status
-  }
+  },
+  // A2 (fase approvazioni-chiare): il registro delle decisioni (finto come l'indice)
+  setApprovalRowDecision: (id: string, status: string, decision: string, mode: string | null, via: string | null) => {
+    const r = approvalsIndex.rows.find((x) => x.id === id)
+    if (r) Object.assign(r, { status, decision, mode, via })
+  },
+  recordAutoAllow: () => undefined
 }))
 
 vi.mock('../../store/jobs', () => ({

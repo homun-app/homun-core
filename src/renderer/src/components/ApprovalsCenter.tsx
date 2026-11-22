@@ -11,16 +11,18 @@
 // Vedi» (tavola 4). I contatori di «Fatto da soli» sommati su tutti i bot
 // costerebbero una passata su tutti i transcript a ogni refresh: resta il
 // link al registro (Attività).
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { ShieldCheck, ArrowLeft, ChevronRight } from 'lucide-react'
 import { api, useStore } from '../store'
-import type { ApprovalsCenterRow, SquadPendingApprovalInfo } from '../../../shared/types'
-import { visibleApprovalsRows, groupApprovalsRows, approvalsFilterCounts, APPROVALS_FILTERS, type ApprovalsGroup } from '../lib/approvals-center'
+import type { ApprovalsCenterRow, SquadPendingApprovalInfo, ApprovalLogRow } from '../../../shared/types'
+import { visibleApprovalsRows, groupApprovalsRows, approvalsFilterCounts, APPROVALS_FILTERS, registroModel, groupRegistroByDay, REGISTRO_FILTERS, type ApprovalsGroup } from '../lib/approvals-center'
 // A1 (fase approvazioni-chiare): il modello UNICO delle scelte, come la card
 import { approvalChoicesOf, type ApprovalChoice } from '../lib/approval-app'
+// A2: i nomi dei consensi e il raggruppamento per bot (come Impostazioni › Approvazioni)
+import { grantDisplayName, groupGrantsByBot, type GrantLike } from '../lib/approval-app'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 
 /** Le etichette dei chip di categoria (come la coda della squadra, tavola 2). */
@@ -95,14 +97,21 @@ function CenterCard({ r, now }: { r: ApprovalsCenterRow; now: number }) {
   // la decisione passa dai percorsi di oggi: resolveApproval per le card,
   // i bottoni della bozza per gli invii (con l'agente DELLA card); per le
   // letture del server la grant dedicata + once, come la card in chat
-  const resolve = (decision: 'allow' | 'deny', mode: 'once' | 'turn' | 'minutes10' | 'always' | 'site' | 'mission'): void => {
-    resolveApproval(r.agentId, r.approvalId, decision, mode)
+  const notificationFocus = useStore((s) => s.approvalsNotificationFocus)
+  const clearNotificationFocus = useStore((s) => s.clearApprovalsNotificationFocus)
+  const resolve = (decision: 'allow' | 'deny', mode: 'once' | 'turn' | 'minutes10' | 'always' | 'site' | 'mission' | 'server-reads'): void => {
+    // A2: la richiesta su cui ha portato il clic della notifica, decisa qui,
+    // si registra con via 'notification'; le altre del centro con 'center'
+    const via = notificationFocus === r.approvalId ? 'notification' : 'center'
+    if (notificationFocus === r.approvalId) clearNotificationFocus()
+    resolveApproval(r.agentId, r.approvalId, decision, mode, via)
     refreshSquadData({ forceBadges: true })
   }
   const decideChoice = (c: ApprovalChoice): void => {
     if (c.kind === 'server-reads') {
       void api.grantServerReads(c.slug!).catch(() => undefined)
-      resolve('allow', 'once')
+      // A2: mode 'server-reads' — la chiamata passa, il registro ricorda il modo
+      resolve('allow', 'server-reads')
       return
     }
     resolve('allow', c.kind)
@@ -302,13 +311,22 @@ function GroupSection({ g, now }: { g: ApprovalsGroup; now: number }) {
   )
 }
 
-export function ApprovalsCenter() {
+/** i dati iniziali del Registro (nei test senza effect; nel prodotto si caricano dall'api) */
+export interface RegistroInitial {
+  log?: ApprovalLogRow[]
+  grants?: GrantLike[]
+}
+
+export function ApprovalsCenter({ registroInitial }: { registroInitial?: RegistroInitial } = {}) {
   const { i18n } = useLingui()
   const approvalsAll = useStore((s) => s.approvalsAll)
   const approvalsSnoozed = useStore((s) => s.approvalsSnoozed)
   const approvalsFocusId = useStore((s) => s.approvalsFocusId)
   const setApprovalsOpen = useStore((s) => s.setApprovalsOpen)
-  const setActivityOpen = useStore((s) => s.setActivityOpen)
+  // A2 (fase approvazioni-chiare): le due schede del centro — le richieste in
+  // attesa e il REGISTRO delle decisioni (con «Consentiti sempre»)
+  const approvalsView = useStore((s) => s.approvalsView)
+  const setApprovalsView = useStore((s) => s.setApprovalsView)
   const [filter, setFilter] = useState<'all' | 'dati-tuoi' | 'invio' | 'sito-interattivo'>('all')
   const now = Date.now()
   const rows = visibleApprovalsRows(approvalsAll, approvalsSnoozed, now)
@@ -334,11 +352,26 @@ export function ApprovalsCenter() {
         <div className="mx-auto flex max-w-3xl items-start justify-between gap-4">
           <div className="min-w-0">
             <h1 className="flex items-center gap-2 font-display text-2xl"><ShieldCheck className="size-5 text-muted-foreground" /><Trans>Da approvare</Trans></h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {rows.length > 0
-                ? <Trans>{rows.length} richieste da {bots} bot · solo tu puoi deciderle · ogni richiesta si decide anche dove è nata</Trans>
-                : <Trans>Nessuna richiesta in attesa.</Trans>}
-            </p>
+            {approvalsView === 'richieste' && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {rows.length > 0
+                  ? <Trans>{rows.length} richieste da {bots} bot · solo tu puoi deciderle · ogni richiesta si decide anche dove è nata</Trans>
+                  : <Trans>Nessuna richiesta in attesa.</Trans>}
+              </p>
+            )}
+            {/* A2: le due schede — le richieste in attesa e il Registro */}
+            <div className="mt-2 flex items-center gap-1.5" data-testid="approvals-center-tabs">
+              {([['richieste', i18n.t(msg`Richieste`)], ['registro', i18n.t(msg`Registro`)]] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  className={`rounded-full px-3 py-1 text-[13px] transition ${approvalsView === id ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                  data-testid={`approvals-tab-${id}`}
+                  onClick={() => setApprovalsView(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           <button
             className="flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-3.5 py-2 text-sm transition hover:bg-accent"
@@ -350,6 +383,9 @@ export function ApprovalsCenter() {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto scroll-thin px-8 pb-6">
+        {approvalsView === 'registro' ? (
+          <RegistroView initial={registroInitial} />
+        ) : (
         <div className="mx-auto max-w-3xl">
           {/* i filtri per tipo, con i conteggi (solo i tipi con richieste) */}
           <div className="flex flex-wrap gap-2 pt-2" role="group" aria-label={i18n.t(msg`Filtra per tipo`)}>
@@ -374,20 +410,141 @@ export function ApprovalsCenter() {
             ))}
           </div>
           {grouped.map((g) => <GroupSection key={g.kind === 'squad' ? `s${g.squad!.id}` : `b${g.bot!.botId}`} g={g} now={now} />)}
-          {/* il riquadro in fondo: i contatori di «Fatto da soli» sommati su
-              tutti i bot costerebbero una passata sui transcript a OGNI
-              refresh — resta il link al registro di oggi (Attività) */}
+          {/* A2: «Registro di oggi» porta al REGISTRO del centro (prima ad
+              Attività, che delle approvazioni non sapeva nulla) */}
           <div className="mt-8 flex items-center justify-between gap-3 rounded-[16px] bg-muted/50 px-4 py-3">
             <p className="text-sm text-muted-foreground"><Trans>Nessuna richiesta di dati tuoi, pagamenti o invii passa senza di te.</Trans></p>
             <button
               className="shrink-0 text-sm text-foreground underline-offset-2 transition hover:underline"
-              onClick={() => { setActivityOpen(true); setApprovalsOpen(false) }}
+              data-testid="approvals-open-registro"
+              onClick={() => setApprovalsView('registro')}
             >
               <Trans>Registro di oggi</Trans>
             </button>
           </div>
         </div>
+        )}
       </div>
     </section>
+  )
+}
+
+// ---- A2: il Registro — le decisioni, le passate da sole, i consentiti sempre ----
+
+/** il registro: le righe per giorno, i filtri e «Consentiti sempre» con Revoca. */
+function RegistroView({ initial }: { initial?: RegistroInitial }): ReactNode {
+  const { i18n } = useLingui()
+  const { t } = useLingui()
+  const agents = useStore((s) => s.agents)
+  const [log, setLog] = useState<ApprovalLogRow[] | null>(initial?.log ?? null)
+  const [grants, setGrants] = useState<GrantLike[] | null>(initial?.grants ?? null)
+  const [filter, setFilter] = useState<'all' | 'approve' | 'deny' | 'expired' | 'auto'>('all')
+  const lang = i18n.locale === 'en' ? 'en' : 'it'
+
+  const reload = (): void => {
+    void api.approvalsLog(200).then(setLog).catch(() => setLog([]))
+    void api.grantsList().then(setGrants).catch(() => setGrants([]))
+  }
+  useEffect(reload, [])
+  const rows = registroModel(log ?? [], filter)
+  const days = groupRegistroByDay(rows, Date.now(), lang)
+  const counts = (id: typeof filter): number => registroModel(log ?? [], id).length
+
+  return (
+    <div className="mx-auto max-w-3xl" data-testid="approvals-registro">
+      {/* i filtri del registro */}
+      <div className="flex flex-wrap gap-2 pt-2" role="group" aria-label={i18n.t(msg`Filtra il registro`)}>
+        <button
+          className={`rounded-full px-3.5 py-1.5 text-sm transition ${filter === 'all' ? 'bg-foreground text-background' : 'bg-muted hover:bg-accent'}`}
+          aria-pressed={filter === 'all'}
+          onClick={() => setFilter('all')}
+        >
+          <Trans>Tutte</Trans>
+        </button>
+        {REGISTRO_FILTERS.map((f) => (
+          counts(f.id) > 0 && (
+            <button
+              key={f.id}
+              className={`rounded-full px-3.5 py-1.5 text-sm transition ${filter === f.id ? 'bg-foreground text-background' : 'bg-muted hover:bg-accent'}`}
+              aria-pressed={filter === f.id}
+              onClick={() => setFilter(f.id)}
+            >
+              {i18n.t(f.label)} · {counts(f.id)}
+            </button>
+          )
+        ))}
+      </div>
+      {log === null && <p className="mt-4 text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>}
+      {log !== null && rows.length === 0 && (
+        <p className="mt-4 text-sm text-muted-foreground"><Trans>Nessuna decisione registrata.</Trans></p>
+      )}
+      {days.map((d) => (
+        <section key={d.label} className="mt-6" data-testid="approvals-registro-day">
+          <h2 className="text-[15px] font-medium capitalize">{d.label}</h2>
+          <div className="mt-2 space-y-1.5">
+            {d.rows.map((r) => (
+              <div key={r.key} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-[14px] bg-muted/40 px-3.5 py-2" data-testid="approvals-registro-row">
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  <span className="font-medium">{r.botName}</span>
+                  <span className="text-muted-foreground"> · {r.phrase || r.tool}</span>
+                </span>
+                <span className={`text-[13px] ${r.decision === 'deny' || r.decision === 'expired' ? 'text-muted-foreground' : 'text-foreground'}`}>
+                  {r.legacy
+                    ? <Trans>decisione precedente al registro</Trans>
+                    : <>
+                        {r.choice ? i18n.t(r.choice) : r.tool}
+                        {r.choiceDomain && <span className="text-muted-foreground"> · {r.choiceDomain}</span>}
+                      </>}
+                </span>
+                <span className="w-24 shrink-0 text-right text-xs text-muted-foreground">
+                  {r.legacy ? '' : r.viaLabel ? i18n.t(r.viaLabel) : ''}
+                </span>
+                <span className="shrink-0 text-xs text-muted-foreground">{r.time}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+      {/* «Consentiti sempre»: le grant attive, ciascuna con Revoca */}
+      <section className="mt-8" data-testid="approvals-registro-grants">
+        <h2 className="text-[15px] font-medium"><Trans>Consentiti sempre</Trans></h2>
+        <p className="mt-0.5 text-[13px] text-muted-foreground"><Trans>Ciò che i bot possono fare senza chiedere. Revoca e la chiamata successiva torna a chiedere.</Trans></p>
+        {grants !== null && grants.length === 0 && (
+          <p className="mt-2 text-sm text-muted-foreground"><Trans>Nessun consenso sempre attivo.</Trans></p>
+        )}
+        <div className="mt-2 space-y-1.5">
+          {groupGrantsByBot(grants ?? []).map((group) => (
+            <div key={group.agentId ?? 'tutti'} className="rounded-[16px] bg-muted/40 px-3.5 py-2.5">
+              <p className="text-[13px] font-medium">
+                {group.agentId === null
+                  ? <Trans>Tutti i bot</Trans>
+                  : agents.find((a) => a.id === group.agentId)?.name ?? group.agentId}
+              </p>
+              <div className="mt-1 space-y-1">
+                {group.grants.map((g) => (
+                  <div key={g.id} className="flex flex-wrap items-baseline gap-x-2 text-[13px]">
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="font-medium">{grantDisplayName(g, lang)}</span>
+                      {g.tool === 'run-command' && <code className="ml-1.5 rounded bg-card px-1 font-mono text-[11px]">{g.target}</code>}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {t`dal ${new Date(g.createdAt).toLocaleDateString()}`}
+                      {g.expiresAt != null ? <> · {t`scade alle ${new Date(g.expiresAt).toLocaleTimeString()}`}</> : null}
+                    </span>
+                    <button
+                      className="shrink-0 text-[13px] text-muted-foreground underline-offset-2 transition hover:text-destructive hover:underline"
+                      data-testid="grant-revoke"
+                      onClick={() => { void api.grantRevoke(g.id).then(reload).catch(() => undefined) }}
+                    >
+                      <Trans>Revoca</Trans>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
   )
 }

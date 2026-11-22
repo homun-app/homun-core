@@ -189,28 +189,28 @@ describe('A1: le decisioni del centro passano dalle RPC che esistono già', () =
     const meta = { tool: 'browser_type', input: { ref: 'e4', text: 'x', submit: true }, siteGrant: { domain: 'lefrecce.it' } }
     expect(clickChoice(() => renderCenter(rowOf('browser_type', meta, {})), 'approval-choice-site')).toBe(true)
     const calls = callsOf('resolveApproval')
-    expect(calls[calls.length - 1]!.args).toEqual(['a-bot', 'ap-1', 'allow', 'site'])
+    expect(calls[calls.length - 1]!.args).toEqual(['a-bot', 'ap-1', 'allow', 'site', 'center'])
   })
 
-  it('«Consenti sempre le letture di <server>» dal centro: la grant delle letture + once (come la card)', () => {
+  it('«Consenti sempre le letture di <server>» dal centro: la grant delle letture + resolve server-reads (come la card)', () => {
     const meta = { tool: 'mcp__ufficio__get_calendario', mcpServerRead: { slug: 'ufficio', name: 'Ufficio' } }
     expect(clickChoice(() => renderCenter(rowOf('mcp__ufficio__get_calendario', meta, {})), 'approval-choice-server-reads')).toBe(true)
     expect(callsOf('grantServerReads').slice(-1)[0]!.args).toEqual(['ufficio'])
     const calls = callsOf('resolveApproval')
-    expect(calls[calls.length - 1]!.args).toEqual(['a-bot', 'ap-1', 'allow', 'once'])
+    expect(calls[calls.length - 1]!.args).toEqual(['a-bot', 'ap-1', 'allow', 'server-reads', 'center'])
   })
 
   it('«Consenti per questa missione» dal centro: resolveApproval allow/mission (la RPC di Q2)', () => {
     const meta = { tool: 'send_to_agent', squadId: 3, input: { to: 'Turismo' } }
     expect(clickChoice(() => renderCenter(rowOf('send_to_agent', meta, { squad: true, category: 'squadra' })), 'approval-choice-mission')).toBe(true)
     const calls = callsOf('resolveApproval')
-    expect(calls[calls.length - 1]!.args).toEqual(['a-bot', 'ap-1', 'allow', 'mission'])
+    expect(calls[calls.length - 1]!.args).toEqual(['a-bot', 'ap-1', 'allow', 'mission', 'center'])
   })
 
   it('la CARD in chat decide dagli stessi testid (il modello è uno)', () => {
     const meta = { tool: 'browser_type', input: { ref: 'e4', text: 'x', submit: true }, siteGrant: { domain: 'lefrecce.it' } }
     expect(clickChoice(() => renderCard(entryOf('browser_type', meta, 5)), 'approval-choice-site')).toBe(true)
     const calls = callsOf('resolveApproval')
-    expect(calls[calls.length - 1]!.args).toEqual(['a-bot', 'ap-5', 'allow', 'site'])
+    expect(calls[calls.length - 1]!.args).toEqual(['a-bot', 'ap-5', 'allow', 'site', 'chat'])
   })
 })

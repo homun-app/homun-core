@@ -75,7 +75,19 @@ export function mcpAnnotationsOf(tool: string): McpAnnotationsLike | undefined {
  * modello dove il modello lo legge; la card mostra l'UiText.
  */
 export type Verdict =
-  | { kind: 'allow'; via: 'rule' | 'grant' }
+  | {
+      kind: 'allow'
+      via: 'rule' | 'grant'
+      /**
+       * A2 (fase approvazioni-chiare): PER COSA è passata — l'id della
+       * standing grant che ha coperto la chiamata, o il tool della regola
+       * dell'utente che l'ha fatta passare. Il loop lo scrive nell'indice
+       * tool_use (allowed_by) per il Registro («Passate da sole»). Le letture
+       * innocue sempre consentite non lo portano: loro non si registrano.
+       */
+      grantId?: number
+      ruleTool?: string
+    }
   | {
       kind: 'ask'
       reason: string
@@ -112,7 +124,7 @@ export type Verdict =
 }
   | { kind: 'deny'; reason: string }
 
-function matchRule(tool: string, target: string, rules: ReturnType<typeof getPermissions>['rules']): PermissionMode | null {
+function matchRuleEntry(tool: string, target: string, rules: ReturnType<typeof getPermissions>['rules']): typeof rules[number] | null {
   // regola più specifica vince: tool esatto prima di prefisso (*) prima di '*'
   const score = (r: typeof rules[number]) =>
     (r.tool !== '*' ? (r.tool.endsWith('*') ? 1 : 3) : 0) + (r.pattern !== '*' ? 1 : 0)
@@ -124,9 +136,13 @@ function matchRule(tool: string, target: string, rules: ReturnType<typeof getPer
       if (!tool.startsWith(r.tool.slice(0, -1))) continue
     } else if (r.tool !== tool) continue
     if (r.pattern !== '*' && !target.startsWith(r.pattern)) continue
-    return r.mode
+    return r
   }
   return null
+}
+
+function matchRule(tool: string, target: string, rules: ReturnType<typeof getPermissions>['rules']): PermissionMode | null {
+  return matchRuleEntry(tool, target, rules)?.mode ?? null
 }
 
 /**
@@ -273,7 +289,8 @@ export async function check(
     const analysis = await analyzeCommand(String(input.command ?? ''))
     // grant esatte per questo tool; le righe vecchie (prima parola, es. "git")
     // restano nel DB ma ora fanno match solo sulla chiave identica
-    const grants = listGrants().filter((g) => g.tool === tool && grantForAgent(g, owner)).map((g) => g.target)
+    const cmdGrants = listGrants().filter((g) => g.tool === tool && grantForAgent(g, owner))
+    const grants = cmdGrants.map((g) => g.target)
     const d = runCommandVerdict(analysis, grants, cfg.rules, cfg.default)
     if (d.kind === 'deny') return { kind: 'deny', reason: d.reasons[0] ?? 'Command blocked by permissions configuration' }
     // AH5 (fase aiutanti): quando il comando gira DAVVERO nel box
@@ -302,7 +319,14 @@ export async function check(
         return { kind: 'allow', via: 'rule' }
       }
     }
-    if (d.kind === 'allow') return { kind: 'allow', via: d.via ?? 'rule' }
+    if (d.kind === 'allow') {
+      // A2 (fase approvazioni-chiare): il verdetto dice PER COSA — l'id
+      // della grant che ha coperto la chiave del comando, o la regola
+      const grantId = d.via === 'grant'
+        ? cmdGrants.find((g) => (d.keys ?? []).includes(g.target))?.id
+        : undefined
+      return { kind: 'allow', via: d.via ?? 'rule', ...(grantId !== undefined ? { grantId } : d.via === 'rule' ? { ruleTool: 'run-command' } : {}) }
+    }
     return {
       kind: 'ask',
       reason: d.reasons.join('; '),
@@ -343,11 +367,14 @@ export async function check(
     const specific = matching.find((r) => r.tool !== '*' && r.tool !== 'composio__*')
     if (specific) {
       return specific.mode === 'always_allow'
-        ? { kind: 'allow', via: 'rule' }
+        ? { kind: 'allow', via: 'rule', ruleTool: specific.tool }
         : { kind: 'ask', reason: `${tool} requires approval`, ui: ui(UI.approvalToolRequires, { tool }), composio: { destructive: false } }
     }
-    if (listGrants().some((g) => g.tool === tool && g.target === '*' && grantForAgent(g, owner))) {
-      return { kind: 'allow', via: 'grant' }
+    {
+      const g = listGrants().find((x) => x.tool === tool && x.target === '*' && grantForAgent(x, owner))
+      if (g) {
+        return { kind: 'allow', via: 'grant', grantId: g.id }
+      }
     }
     const kind = classifyComposioToolName(tool)
     if (kind === 'read') {
@@ -463,19 +490,25 @@ export async function check(
     const specific = matching.find((r) => r.tool !== '*' && r.tool !== 'mcp__*')
     if (specific) {
       return specific.mode === 'always_allow'
-        ? { kind: 'allow', via: 'rule' }
+        ? { kind: 'allow', via: 'rule', ruleTool: specific.tool }
         : { kind: 'ask', reason: `${tool} requires approval`, ui: ui(UI.approvalToolRequires, { tool }) }
     }
-    if (listGrants().some((g) => g.tool === tool && g.target === '*' && grantForAgent(g, owner))) {
-      return { kind: 'allow', via: 'grant' }
+    {
+      const g = listGrants().find((x) => x.tool === tool && x.target === '*' && grantForAgent(x, owner))
+      if (g) {
+        return { kind: 'allow', via: 'grant', grantId: g.id }
+      }
     }
     const info = mcpAnnotationsLookup(tool)
     // M4 (fase 0.3.1001): la grant «Consenti sempre le letture di <server>»
     // (mcp__<server>__* scope readOnly) copre QUESTA chiamata solo se le
     // annotazioni CORRENTI del tool sono readOnly e non destructive — il
     // controllo è a ogni chiamata, non alla concessione
-    if (info && listGrants().some((g) => grantForAgent(g, owner) && serverReadGrantCovers(g.tool, g.scope, tool, info.annotations))) {
-      return { kind: 'allow', via: 'grant' }
+    if (info) {
+      const g = listGrants().find((x) => grantForAgent(x, owner) && serverReadGrantCovers(x.tool, x.scope, tool, info.annotations))
+      if (g) {
+        return { kind: 'allow', via: 'grant', grantId: g.id }
+      }
     }
     const annotated = mcpAnnotationMode(info?.annotations, info?.catalogServer ?? false)
     if (annotated === 'always_allow') return { kind: 'allow', via: 'rule' }
@@ -487,8 +520,9 @@ export async function check(
       }
     }
     // annotazioni assenti: regola di default (mcp__* → needs_approval) o default globale
-    const mode = matchRule(tool, '*', cfg.rules) ?? cfg.default
-    if (mode === 'always_allow') return { kind: 'allow', via: 'rule' }
+    const matchedStar = matchRuleEntry(tool, '*', cfg.rules)
+    const mode = matchedStar?.mode ?? cfg.default
+    if (mode === 'always_allow') return { kind: 'allow', via: 'rule', ruleTool: matchedStar?.tool ?? '*' }
     // M4: il tool di un server manuale dichiara readOnly (e non destructive) →
     // la card offre «Consenti sempre le letture di <server>»
     if (
@@ -507,7 +541,8 @@ export async function check(
   }
 
   const target = targetKey(tool, input)
-  const mode = matchRule(tool, target, cfg.rules) ?? cfg.default
+  const matched = matchRuleEntry(tool, target, cfg.rules)
+  const mode = matched?.mode ?? cfg.default
   if (mode === 'blocked') return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
 
   // Q1 (fase squadra): l'insieme FISSO chiede SEMPRE nell'autonomia di una
@@ -591,9 +626,9 @@ export async function check(
     grantForAgent(g, owner) &&
     grantActive(g)
   )
-  if (grant) return { kind: 'allow', via: 'grant' }
+  if (grant) return { kind: 'allow', via: 'grant', grantId: grant.id }
 
-  if (mode === 'always_allow') return { kind: 'allow', via: 'rule' }
+  if (mode === 'always_allow') return { kind: 'allow', via: 'rule', ruleTool: matched?.tool ?? '*' }
   // fase use-app (U3): la card dice l'APP o l'HOST, mai la chiave tecnica
   if (tool === 'use-app') {
     if (String(input.action ?? '') === 'open_url') {

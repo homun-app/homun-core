@@ -157,7 +157,7 @@ describe('A2: il centro «Da approvare» (tavola 4)', () => {
     expect(btn).toBeTruthy()
     ;(btn!.props.onClick as () => void)()
     const calls = callsOf('resolveApproval')
-    expect(calls[calls.length - 1]!.args).toEqual(['a-turismo', 'ap-1', 'allow', 'once'])
+    expect(calls[calls.length - 1]!.args).toEqual(['a-turismo', 'ap-1', 'allow', 'once', 'center'])
     // la card nella chat del bot passa a decisa (l'ottimistico di oggi)
     const en = useStore.getState().entries.find((e) => e.meta?.approvalId === 'ap-1')
     expect(en?.meta?.status).toBe('allowed')
