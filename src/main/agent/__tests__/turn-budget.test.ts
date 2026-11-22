@@ -6,7 +6,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const mode = vi.hoisted(() => ({ v: 'host' as 'host' | 'docker' }))
 const browserOk = vi.hoisted(() => ({ v: false }))
-vi.mock('../../sandbox', () => ({ sandboxMode: () => mode.v, browserSandboxOk: () => browserOk.v }))
+vi.mock('../../sandbox', () => ({ sandboxMode: () => mode.v, browserSandboxOk: () => browserOk.v, workspaceNameForPrompt: () => '/workspace' }))
 
 import { toolDefs, computerToolDefs } from '../tools'
 import { browserToolDefs } from '../browser'

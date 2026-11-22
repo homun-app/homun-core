@@ -77,6 +77,9 @@ const S: Record<string, { args: unknown[]; sub: string }> = {
   appleBoxRunArgv: { args: ['sandbot-box', 'sandbot-box', 'bridge', DEFAULT_BOX_LIMITS, 'sandbot-box:abab9640c765'], sub: 'run' },
   appleBoxRmArgv: { args: ['sandbot-box'], sub: 'rm' },
   appleIsolateLinkDownArgv: { args: ['sandbot-box'], sub: 'exec' },
+  // D7 (fase deleghe): il collegamento /workspace → /box/workspace nel box
+  appleWorkspaceLinkArgv: { args: ['sandbot-box'], sub: 'exec' },
+  appleWorkspaceLinkCheckArgv: { args: ['sandbot-box'], sub: 'exec' },
   appleIsolationCheckArgv: { args: ['sandbot-box'], sub: 'exec' },
   appleBoxInspectArgv: { args: ['sandbot-box'], sub: 'inspect' },
   appleBoxWritableArgv: { args: ['sandbot-box'], sub: 'exec' },

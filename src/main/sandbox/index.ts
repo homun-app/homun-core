@@ -100,6 +100,58 @@ export function sandboxNetwork(): SandboxNetwork {
   return getSetting<SandboxNetwork>('sandbox.network', 'bridge')
 }
 
+// ---- D7 (fase deleghe): /workspace è un percorso VERO anche nel box ----
+
+/**
+ * D7: il collegamento /workspace → /box/workspace nel container c'è? null =
+ * non ancora deciso (default: c'è — host non ne ha bisogno, il box lo crea
+ * all'ensure). UN SOLO punto decide quale nome del percorso comune il bot
+ * vede nel prompt.
+ */
+let boxWorkspaceLinked: boolean | null = null
+
+/** D7: il nome della cartella comune che il prompt dà al bot (UN punto solo). */
+export function workspaceNameForPrompt(): string {
+  return boxWorkspaceLinked === false ? '/box/workspace' : '/workspace'
+}
+
+/** D7 (solo test): riporta la decisione del collegamento allo stato voluto. */
+export function setBoxWorkspaceLinkedForTests(v: boolean | null): void {
+  boxWorkspaceLinked = v
+}
+
+/**
+ * D7: assicura il collegamento /workspace → /box/workspace nel container in
+ * corsa — idempotente (test -L prima, ln -sfn solo se manca: due avvii non
+ * sbagliano), come root, per OGNI motore (gli argv del contratto della CLI:
+ * Docker e Apple oggi, Podman e WSL2 domani). Se non si può creare (motore
+ * vecchio, filesystem in sola lettura): UNA riga di log e il prompt ricade
+ * su /box/workspace. Ritorna true se il collegamento c'è (o è appena nato).
+ */
+export async function ensureBoxWorkspaceLink(runner: DockerRunner, container: string): Promise<boolean> {
+  const engine = activeBoxEngine()
+  if (!engine.argv.workspaceLink || !engine.argv.workspaceLinkCheck) return true
+  try {
+    const check = await runner(engine.argv.workspaceLinkCheck(container), { timeoutMs: 15_000 })
+    if (check.exitCode === 0) {
+      boxWorkspaceLinked = true
+      return true
+    }
+    const ln = await runner(engine.argv.workspaceLink(container), { timeoutMs: 15_000 })
+    if (ln.exitCode === 0) {
+      boxWorkspaceLinked = true
+      return true
+    }
+    boxWorkspaceLinked = false
+    console.log(`[sandbox] collegamento /workspace non creato nel box (${String(ln.stderr).trim().slice(0, 120) || 'motore o filesystem in sola lettura'}): il prompt usa /box/workspace`)
+    return false
+  } catch (e) {
+    boxWorkspaceLinked = false
+    console.log(`[sandbox] collegamento /workspace non verificato nel box: ${e instanceof Error ? e.message : String(e)} — il prompt usa /box/workspace`)
+    return false
+  }
+}
+
 /**
  * Fase 11b (punto 2): il browser del bot esiste SOLO in modalità docker con
  * rete bridge (mai un browser sul Mac dell'utente); il flag di test del MCP
@@ -759,6 +811,9 @@ async function ensureBoxContainerUnchecked(): Promise<void> {
         }
       }
     }
+    // D7 (fase deleghe): il collegamento /workspace → /box/workspace vale
+    // ANCHE per i box nati PRIMA (check leggero, ln solo se manca)
+    await ensureBoxWorkspaceLink(dockerRunner, BOX_CONTAINER)
     // CC2 (fase computer-card): l'ensure È RIUSCITO col box riusato — il
     // computer del bot GIRA (un fatto che già sappiamo, nessuno spawn in più)
     setBoxRuntime('running')
@@ -804,6 +859,10 @@ async function ensureBoxContainerUnchecked(): Promise<void> {
   if (create.exitCode !== 0) throw new Error(`docker create fallito: ${create.stderr}`)
   const start = await dockerRunner(engine.argv.start(BOX_CONTAINER), { timeoutMs: 30_000 })
   if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
+  // D7 (fase deleghe): il collegamento /workspace → /box/workspace, come
+  // root, nello stesso punto dell'avvio del box (idempotente: il box riusato
+  // lo ricontrolla nel percorso use qui sopra)
+  await ensureBoxWorkspaceLink(dockerRunner, BOX_CONTAINER)
   // BR1: col motore Apple in none, SUBITO dopo il run -d e prima di OGNI
   // exec del bot — interfacce GIÙ come root e VERIFICA operstate. Ogni
   // fallimento è CHIUSO: il box si rimuove, l'azione del bot lo dice in

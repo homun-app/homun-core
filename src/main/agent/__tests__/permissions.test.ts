@@ -38,6 +38,7 @@ vi.mock('../../store/db', () => ({
 }))
 
 vi.mock('../../sandbox', () => ({
+  workspaceNameForPrompt: () => '/workspace',
   sandboxMode: () => state.sandboxMode,
   // fase 11: la radice è il box CONDIVISO, la home del bot ci vive dentro
   boxRoot: () => BOX,

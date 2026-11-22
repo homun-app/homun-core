@@ -459,6 +459,22 @@ export function boxHasBrowserMountRw(inspectOutput: string): boolean {
  */
 export const DOCKER_BOX_INIT_SH = `mkdir -p ${BOX_MOUNT}/workspace ${BOX_MOUNT}/home && chown -R ${CONTAINER_USER} ${BOX_MOUNT}`
 
+/**
+ * D7 (fase deleghe): il collegamento /workspace → /box/workspace DENTRO il
+ * container in corsa — come ROOT (la radice del fs del container è
+ * dell'utente 0), IDEMPOTENTE (ln -sfn: symlink, force, no-dereference: due
+ * avviti non sbagliano). Il prompt dice /workspace e i tool dei file lo
+ * accettano già: così anche `run-command ls /workspace` FUNZIONA nel box.
+ */
+export function dockerWorkspaceLinkArgv(container: string): string[] {
+  return ['exec', '-u', '0', container, 'ln', '-sfn', `${BOX_MOUNT}/workspace`, '/workspace']
+}
+
+/** D7: il check del collegamento (test -L, come utente del container basta). */
+export function dockerWorkspaceLinkCheckArgv(container: string): string[] {
+  return ['exec', container, 'test', '-L', '/workspace']
+}
+
 export function dockerBoxChownArgv(volume: string, image: string): string[] {
   return ['run', '--rm', '-v', `${volume}:${BOX_MOUNT}`, image, 'sh', '-c', DOCKER_BOX_INIT_SH]
 }

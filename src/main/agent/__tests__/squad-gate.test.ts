@@ -36,6 +36,7 @@ const defaultRules = (): PermissionRule[] => [
 ]
 
 vi.mock('../../sandbox', () => ({
+  workspaceNameForPrompt: () => '/workspace',
   sandboxMode: () => state.sandboxMode,
   boxRoot: () => '/tmp/squad-box',
   boxDir: (id: string) => `/tmp/squad-box/home/${id}`,

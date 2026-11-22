@@ -9,7 +9,8 @@ const facts = vi.hoisted(() => ({ mode: 'host' as 'host' | 'box', egress: 'direc
 vi.mock('../../sandbox', () => ({
   sandboxMode: () => facts.mode,
   browserSandboxOk: () => false,
-  boxShellEgressOf: () => facts.egress
+  boxShellEgressOf: () => facts.egress,
+  workspaceNameForPrompt: () => '/workspace'
 }))
 
 const { computerSection } = await import('../prompts')

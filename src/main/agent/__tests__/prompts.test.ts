@@ -9,7 +9,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 const mode = vi.hoisted(() => ({ v: 'host' as 'host' | 'box' }))
 // fase 11b: la sezione browser dipende dalla disponibilità del browser
 const browserOk = vi.hoisted(() => ({ v: false }))
-vi.mock('../../sandbox', () => ({ sandboxMode: () => mode.v, browserSandboxOk: () => browserOk.v }))
+vi.mock('../../sandbox', () => ({ sandboxMode: () => mode.v, browserSandboxOk: () => browserOk.v, workspaceNameForPrompt: () => '/workspace' }))
 
 import {
   systemPrompt, identitySection, computerSection, talkingSection, initiativeSection,

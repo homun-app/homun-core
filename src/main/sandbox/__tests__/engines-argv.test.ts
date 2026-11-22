@@ -139,6 +139,7 @@ describe('BX5: gli argv del motore Docker sono byte-identici a oggi', () => {
       'screenControlVnc', 'screenControlPidRead', 'screenSocketReady', 'screenDisplayRead', 'screenBridge', 'xdotool',
       'screenCapture', 'screenGeometry',
       'terminal', 'termPidList', 'termPidClean',
+      'workspaceLink', 'workspaceLinkCheck',
       'boxChown', 'boxMigrate', 'boxMarkerCheck', 'boxMarkerWrite',
       'df', 'pruneSafe', 'removeImage', 'removeVolumes'
     ] as const

@@ -556,6 +556,7 @@ vi.mock('../llm', () => ({
 }))
 
 vi.mock('../../sandbox', () => ({
+  workspaceNameForPrompt: () => '/workspace',
   sandboxMode: () => h.sandboxMock.mode,
   boxShellEgressOf: () => h.sandboxMock.egress,
   browserSandboxOk: () => false,

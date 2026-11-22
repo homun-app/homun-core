@@ -22,6 +22,7 @@ vi.mock('../../store/db', () => ({
 }))
 
 vi.mock('../../sandbox', () => ({
+  workspaceNameForPrompt: () => '/workspace',
   sandboxMode: () => 'host' as const,
   boxRoot: () => '/unused',
   boxDir: (id: string) => `/unused/${id}`

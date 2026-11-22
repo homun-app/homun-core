@@ -22,6 +22,7 @@ vi.mock('../../store/db', () => ({
   familyAgents: (owner: string) => (owner === 'papà' ? [{ id: 'papà', name: 'Papà' }, { id: 'figlio', name: 'Figlio' }] : [{ id: owner, name: owner }])
 }))
 vi.mock('../../sandbox', () => ({
+  workspaceNameForPrompt: () => '/workspace',
   // come il vero boxOwnerOf: il figlio appartiene al padre
   boxOwnerOf: (id: string) => (id === 'figlio' ? 'papà' : id)
 }))

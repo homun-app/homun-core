@@ -45,6 +45,13 @@ export interface BoxEngineArgv {
    */
   boxInitCheck?(container: string): string[]
   boxMounts?(container: string): string[]
+  /**
+   * D7 (fase deleghe): il collegamento /workspace → /box/workspace nel
+   * container in corsa (come root, idempotente) e il suo check — l'ensure lo
+   * chiede a OGNI avvio del box, riusato o nuovo.
+   */
+  workspaceLink?(container: string): string[]
+  workspaceLinkCheck?(container: string): string[]
   boxWritable(container: string): string[]
   containerImage?(container: string): string[]
   /** BR3: la RETE del box esistente (l'inspect da confrontare con networkNameOf). */

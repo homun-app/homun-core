@@ -9,6 +9,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { BoxEngine, BoxEngineArgv } from './engine'
 import {
+  dockerWorkspaceLinkArgv,
+  dockerWorkspaceLinkCheckArgv,
   dockerContainerNetworkArgv,
   dockerExecArgv,
   dockerExecBackgroundArgv,
@@ -86,6 +88,8 @@ const argv: BoxEngineArgv = {
   boxRm: dockerBoxRmArgv,
   boxInitCheck: dockerBoxInitCheckArgv,
   boxMounts: dockerBoxMountsArgv,
+  workspaceLink: dockerWorkspaceLinkArgv,
+  workspaceLinkCheck: dockerWorkspaceLinkCheckArgv,
   boxWritable: dockerBoxWritableArgv,
   containerImage: dockerContainerImageArgv,
   containerNetwork: dockerContainerNetworkArgv,

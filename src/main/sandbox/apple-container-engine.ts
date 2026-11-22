@@ -10,6 +10,8 @@ import { join } from 'node:path'
 import type { BoxEngine, BoxEngineArgv, BoxEngineReads } from './engine'
 import { BOX_CONTAINER, BOX_VOLUME, BOX_IMAGE_REPO, PLUGINS_MOUNT, BROWSER_MOUNT } from './docker-argv'
 import {
+  appleWorkspaceLinkArgv,
+  appleWorkspaceLinkCheckArgv,
   APPLE_BOX_NETWORK,
   appleNetworkOf,
   appleNetworkInspectArgv,
@@ -207,6 +209,8 @@ const argv: BoxEngineArgv = {
   boxCreate: appleBoxRunArgv,
   boxRm: appleBoxRmArgv,
   boxWritable: appleBoxWritableArgv,
+  workspaceLink: appleWorkspaceLinkArgv,
+  workspaceLinkCheck: appleWorkspaceLinkCheckArgv,
   ensureHome: appleEnsureHomeArgv,
   imageInspect: appleImageInspectArgv,
   imageSize: appleImageSizeArgv,

@@ -729,6 +729,21 @@ export function appleBoxChownArgv(volume: string, image: string): string[] {
   return ['run', '--rm', '-v', `${volume}:${BOX_MOUNT}`, image, 'sh', '-c', DOCKER_BOX_INIT_SH]
 }
 
+/**
+ * D7 (fase deleghe): il collegamento /workspace → /box/workspace nel
+ * container in corsa (come root, ln -sfn idempotente) e il suo check — gli
+ * STESSI argv di Docker: il contratto della CLI (engine-cli-contract) è
+ * quello che Podman e WSL2 riusano.
+ */
+export function appleWorkspaceLinkArgv(container: string): string[] {
+  return ['exec', '-u', '0', container, 'ln', '-sfn', `${BOX_MOUNT}/workspace`, '/workspace']
+}
+
+/** D7: il check del collegamento. */
+export function appleWorkspaceLinkCheckArgv(container: string): string[] {
+  return ['exec', container, 'test', '-L', '/workspace']
+}
+
 export function appleBoxMigrateArgv(oldVolume: string, agentId: string, image: string, boxVolume: string): string[] {
   return ['run', '--rm', '-v', `${oldVolume}:/from:ro`, '-v', `${boxVolume}:${BOX_MOUNT}`, image, 'sh', '-c', DOCKER_BOX_MIGRATE_SH, 'sh', agentId]
 }

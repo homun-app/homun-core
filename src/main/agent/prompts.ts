@@ -13,7 +13,7 @@
 // applicata dal loop per ULTIMA (posizione di recenza).
 import type { Agent } from '../../shared/types'
 import { languageName, type Lang } from '../../shared/language'
-import { sandboxMode, browserSandboxOk, boxShellEgressOf } from '../sandbox'
+import { sandboxMode, browserSandboxOk, boxShellEgressOf, workspaceNameForPrompt } from '../sandbox'
 import { BOX_NO_INTERNET_LINE } from '../sandbox/box-egress'
 
 /**
@@ -166,6 +166,9 @@ export const WEB_NAVIGATION_RULES = `- Search ON a site from its home or an addr
 
 export function computerSection(groups: ReadonlyArray<string> = [], opts: { groupTurn?: boolean } = {}): string {
   const docker = sandboxMode() === 'box'
+  // D7 (fase deleghe): UN SOLO punto decide il nome della cartella comune —
+  // /workspace quando il collegamento nel box c'è, /box/workspace altrimenti
+  const ws = workspaceNameForPrompt()
   const env = docker
     ? 'a persistent Linux container shared with your OTHER bots (files survive across sessions).'
     : 'a persistent working folder shared with your OTHER bots. Commands run in a shell.'
@@ -181,9 +184,9 @@ export function computerSection(groups: ReadonlyArray<string> = [], opts: { grou
   const noInternet = boxNoInternetOn() ? `\n- ${BOX_NO_INTERNET_LINE}` : ''
   return `# Your computer
 You have a computer (the box): ${env}
-- \`/workspace\` (the shared box) is the COMMON space of all your bots: deliverables that the others need too go there, in \`/workspace/<project>/…\`, and you cite the path in the group.
+- \`${ws}\` (the shared box) is the COMMON space of all your bots: deliverables that the others need too go there, in \`${ws}/<project>/…\`, and you cite the path in the group.
 - Your home is yours: relative paths start there.
-- Before redoing work, check whether another bot has already left it in \`/workspace\`.
+- Before redoing work, check whether another bot has already left it in \`${ws}\`.
 Base tools: run-command (background: true for long ones${background}), read-file, write-file, list-directory, web_search / web_fetch (web search and reading), memory (save / recall), document (write / read / edit), skill.${groupBlock ? `\n${groupBlock}` : ''}${noInternet}
 ${WEB_NAVIGATION_RULES}
 ${documentRule()}

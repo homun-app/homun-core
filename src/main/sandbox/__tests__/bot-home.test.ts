@@ -172,7 +172,10 @@ describe('N1: il box già a posto NON si ricrea a ogni comando', () => {
     expect(new Set(f.calls.map((a) => a[0]))).toEqual(new Set(['image', 'ps', 'inspect', 'start', 'exec']))
     expect(f.calls.filter((a) => a[0] === 'inspect')).toHaveLength(8) // init, immagine, mount e RETE (BR3) × 2
     expect(f.calls.filter((a) => a[0] === 'start')).toHaveLength(2)
-    expect(f.calls.filter((a) => a[0] === 'exec' && a[2] === 'test')).toHaveLength(2) // test -w /box/workspace
+    expect(f.calls.filter((a) => a[0] === 'exec' && a[2] === 'test' && a[3] === '-w')).toHaveLength(2) // test -w /box/workspace
+    // D7 (fase deleghe): il check LEGGERO del collegamento /workspace → /box/workspace, uno a ensure (il ln parte solo se manca)
+    expect(f.calls.filter((a) => a[0] === 'exec' && a[2] === 'test' && a[3] === '-L' && a[4] === '/workspace')).toHaveLength(2)
+    expect(f.calls.some((a) => a.includes('ln'))).toBe(false) // il collegamento c'è già: NESSUN ln
   })
 
   it('il box NATO PRIMA del mount :ro si ricrea UNA volta col motivo nel log (N1.4), poi non più', async () => {
