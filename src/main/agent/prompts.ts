@@ -488,9 +488,15 @@ export const secondaryPrompts = {
     `You are answering a single ephemeral question about the user's current work. Use the provided conversation as context and respond directly. Answer in ${languageName(lang)}.\n\n<conversation>\n${context}\n</conversation>\n\nQuestion: ${question}`,
   routinesSuggestion: (transcript: string, lang: Lang) =>
     `You are analyzing conversation transcripts to identify repeated user behaviors.\n\n<transcript>\n${transcript}\n</transcript>\n\nList up to 5 recurring behaviors that could become automatic routines, in JSON: [{"title": string, "schedule": string, "description": string}]. Only JSON. Write titles and descriptions in ${languageName(lang)}.`,
-  /** fase 4: compaction — il riepilogo dei turni più vecchi (fatti, decisioni, task aperti, preferenze). */
+  /**
+   * fase 4: compaction — il riepilogo dei turni più vecchi (fatti, decisioni,
+   * task aperti, preferenze). V2 (fase stato-vivo): le CAPACITÀ non si
+   * congelano — la disponibilità di strumenti, connettori, server MCP e i
+   * limiti di rete cambiano a ogni turno (il blocco «Collegamenti ora» di V1
+   * è la verità corrente): mai scriverla come fatto permanente, semmai datata.
+   */
   compaction: (digest: string) =>
-    `Summarize the following conversation between a user and their assistant. Extract in markdown, with brief items: the certain FACTS that emerged (about people, projects, data), the DECISIONS made, the open or pending TASKS, the user's PREFERENCES. Do not invent anything: only what is in the text. Maximum 300 words. Write the summary in the language of the conversation.\n\n<conversation>\n${digest}\n</conversation>`,
+    `Summarize the following conversation between a user and their assistant. Extract in markdown, with brief items: the certain FACTS that emerged (about people, projects, data), the DECISIONS made, the open or pending TASKS, the user's PREFERENCES. Do not invent anything: only what is in the text. Never state in the FACTS which tools, connectors, MCP servers or network access exist or do not exist: those change from turn to turn. If one matters, write it as 'at the time of this summary: …' instead. Maximum 300 words. Write the summary in the language of the conversation.\n\n<conversation>\n${digest}\n</conversation>`,
   /** fase 6 (§3ter T2): check-in al rientro — l'utente è tornato dopo un'assenza. */
   lookAround: () =>
     `The user has just come back to the computer after an absence (this message is opened by the system, not by them).

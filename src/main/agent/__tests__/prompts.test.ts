@@ -16,7 +16,7 @@ import {
   externalContentSection, transparencySection, workSection, connectorsSection,
   agentsSection, teamGroupsSection, memorySkillsSection, tasksSection, limitsSection,
   languageSection, withLanguage, mainAgentSection, PROMPT_SECTION_TITLES, PROMPT_TOKEN_BUDGET,
-  ROUTINE_SILENT_REPLY_GUIDANCE
+  ROUTINE_SILENT_REPLY_GUIDANCE, secondaryPrompts
 } from '../prompts'
 import type { Agent } from '../../../shared/types'
 
@@ -453,6 +453,31 @@ describe('U4: la regola dell\'ora di invio, fissa nel system prompt', () => {
   it('anche il FIGLIO: i suoi messaggi utente portano il timbro come quelli del padre', () => {
     const child = subagentSystemPrompt(agent, { id: 'sub_ab12cd34', title: 't' })
     expect(child.split(RULE).length - 1).toBe(1)
+  })
+})
+
+// V2 (fase stato-vivo): i riassunti NON congelano le capacità — l'entry
+// summary 1738 della chat di Competito diceva come FATTO «non ho accesso ai
+// server MCP» e il bot ci ha creduto per un turno intero. Le istruzioni di
+// compattazione lo vietano: la disponibilità di strumenti, connettori,
+// server e i limiti di rete non sono fatti permanenti; se servono, si
+// scrivono datati («at the time of this summary: …»). La regola di V1 copre
+// i riassunti già scritti.
+describe("V2: le istruzioni di compattazione non congelano le capacità", () => {
+  const RULE = "Never state in the FACTS which tools, connectors, MCP servers or network access exist or do not exist: those change from turn to turn. If one matters, write it as 'at the time of this summary: …' instead."
+
+  it('la frase nuova c\'è nelle istruzioni di compattazione, UNA volta, parola per parola', () => {
+    const p = secondaryPrompts.compaction('digest di prova')
+    expect(p.split(RULE).length - 1).toBe(1)
+  })
+
+  it('le istruzioni di sempre restano (fatti, decisioni, task, preferenze; 300 parole; lingua della conversazione)', () => {
+    const p = secondaryPrompts.compaction('digest di prova')
+    expect(p).toContain('the certain FACTS that emerged')
+    expect(p).toContain('the DECISIONS made')
+    expect(p).toContain('Maximum 300 words.')
+    expect(p).toContain('Write the summary in the language of the conversation.')
+    expect(p).toContain('<conversation>\ndigest di prova\n</conversation>')
   })
 })
 
