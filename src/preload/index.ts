@@ -67,6 +67,8 @@ const api: SandbotApi = {
     ipcRenderer.invoke('approvals:resolve', agentId, approvalId, decision, mode, via),
   // A1 (fase centro-autorizzazioni): tutte le richieste pendenti, per il centro
   approvalsPendingAll: () => ipcRenderer.invoke('approvals:pending-all'),
+  // A3 (fase approvazioni-chiare): il numero delle richieste sull'icona del Dock
+  setDockBadge: (count) => ipcRenderer.invoke('app:dock-badge', count),
   // A2 (fase approvazioni-chiare): il registro delle decisioni (e delle passate da sole)
   approvalsLog: (limit) => ipcRenderer.invoke('approvals:log', limit),
   // fase 8 (§3bis L5): decisione dell'utente sulla regola proposta dal bot

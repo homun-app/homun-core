@@ -49,7 +49,9 @@ import { handleWebhook } from './webhooks'
 import { deliverDueHeld } from './outbox'
 import { decideNotification, notifyTexts, notifyOpenAgentOf } from './notifications'
 // A4 (fase centro-autorizzazioni): il raggruppatore delle notifiche delle richieste
-import { createApprovalNotifier } from './approval-notifications'
+// A4 (fase centro-autorizzazioni) → A3 (fase approvazioni-chiare): il
+// raggruppatore delle notifiche delle richieste e la FRASE RIPULITA (X2)
+import { createApprovalNotifier, approvalNotifyBodyOf } from './approval-notifications'
 import { enqueueUserMessage } from './enqueue'
 // fase 17c (C2): notice col testo del catalogo UI
 import { uiLanguage, formatUi, ui } from '../main/ui-language'
@@ -503,11 +505,41 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
 
   // fase 6 (§3bis L9): ultima notifica consegnata per agente (throttle 5 s)
   const lastNotified = new Map<string, number>()
+  // A3 (fase approvazioni-chiare): il raggruppatore delle notifiche delle
+  // RICHIESTE — le card (evento needs-input con approvalId) passano da QUI,
+  // non dal percorso dei 5 s (che resta per ask_user e takeover). Consegna
+  // SOLO a finestra non a fuoco (il fuoco arriva dalla UI via
+  // presence:window-focus), rispetta l'interruttore per bot, al massimo UNA
+  // ogni 30 s con l'aggregata «N richieste aspettano te». Il corpo è la
+  // FRASE RIPULITA per categoria (come X2: mai testo libero di siti o
+  // server), il clic apre il centro SU quella richiesta: dalla notifica NON
+  // si decide niente.
+  const approvalNotifier = createApprovalNotifier({
+    notify: (title, body, openApprovalsFor) => {
+      bridge?.notify(title, body, undefined, undefined, openApprovalsFor)
+    },
+    windowFocused: () => presence.windowFocused(),
+    now: () => Date.now()
+  })
   const emit = (e: SandbotEvent): void => {
     server.broadcast(e)
     if (e.type !== 'agent-notify') return
     const agent = getAgent(e.agentId)
     if (!agent) return
+    // A3: la CARD di una richiesta → il raggruppatore (finestra non a fuoco,
+    // frase chiusa, clic sul centro) e BASTA: niente percorso dei 5 s
+    if (e.kind === 'needs-input' && typeof e.approvalId === 'string' && e.approvalId) {
+      // AH2: il bot mostrato è il PADRE per le richieste di un sottoagente
+      const shown = agent.parentId ? getAgent(agent.parentId)?.name ?? agent.name : agent.name
+      const entry = getEntries(e.agentId).findLast((x) => x.meta?.approvalId === e.approvalId)
+      approvalNotifier.onApprovalBorn({
+        enabled: !getSetting<string[]>('notifications.disabledAgents', []).includes(e.agentId),
+        agentName: shown,
+        phrase: approvalNotifyBodyOf(uiLanguage(), entry ?? { kind: 'approval', content: '', meta: null }),
+        approvalId: e.approvalId
+      })
+      return
+    }
     const decision = decideNotification({
       enabled: !getSetting<string[]>('notifications.disabledAgents', []).includes(e.agentId),
       viewing: server.hasUi() && presence.viewingAgent() === e.agentId,

@@ -89,13 +89,14 @@ describe('P4: la card dell\'aiutante che aspetta te — «aspetta te» e «Decid
     expect(findAll(root, (n) => n.tag === 'button' && textOf(n) === 'Decidi')).toEqual([])
   })
 
-  it('il riquadro A3 in cima alla chat conta GIÀ le richieste degli aiutanti (verifica)', async () => {
-    const { ApprovalsBanner } = await import('../components/ApprovalsBanner')
+  it('il riquadro A3 della chat conta GIÀ le richieste degli aiutanti (verifica: «+N altrove»)', async () => {
+    const { ApprovalsBannerElsewhere } = await import('../components/ApprovalsBanner')
     // la riga del centro per la richiesta del FIGLIO: botName del padre (il
     // figlio non è in roster), agentId del figlio
     const row: ApprovalsCenterRow = {
       agentId: 'sub-1',
       approvalId: 'appr-b1',
+      botId: 'bot-padre',
       botName: 'Bot padre',
       phrase: 'vuole cliccare «Conferma acquisto» su lefrecce.it',
       category: 'sito-interattivo',
@@ -105,13 +106,10 @@ describe('P4: la card dell\'aiutante che aspetta te — «aspetta te» e «Decid
     setStoreStateForRender(useStore as never, {
       approvalsAll: [row],
       approvalsSnoozed: {},
-      approvalsBannerCollapsed: false,
       openGroupId: null
     })
-    const html = renderHtml(createElement(ApprovalsBanner))
+    const html = renderHtml(createElement(ApprovalsBannerElsewhere))
     const root = parseHtml(html)
-    expect(textOf(root)).toContain('1 richieste aspettano te')
-    expect(textOf(root)).toContain('Conferma acquisto')
-    expect(findAll(root, (n) => n.tag === 'button' && textOf(n) === 'Decidi')).toBeTruthy()
+    expect(textOf(root)).toContain('+1 altrove')
   })
 })

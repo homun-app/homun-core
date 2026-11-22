@@ -51,7 +51,11 @@ export function uiSafeStorage(deps: HostBridgeDeps): SafeStorageLike {
  * apre la chat del PADRE (dove la card del figlio si decide).
  */
 export function attachHostBridge(deps: HostBridgeDeps): {
-  notify(title: string, body: string, openGroupId?: number, openAgentId?: string): void
+  /**
+   * A4 (fase centro-autorizzazioni) → A3: openApprovalsFor — il click apre il
+   * centro «Da approvare» SU quella richiesta (dalla notifica NON si decide)
+   */
+  notify(title: string, body: string, openGroupId?: number, openAgentId?: string, openApprovalsFor?: string): void
   refreshScale(): void
 } {
   setSafeStorage(uiSafeStorage(deps))

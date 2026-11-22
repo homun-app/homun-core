@@ -31,7 +31,11 @@ import { agentMessageDisplay } from '../../../shared/agent-message'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, ThinkingSetting } from '../../../shared/types'
 import { ApprovalCard } from './ApprovalCard'
 // A3 (fase centro-autorizzazioni): il riquadro delle richieste in cima alla chat
-import { ApprovalsBanner } from './ApprovalsBanner'
+// A3 (fase approvazioni-chiare): il riquadro in cima resta SOLO per le
+// richieste di ALTRI bot o squadre; la richiesta di QUESTO bot sta sopra il
+// campo di scrittura (ComposerApproval)
+import { ApprovalsBannerElsewhere } from './ApprovalsBanner'
+import { ComposerApproval } from './ComposerApproval'
 import { WidgetCard } from './WidgetCard'
 import { AgentSendRow } from './AgentSendRow'
 import { RoutineCreatedRow } from './RoutineCreatedRow'
@@ -598,9 +602,10 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
           scorrimento al ritorno); la pagina aperta gli passa SOPRA, il
           compositore resta sospeso in basso */}
       <div className="relative flex min-h-0 flex-1 flex-col">
-        {/* A3 (fase centro-autorizzazioni): il riquadro delle richieste, FISSO
-            sopra i messaggi (tavola 5) — fuori dal contenitore che scorre */}
-        <ApprovalsBanner />
+        {/* A3 (fase approvazioni-chiare): in cima SOLO le richieste di ALTRI
+            bot o squadre, ridotte («+N altrove») — quella di QUESTO bot sta
+            sopra il campo di scrittura, dove guarda l'utente */}
+        <ApprovalsBannerElsewhere excludeBotId={agent.id} />
         <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden scroll-thin px-6 pb-4 pt-16">
           {entries.length === 0 && (
             <p className="mt-16 text-center text-sm text-muted-foreground">
@@ -638,6 +643,11 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
           bottone tondo con l'icona, il campo non scende mai sotto 120 px e
           allega/invia restano DENTRO la pillola anche con la chat al minimo */}
       <footer className="@container px-6 pb-4">
+        {/* A3 (fase approvazioni-chiare): la richiesta in attesa di QUESTO
+            bot, agganciata in basso sopra il campo (come i permessi degli
+            strumenti per sviluppatori): resta visibile scorrendo e il campo
+            resta usabile */}
+        <ComposerApproval botId={agent.id} />
         {/* fase skill (S7.1): l'elenco delle skill quando il messaggio comincia con / */}
         {slashOpen && slashOptions.length > 0 && (
           <div className="mx-auto mb-2 max-w-3xl overflow-hidden rounded-2xl bg-card p-1.5 shadow-soft" data-testid="slash-picker">

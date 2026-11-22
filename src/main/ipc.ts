@@ -4,6 +4,8 @@
 // Restano locali solo le API che dipendono da finestre e dialoghi: pick-image,
 // test notifiche, "Avvia all'accesso", il rinnovo da Homun 2 e l'aggiornamento.
 import { ipcMain, BrowserWindow, Notification, dialog, app, shell } from 'electron'
+// A3 (fase approvazioni-chiare): il testo del badge del Dock (puro)
+import { dockBadgeOf } from './dock-badge'
 import { readFile } from 'node:fs/promises'
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -468,6 +470,12 @@ export function registerIpc(
   })
   ipcMain.handle('app:legacy-homun2-dismiss', () => {
     writeFileSync(legacyNoticeMarkerPath(app.getPath('userData')), String(Date.now()) + '\n', { mode: 0o600 })
+    return { ok: true }
+  })
+  // A3 (fase approvazioni-chiare): il numero delle richieste in attesa
+  // sull'icona del Dock — 0 lo toglie. Solo su macOS (app.dock esiste lì)
+  ipcMain.handle('app:dock-badge', (_e, count: number) => {
+    app.dock?.setBadge(dockBadgeOf(Number(count)))
     return { ok: true }
   })
   ipcMain.handle('app:reveal-in-finder', (_e, dir: string) => {

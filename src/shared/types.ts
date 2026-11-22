@@ -1223,6 +1223,8 @@ export interface SandbotApi {
   }>
   /** A1 (fase centro-autorizzazioni): tutte le richieste pendenti, per il centro */
   approvalsPendingAll(): Promise<ApprovalsCenterRow[]>
+  /** A3 (fase approvazioni-chiare): il numero sull'icona del Dock (0 lo toglie) */
+  setDockBadge(count: number): Promise<void>
   // fase 12: sottoagenti del padre (card + pannello) e bottone Ferma
   listSubagents(parentId: string): Promise<SubagentInfo[]>
   stopSubagent(id: string): Promise<void>

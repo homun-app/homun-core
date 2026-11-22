@@ -326,6 +326,16 @@ export const UI = {
   // corpo è la frase breve della card) e quella raggruppata dei 30 s
   approvalNotifySingle: msg({ id: 'notify.approvalSingle', message: '{agent} chiede a te' }),
   approvalNotifyAggregated: msg({ id: 'notify.approvalAggregated', message: '{count} richieste aspettano te' }),
+  // A3 (fase approvazioni-chiare): il corpo RIPULITO della notifica di una
+  // richiesta — l'ELENCO CHIUSO per categoria (come X2: mai testo libero di
+  // siti o server; il titolo dice il bot, il clic porta all'app)
+  approvalNotifyBodyData: msg({ id: 'notify.approvalBodyData', message: 'chiede di usare i tuoi dati' }),
+  approvalNotifyBodyPayment: msg({ id: 'notify.approvalBodyPayment', message: 'chiede un pagamento o un acquisto' }),
+  approvalNotifyBodyOutgoing: msg({ id: 'notify.approvalBodyOutgoing', message: 'chiede un invio verso fuori' }),
+  approvalNotifyBodySite: msg({ id: 'notify.approvalBodySite', message: 'chiede di usare un sito interattivo' }),
+  approvalNotifyBodyMac: msg({ id: 'notify.approvalBodyMac', message: 'chiede di usare il tuo Mac' }),
+  approvalNotifyBodyTeam: msg({ id: 'notify.approvalBodyTeam', message: "chiede un'azione del team" }),
+  approvalNotifyBodyOther: msg({ id: 'notify.approvalBodyOther', message: "chiede un'altra azione" }),
 
   // ---- errori RPC mostrati dalla UI (C3) ----
   rpcAgentNotFound: msg({ id: 'rpc.agentNotFound', message: 'Agente non trovato' }),

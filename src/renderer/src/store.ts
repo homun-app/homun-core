@@ -1468,6 +1468,9 @@ export const useStore = create<Store>((set, get) => ({
       void api.approvalsPendingAll()
         .then((approvalsAll) => {
           apply('approvalsAll', approvalsAll)
+          // A3 (fase approvazioni-chiare): il numero delle richieste in attesa
+          // sull'icona del Dock — 0 lo toglie (una chiamata per passata)
+          void api.setDockBadge(approvalsAll.length).catch(() => undefined)
           const squadCounts: Record<number, number> = {}
           const botCounts: Record<string, number> = {}
           for (const r of approvalsAll) {

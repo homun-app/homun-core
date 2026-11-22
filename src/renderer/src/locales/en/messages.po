@@ -255,11 +255,6 @@ msgid "{0} non è tra le app del catalogo, ma si può collegare con un server MC
 msgstr "{0} is not among the catalog apps, but it can be connected with an MCP server"
 
 #. placeholder {0}: rows.length
-#: src/renderer/src/components/ApprovalsBanner.tsx
-msgid "{0} richieste aspettano te"
-msgstr "{0} requests are waiting for you"
-
-#. placeholder {0}: rows.length
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "{0} richieste da {bots} bot · solo tu puoi deciderle · ogni richiesta si decide anche dove è nata"
 msgstr "{0} requests from {bots} bots · only you can decide them · each request is also decided where it was born"
@@ -581,6 +576,11 @@ msgstr "+ New routine"
 #: src/renderer/src/components/McpWindow.tsx
 msgid "+ Variabile"
 msgstr "+ Variable"
+
+#. placeholder {0}: rest.length
+#: src/renderer/src/components/ComposerApproval.tsx
+msgid "+{0} altre"
+msgstr "+{0} more"
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "⚠ dati letti da una fonte esterna"
@@ -931,6 +931,7 @@ msgid "Altre opzioni ▾"
 msgstr "More options ▾"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
+#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Altre scelte ▾"
 msgstr "More choices ▾"
 
@@ -1762,6 +1763,21 @@ msgstr "asks a helper…"
 msgid "chiede anche l'indirizzo"
 msgstr "also asks for the address"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notify.approvalBodyData"
+msgstr "asks to use your personal data"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notify.approvalBodyMac"
+msgstr "asks to use your Mac"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notify.approvalBodySite"
+msgstr "asks to use an interactive site"
+
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "Chiede sempre a te"
 msgstr "Always asks you"
@@ -1774,9 +1790,29 @@ msgstr "asks for everything"
 msgid "Chiede tutto"
 msgstr "Asks for everything"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notify.approvalBodyOutgoing"
+msgstr "asks for an outgoing send"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notify.approvalBodyPayment"
+msgstr "asks for a payment or a purchase"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notify.approvalBodyOther"
+msgstr "asks for another action"
+
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "chiede un'azione"
 msgstr "is asking for an action"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notify.approvalBodyTeam"
+msgstr "asks for a team action"
 
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "chiede un'azione di team"
@@ -2259,6 +2295,7 @@ msgid "Consensi salvati"
 msgstr "Saved consents"
 
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/ComposerApproval.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Consenti"
 msgstr "Allow"
@@ -2266,12 +2303,14 @@ msgstr "Allow"
 #. placeholder {0}: c.app ?? ''
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
+#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Consenti per 10 minuti a {0}"
 msgstr "Allow for 10 minutes on {0}"
 
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
+#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Consenti per questa missione"
 msgstr "Allow for this mission"
 
@@ -2282,6 +2321,7 @@ msgstr "Always allow"
 
 #. placeholder {0}: r.botName
 #: src/renderer/src/components/ApprovalsCenter.tsx
+#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Consenti sempre a {0}"
 msgstr "Always allow {0}"
 
@@ -2297,12 +2337,14 @@ msgstr "Always allow for {agentName}"
 #. placeholder {0}: c.name ?? c.slug ?? ''
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
+#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Consenti sempre le letture di {0}"
 msgstr "Always allow reads from {0}"
 
 #. placeholder {0}: c.domain ?? ''
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
+#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Consenti sempre su {0}"
 msgstr "Always allow on {0}"
 
@@ -2695,10 +2737,13 @@ msgstr "from the notification"
 msgid "Decide da solo le richieste semplici quando le Approvazioni sono su Automatico."
 msgstr "It handles the simple requests on its own when Approvals is set to Automatic."
 
-#: src/renderer/src/components/ApprovalsBanner.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "Decidi"
 msgstr "Decide"
+
+#: src/renderer/src/components/ComposerApproval.tsx
+msgid "Decidi la bozza"
+msgstr "Review the draft"
 
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "Decidono regole fisse e, se scelto, un revisore che vede solo la tua richiesta e l'azione. Il coordinatore non approva al posto tuo: legge le pagine del web, e una pagina ostile potrebbe convincerlo."
@@ -2897,11 +2942,6 @@ msgstr "Download failed: {0}"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "download settimanali: {0}"
 msgstr "weekly downloads: {0}"
-
-#. placeholder {0}: rest.length
-#: src/renderer/src/components/ApprovalsBanner.tsx
-msgid "e altre {0}: {summary}"
-msgstr "and {0} more: {summary}"
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "È il tuo punto di contatto in Homun: ti risponde, lavora per te e coordina gli altri bot. Puoi cambiarlo quando vuoi."
@@ -6138,6 +6178,7 @@ msgstr "by source"
 
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
+#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Per questo turno"
 msgstr "For this turn"
 
@@ -6794,10 +6835,6 @@ msgstr "Invalid request (wrong state): try the connection again from Homun."
 msgid "Richieste"
 msgstr "Requests"
 
-#: src/renderer/src/components/ApprovalsBanner.tsx
-msgid "Richieste che aspettano te"
-msgstr "Requests waiting for you"
-
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/PluginPanel.tsx
@@ -6825,10 +6862,6 @@ msgstr "Reconnect"
 msgid "ricorda…"
 msgstr "remembers…"
 
-#: src/renderer/src/components/ApprovalsBanner.tsx
-msgid "Riduci"
-msgstr "Collapse"
-
 #: src/renderer/src/components/TeamChat.tsx
 msgid "riepilogo per te"
 msgstr "summary for you"
@@ -6844,6 +6877,7 @@ msgstr "Start over"
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
+#: src/renderer/src/components/ComposerApproval.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/TeamChat.tsx
 msgid "Rifiuta"
@@ -8098,6 +8132,7 @@ msgid "Tramite Composio: login e azioni passano dai suoi server"
 msgstr "Via Composio: logins and actions pass through its servers"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
+#: src/renderer/src/components/ComposerApproval.tsx
 msgid "tramite un sottoagente"
 msgstr "via a subagent"
 
@@ -8590,7 +8625,7 @@ msgstr "item not found"
 msgid "VS Code"
 msgstr "VS Code"
 
-#: src/renderer/src/components/ApprovalsBanner.tsx
+#: src/renderer/src/components/ComposerApproval.tsx
 msgid "vuole"
 msgstr "wants to"
 
