@@ -140,7 +140,7 @@ import { MAX_CREATE_AGENTS_PER_TURN, wakeParentToolDef } from './tools'
 // fase 13 (punto 3): add_mcp_server/install_plugin SOLO nei turni dell'utente;
 // (punto 5): tool MCP deferiti oltre connectors.maxInlineTools
 import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED, GROUP_EXCLUDED_TOOLS, isMcpId, offerConnectorMcpGuidance, offerConnectorMissingText, isBotIntroTurn } from './connectors-policy'
-import { connectedAppsLine, mcpServerNames, connectedMcpServersSection } from './connected-apps'
+import { connectionsNowSection } from './connected-apps'
 import { PROPOSAL_RESULT } from '../connectors/install'
 import {
   requiredParamsOf, toolsDeferred, connectorsActiveSection, DEFAULT_MAX_INLINE_TOOLS
@@ -2106,9 +2106,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // l'elenco degli altri bot (nome, descrizione, routine attive)
     let mainSection = ''
     let connectorsSection = ''
-    let connectedAppsSection = ''
-    // U5 (fase mcp-ui): l'elenco dei server MCP collegati e funzionanti
-    let mcpServersSection = ''
+    // V1 (fase stato-vivo): il blocco «Collegamenti ora» — server MCP
+    // funzionanti, server accesi che non partono (categoria X2) e app
+    // Composio attive, ricalcolato a OGNI turno; vale più dei riassunti
+    let connectionsNow = ''
     // fase velocità (S5): le sezioni VARIABILI vanno in FONDO al sistema,
     // dopo la parte fissa e in ordine di frequenza (memoria per ultima: è
     // quella che cambia più spesso, a ogni update_memory); la sezione
@@ -2162,15 +2163,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       } catch {
         // connettori non disponibili: il system prompt resta quello di base
       }
-      // B4 (fase beta.4): il bot sa quali app ha collegate — la riga sta
-      // nella parte VARIABILE del prompt (mai nel prefisso in cache), dalle
-      // app del gateway Composio (C5) e dai server MCP attivi del bot.
-      // CA3 (fase composio-account): ogni app porta i SUOI account attivi —
-      // l'email con un account solo, l'elenco «alias (email)» e la regola
-      // `account` con più di uno
+      // B4 (fase beta.4): il bot sa quali app ha collegate. CA3 (fase
+      // composio-account): ogni app porta i SUOI account attivi — l'email con
+      // un account solo, l'elenco «alias (email)» e la regola `account` con
+      // più di uno
+      let composioAppFacts: import('./connected-apps').ConnectedAppFacts[] = []
       try {
         const { composioGateway } = await import('../connectors/composio-gateway')
-        const apps = (composioGateway()?.status().connected ?? [])
+        composioAppFacts = (composioGateway()?.status().connected ?? [])
           .filter((a) => a.status === 'ACTIVE')
           .map((a) => ({
             name: a.name,
@@ -2180,18 +2180,28 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               // alias si mostra col suo id, che Composio accetta in `account`
               .map((acc) => ({ ...(acc.accountId ? { accountId: acc.accountId } : {}), ...(acc.alias ? { alias: acc.alias } : {}), ...(acc.email ? { email: acc.email } : {}) }))
           }))
-        // U5 (fase mcp-ui): i server attivi sono già stati calcolati per il
-        // turno (activeMcpServers): la riga delle app e la SEZIONE dei server
-        // MCP collegati vengono dallo stesso elenco
-        connectedAppsSection = connectedAppsLine({ composioApps: apps, mcpServers: mcpServerNames(activeMcpServers, apps.map((a) => a.name)) })
       } catch {
-        // niente riga: il prompt resta quello di base
+        // niente app note: il blocco resta coi soli server
       }
-      // U5 (fase mcp-ui): l'elenco breve dei server MCP collegati e
-      // funzionanti per questo bot, con la regola «i loro strumenti PRIMA di
-      // ogni altra strada; mai curl dal computer isolato» — parte VARIABILE
-      // del prompt, sotto il tetto misurato CONNECTED_MCP_SECTION_TOKEN_BUDGET
-      mcpServersSection = connectedMcpServersSection(activeMcpServers.map((s) => ({ name: s.name, toolCount: s.tools.length })))
+      // V1 (fase stato-vivo): l'UNICO blocco «Collegamenti ora» (ex riga B4 +
+      // ex sezione U5), ricalcolato a OGNI turno: i server funzionanti sono
+      // quelli già calcolati per il turno (activeMcpServers), i non parti
+      // arrivano da failingServersForAgent (categoria X2 dell'ultima prova) e
+      // le app Composio dal gateway. Con la regola che vale più dei riassunti
+      // («questo blocco è la verità corrente; se un riassunto dice altro,
+      // vince il blocco»), sotto il tetto misurato
+      // CONNECTIONS_NOW_TOKEN_BUDGET — parte VARIABILE del prompt, mai nel
+      // prefisso in cache
+      try {
+        const { failingServersForAgent } = await import('../mcp')
+        connectionsNow = connectionsNowSection({
+          working: activeMcpServers.map((s) => ({ name: s.name, toolCount: s.tools.length })),
+          failing: failingServersForAgent(agentId),
+          composioApps: composioAppFacts
+        })
+      } catch {
+        // elenco non disponibile: il prompt resta quello di base
+      }
       // fase 12 (punto 6): la sezione Sottoagenti solo nei bot NORMALI, mai
       // nei turni di gruppo (lì si coordina col gruppo)
       // fase 14 (punto 8): le righe delle credenziali solo nei turni NON di gruppo
@@ -2201,8 +2211,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // del bot NORMALE (spawn_subagent sta nel suo nucleo)
       systemText = systemPrompt(agent, { main: isMain, teams: opts.groupTurn !== undefined, subagents: opts.groupTurn === undefined, groups: turnCatalog.map((g) => g.id) }) +
         mainSection + buildSkillsSection(agentId) + connectorsSection +
-        (connectedAppsSection ? `\n${connectedAppsSection}` : '') +
-        (mcpServersSection ? `\n${mcpServersSection}` : '') +
+        (connectionsNow ? `\n${connectionsNow}` : '') +
         await buildMemorySection(agentId)
     }
 

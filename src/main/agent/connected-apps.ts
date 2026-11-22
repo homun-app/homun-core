@@ -5,43 +5,88 @@
 // dicesse quali app sono collegate. Rakazo ogni turno scrive «Connected
 // plugins: … Prefer those plugin tools over the computer browser or web
 // search when reading app data» (packages/adapters/src/executor.ts).
-// Qui la riga si costruisce dallo stato locale del gateway Composio (le app
-// collegate di C5) e dai server MCP attivi del bot; sta nella PARTE CHE
-// CAMBIA del system prompt (mai nel prefisso in cache). Tutto PURO.
-import type { ToolDef } from './llm'
-
-/** Quanti nomi al massimo nella riga; poi «and N more». */
-export const CONNECTED_APPS_MAX_NAMES = 20
-
-/**
- * U5 (fase mcp-ui): il tetto (token caratteri/4) della sezione «Connected MCP
- * servers» del prompt, MISURATO con 8 server dai nomi realistici (riga per
- * server + regola find_tools-prima-di-tutto): mai alzarlo per far passare un
- * test — il numero sta nel REPORT della fase.
- */
-export const CONNECTED_MCP_SECTION_TOKEN_BUDGET = 150
-
-/** Quanti server al massimo nell'elenco breve del prompt; poi «and N more». */
-export const CONNECTED_MCP_MAX_SERVERS = 8
+// V1 (fase stato-vivo): la riga B4 e la sezione U5 dei server sono diventate
+// l'UNICO blocco «Collegamenti ora», ricalcolato a OGNI turno dallo stato
+// locale del gateway Composio e dai server MCP del bot (funzionanti E non
+// parti); sta nella PARTE CHE CAMBIA del system prompt (mai nel prefisso in
+// cache) e VALE PIÙ dei riassunti. Tutto PURO.
+import { mcpErrorCategoryText } from '../mcp/error-category'
+import type { McpErrorCategory } from '../mcp/error-category'
 
 /**
- * U5 (fase mcp-ui): l'elenco BREVE dei server MCP collegati e funzionanti per
- * quel bot (nome + una riga), con la regola che manca: per un servizio che ha
- * un server collegato, i suoi strumenti (find_tools) PRIMA di qualunque altra
- * strada; mai curl dal computer isolato. PURA: vuota senza server; sta nella
- * parte VARIABILE del system prompt (mai nel prefisso in cache), sotto il
- * tetto misurato CONNECTED_MCP_SECTION_TOKEN_BUDGET.
+ * V1 (fase stato-vivo): il tetto (token caratteri/4) del blocco
+ * «Collegamenti ora» del prompt, MISURATO sul caso pieno (8 server
+ * funzionanti + 4 non parti + 6 app Composio multi-account + le due regole:
+ * 487 token): mai alzarlo per far passare un test — il numero sta nel REPORT
+ * della fase.
  */
-export function connectedMcpServersSection(servers: ReadonlyArray<{ name: string; toolCount: number }>): string {
-  if (!servers.length) return ''
-  const shown = servers.slice(0, CONNECTED_MCP_MAX_SERVERS)
-  const over = servers.length - shown.length
-  const lines = shown.map((s) => `- ${s.name}: ${s.toolCount} tools`)
-  if (over > 0) lines.push(`- and ${over} more`)
+export const CONNECTIONS_NOW_TOKEN_BUDGET = 490
+
+/** V1: quanti server funzionanti al massimo nell'elenco; poi «and N more». */
+export const CONNECTIONS_NOW_MAX_SERVERS = 8
+
+/** V1: quanti server NON PARTI al massimo nell'elenco; il resto si conta. */
+export const CONNECTIONS_NOW_MAX_FAILING = 4
+
+/** V1: quante app Composio al massimo sulla riga (poi «and N more»): le altre restano in find_tools. */
+export const CONNECTIONS_NOW_MAX_APPS = 6
+
+/** Un server che non parte, come serve al blocco: nome + categoria X2 dell'ultima prova. */
+export interface FailingServerFacts {
+  name: string
+  category: McpErrorCategory
+}
+
+/** I fatti del blocco «Collegamenti ora»: ricalcolati a ogni turno. */
+export interface ConnectionsNowFacts {
+  /** i server MCP funzionanti del bot (nome + numero di strumenti) */
+  working: ReadonlyArray<{ name: string; toolCount: number }>
+  /** i server ACCESI che non partono, con la categoria X2 dell'ultima prova */
+  failing: readonly FailingServerFacts[]
+  /** le app Composio attive (nome umano + account ATTIVI, CA3) */
+  composioApps: readonly ConnectedAppFacts[]
+}
+
+/**
+ * V1 (fase stato-vivo): il blocco «Collegamenti ora» — i server MCP
+ * funzionanti (nome + strumenti), quelli ACCESI che non partono (categoria X2,
+ * frase fissa: mai il testo libero dell'errore) e le app Composio attive con
+ * i loro account. Con la REGOLA che manca nella chat del 21/11: questo blocco
+ * è la verità CORRENTE di tool e collegamenti — se un riassunto o un
+ * messaggio precedente dice altro (per esempio «non hai accesso a X»), vince
+ * il blocco. PURA: vuota senza nulla; sta nella parte VARIABILE del system
+ * prompt (mai nel prefisso in cache), sotto il tetto misurato
+ * CONNECTIONS_NOW_TOKEN_BUDGET.
+ */
+export function connectionsNowSection(facts: ConnectionsNowFacts): string {
+  const appsSet = new Set(facts.composioApps.map((a) => a.name.trim().toLowerCase()))
+  // i server il cui nome è un'app del gateway Composio non si duplicano:
+  // l'app è già nella riga Composio (come mcpServerNames di B4)
+  const working = facts.working.filter((s) => {
+    const n = s.name.trim().toLowerCase()
+    return n !== 'composio' && !appsSet.has(n)
+  })
+  if (!working.length && !facts.failing.length && !facts.composioApps.length) return ''
+  const lines: string[] = []
+  const shown = working.slice(0, CONNECTIONS_NOW_MAX_SERVERS)
+  for (const s of shown) lines.push(`- ${s.name}: ${s.toolCount} tools`)
+  const overWorking = working.length - shown.length
+  if (overWorking > 0) lines.push(`- and ${overWorking} more`)
+  const failShown = facts.failing.slice(0, CONNECTIONS_NOW_MAX_FAILING)
+  for (const s of failShown) lines.push(`- ${s.name}: does not start (${mcpErrorCategoryText(s.category)})`)
+  const overFailing = facts.failing.length - failShown.length
+  if (overFailing > 0) lines.push(`- and ${overFailing} more do not start`)
+  if (facts.composioApps.length) {
+    const appsShown = facts.composioApps.slice(0, CONNECTIONS_NOW_MAX_APPS)
+    const overApps = facts.composioApps.length - appsShown.length
+    const list = appsShown.map(connectedAppPhrase).join('; ') + (overApps > 0 ? `, and ${overApps} more` : '')
+    lines.push(`- Composio: ${list}`)
+  }
   return [
-    '# Connected MCP servers',
+    '# Connections now',
     ...lines,
-    'For a service that has a connected server, use its tools (find_tools({query: "<server or service name>"})) BEFORE any other route — not the browser, web_fetch, curl or a new connector. Never curl or run-command from the isolated computer.'
+    'This block is the current truth about your tools and connections. If a summary or an earlier message says otherwise, this block wins.',
+    'For a service in this list use its tools FIRST — find_tools({query: "<server or service name>"}) for its MCP server, COMPOSIO_SEARCH_TOOLS then COMPOSIO_MULTI_EXECUTE_TOOL for a Composio app — not history, memory, the browser, web_fetch, curl or a new connector. Never curl or run-command from the isolated computer.'
   ].join('\n')
 }
 
@@ -57,14 +102,6 @@ export interface ConnectedAppAccountFacts {
 export interface ConnectedAppFacts {
   name: string
   accounts: readonly ConnectedAppAccountFacts[]
-}
-
-/** I fatti della riga: le app Composio collegate e i server MCP attivi del bot. */
-export interface ConnectedAppsFacts {
-  /** le app collegate tramite Composio (nome umano, stato ACTIVE del gateway) */
-  composioApps: readonly ConnectedAppFacts[]
-  /** i server MCP attivi del bot (nome), escluso il trasporto Composio */
-  mcpServers: readonly string[]
 }
 
 /**
@@ -106,37 +143,6 @@ export function connectedAppPhrase(app: ConnectedAppFacts): string {
   const over = app.accounts.length - MAX_SHOWN
   const list = shown.join(', ') + (over > 0 ? `, and ${over} more` : '')
   return `${app.name} — accounts: ${list}; pass \`account\` in every MULTI_EXECUTE item for ${app.name}`
-}
-
-/**
- * La riga del prompt (PURA, inglese come tutto il prompt): vuota senza app
- * né server. Come pluginLine di Rakazo, dice di PREFERIRE questi strumenti
- * per i dati di quelle app — non la cronologia, la memoria, il browser o un
- * connettore nuovo. CA3: ogni app porta i SUOI account (l'email con un
- * account solo, l'elenco e la regola `account` con più di uno). Il tetto di
- * 20 nomi vale PER LA RIGA e CONTA LE APP (prima le app poi i server); lo
- * sforamento si dice UNA volta, in coda all'ultimo elenco.
- */
-export function connectedAppsLine(facts: ConnectedAppsFacts): string {
-  if (!facts.composioApps.length && !facts.mcpServers.length) return ''
-  const appsShown = facts.composioApps.slice(0, CONNECTED_APPS_MAX_NAMES)
-  const serversShown = facts.mcpServers.slice(0, Math.max(0, CONNECTED_APPS_MAX_NAMES - appsShown.length))
-  const over = facts.composioApps.length + facts.mcpServers.length - appsShown.length - serversShown.length
-  let appsPart = appsShown.map(connectedAppPhrase).join('; ')
-  let serversNames = serversShown.join(', ')
-  if (over > 0) {
-    const tail = `, and ${over} more`
-    if (serversNames) serversNames += tail
-    else appsPart += tail
-  }
-  const parts: string[] = []
-  if (appsPart) {
-    parts.push(`Connected apps (via Composio: COMPOSIO_SEARCH_TOOLS to find the action, then COMPOSIO_MULTI_EXECUTE_TOOL): ${appsPart}`)
-  }
-  if (serversNames) {
-    parts.push(`MCP servers: ${serversNames}`)
-  }
-  return `${parts.join('; ')}. To read or change these apps' data use these tools: not history, memory, the browser or a new connector.`
 }
 
 /** Un'app collegata con i suoi account, come serve al prefisso di search_connectors. */
@@ -226,23 +232,4 @@ export function connectedAppMatch<T extends ConnectedAppRef>(query: string, conn
     if (wholeWordIn(q, slug) || wholeWordIn(q, name)) return app
   }
   return null
-}
-
-/**
- * I server MCP attivi del bot SENZA il trasporto Composio (le sue app sono
- * già nella riga come app collegate): si escludono i nomi che sono app del
- * gateway o server Composio. PURO rispetto agli input.
- */
-export function mcpServerNames(
-  servers: ReadonlyArray<{ name: string; tools: ReadonlyArray<ToolDef | { name: string }> }>,
-  composioAppNames: readonly string[]
-): string[] {
-  const apps = new Set(composioAppNames.map((n) => n.trim().toLowerCase()))
-  return servers
-    .map((s) => s.name)
-    .filter((name) => {
-      const n = name.trim().toLowerCase()
-      if (n === 'composio') return false
-      return !apps.has(n)
-    })
 }

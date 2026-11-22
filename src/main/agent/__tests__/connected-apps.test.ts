@@ -1,15 +1,17 @@
-// B4 (fase beta.4): il bot sa quali app ha collegate. Una riga nel prompt di
-// ogni turno, nella PARTE CHE CAMBIA (mai nel prefisso in cache): le app
-// collegate tramite Composio (stato locale di composio-gateway) e i server
-// MCP attivi del bot, con l'ordine dei nomi, il tetto di 20 e poi «and N
-// more». E search_connectors su un'app già collegata risponde subito
-// «già collegata tramite Composio», senza proporne un'altra.
+// B4 (fase beta.4): il bot sa quali app ha collegate. La riga di B4 e la
+// sezione U5 dei server sono diventate, in V1 (fase stato-vivo), l'UNICO
+// blocco «Collegamenti ora» del prompt di ogni turno, nella PARTE CHE CAMBIA
+// (mai nel prefisso in cache): le app collegate tramite Composio (stato
+// locale di composio-gateway) e i server MCP attivi del bot, con l'ordine dei
+// nomi, il tetto di 20 app e poi «and N more». E search_connectors su un'app
+// già collegata risponde subito «già collegata tramite Composio», senza
+// proporne un'altra.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const { connectedAppsLine, connectedAppMatch, CONNECTED_APPS_MAX_NAMES } = await import('../connected-apps')
+const { connectionsNowSection, connectedAppMatch, CONNECTIONS_NOW_MAX_APPS } = await import('../connected-apps')
 const { systemPrompt } = await import('../prompts')
 
 let root: string
@@ -28,37 +30,39 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-describe('B4: connectedAppsLine — la riga del prompt (pura)', () => {
+describe('V1 (ex B4): connectionsNowSection — le app collegate nel blocco «Collegamenti ora» (pura)', () => {
   it('con le app collegate c\'è, con la guida Composio e i server MCP', () => {
-    const line = connectedAppsLine({ composioApps: [{ name: 'Trello', accounts: [] }, { name: 'Gmail', accounts: [] }], mcpServers: ['Notion'] })
-    expect(line).toContain('Connected apps (via Composio: COMPOSIO_SEARCH_TOOLS to find the action, then COMPOSIO_MULTI_EXECUTE_TOOL): Trello; Gmail')
-    expect(line).toContain('MCP servers: Notion')
-    expect(line).toMatch(/use these tools|use THESE tools/i)
-    expect(line).toMatch(/not history, memory, the browser or a new connector/)
+    const s = connectionsNowSection({
+      working: [{ name: 'Notion', toolCount: 5 }],
+      failing: [],
+      composioApps: [{ name: 'Trello', accounts: [] }, { name: 'Gmail', accounts: [] }]
+    })
+    expect(s).toContain('- Composio: Trello; Gmail')
+    expect(s).toContain('- Notion: 5 tools')
+    expect(s).toContain('COMPOSIO_SEARCH_TOOLS')
+    expect(s).toContain('COMPOSIO_MULTI_EXECUTE_TOOL')
+    expect(s).toMatch(/not history, memory, the browser, web_fetch, curl or a new connector/)
   })
 
-  it('SENZA app e SENZA server la riga NON c\'è (stringa vuota)', () => {
-    expect(connectedAppsLine({ composioApps: [], mcpServers: [] })).toBe('')
+  it('SENZA app, senza server non parti e senza Composio il blocco NON c\'è (stringa vuota)', () => {
+    expect(connectionsNowSection({ working: [], failing: [], composioApps: [] })).toBe('')
   })
 
-  it('l\'ordine dei nomi resta quello dato; massimo 20, poi «and N more»', () => {
-    expect(CONNECTED_APPS_MAX_NAMES).toBe(20)
+  it('l\'ordine dei nomi resta quello dato; massimo 6 app, poi «and N more»', () => {
+    expect(CONNECTIONS_NOW_MAX_APPS).toBe(6)
     const many = Array.from({ length: 25 }, (_, i) => ({ name: `App${i}`, accounts: [] as Array<{ alias?: string; email?: string }> }))
-    const line = connectedAppsLine({ composioApps: many, mcpServers: [] })
-    expect(line).toContain('App0; App1')
-    expect(line).toMatch(/App19, and 5 more/)
-    expect(line).not.toContain('App20')
-    // i server MCP contano nello stesso tetto
-    const line2 = connectedAppsLine({ composioApps: many.slice(0, 10), mcpServers: many.slice(10).map((a) => a.name) })
-    expect(line2).toMatch(/and 5 more/)
+    const s = connectionsNowSection({ working: [], failing: [], composioApps: many })
+    expect(s).toContain('App0; App1')
+    expect(s).toMatch(/App5, and 19 more/)
+    expect(s).not.toContain('App6')
   })
 
-  it('la riga NON sta nel prefisso in cache: systemPrompt non la contiene', () => {
+  it('il blocco NON sta nel prefisso in cache: systemPrompt non lo contiene', () => {
     const agent = { id: 'a', name: 'Bot', description: '', providerId: 'p', model: 'm', status: 'idle' as const, unread: 0, createdAt: 1 }
     const p = systemPrompt(agent, { subagents: true })
-    expect(p).not.toContain('Connected apps')
-    // e nessuna sezione del prompt base la introduce
-    expect(p).not.toMatch(/# Connected apps/)
+    expect(p).not.toContain('Connections now')
+    // e nessuna sezione del prompt base lo introduce
+    expect(p).not.toMatch(/# Connections now/)
   })
 })
 
@@ -193,40 +197,43 @@ const { missingAccountOfItems } = await import('../../connectors/tool-batch')
 
 const ACC = (alias?: string, email?: string, accountId?: string) => ({ ...(accountId ? { accountId } : {}), ...(alias ? { alias } : {}), ...(email ? { email } : {}) })
 
-describe('CA3: connectedAppsLine — la riga porta gli ACCOUNT', () => {
+describe('CA3: connectionsNowSection — il blocco porta gli ACCOUNT', () => {
   it('un SOLO account: l\'email accanto al nome («quale casella ho collegato?» ha risposta)', () => {
-    const line = connectedAppsLine({ composioApps: [{ name: 'Gmail', accounts: [ACC(undefined, 'fabio@gmail.test')] }], mcpServers: [] })
-    expect(line).toContain('Gmail — fabio@gmail.test')
-    expect(line).not.toContain('accounts:')
+    const s = connectionsNowSection({ working: [], failing: [], composioApps: [{ name: 'Gmail', accounts: [ACC(undefined, 'fabio@gmail.test')] }] })
+    expect(s).toContain('Gmail — fabio@gmail.test')
+    expect(s).not.toContain('accounts:')
   })
 
   it('PIÙ account: l\'elenco alias (email) e la regola `account` esplicita', () => {
-    const line = connectedAppsLine({
-      composioApps: [{ name: 'Gmail', accounts: [ACC('lavoro', 'fabio@azienda.test'), ACC('personale', 'fabio@gmail.test')] }],
-      mcpServers: []
+    const s = connectionsNowSection({
+      working: [],
+      failing: [],
+      composioApps: [{ name: 'Gmail', accounts: [ACC('lavoro', 'fabio@azienda.test'), ACC('personale', 'fabio@gmail.test')] }]
     })
-    expect(line).toContain('Gmail — accounts: lavoro (fabio@azienda.test), personale (fabio@gmail.test)')
-    expect(line).toContain('pass `account` in every MULTI_EXECUTE item for Gmail')
+    expect(s).toContain('Gmail — accounts: lavoro (fabio@azienda.test), personale (fabio@gmail.test)')
+    expect(s).toContain('pass `account` in every MULTI_EXECUTE item for Gmail')
   })
 
   it('la guida Composio e i server MCP restano; 0 account → solo il nome', () => {
-    const line = connectedAppsLine({
-      composioApps: [{ name: 'Trello', accounts: [] }, { name: 'Gmail', accounts: [ACC('lavoro', 'f@azienda.test')] }],
-      mcpServers: ['Notion']
+    const s = connectionsNowSection({
+      working: [{ name: 'Notion', toolCount: 3 }],
+      failing: [],
+      composioApps: [{ name: 'Trello', accounts: [] }, { name: 'Gmail', accounts: [ACC('lavoro', 'f@azienda.test')] }]
     })
-    expect(line).toContain('Connected apps (via Composio: COMPOSIO_SEARCH_TOOLS to find the action, then COMPOSIO_MULTI_EXECUTE_TOOL):')
-    expect(line).toContain('Trello; Gmail — lavoro (f@azienda.test)')
-    expect(line).toContain('MCP servers: Notion')
-    expect(line).toMatch(/not history, memory, the browser or a new connector/)
+    expect(s).toContain('COMPOSIO_SEARCH_TOOLS')
+    expect(s).toContain('Trello; Gmail — lavoro (f@azienda.test)')
+    expect(s).toContain('- Notion: 3 tools')
+    expect(s).toMatch(/not history, memory, the browser, web_fetch, curl or a new connector/)
   })
 
   it('più di 3 account per app: i primi 3 più «and N more»', () => {
-    const line = connectedAppsLine({
-      composioApps: [{ name: 'Gmail', accounts: [ACC('a'), ACC('b'), ACC('c'), ACC('d')] }],
-      mcpServers: []
+    const s = connectionsNowSection({
+      working: [],
+      failing: [],
+      composioApps: [{ name: 'Gmail', accounts: [ACC('a'), ACC('b'), ACC('c'), ACC('d')] }]
     })
-    expect(line).toContain('accounts: a, b, c, and 1 more')
-    expect(line).not.toContain('(d)')
+    expect(s).toContain('accounts: a, b, c, and 1 more')
+    expect(s).not.toContain('(d)')
   })
 
   // BR4 (fase box-rete, difetto CA3): un account SENZA alias si mostra col
@@ -234,27 +241,29 @@ describe('CA3: connectedAppsLine — la riga porta gli ACCOUNT', () => {
   // che il modello ripasserebbe e Composio non conosce (succede con gli
   // account collegati fuori da Homun, dalla dashboard di Composio)
   it('BR4: l\'account SENZA alias dell\'elenco multiplo si mostra col suo accountId', () => {
-    const line = connectedAppsLine({
-      composioApps: [{ name: 'Gmail', accounts: [ACC('lavoro', 'fabio@azienda.test', 'a1'), ACC(undefined, undefined, 's2-dashboard')] }],
-      mcpServers: []
+    const s = connectionsNowSection({
+      working: [],
+      failing: [],
+      composioApps: [{ name: 'Gmail', accounts: [ACC('lavoro', 'fabio@azienda.test', 'a1'), ACC(undefined, undefined, 's2-dashboard')] }]
     })
-    expect(line).toContain('Gmail — accounts: lavoro (fabio@azienda.test), s2-dashboard')
+    expect(s).toContain('Gmail — accounts: lavoro (fabio@azienda.test), s2-dashboard')
   })
 
   it('BR4: un SOLO account senza alias e senza email → il suo accountId accanto al nome', () => {
-    const line = connectedAppsLine({
-      composioApps: [{ name: 'Trello', accounts: [ACC(undefined, undefined, 't9')] }],
-      mcpServers: []
+    const s = connectionsNowSection({
+      working: [],
+      failing: [],
+      composioApps: [{ name: 'Trello', accounts: [ACC(undefined, undefined, 't9')] }]
     })
-    expect(line).toContain('Trello — t9')
+    expect(s).toContain('Trello — t9')
   })
 
-  it('il tetto di 20 nomi resta: conta le APP', () => {
+  it('il tetto delle app resta: conta le APP (6, poi «and N more»)', () => {
     const many = Array.from({ length: 25 }, (_, i) => ({ name: `App${i}`, accounts: [] }))
-    const line = connectedAppsLine({ composioApps: many, mcpServers: [] })
-    expect(line).toContain('App0')
-    expect(line).toMatch(/App19, and 5 more/)
-    expect(line).not.toContain('App20')
+    const s = connectionsNowSection({ working: [], failing: [], composioApps: many })
+    expect(s).toContain('App0')
+    expect(s).toMatch(/App5, and 19 more/)
+    expect(s).not.toContain('App6')
   })
 })
 

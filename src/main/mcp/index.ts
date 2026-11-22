@@ -298,9 +298,9 @@ export function serverToolsPrefix(cfg: Pick<McpServerConfig, 'toolSlug' | 'name'
 }
 
 /** Stato del connettore collegato al server (fase 5), se ce n'è uno. */
-function connectorStateOf(cfg: McpServerConfig): { status?: string; disabledTools?: string[] } {
+function connectorStateOf(cfg: McpServerConfig): { status?: string; disabledTools?: string[]; category?: string } {
   const id = cfg.catalogId ?? cfg.id
-  return getSetting<Record<string, { status?: string; disabledTools?: string[] }>>('connectors.state', {})[id] ?? {}
+  return getSetting<Record<string, { status?: string; disabledTools?: string[]; category?: string }>>('connectors.state', {})[id] ?? {}
 }
 
 /** Un server in needs_auth/errore non viene offerto al modello (evita retry lenti a ogni turno). */
@@ -322,13 +322,30 @@ function markNeedsAuth(cfg: McpServerConfig, message: string): void {
 /**
  * N1 (fase mcp-egress-sicurezza): l'ultima prova del server è FALLITA per un
  * motivo che l'utente deve vedere (es. il motore non garantisce il recinto) —
- * lo stato 'error' col messaggio arriva al foglio del server.
+ * lo stato 'error' col messaggio arriva al foglio del server. V1 (fase
+ * stato-vivo): si ricorda anche la CATEGORIA X2 (frase fissa) — serve al
+ * blocco «Collegamenti ora» del prompt, mai il testo libero.
  */
-function markStateError(cfg: McpServerConfig, message: string): void {
+function markStateError(cfg: McpServerConfig, message: string, category?: McpErrorCategory): void {
   const id = cfg.catalogId ?? cfg.id
   const all = getSetting<Record<string, Record<string, unknown>>>('connectors.state', {})
   const cur = (all[id] ?? {}) as Record<string, unknown>
-  setSetting('connectors.state', { ...all, [id]: { ...cur, status: 'error', error: message } })
+  // category: undefined fa sparire la categoria vecchia (JSON.stringify la butta)
+  setSetting('connectors.state', { ...all, [id]: { ...cur, status: 'error', error: message, category } })
+}
+
+/**
+ * V1 (fase stato-vivo): una prova RIUSCITA pulisce lo stato 'error' di prima
+ * (il server torna nei tool del turno e il blocco «Collegamenti ora» non lo
+ * dice rotto). Scrive SOLO se c'è un error da pulire: per un server mai
+ * fallito non crea stato (come install.ts: status 'connected').
+ */
+function markStateOk(cfg: McpServerConfig): void {
+  const id = cfg.catalogId ?? cfg.id
+  const all = getSetting<Record<string, Record<string, unknown>>>('connectors.state', {})
+  const cur = (all[id] ?? {}) as Record<string, unknown>
+  if (!cur || (cur.status !== 'error' && cur.category === undefined)) return
+  setSetting('connectors.state', { ...all, [id]: { ...cur, status: 'connected', error: undefined, category: undefined } })
 }
 
 /**
@@ -376,7 +393,7 @@ async function connect(cfg: McpServerConfig): Promise<Client> {
       // parole, PRIMA di ogni exec — e lo stato del connettore lo dice, così
       // il foglio del server lo mostra.
       if (cfg.egress && boxShellEgressOf() !== 'none') {
-        markStateError(cfg, NPM_SERVERS_EGRESS_REFUSED)
+        markStateError(cfg, NPM_SERVERS_EGRESS_REFUSED, 'startup-error')
         // X2: la categoria è DECISA qui (il recinto ha rifiutato l'avvio)
         throw new McpServerError(NPM_SERVERS_EGRESS_REFUSED, 'startup-error')
       }
@@ -511,13 +528,19 @@ export async function testServer(id: string): Promise<{ ok: boolean; error?: str
   if (!cfg) return { ok: false, error: 'server not found', category: 'unknown-error' }
   try {
     const c = await ensure(cfg, true)
+    // V1 (fase stato-vivo): una prova riuscita pulisce l'eventuale 'error' di
+    // prima (il server torna nei tool del turno e nel blocco «Collegamenti
+    // ora» non risulta più rotto)
+    markStateOk(cfg)
     return { ok: true, tools: c.tools.map((t) => t.def.name) }
   } catch (e) {
     if (e instanceof UnauthorizedError) markNeedsAuth(cfg, uiText(UI.connTokenExpired))
     // PL3 (fase plugin): l'esito del test si RICORDA anche per i server
     // manuali — la pagina «Plugin» dice «non parte · Vedi perché» con
-    // l'evidenza dell'ultima prova (l'errore resta SOLO nella UI, tagliato)
-    markStateError(cfg, e instanceof Error ? e.message : String(e))
+    // l'evidenza dell'ultima prova (l'errore resta SOLO nella UI, tagliato).
+    // V1: anche la CATEGORIA X2 si ricorda (il blocco «Collegamenti ora» del
+    // prompt usa solo la frase fissa, mai il testo libero)
+    markStateError(cfg, e instanceof Error ? e.message : String(e), classifyMcpError(e))
     return { ok: false, error: e instanceof Error ? e.message : String(e), category: classifyMcpError(e) }
   }
 }
@@ -626,6 +649,29 @@ export async function activeServersForAgent(agentId?: string): Promise<Array<{ i
   const { composioServersForAgent } = await import('../connectors/composio')
   for (const s of composioServersForAgent(agentId)) {
     if (s.tools.length) out.push({ id: s.id, name: s.name, tools: s.tools as unknown as ToolDef[] })
+  }
+  return out
+}
+
+/**
+ * V1 (fase stato-vivo): i server ACCESI per questo bot che NON partono
+ * (l'ultima prova in connectors.state dice 'error'), con la CATEGORIA X2 —
+ * per la riga «- <nome>: does not start (<frase fissa>)» del blocco
+ * «Collegamenti ora» del prompt. Così il bot sa che lo strumento ESISTE ma è
+ * rotto, invece di concludere che non c'è e fare curl. I server spenti,
+ * needsAuth e i sani restano fuori (quelli li elencano le altre righe del
+ * blocco); un figlio eredita dal padre come sempre (serversForAgent).
+ */
+export function failingServersForAgent(agentId?: string): Array<{ id: string; name: string; category: McpErrorCategory }> {
+  const owner = agentId !== undefined ? boxOwnerOf(agentId) : undefined
+  const servers = agentId !== undefined ? serversForAgent(listServers(), agentId, owner) : listServers()
+  const out: Array<{ id: string; name: string; category: McpErrorCategory }> = []
+  for (const cfg of servers) {
+    if (!cfg.enabled || cfg.needsAuth) continue
+    const st = connectorStateOf(cfg)
+    if (st.status === 'error') {
+      out.push({ id: cfg.id, name: cfg.name, category: (st.category as McpErrorCategory | undefined) ?? 'unknown-error' })
+    }
   }
   return out
 }

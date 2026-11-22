@@ -783,6 +783,8 @@ vi.mock('../../mcp', () => ({
   }],
   // fase 13 (punto 5): la sezione "Connettori attivi" in modalità differita
   activeServersForAgent: async () => [],
+  // V1 (fase stato-vivo): nessun server non parte nei test del loop
+  failingServersForAgent: () => [],
   listServers: () => [],
   McpNeedsReconnectError: class extends Error {},
   // fase chat-limiti (CL6): nessuna app collegata nei test del loop
@@ -9302,9 +9304,12 @@ describe('B2 (fase beta.4): presentazione del bot nuovo', () => {
 })
 
 // ---- B4 (fase beta.4): il bot sa quali app ha collegate ----
+// V1 (fase stato-vivo): la riga e la sezione U5 dei server sono l'UNICO
+// blocco «Collegamenti ora», ricalcolato a ogni turno, che vale più dei
+// riassunti
 
-describe('B4 (fase beta.4): la riga delle app collegate nel prompt del turno', () => {
-  it("con le app collegate la riga c'è, DOPO il prompt base (parte che cambia)", async () => {
+describe('B4/V1: il blocco «Collegamenti ora» nel prompt del turno', () => {
+  it("con le app collegate c'è, DOPO il prompt base (parte che cambia), con la regola che vince sui riassunti", async () => {
     const { setActiveComposioGateway } = await import('../../connectors/composio-gateway')
     const fake = {
       status: () => ({
@@ -9318,20 +9323,25 @@ describe('B4 (fase beta.4): la riga delle app collegate nel prompt del turno', (
     } as unknown as import('../../connectors/composio-gateway').ComposioGatewayManager
     setActiveComposioGateway(fake)
     try {
+      h.llm.calls.length = 0
       h.llm.queue = [{ text: 'ok' }]
       await runTurn(AGENT, 'quali sono le board di trello?', emit)
       const system = String(h.llm.calls[0]![0]!.content)
-      // CA3: il formato nuovo — la guida Composio in testa e i nomi con ';'
-      expect(system).toContain('Connected apps (via Composio: COMPOSIO_SEARCH_TOOLS to find the action, then COMPOSIO_MULTI_EXECUTE_TOOL): Trello; Gmail')
-      expect(system).toMatch(/not history, memory, the browser or a new connector/)
+      // V1: il blocco unico con la riga Composio e la guida d'uso
+      expect(system).toContain('# Connections now')
+      expect(system).toContain('- Composio: Trello; Gmail')
+      expect(system).toContain('COMPOSIO_SEARCH_TOOLS')
+      expect(system).toMatch(/not history, memory, the browser, web_fetch, curl or a new connector/)
+      // la REGOLA V1: il blocco è la verità corrente, vince sui riassunti
+      expect(system).toContain('This block is the current truth about your tools and connections. If a summary or an earlier message says otherwise, this block wins.')
       // sta DOPO il prompt base (mai nel prefisso in cache): # Limits la precede
-      expect(system.indexOf('# Limits')).toBeLessThan(system.indexOf('Connected apps'))
+      expect(system.indexOf('# Limits')).toBeLessThan(system.indexOf('# Connections now'))
     } finally {
       setActiveComposioGateway(null)
     }
   })
 
-  it("CA3: con più account la riga porta l'elenco e la regola `account` (parte che cambia)", async () => {
+  it("CA3: con più account il blocco porta l'elenco e la regola `account` (parte che cambia)", async () => {
     const { setActiveComposioGateway } = await import('../../connectors/composio-gateway')
     const fake = {
       status: () => ({
@@ -9350,25 +9360,37 @@ describe('B4 (fase beta.4): la riga delle app collegate nel prompt del turno', (
     } as unknown as import('../../connectors/composio-gateway').ComposioGatewayManager
     setActiveComposioGateway(fake)
     try {
+      h.llm.calls.length = 0
       h.llm.queue = [{ text: 'ok' }]
       await runTurn(AGENT, 'quale casella email ho collegato?', emit)
       const system = String(h.llm.calls[0]![0]!.content)
       expect(system).toContain('Gmail — accounts: lavoro (fabio@azienda.test), personale (fabio@gmail.test)')
       expect(system).toContain('pass `account` in every MULTI_EXECUTE item for Gmail')
       // mai nel prefisso in cache
-      expect(system.indexOf('# Limits')).toBeLessThan(system.indexOf('Connected apps'))
+      expect(system.indexOf('# Limits')).toBeLessThan(system.indexOf('# Connections now'))
     } finally {
       setActiveComposioGateway(null)
     }
   })
 
-  it("senza app collegate la riga non c'è", async () => {
+  it("senza app collegate, né server funzionanti né non parti, il blocco non c'è", async () => {
     const { setActiveComposioGateway } = await import('../../connectors/composio-gateway')
     setActiveComposioGateway(null)
-    h.llm.queue = [{ text: 'ok' }]
-    await runTurn(AGENT, 'ciao', emit)
-    const system = String(h.llm.calls[0]![0]!.content)
-    expect(system).not.toContain('Connected apps:')
+    // il test T2 (fase token) patcha il mock dei server attivi e non lo
+    // ripristina: qui si azzera LOCALE per provare il blocco senza niente
+    const patched = mcpMock as { activeServersForAgent: () => Promise<unknown[]> }
+    const prev = patched.activeServersForAgent
+    patched.activeServersForAgent = async () => []
+    try {
+      h.llm.calls.length = 0
+      h.llm.queue = [{ text: 'ok' }]
+      await runTurn(AGENT, 'ciao', emit)
+      const system = String(h.llm.calls[0]![0]!.content)
+      expect(system).not.toContain('# Connections now')
+      expect(system).not.toContain('- Composio:')
+    } finally {
+      patched.activeServersForAgent = prev
+    }
   })
 })
 
