@@ -229,7 +229,7 @@ describe('PL3: la tabella «Collegati» (tavola 10)', () => {
     setStoreStateForRender(useStore, { connectors: [], composio: null, composioGateway: null })
     stubApiMethod('connectorsInstalled', () => ({ servers: [], plugins: [] }))
     stubApiMethod('skillsLibrary', () => ({ library: [], plugins: [] }))
-  })
+  }, 20_000) // render pesante: sul runner macOS di CI ha superato i 5 s di default (build beta.18)
 })
 
 describe('PL5: le skill in pagina come le altre (libreria, plugin, catalogo)', () => {
