@@ -347,30 +347,33 @@ try {
   await uiSend(`compra-biglietti: guarda ${HOME} e le offerte ${OFFERTE}, poi prova ad acquistare.`)
 
   // DEBUG: i tool-result del padre (per capire se il browser MCP parte)
-  // la card del ref SCADUTO: approval browser_click pending
-  const firstCard = await waitDom(`!!document.querySelector('[data-testid="card-approvazione"]')`, 90_000)
-  check('P3: la card del ref scaduto compare (sito interattivo)', firstCard)
+  // la richiesta del ref SCADUTO: R1 (fase ritocchi-beta18) — nella chat del
+  // bot si decide dal riquadro sopra il campo; nei messaggi c'è la riga compatta
+  const firstCard = await waitDom(
+    `!!document.querySelector('[data-testid="composer-approval-card"]') && !!document.querySelector('[data-testid="approval-compact-row"]')`,
+    90_000)
+  check('P3: la richiesta del ref scaduto compare (riquadro sopra il campo + riga compatta in chat)', firstCard)
   // il menu offre «Consenti sempre su 127.0.0.1» (dominio registrabile
   // dell'IP): il menu di Radix si apre col pointerdown, non col solo click
   const menuOpened = await pageEval(`
-    const b = document.querySelector('[data-testid="approval-altre-opzioni"]')
+    const b = document.querySelector('[data-testid="approval-altre-scelte"]')
     if (!b) return false
     b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, isPrimary: true, button: 0 }))
     b.click()
     return true
   `).catch(() => false)
-  const itemSeen = menuOpened && await waitDom(`!!document.querySelector('[data-testid="approval-site-always"]')`, 5_000)
+  const itemSeen = menuOpened && await waitDom(`!!document.querySelector('[data-testid="approval-choice-site"]')`, 5_000)
   if (!itemSeen) {
-    log('DEBUG trigger presenti:', await pageEval(`return document.querySelectorAll('[data-testid="approval-altre-opzioni"]').length`).catch(() => 'ERR'))
-    log('DEBUG card html:', String(await pageEval(`return (document.querySelector('[data-testid="card-approvazione"]') ?? document.body).outerHTML.slice(0, 1500)`).catch((e) => 'ERR ' + e.message)).replace(/\n/g, ' '))
+    log('DEBUG trigger presenti:', await pageEval(`return document.querySelectorAll('[data-testid="approval-altre-scelte"]').length`).catch(() => 'ERR'))
+    log('DEBUG riquadro html:', String(await pageEval(`return (document.querySelector('[data-testid="composer-approval-card"]') ?? document.body).outerHTML.slice(0, 1500)`).catch((e) => 'ERR ' + e.message)).replace(/\n/g, ' '))
     log('DEBUG menuitems:', await pageEval(`return [...document.querySelectorAll('[role="menuitem"]')].map((m) => m.textContent.trim()).join(' | ')`).catch(() => 'ERR'))
   }
-  const itemText = itemSeen ? await pageEval(`return document.querySelector('[data-testid="approval-site-always"]').textContent`) : ''
-  check('P3: la card offre «Consenti sempre su 127.0.0.1»', itemSeen && String(itemText).includes('127.0.0.1'),
+  const itemText = itemSeen ? await pageEval(`return document.querySelector('[data-testid="approval-choice-site"]').textContent`) : ''
+  check('P3: la richiesta offre «Consenti sempre su 127.0.0.1»', itemSeen && String(itemText).includes('127.0.0.1'),
     `voce: «${String(itemText).trim()}»`)
   await shot('p3-card-consenti-sempre-sito.png')
   const clicked = itemSeen && await pageEval(`
-    const b = document.querySelector('[data-testid="approval-site-always"]')
+    const b = document.querySelector('[data-testid="approval-choice-site"]')
     if (!b) return false
     b.click()
     return true

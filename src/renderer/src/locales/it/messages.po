@@ -216,6 +216,12 @@ msgstr "{0} +{1}"
 msgid "{0} azioni aspettano te"
 msgstr "{0} azioni aspettano te"
 
+#. placeholder {0}: i + 1
+#. placeholder {1}: ordered.length
+#: src/renderer/src/components/ComposerApproval.tsx
+msgid "{0} di {1}"
+msgstr "{0} di {1}"
+
 #. placeholder {0}: overview.counts.deleted
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "{0} eliminate"
@@ -518,7 +524,7 @@ msgstr "{tool} ({target}) richiede approvazione"
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "card.browserAsk"
-msgstr "{tool} {target, select, key {tasto {key}} element {su {element}} other {}} in {url}{typed, select, yes { — testo: \"{text}\"} other {}}: {reasonKind, select, refMissing {ref \"{ref}\" non presente nell’ultimo snapshot ricevuto: ricarica la pagina con browser_snapshot prima di agire} submit {browser_type con submit: true invia il modulo (campo \"{field}\")} enter {Invio può inviare il modulo (come browser_type con submit: true): se c’è un modulo compilato, questo lo spedisce} commit {click su \"{name}\" ({role}): un’azione che invia, compra o impegna} probe {non riesco a verificare il tipo del campo} other {{reason}}}"
+msgstr "{tool} {target, select, key {tasto {key}} element {su {element}} other {}} in {url}{typed, select, yes { — testo: \"{text}\"} other {}}: {reasonKind, select, refMissing {ref \"{ref}\" non presente nell’ultimo snapshot ricevuto: ricarica la pagina con browser_snapshot prima di agire} submit {l’azione invia il modulo (campo \"{field}\")} enter {Invio può inviare il modulo: se c’è un modulo compilato, questo lo spedisce} commit {click su \"{name}\" ({role}): un’azione che invia, compra o impegna} probe {non riesco a verificare il tipo del campo} other {{reason}}}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -586,11 +592,6 @@ msgstr "+ Nuova routine"
 #: src/renderer/src/components/McpWindow.tsx
 msgid "+ Variabile"
 msgstr "+ Variabile"
-
-#. placeholder {0}: rest.length
-#: src/renderer/src/components/ComposerApproval.tsx
-msgid "+{0} altre"
-msgstr "+{0} altre"
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "⚠ dati letti da una fonte esterna"
@@ -937,11 +938,7 @@ msgid "Altre azioni"
 msgstr "Altre azioni"
 
 #: src/renderer/src/components/ApprovalCard.tsx
-msgid "Altre opzioni ▾"
-msgstr "Altre opzioni ▾"
-
 #: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Altre scelte ▾"
 msgstr "Altre scelte ▾"
 
@@ -2307,7 +2304,6 @@ msgid "Consensi salvati"
 msgstr "Consensi salvati"
 
 #: src/renderer/src/components/ApprovalCard.tsx
-#: src/renderer/src/components/ComposerApproval.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Consenti"
 msgstr "Consenti"
@@ -2315,14 +2311,12 @@ msgstr "Consenti"
 #. placeholder {0}: c.app ?? ''
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Consenti per 10 minuti a {0}"
 msgstr "Consenti per 10 minuti a {0}"
 
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
-#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Consenti per questa missione"
 msgstr "Consenti per questa missione"
 
@@ -2333,7 +2327,6 @@ msgstr "Consenti sempre"
 
 #. placeholder {0}: r.botName
 #: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Consenti sempre a {0}"
 msgstr "Consenti sempre a {0}"
 
@@ -2349,14 +2342,12 @@ msgstr "Consenti sempre a {agentName}"
 #. placeholder {0}: c.name ?? c.slug ?? ''
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Consenti sempre le letture di {0}"
 msgstr "Consenti sempre le letture di {0}"
 
 #. placeholder {0}: c.domain ?? ''
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Consenti sempre su {0}"
 msgstr "Consenti sempre su {0}"
 
@@ -2397,7 +2388,7 @@ msgstr "Consentito sempre"
 msgid "Consentito sempre (sito)"
 msgstr "Consentito sempre (sito)"
 
-#. placeholder {0}: siteGrant?.domain ?? ''
+#. placeholder {0}: siteGrantLabelOf(entry.meta)
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Consentito sempre su {0}"
 msgstr "Consentito sempre su {0}"
@@ -2753,7 +2744,7 @@ msgstr "Decide da solo le richieste semplici quando le Approvazioni sono su Auto
 msgid "Decidi"
 msgstr "Decidi"
 
-#: src/renderer/src/components/ComposerApproval.tsx
+#: src/renderer/src/components/ApprovalCard.tsx
 msgid "Decidi la bozza"
 msgstr "Decidi la bozza"
 
@@ -2883,13 +2874,13 @@ msgstr "Docker non risponde: aprilo e riprova"
 msgid "docker.com"
 msgstr "docker.com"
 
-#: src/renderer/src/components/DocumentMarkdown.tsx
-msgid "documento non trovato"
-msgstr "documento non trovato"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.documentNotFound"
+msgstr "documento non trovato"
+
+#: src/renderer/src/components/DocumentMarkdown.tsx
+msgid "documento non trovato"
 msgstr "documento non trovato"
 
 #: src/renderer/src/components/Settings.tsx
@@ -4295,6 +4286,10 @@ msgstr "In attesa del login nel browser…"
 #: src/shared/ui-messages.ts
 msgid "notice.turnEndAwaitingUser"
 msgstr "In attesa della risposta dell’utente"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "In attesa della tua scelta · qui sotto"
+msgstr "In attesa della tua scelta · qui sotto"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "in attesa di conferma"
@@ -6207,7 +6202,6 @@ msgstr "per origine"
 
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/ComposerApproval.tsx
 msgid "Per questo turno"
 msgstr "Per questo turno"
 
@@ -6865,6 +6859,14 @@ msgstr "Ricevi le versioni di prova"
 msgid "oauth.errPage"
 msgstr "Richiesta non valida (state errato): riprova la connessione da Homun."
 
+#: src/renderer/src/components/ComposerApproval.tsx
+msgid "Richiesta precedente"
+msgstr "Richiesta precedente"
+
+#: src/renderer/src/components/ComposerApproval.tsx
+msgid "Richiesta successiva"
+msgstr "Richiesta successiva"
+
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Richieste"
 msgstr "Richieste"
@@ -6911,7 +6913,6 @@ msgstr "Rifai da capo"
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
-#: src/renderer/src/components/ComposerApproval.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/TeamChat.tsx
 msgid "Rifiuta"
@@ -8165,8 +8166,8 @@ msgstr "tramite Composio"
 msgid "Tramite Composio: login e azioni passano dai suoi server"
 msgstr "Tramite Composio: login e azioni passano dai suoi server"
 
+#: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/ComposerApproval.tsx
 msgid "tramite un sottoagente"
 msgstr "tramite un sottoagente"
 
@@ -8658,10 +8659,6 @@ msgstr "voce non trovata"
 #: src/renderer/src/components/McpWindow.tsx
 msgid "VS Code"
 msgstr "VS Code"
-
-#: src/renderer/src/components/ComposerApproval.tsx
-msgid "vuole"
-msgstr "vuole"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

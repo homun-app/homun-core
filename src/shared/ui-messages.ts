@@ -150,8 +150,10 @@ export const UI = {
   draftAwaiting: msg({ id: 'card.draftAwaiting', message: 'bozza in attesa: {preview}' }),
   cardBrowserAsk: msg({
     id: 'card.browserAsk',
+    // R1 (fase ritocchi-beta18): mai la stringa grezza dello strumento nella
+    // frase — il nome in parole lo mette {tool} via toolDisplayName
     message:
-      '{tool} {target, select, key {tasto {key}} element {su {element}} other {}} in {url}{typed, select, yes { — testo: "{text}"} other {}}: {reasonKind, select, refMissing {ref "{ref}" non presente nell’ultimo snapshot ricevuto: ricarica la pagina con browser_snapshot prima di agire} submit {browser_type con submit: true invia il modulo (campo "{field}")} enter {Invio può inviare il modulo (come browser_type con submit: true): se c’è un modulo compilato, questo lo spedisce} commit {click su "{name}" ({role}): un’azione che invia, compra o impegna} probe {non riesco a verificare il tipo del campo} other {{reason}}}'
+      '{tool} {target, select, key {tasto {key}} element {su {element}} other {}} in {url}{typed, select, yes { — testo: "{text}"} other {}}: {reasonKind, select, refMissing {ref "{ref}" non presente nell’ultimo snapshot ricevuto: ricarica la pagina con browser_snapshot prima di agire} submit {l’azione invia il modulo (campo "{field}")} enter {Invio può inviare il modulo: se c’è un modulo compilato, questo lo spedisce} commit {click su "{name}" ({role}): un’azione che invia, compra o impegna} probe {non riesco a verificare il tipo del campo} other {{reason}}}'
   }),
   cardFileExchange: msg({
     id: 'card.fileExchange',

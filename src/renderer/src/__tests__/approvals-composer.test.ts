@@ -129,7 +129,8 @@ describe('A3: la richiesta del bot aperto sta SOPRA il campo di scrittura', () =
 
   it('il riquadro decide con le RPC di sempre, via chat: Consenti → allow once', () => {
     renderBotChat([botMessage(1)], [ownRow()])
-    const btn = capture.els.find((e) => e.type === 'button' && e.props['data-testid'] === 'composer-approval-allow')
+    // R1 (fase ritocchi-beta18): il pezzo unico — il Consenti si chiama approval-allow
+    const btn = capture.els.find((e) => e.type === 'button' && e.props['data-testid'] === 'approval-allow')
     expect(btn).toBeTruthy()
     ;(btn!.props.onClick as () => void)()
     expect(callsOf('resolveApproval').slice(-1)[0]!.args).toEqual(['bot-chat', 'ap-mio', 'allow', 'once', 'chat'])
@@ -143,16 +144,18 @@ describe('A3: la richiesta del bot aperto sta SOPRA il campo di scrittura', () =
     expect(callsOf('resolveApproval').slice(-1)[0]!.args).toEqual(['bot-chat', 'ap-mio', 'allow', 'always', 'chat'])
   })
 
-  it('più richieste di QUESTO bot: la più urgente nel riquadro, «+N» apre il centro', () => {
+  it('più richieste di QUESTO bot: la più urgente nel riquadro, con «1 di 2» e la freccia per passare alle altre', () => {
     const rows = [
       ownRow({ approvalId: 'nuova', phrase: 'La nuova.', when: Date.now() - 60_000 }),
       ownRow({ approvalId: 'fissa', phrase: 'La fissa.', why: 'fisso', meta: { squadAlwaysAsk: true }, when: Date.now() - 300_000 })
     ]
     const tree = renderBotChat([botMessage(1)], rows)
     const box = findAll(tree, (n) => n.attrs['data-testid'] === 'composer-approval')[0]!
-    // prima l'insieme fisso (byUrgency), la dichiara e c'è il conto delle altre
+    // prima l'insieme fisso (byUrgency), la dichiara e c'è il conto «1 di 2»
     expect(textOf(box)).toContain('La fissa.')
-    expect(textOf(box)).toContain('+1')
+    expect(textOf(box)).toContain('1 di 2')
+    // la freccia porta alla seconda (R1: niente più «+N altre», si passa qui)
+    expect(capture.els.some((e) => e.props['data-testid'] === 'composer-approval-next')).toBe(true)
   })
 
   it('l\'insieme fisso nel riquadro: NESSUNA scelta oltre a Consenti/Rifiuta (il modello unico A1)', () => {

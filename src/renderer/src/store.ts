@@ -438,6 +438,10 @@ interface Store {
   /** A2 (fase approvazioni-chiare): la vista del centro — le richieste o il Registro */
   approvalsView: 'richieste' | 'registro'
   setApprovalsView(view: 'richieste' | 'registro'): void
+  /** R1 (fase ritocchi-beta18): la richiesta mostrata dal riquadro sopra il
+   *  campo quando il bot aperto ne ha PIÙ di una in attesa («1 di N») */
+  composerApprovalIndex: number
+  setComposerApprovalIndex(index: number): void
   /** A2: la richiesta su cui ha portato il clic della NOTIFICA (deciderla qui
    *  si registra come via 'notification' — la decisione si prende in app) */
   approvalsNotificationFocus: string | null
@@ -596,6 +600,7 @@ export const useStore = create<Store>((set, get) => ({
   approvalsQueueOpen: false,
   approvalsAll: [],
   approvalsView: 'richieste' as const,
+  composerApprovalIndex: 0,
   approvalsNotificationFocus: null,
   approvalsOpen: false,
   approvalsFocusId: null,
@@ -1535,6 +1540,11 @@ export const useStore = create<Store>((set, get) => ({
   // A2: «Registro di oggi» e le schede del centro — la vista del registro
   setApprovalsView(view) {
     set({ approvalsView: view })
+  },
+  // R1 (fase ritocchi-beta18): il riquadro sopra il campo mostra UNA richiesta
+  // per volta quando il bot ne ha diverse in attesa — questa è la scelta
+  setComposerApprovalIndex(index) {
+    set({ composerApprovalIndex: index })
   },
 
   clearApprovalsNotificationFocus() {

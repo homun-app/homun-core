@@ -44,6 +44,10 @@ mkdirSync(SHOTS, { recursive: true })
 // fase approvazioni-chiare: le catture della fase nuova
 const SHOTS2 = join(ROOT, 'docs', 'catture', 'fase-approvazioni-chiare')
 mkdirSync(SHOTS2, { recursive: true })
+// fase ritocchi-beta18 (R1): le catture della chat con la riga compatta e il
+// riquadro, e del «1 di N» con le frecce
+const SHOTS3 = join(ROOT, 'docs', 'catture', 'fase-ritocchi-beta18')
+mkdirSync(SHOTS3, { recursive: true })
 
 const log = (...a) => console.log(`[sonda r${run}]`, ...a)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -262,6 +266,13 @@ const shot2 = async (name) => {
   const r = await page.send('Page.captureScreenshot', { format: 'png' })
   writeFileSync(join(SHOTS2, name), Buffer.from(r.data, 'base64'))
   log('cattura (fase approvazioni-chiare)', name)
+}
+/** la cattura della fase ritocchi-beta18 (R1) */
+const shot3 = async (name) => {
+  await settle()
+  const r = await page.send('Page.captureScreenshot', { format: 'png' })
+  writeFileSync(join(SHOTS3, name), Buffer.from(r.data, 'base64'))
+  log('cattura (fase ritocchi-beta18)', name)
 }
 /** click per testid (attesa ≤ 5 s: è un click UI, la sonda deve essere rossa se la UI rallenta) */
 const clickTestid = async (testid, timeoutMs = 5_000) => {
@@ -499,6 +510,16 @@ try {
   callTool('run-command', { command: 'echo controllo-fattura' }, CHILD)
   callTool('wake_parent', { summary: 'Il comando è stato rifiutato: controllo non eseguito.' }, CHILD)
   sayText('Fatto.', CHILD)
+  // R1 (fase ritocchi-beta18): l'AIUTANTE di Alloggio — la sua richiesta conta
+  // per ALLOGGIO (bot aperto): due richieste dello stesso bot nel riquadro
+  // sopra il campo → «1 di 2» con le frecce. Le voci del figlio si consumano
+  // DOPO quelle di T6 (findIndex FIFO)
+  const T7 = ['You are Alloggio', 'figlio-alloggio']
+  callTool('spawn_subagent', { title: 'Controllo camera', brief: 'Obiettivo: eseguire un comando echo innocuo (figlio-alloggio) e riferire l\'esito. Confini: nessuna rete, non toccare file fuori dalla cartella temporanea, nessun altro strumento. Risultato: una riga con l\'output del comando.' }, T7)
+  sayText('Ho lanciato l\'aiutante: ti chiede il permesso.', T7)
+  callTool('run-command', { command: 'echo controllo-camera' }, CHILD)
+  callTool('wake_parent', { summary: 'Permesso concesso: controllo eseguito.' }, CHILD)
+  sayText('Fatto.', CHILD)
 
   // ---- i turni: un messaggio privato a ogni bot (il sottoagente parte da solo).
   // Ricerche è ULTIMO: il limite di prodotto è 3 browser per computer e il
@@ -668,6 +689,17 @@ try {
   check('A3: la richiesta di Alloggio sta nel riquadro SOPRA il campo (frase + Consenti/Rifiuta/Altre scelte)',
     composerBox && composerText.includes('Alloggio') && composerText.includes('vuole') && composerText.includes('Consenti') && composerText.includes('Rifiuta') && composerText.includes('Altre scelte'),
     String(composerText).slice(0, 160))
+  // R1 (fase ritocchi-beta18): una richiesta, un posto solo — il difetto
+  // della cattura 1 era DUE «Consenti» (card + riquadro) con testi diversi
+  const consentiInChat = await pageEval(`return [...document.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Consenti').length`).catch(() => -1)
+  check('R1: nella chat del bot UN solo bottone «Consenti» (la card pendente è compatta)', consentiInChat === 1, `${consentiInChat} Consenti`)
+  const compatta = await waitDom(`!!document.querySelector('[data-testid="approval-compact-row"]')`, 5_000)
+  const compattaText = compatta ? await pageEval(`return document.querySelector('[data-testid="approval-compact-row"]').textContent`) : ''
+  check('R1: la riga compatta nei messaggi («In attesa della tua scelta · qui sotto»)',
+    compatta && compattaText.includes('In attesa della tua scelta') && compattaText.includes('qui sotto'), String(compattaText).slice(0, 80))
+  check('R1: il riquadro NON mostra la stringa grezza dello strumento (caso browser_type con submit)',
+    composerBox && !composerText.includes('browser_type') && composerText.includes('vuole usare Azioni nel browser del bot'),
+    String(composerText).slice(0, 160))
   check('A3: il campo di scrittura resta usabile, con la richiesta in attesa',
     await waitDom(`!!document.querySelector('form textarea') && !!document.querySelector('[data-testid="composer-approval"]')`, 5_000))
   const bannerAltrove = await pageEval(`return document.querySelector('[data-testid="approvals-banner"]')?.textContent ?? ''`)
@@ -675,6 +707,7 @@ try {
   // ALTRE visibili — Solleciti e Ricerche
   check('A3: in cima solo «+2 altrove» (le altre visibili sono di altri bot)', bannerAltrove.includes('+2 altrove') && !bannerAltrove.includes('modulo di verifica'), bannerAltrove.slice(0, 120))
   await shot2('1-chat-richiesta-sopra-il-campo.png')
+  await shot3('1-chat-riga-compatta-e-riquadro.png')
 
   // =========== A1+A2: «Consenti sempre a Alloggio» DAL CAMPO → la grant, il registro la dice ===========
   const menuComposer = await openMenu('composer-altre-scelte')
@@ -715,12 +748,47 @@ try {
   check('A2: Revoca cancella la grant', await clickTestid('grant-revoke') &&
     await waitDom(`(await window.sandbot.grantsList()).length === 0`, 10_000, 500))
 
-  // =========== A2: revocata, il GATE chiede di nuovo ===========
+  // =========== A2: revocata, il GATE chiede di nuovo — con DUE richieste dello stesso bot ===========
   if (!(await selectBot('Alloggio'))) throw new Error('selezione di Alloggio non riuscita (2)')
+  // R1: PRIMA l'aiutante di Alloggio (il suo turno COMPLETA e la richiesta
+  // resta in attesa contando per il bot aperto), POI la verifica che si
+  // blocca sul submit: due richieste dello stesso bot nel riquadro
+  await sendMessage('figlio-alloggio: lancia l\'aiutante per il controllo della camera e aspetta il suo permesso')
+  const figliaInAttesa = await waitDom(
+    `(await window.sandbot.approvalsPendingAll()).some((r) => r.botId === ${JSON.stringify(alloggio.id)} && r.fromSubagent === true)`,
+    90_000, 500)
+  check('R1: la richiesta dell\'aiutante di Alloggio è in attesa (conta per il bot aperto)', figliaInAttesa)
   await sendMessage('verifica-alloggio-2: scrivi di nuovo la mia email nel modulo (https://spa.example/prenota) e invialo')
-  check('A2: revocata la grant, la STESSA azione torna a chiedere (conteggio risale a 4)',
-    await waitDom(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('4')`, 90_000, 500),
+  check('A2: revocata la grant, la STESSA azione torna a chiedere (+ l\'aiutante: conteggio a 5)',
+    await waitDom(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('5')`, 90_000, 500),
     (await pageEval(`return document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? ''`).catch(() => '')))
+
+  // =========== R1: il riquadro «1 di 2» con le frecce; decidere la prima mostra la seconda ===========
+  const boxCount = await waitDom(`!!document.querySelector('[data-testid="composer-approval-count"]')`, 10_000)
+  const stepText = boxCount ? await pageEval(`return document.querySelector('[data-testid="composer-approval-step"]').textContent`) : ''
+  const cardText1 = boxCount ? await pageEval(`return document.querySelector('[data-testid="composer-approval-card"]').textContent`) : ''
+  check('R1: due richieste dello stesso bot → «1 di 2» con le frecce, prima la più urgente (l\'aiutante, il più vecchio)',
+    boxCount && stepText.includes('1 di 2') && cardText1.includes('tramite un sottoagente') && cardText1.includes('vuole eseguire un comando'),
+    `${String(stepText).trim()} · ${String(cardText1).slice(0, 100)}`)
+  const consentiDue = await pageEval(`return [...document.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Consenti').length`).catch(() => -1)
+  check('R1: con due richieste dello stesso bot resta UN solo «Consenti»', consentiDue === 1, `${consentiDue} Consenti`)
+  const compactTwo = await pageEval(`return document.querySelectorAll('[data-testid="approval-compact-row"]').length`).catch(() => -1)
+  check('R1: TUTTE le richieste del bot aperto sono righe compatte nei messaggi', compactTwo === 2, `${compactTwo} righe compatte`)
+  // la freccia passa alla seconda (il submit del modulo)
+  const wentNext = await clickTestid('composer-approval-next')
+  const step2 = wentNext && await waitDom(
+    `document.querySelector('[data-testid="composer-approval-step"]')?.textContent.includes('2 di 2') && document.querySelector('[data-testid="composer-approval-card"]').textContent.includes('Azioni nel browser del bot')`,
+    5_000)
+  check('R1: la freccia passa alla seconda (il submit del modulo, senza stringa grezza)', step2)
+  await shot3('2-riquadro-1-di-2.png')
+  // decidere la PRIMA mostra la SECONDA: si torna alla prima e si consente
+  const wentPrev = await clickTestid('composer-approval-prev')
+  const step1back = wentPrev && await waitDom(`document.querySelector('[data-testid="composer-approval-step"]')?.textContent.includes('1 di 2')`, 5_000)
+  const decidedFirst = step1back && await clickTestid('approval-allow')
+  const showsSecond = decidedFirst && await waitDom(
+    `!document.querySelector('[data-testid="composer-approval-count"]') && document.querySelector('[data-testid="composer-approval-card"]') !== null && document.querySelector('[data-testid="composer-approval-card"]').textContent.includes('Azioni nel browser del bot')`,
+    15_000)
+  check('R1: decisa la prima, il riquadro mostra la SECONDA (niente più frecce né «di 2»)', showsSecond)
 
   // =========== 9. nessun «approva tutto» ===========
   const approveAll = await pageEval(`return [...document.querySelectorAll('button')].filter((b) => /approva tutto|approve all/i.test(b.textContent + ' ' + (b.getAttribute('aria-label') ?? ''))).length`)

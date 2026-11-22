@@ -2,13 +2,23 @@
 // in parole («Contabile vuole eseguire un comando»), il dettaglio (comando in
 // monospace su fondo chiaro) e la frase del rischio che la card ha già
 // (reasonKind / i motivi del gate in meta.ui). Bottoni: Consenti primario,
-// Rifiuta, e «Altre opzioni ▾» col menu delle azioni di oggi (per questo
+// Rifiuta, e «Altre scelte ▾» col menu delle azioni di oggi (per questo
 // turno, sempre, crea una regola). DOPO la decisione la card diventa UNA riga
 // grigia cliccabile in sola lettura. La logica NON cambia: stesse RPC.
-import { useState } from 'react'
-import { useStore, api } from '../store'
+//
+// R1 (fase ritocchi-beta18): il contenuto della richiesta in attesa è UN
+// pezzo solo — ApprovalRequestContent, usato sia dalla card nei messaggi sia
+// dal riquadro sopra il campo (ComposerApproval), stesso titolo, stessa
+// frase, stessi bottoni e la STESSA etichetta «Altre scelte ▾». Il difetto
+// del 22/11: due «Consenti» per una decisione sola, con la frase grezza
+// dello strumento nel riquadro. Finché la richiesta è in attesa e il
+// riquadro c'è, la card nei messaggi diventa UNA RIGA COMPATTA (icona lucide
+// ArrowDown, «In attesa della tua scelta · qui sotto») che porta il fuoco
+// sul riquadro; dopo la decisione (o la scadenza) torna la card con l'esito.
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
+import { ArrowDown } from 'lucide-react'
+import { useStore, api } from '../store'
 import { describeCron } from '../../../shared/cron-human'
 // fase 17c (C2): il motivo della card si ritraduce dal meta.ui
 // P2 (fase pulizia): col nome dello strumento in parole (toolDisplayName)
@@ -20,6 +30,7 @@ import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnical
 import { accountLabelOf } from '../lib/apps-view'
 import { toolDisplayName } from '../../../shared/tool-names'
 import type { TranscriptEntry } from '../../../shared/types'
+import { visibleApprovalsRows } from '../lib/approvals-center'
 import { DecidedRow, CardShell } from './DecidedRow'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 
@@ -56,25 +67,36 @@ export function approvalSummary(tool: string, input: Record<string, unknown> | u
   return toolDisplayName(tool, toolCtxOfMeta(meta, lang))
 }
 
-/** Il titolo in parole: cosa vuole fare il bot con questo tool (P2: modello puro in approval-app). */
-function askTitle(tool: string, meta: Record<string, unknown> | null | undefined, name: string, lang: 'it' | 'en'): string {
-  return i18n.t(approvalAskTitle(tool, meta, name, lang))
-}
-
-export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: TranscriptEntry; readOnly?: boolean; ownerName?: string }) {
+/**
+ * R1 (fase ritocchi-beta18): il contenuto UNICO della richiesta in attesa —
+ * titolo, frase, dettagli, bottoni e menu. Lo usano la card nei messaggi e
+ * il riquadro sopra il campo: UNA decisione, UNA grafica, UN'etichetta
+ * («Altre scelte ▾»). Le decisioni passano dalle RPC di sempre con
+ * decided_via 'chat'. `readOnly` riapre il pezzo senza bottoni (la riga
+ * decisa); `fromSubagent` aggiunge «tramite un sottoagente» (il riquadro
+ * parla del bot PADRE, come il centro).
+ */
+export function ApprovalRequestContent({
+  entry,
+  agentName,
+  fromSubagent = false,
+  readOnly = false
+}: {
+  entry: TranscriptEntry
+  /** chi chiede: il bot della chat (card) o il bot PADRE della riga (riquadro) */
+  agentName: string
+  fromSubagent?: boolean
+  readOnly?: boolean
+}) {
   const { t } = useLingui()
   // fase 17c (C6): la schedule in linguaggio naturale nella lingua attiva
   const activeLang = i18n.locale === 'en' ? 'en' : 'it'
-  const agents = useStore((s) => s.agents)
-  const activeId = useStore((s) => s.activeId)
   const resolve = useStore((s) => s.resolveApproval)
   const proposeRule = useStore((s) => s.proposeRule)
+  const setApprovalsOpen = useStore((s) => s.setApprovalsOpen)
   const approvalId = entry.meta?.approvalId as string | undefined
   const status = (entry.meta?.status as string | undefined) ?? 'pending'
   const tool = String(entry.meta?.tool)
-  // AH2 (fase aiutanti): la card del figlio nella chat del padre porta il
-  // TITOLO dell'aiutante, non il nome del bot attivo (il figlio non è in roster)
-  const agentName = ownerName ?? agents.find((a) => a.id === activeId)?.name ?? ''
   const input = entry.meta?.input as Record<string, unknown> | undefined
 
   // R3 (fase app — ritocchi): per gli strumenti Composio e MCP il motivo è
@@ -107,33 +129,6 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
   const useApp = tool === 'use-app' ? useAppCardModel(input) : null
   const useAppSend = (entry.meta?.ui as { id?: string } | undefined)?.id === 'approval.useAppSend'
 
-  // fase 8: auto-approvata dall'auto-review — riga compressa, espandibile.
-  // fase impostazioni (I4.3): nel modo «Non chiedere» non c'è regola — la
-  // riga dice QUALE impostazione ha fatto passare l'azione.
-  // RW (fase revisore sulla richiesta): autoBasis 'request' → il reason del
-  // revisore; 'rule' (e le entry vecchie senza campo) → la regola citata
-  if (entry.meta?.autoApproved) {
-    const autoLabel = entry.meta?.autoNever
-      ? i18n.t(msg`Eseguito senza chiedere (Approvazioni: non chiedere)`)
-      : entry.meta?.autoBasis === 'request'
-        ? i18n.t(msg`Approvato automaticamente: ${String(entry.meta?.reason ?? '')}`)
-        : i18n.t(msg`Approvato automaticamente dalla regola: ${String(entry.meta?.ruleMatched ?? '')}`)
-    return (
-      <DecidedRow ok label={autoLabel} at={entry.createdAt}>
-        <CardShell>
-          {/* R3: anche qui il titolo umano per Composio/MCP, mai il nome tecnico nudo */}
-          <p className="text-sm">
-            {resolvedTitle ?? tool}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {humanReason ? i18n.t(humanReason) : reasonText && reasonText !== tool ? reasonText : ''}
-          </p>
-        </CardShell>
-      </DecidedRow>
-    )
-  }
-
-  if (!approvalId) return null
   // C4: nomi dei segreti usati dal comando (meta.secretRefs sull'entry approval)
   const secretRefs = Array.isArray(entry.meta?.secretRefs) ? (entry.meta!.secretRefs as string[]) : []
   // fase 4: input di update_state su routine (nome/schedule/prompt per la card)
@@ -210,13 +205,17 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
     if (c.kind === 'server-reads') {
       void api.grantServerReads(c.slug!).catch(() => undefined)
       // A2: mode 'server-reads' — la chiamata passa, il registro ricorda il modo
-      resolve(entry.agentId, approvalId, 'allow', 'server-reads', 'chat')
+      resolve(entry.agentId, approvalId!, 'allow', 'server-reads', 'chat')
       return
     }
-    resolve(entry.agentId, approvalId, 'allow', c.kind, 'chat')
+    resolve(entry.agentId, approvalId!, 'allow', c.kind, 'chat')
   }
 
-  const body = (
+  // R1: le BOZZE si decidono col campo della bozza (come il centro): qui il
+  // rinvio, mai Consenti/Rifiuta che non saprebbero cosa fare
+  const isDraft = ((entry.meta?.message as { type?: string } | null)?.type) === 'draft'
+
+  return (
     <>
       {useApp?.kind === 'url' && useApp.host ? (
         // U2: l'host in evidenza — «Aprire sora.chatgpt.com nel tuo browser»
@@ -229,8 +228,11 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
         </p>
       ) : (
         <p className="break-all text-[15px] font-semibold">
-          {resolvedTitle ?? askTitle(tool, entry.meta, agentName, activeLang)}
+          {resolvedTitle ?? i18n.t(approvalAskTitle(tool, entry.meta, agentName, activeLang))}
         </p>
+      )}
+      {fromSubagent && (
+        <p className="mt-0.5 text-[11px] text-muted-foreground"><Trans>tramite un sottoagente</Trans></p>
       )}
       {(composioAction || composioBatch) && (
         <p className="mt-0.5 text-[11px] text-muted-foreground"><Trans>tramite Composio</Trans></p>
@@ -325,51 +327,162 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
       )}
       {!readOnly && status === 'pending' && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button
-            className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
-            onClick={() => resolve(entry.agentId, approvalId, 'allow', 'once', 'chat')}
-          >
-            <Trans>Consenti</Trans>
-          </button>
-          <button
-            className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
-            onClick={() => resolve(entry.agentId, approvalId, 'deny', 'once', 'chat')}
-          >
-            <Trans>Rifiuta</Trans>
-          </button>
-          <DropdownMenu>
-            <DropdownMenuTrigger data-testid="approval-altre-opzioni" className="rounded-[10px] px-2.5 py-1.5 text-sm text-muted-foreground transition hover:text-foreground">
-              <Trans>Altre opzioni ▾</Trans>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              {/* A1 (fase approvazioni-chiare): le scelte vengono dal modello
-                  UNICO approvalChoicesOf — le stesse del centro «Da approvare» */}
-              {choices.map((c) => (
-                <DropdownMenuItem
-                  key={c.kind}
-                  data-testid={`approval-choice-${c.kind}`}
-                  disabled={c.disabled === true}
-                  title={choiceTitleOf(c)}
-                  onClick={() => decideChoice(c)}
-                >
-                  {choiceLabelOf(c)}
-                </DropdownMenuItem>
-              ))}
-              <DropdownMenuItem
-                title={t`Apri Impostazioni → Approvazione automatica con una regola precompilata`}
-                onClick={() => proposeRule(suggestedRule(tool, input))}
+          {isDraft ? (
+            // le bozze si decidono col campo della bozza: qui il rinvio al centro
+            <button
+              data-testid="approval-draft-open"
+              className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
+              onClick={() => setApprovalsOpen(true, approvalId)}
+            >
+              <Trans>Decidi la bozza</Trans>
+            </button>
+          ) : (
+            <>
+              <button
+                data-testid="approval-allow"
+                className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
+                onClick={() => resolve(entry.agentId, approvalId!, 'allow', 'once', 'chat')}
               >
-                <Trans>Crea una regola</Trans>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <Trans>Consenti</Trans>
+              </button>
+              <button
+                className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
+                onClick={() => resolve(entry.agentId, approvalId!, 'deny', 'once', 'chat')}
+              >
+                <Trans>Rifiuta</Trans>
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger data-testid="approval-altre-scelte" className="rounded-[10px] px-2.5 py-1.5 text-sm text-muted-foreground transition hover:text-foreground">
+                  <Trans>Altre scelte ▾</Trans>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {/* A1 (fase approvazioni-chiare): le scelte vengono dal modello
+                      UNICO approvalChoicesOf — le stesse del centro «Da approvare» */}
+                  {choices.map((c) => (
+                    <DropdownMenuItem
+                      key={c.kind}
+                      data-testid={`approval-choice-${c.kind}`}
+                      disabled={c.disabled === true}
+                      title={choiceTitleOf(c)}
+                      onClick={() => decideChoice(c)}
+                    >
+                      {choiceLabelOf(c)}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuItem
+                    title={t`Apri Impostazioni → Approvazione automatica con una regola precompilata`}
+                    onClick={() => proposeRule(suggestedRule(tool, input))}
+                  >
+                    <Trans>Crea una regola</Trans>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          )}
         </div>
       )}
     </>
   )
+}
+
+/**
+ * R1 (fase ritocchi-beta18): porta il fuoco sul riquadro della richiesta
+ * sopra il campo di scrittura — il clic sulla riga compatta nei messaggi.
+ */
+export function focusComposerApproval(): void {
+  if (typeof document === 'undefined') return
+  const el = document.querySelector('[data-testid="composer-approval"]') as HTMLElement | null
+  el?.scrollIntoView({ block: 'center' })
+  el?.focus()
+}
+
+/** La riga compatta che prende il posto della card nei messaggi finché la richiesta è in attesa (R1). */
+function CompactApprovalRow() {
+  return (
+    <div className="flex w-full">
+      <button
+        data-testid="approval-compact-row"
+        className="flex w-full items-center gap-2 rounded-[12px] px-2.5 py-1.5 text-left text-sm text-muted-foreground transition hover:bg-muted/60"
+        onClick={focusComposerApproval}
+      >
+        <ArrowDown className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate"><Trans>In attesa della tua scelta · qui sotto</Trans></span>
+      </button>
+    </div>
+  )
+}
+
+export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: TranscriptEntry; readOnly?: boolean; ownerName?: string }) {
+  // fase 17c (C6): la schedule in linguaggio naturale nella lingua attiva
+  const activeLang = i18n.locale === 'en' ? 'en' : 'it'
+  const agents = useStore((s) => s.agents)
+  const activeId = useStore((s) => s.activeId)
+  const approvalsAll = useStore((s) => s.approvalsAll)
+  const approvalsSnoozed = useStore((s) => s.approvalsSnoozed)
+  const approvalId = entry.meta?.approvalId as string | undefined
+  const status = (entry.meta?.status as string | undefined) ?? 'pending'
+  // AH2 (fase aiutanti): la card del figlio nella chat del padre porta il
+  // TITOLO dell'aiutante, non il nome del bot attivo (il figlio non è in roster)
+  const agentName = ownerName ?? agents.find((a) => a.id === activeId)?.name ?? ''
+
+  // R3 (fase app — ritocchi): per gli strumenti Composio e MCP il motivo è
+  // una frase umana e il nome tecnico vive nei «Dettagli tecnici» chiusi
+  const appInfo = approvalAppOf(String(entry.meta?.tool), entry.meta)
+  const humanTitle = approvalTitleOf(appInfo, agentName, activeLang)
+  const resolvedTitle = typeof humanTitle === 'string' ? humanTitle : humanTitle ? i18n.t(humanTitle) : null
+  const humanReason = appInfo ? approvalReasonPhrase(appInfo) : null
+  const reasonText = uiTextOfMetaTools(entry.meta, activeLang) ?? entry.content
+
+  // fase 8: auto-approvata dall'auto-review — riga compressa, espandibile.
+  // fase impostazioni (I4.3): nel modo «Non chiedere» non c'è regola — la
+  // riga dice QUALE impostazione ha fatto passare l'azione.
+  // RW (fase revisore sulla richiesta): autoBasis 'request' → il reason del
+  // revisore; 'rule' (e le entry vecchie senza campo) → la regola citata
+  if (entry.meta?.autoApproved) {
+    const autoLabel = entry.meta?.autoNever
+      ? i18n.t(msg`Eseguito senza chiedere (Approvazioni: non chiedere)`)
+      : entry.meta?.autoBasis === 'request'
+        ? i18n.t(msg`Approvato automaticamente: ${String(entry.meta?.reason ?? '')}`)
+        : i18n.t(msg`Approvato automaticamente dalla regola: ${String(entry.meta?.ruleMatched ?? '')}`)
+    return (
+      <DecidedRow ok label={autoLabel} at={entry.createdAt}>
+        <CardShell>
+          {/* R3: anche qui il titolo umano per Composio/MCP, mai il nome tecnico nudo */}
+          <p className="text-sm">
+            {resolvedTitle ?? String(entry.meta?.tool)}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {humanReason ? i18n.t(humanReason) : reasonText && reasonText !== entry.meta?.tool ? reasonText : ''}
+          </p>
+        </CardShell>
+      </DecidedRow>
+    )
+  }
+
+  if (!approvalId) return null
+
+  // R1 (fase ritocchi-beta18): finché la richiesta è in attesa e il riquadro
+  // sopra il campo c'è (il bot aperto ha richieste visibili — le sue o dei
+  // suoi sottoagenti), la card nei messaggi è UNA RIGA COMPATTA: si decide
+  // dal riquadro, un «Consenti» solo
+  const composerVisible = visibleApprovalsRows(approvalsAll, approvalsSnoozed, Date.now())
+    .some((r) => r.botId === activeId)
+  if (status === 'pending' && !readOnly && composerVisible) {
+    return <CompactApprovalRow />
+  }
+
+  const body = (
+    <ApprovalRequestContent
+      entry={entry}
+      agentName={agentName}
+      readOnly={readOnly || status !== 'pending'}
+    />
+  )
 
   // DOPO la decisione: UNA riga grigia; un clic riapre in sola lettura (S6)
   if (status !== 'pending') {
+    const tool = String(entry.meta?.tool)
+    const input = entry.meta?.input as Record<string, unknown> | undefined
     const mode = entry.meta?.resolutionMode as string | undefined
     const rowLabel =
       status === 'allowed'
@@ -380,7 +493,7 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
               : mode === 'always'
                 ? i18n.t(msg`Consentito sempre`)
                 : mode === 'site'
-                  ? i18n.t(msg`Consentito sempre su ${siteGrant?.domain ?? ''}`)
+                  ? i18n.t(msg`Consentito sempre su ${siteGrantLabelOf(entry.meta)}`)
                   : i18n.t(msg`Consentito una volta`))
         : status === 'denied'
           ? i18n.t(msg`Rifiutato`)
@@ -405,4 +518,9 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
   }
 
   return <CardShell tone="waiting" testid="card-approvazione">{body}</CardShell>
+}
+
+/** R1: il dominio del grant di sito per la riga decisa (senza importare il modello della card). */
+function siteGrantLabelOf(meta: Record<string, unknown> | null | undefined): string {
+  return siteGrantOptionOf(meta)?.domain ?? ''
 }
