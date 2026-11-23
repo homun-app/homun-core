@@ -114,7 +114,7 @@ describe('DS6: la guardia vede quello che deve vedere', () => {
       'radius-arbitrary:rounded-[22px]', 'radius-other:rounded-t-lg', 'radius-other:rounded', 'radius-other:sm:rounded-2xl'
     ])
     expect(violationsOfString('w-[36rem] max-w-[80%] max-w-[36rem] w-[120px] max-w-[720px]', none).map((v) => v.token)).toEqual(['w-[120px]', 'max-w-[720px]'])
-    expect(violationsOfString('uppercase tracking-wide hover:tracking-tight text-caption', none).map((v) => v.token)).toEqual(['uppercase', 'tracking-wide', 'hover:tracking-tight'])
+    expect(violationsOfString('uppercase tracking-wide hover:tracking-tight tracking-[-0.01em] text-caption', none).map((v) => v.token)).toEqual(['uppercase', 'tracking-wide', 'hover:tracking-tight', 'tracking-[-0.01em]'])
     expect(violationsOfString('text-[13px] text-[var(--bubble-user-foreground)]', none).map((v) => v.rule)).toEqual(['text-arbitrary', 'text-arbitrary'])
   })
   it('pesi, interlinea, scala delle spaziature: le regole in più di DS1', () => {
