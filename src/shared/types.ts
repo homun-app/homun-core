@@ -1514,8 +1514,12 @@ export interface SandbotApi {
   bootStatus(): Promise<{ connected: boolean; restartingForUpdate: boolean }>
   /** W2: il bottone «Riprova» — rifà la connessione (e avvia il daemon se non c'è). */
   bootRetry(): Promise<{ ok: boolean; restarted: boolean }>
-  /** P1 (fase primo-avvio): dice al main che React ha montato (nel primo frame dopo il mount). */
-  firstPaint(): Promise<{ ok: true }>
+  /**
+   * P1 (fase primo-avvio): dice al main che React ha montato. `framed` true
+   * quando è passato il primo frame dopo il mount; false quando la pagina era
+   * nascosta (finestra coperta o mai mostrata) e il segnale è partito lo stesso.
+   */
+  firstPaint(framed: boolean): Promise<{ ok: true }>
   /** W3: SOLO sonde (SANDBOT_TEST_USER_DATA) — emette l'activate vero, come il clic sul Dock. */
   testEmitActivate(): Promise<{ ok: boolean }>
   /** U6 (fase mcp-ui): il ⌘Q di prova delle sonde (app.quit() VERA) */

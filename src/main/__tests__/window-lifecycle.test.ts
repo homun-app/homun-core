@@ -401,6 +401,48 @@ describe('P1: watchWindow — la fotografia 5 s dopo ogni window-shown', () => {
   })
 })
 
+describe('P3.4: watchWindow — gli eventi del renderer arrivano al cane da guardia (hooks)', () => {
+  it('did-finish-load, did-fail-load (col «è il frame principale») e render-process-gone', () => {
+    const win = new FakeWindow()
+    const seen: string[] = []
+    watchWindow(win, fakeLog().log, fakeDeps().deps, {
+      didFinishLoad: () => { seen.push('finish') },
+      didFailLoad: (main) => { seen.push(`fail:${main}`) },
+      renderProcessGone: () => { seen.push('gone') }
+    })
+    win.webContents.emit('did-start-loading')
+    win.webContents.emit('did-finish-load')
+    win.webContents.emit('did-fail-load', {}, -3, 'ERR_ABORTED', 'homun://app/', false)
+    win.webContents.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'homun://app/', true)
+    win.webContents.emit('render-process-gone', {}, { reason: 'crashed' })
+    expect(seen).toEqual(['finish', 'fail:false', 'fail:true', 'gone'])
+  })
+
+  it('dopo dispose() (finestra chiusa) gli hooks non scattano più: una finestra morta non fa ricaricare niente', () => {
+    const win = new FakeWindow()
+    const seen: string[] = []
+    const watch = watchWindow(win, fakeLog().log, fakeDeps().deps, {
+      didFinishLoad: () => { seen.push('finish') },
+      didFailLoad: () => { seen.push('fail') },
+      renderProcessGone: () => { seen.push('gone') }
+    })
+    watch.dispose()
+    win.webContents.emit('did-finish-load')
+    win.webContents.emit('did-fail-load', {}, -105, 'x', 'homun://app/', true)
+    win.webContents.emit('render-process-gone', {}, { reason: 'crashed' })
+    expect(seen).toEqual([])
+  })
+
+  it('firstPaint(false): renderer-ready con frame=0 — React ha montato, ma la pagina era nascosta (nessun frame)', () => {
+    const win = new FakeWindow()
+    const l = fakeLog()
+    const watch = watchWindow(win, l.log, fakeDeps().deps)
+    watch.firstPaint(false)
+    expect(l.lines).toEqual(['renderer-ready ms=0 frame=0'])
+    expect(watch.rendererReady()).toBe(true)
+  })
+})
+
 describe('P1: watchWindow — il primo segnale dal renderer', () => {
   it('firstPaint() scrive renderer-ready ms=… UNA volta sola per finestra', () => {
     const win = new FakeWindow()

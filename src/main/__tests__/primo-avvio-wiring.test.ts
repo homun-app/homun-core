@@ -20,7 +20,8 @@ describe('P1: la finestra principale è osservata dal registro (createWindow)', 
   const createWindow = INDEX.slice(INDEX.indexOf('function createWindow(): BrowserWindow {'), INDEX.indexOf("app.whenReady().then(async () => {"))
 
   it('appena nata la finestra entra nel registro del ciclo di vita (watchWindow), prima di caricare la pagina', () => {
-    expect(createWindow).toMatch(/const watch = watchWindow\(win, lifecycle, windowWatchDeps\)/)
+    // (P3.4: quarto argomento, gli hooks verso il cane da guardia del renderer)
+    expect(createWindow).toMatch(/const watch = watchWindow\(win, lifecycle, windowWatchDeps[,)]/)
     expect(createWindow).toMatch(/windowWatchers\.set\(win, watch\)/)
     expect(createWindow.indexOf('watchWindow(win'), 'PRIMA del loadURL').toBeLessThan(createWindow.indexOf('win.loadURL('))
   })
@@ -56,20 +57,22 @@ describe('P1: la finestra principale è osservata dal registro (createWindow)', 
 
 describe('P1: il primo paint dal renderer arriva al registro', () => {
   it('il preload espone firstPaint → l\'IPC locale app:first-paint (non un\'RPC al daemon)', () => {
-    expect(PRELOAD).toContain("firstPaint: () => ipcRenderer.invoke('app:first-paint')")
-    expect(TYPES).toMatch(/firstPaint\(\): Promise<\{ ok: true \}>/)
+    expect(PRELOAD).toContain("firstPaint: (framed) => ipcRenderer.invoke('app:first-paint', framed)")
+    expect(TYPES).toMatch(/firstPaint\(framed: boolean\): Promise<\{ ok: true \}>/)
   })
 
   it('il main gestisce app:first-paint e lo porta alla finestra che l\'ha mandato (event.sender)', () => {
     expect(IPC).toContain("ipcMain.handle('app:first-paint'")
     const handler = /ipcMain\.handle\('app:first-paint'[\s\S]*?\n  \}\)/.exec(IPC)?.[0] ?? ''
     expect(handler).toContain('BrowserWindow.fromWebContents(e.sender)')
-    expect(handler).toContain('firstPaint(win)')
+    // P3.4: framed false = segnale partito senza un frame (pagina nascosta)
+    expect(handler).toContain('firstPaint(win, framed !== false)')
   })
 
   it('index.ts dà a registerIpc la porta del registro: dalla finestra al SUO firstPaint', () => {
     const call = /registerIpc\(client, windowsForIpc, pip, boot, \{[\s\S]*?\}\)/.exec(INDEX)?.[0] ?? ''
-    expect(call).toMatch(/firstPaint: \(win\) => windowWatchers\.get\(win\)\?\.firstPaint\(\)/)
+    expect(call).toContain('firstPaint: firstPaintOf')
+    expect(INDEX).toMatch(/function firstPaintOf\(win: BrowserWindow, framed: boolean\): void \{\s*\n\s*windowWatchers\.get\(win\)\?\.firstPaint\(framed\)/)
   })
 })
 

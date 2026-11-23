@@ -123,12 +123,26 @@ export function describeWindow(
   }
 }
 
+/** Quello che accade al renderer di una finestra, per chi lo vuole sapere (P3.4: il cane da guardia). */
+export interface WindowHooks {
+  /** did-finish-load: la pagina è caricata */
+  didFinishLoad?(): void
+  /** did-fail-load: solo del frame principale conta */
+  didFailLoad?(isMainFrame: boolean): void
+  /** render-process-gone: il renderer è morto */
+  renderProcessGone?(): void
+}
+
 /** Il registro di UNA finestra: lo tieni in mano tu (la chiudi con dispose). */
 export interface WindowWatch {
   /** Il renderer ha MAI segnalato il primo paint (sopravvive ai reload). */
   rendererReady(): boolean
-  /** Il primo paint del renderer: la riga renderer-ready, una volta per finestra. */
-  firstPaint(): void
+  /**
+   * Il primo paint del renderer: la riga renderer-ready, una volta per
+   * finestra. `framed` false quando il segnale è arrivato SENZA un frame
+   * (pagina nascosta: finestra coperta o mai mostrata) — la riga porta frame=0.
+   */
+  firstPaint(framed?: boolean): void
   /**
    * La finestra si mostra SENZA l'evento «show» (era già visibile: show() non
    * lo emette): la riga window-shown, coi campi dati, e la fotografia a 5 s.
@@ -148,7 +162,12 @@ export interface WindowWatch {
  * finestra era già visibile la riga la scrive shown(), che chiama la porta
  * unica della principale.
  */
-export function watchWindow(win: WatchedWindow, log: LifecycleLine, deps: WatchDeps): WindowWatch {
+export function watchWindow(
+  win: WatchedWindow,
+  log: LifecycleLine,
+  deps: WatchDeps,
+  hooks: WindowHooks = {}
+): WindowWatch {
   let everReady = false
   let disposed = false
   let timer: unknown = null
@@ -177,12 +196,18 @@ export function watchWindow(win: WatchedWindow, log: LifecycleLine, deps: WatchD
   const wc = win.webContents
   wc.on('did-start-loading', () => line('did-start-loading'))
   wc.on('dom-ready', () => line('dom-ready'))
-  wc.on('did-finish-load', () => line('did-finish-load'))
-  wc.on('did-fail-load', (_event, code, desc, url, isMainFrame) =>
-    line('did-fail-load', { code: field(code), desc: field(desc), main: field(isMainFrame), origin: urlOriginForLog(String(url ?? '')) }))
+  wc.on('did-finish-load', () => {
+    line('did-finish-load')
+    if (!disposed) hooks.didFinishLoad?.()
+  })
+  wc.on('did-fail-load', (_event, code, desc, url, isMainFrame) => {
+    line('did-fail-load', { code: field(code), desc: field(desc), main: field(isMainFrame), origin: urlOriginForLog(String(url ?? '')) })
+    if (!disposed) hooks.didFailLoad?.(isMainFrame === true)
+  })
   wc.on('render-process-gone', (_event, details) => {
     const d = (details ?? {}) as { reason?: unknown; exitCode?: unknown }
     line('render-process-gone', { reason: field(d.reason), exit: field(d.exitCode) })
+    if (!disposed) hooks.renderProcessGone?.()
   })
   wc.on('unresponsive', () => line('unresponsive'))
   wc.on('responsive', () => line('responsive'))
@@ -195,10 +220,10 @@ export function watchWindow(win: WatchedWindow, log: LifecycleLine, deps: WatchD
 
   return {
     rendererReady: () => everReady,
-    firstPaint(): void {
+    firstPaint(framed = true): void {
       if (disposed || everReady) return
       everReady = true
-      line('renderer-ready')
+      line('renderer-ready', framed ? {} : { frame: 0 })
     },
     shown,
     snapshot,

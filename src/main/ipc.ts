@@ -171,7 +171,7 @@ export function registerIpc(
   // P1 (fase primo-avvio): il registro delle finestre — il primo paint del
   // renderer va al registro della finestra che l'ha mandato
   lifecycle?: {
-    firstPaint(win: BrowserWindow): void
+    firstPaint(win: BrowserWindow, framed: boolean): void
   }
 ): void {
   // ---- inoltro RPC al daemon ----
@@ -205,9 +205,9 @@ export function registerIpc(
   // P1 (fase primo-avvio): il PRIMO segnale dal renderer — React ha montato e
   // il frame è passato. Arriva alla finestra che l'ha mandato (event.sender):
   // il suo registro scrive renderer-ready, una volta per finestra
-  ipcMain.handle('app:first-paint', (e) => {
+  ipcMain.handle('app:first-paint', (e, framed: unknown) => {
     const win = BrowserWindow.fromWebContents(e.sender)
-    if (win) lifecycle?.firstPaint(win)
+    if (win) lifecycle?.firstPaint(win, framed !== false)
     return { ok: true }
   })
   // W3 (fase avvio-finestra): il gancio di prova delle sonde — il clic sul

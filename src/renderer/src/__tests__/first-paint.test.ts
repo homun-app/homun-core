@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { signalFirstPaintAfterFrame } from '../lib/first-paint'
+import { FIRST_PAINT_HIDDEN_FALLBACK_MS, signalFirstPaintAfterFrame } from '../lib/first-paint'
 
 const MAIN_SRC = readFileSync(fileURLToPath(new URL('../main.tsx', import.meta.url)), 'utf8')
 const SIGNAL_SRC = readFileSync(fileURLToPath(new URL('../components/FirstPaintSignal.tsx', import.meta.url)), 'utf8')
@@ -82,7 +82,7 @@ describe('P1: signalFirstPaintAfterFrame — il segnale nel primo frame dopo il 
 
 describe('P1: FirstPaintSignal — guardie sul sorgente', () => {
   it('il segnale passa dall\'IPC app:first-paint del main, non da un canale RPC del daemon', () => {
-    expect(SIGNAL_SRC).toContain('firstPaint()')
+    expect(SIGNAL_SRC).toMatch(/api\.firstPaint\((true|false)\)/)
     expect(SIGNAL_SRC).toContain('signalFirstPaintAfterFrame')
     expect(SIGNAL_SRC).not.toContain('ipcRenderer')
   })
@@ -93,5 +93,103 @@ describe('P1: FirstPaintSignal — guardie sul sorgente', () => {
     expect(render).toContain('<App />')
     expect(render).toContain('<PipView')
     expect(render).toContain('<FirstPaintSignal />')
+  })
+})
+
+// ---- P3.4: a pagina nascosta (finestra coperta o mai mostrata) il frame non arriva ----
+
+/** I timer finti del ripiego. */
+function fakeTimers() {
+  const timers: Array<{ at: number; fn: () => void; id: number }> = []
+  let now = 0
+  let nextId = 1
+  return {
+    setTimeout: (fn: () => void, ms: number): number => {
+      const id = nextId++
+      timers.push({ at: now + ms, fn, id })
+      return id
+    },
+    clearTimeout: (id: unknown): void => {
+      const i = timers.findIndex((t) => t.id === id)
+      if (i !== -1) timers.splice(i, 1)
+    },
+    pending: () => timers.length,
+    advance: (ms: number): void => {
+      now += ms
+      for (const t of [...timers].sort((a, b) => a.at - b.at)) {
+        if (t.at <= now && timers.includes(t)) {
+          timers.splice(timers.indexOf(t), 1)
+          t.fn()
+        }
+      }
+    }
+  }
+}
+
+describe('P3.4: a pagina nascosta il segnale parte lo stesso (il cane da guardia deve sapere se React ha montato)', () => {
+  it('il frame arriva in tempo: UN segnale, col frame; nessun ripiego e nessun timer appeso', () => {
+    const f = fakeFrames()
+    const t = fakeTimers()
+    const signal = vi.fn()
+    const fallback = vi.fn()
+    signalFirstPaintAfterFrame(signal, f.requestFrame, f.cancel, { isHidden: () => true, onFallback: fallback, setTimeout: t.setTimeout, clearTimeout: t.clearTimeout })
+    t.advance(FIRST_PAINT_HIDDEN_FALLBACK_MS - 1)
+    f.tick()
+    expect(signal).toHaveBeenCalledTimes(1)
+    expect(fallback).not.toHaveBeenCalled()
+    expect(t.pending(), 'il timer del ripiego è stato tolto').toBe(0)
+    t.advance(60_000)
+    f.tick()
+    expect(signal).toHaveBeenCalledTimes(1)
+  })
+
+  it('pagina NASCOSTA e nessun frame: dopo 2 s parte il segnale di ripiego, e il frame non serve più', () => {
+    const f = fakeFrames()
+    const t = fakeTimers()
+    const signal = vi.fn()
+    const fallback = vi.fn()
+    signalFirstPaintAfterFrame(signal, f.requestFrame, f.cancel, { isHidden: () => true, onFallback: fallback, setTimeout: t.setTimeout, clearTimeout: t.clearTimeout })
+    t.advance(FIRST_PAINT_HIDDEN_FALLBACK_MS - 1)
+    expect(fallback).not.toHaveBeenCalled()
+    t.advance(1)
+    expect(fallback).toHaveBeenCalledTimes(1)
+    expect(signal, 'il segnale «col frame» non c\'è stato: nessun frame è passato').not.toHaveBeenCalled()
+    expect(f.cancelled, 'la richiesta di frame è stata tolta').toEqual([1])
+    f.tick()
+    expect(signal).not.toHaveBeenCalled()
+    expect(fallback).toHaveBeenCalledTimes(1)
+  })
+
+  it('pagina VISIBILE e il frame è solo in ritardo: il ripiego NON parte (il frame arriverà)', () => {
+    const f = fakeFrames()
+    const t = fakeTimers()
+    const signal = vi.fn()
+    const fallback = vi.fn()
+    signalFirstPaintAfterFrame(signal, f.requestFrame, f.cancel, { isHidden: () => false, onFallback: fallback, setTimeout: t.setTimeout, clearTimeout: t.clearTimeout })
+    t.advance(FIRST_PAINT_HIDDEN_FALLBACK_MS + 5_000)
+    expect(fallback).not.toHaveBeenCalled()
+    expect(f.frames, 'la richiesta di frame è ancora lì').toHaveLength(1)
+    f.tick()
+    expect(signal).toHaveBeenCalledTimes(1)
+  })
+
+  it('smontato prima dei 2 s: niente segnale, nessun timer appeso', () => {
+    const f = fakeFrames()
+    const t = fakeTimers()
+    const signal = vi.fn()
+    const fallback = vi.fn()
+    const cleanup = signalFirstPaintAfterFrame(signal, f.requestFrame, f.cancel, { isHidden: () => true, onFallback: fallback, setTimeout: t.setTimeout, clearTimeout: t.clearTimeout })
+    cleanup()
+    expect(t.pending()).toBe(0)
+    t.advance(FIRST_PAINT_HIDDEN_FALLBACK_MS * 2)
+    f.tick()
+    expect(signal).not.toHaveBeenCalled()
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
+  it('FirstPaintSignal dice al main se il frame è passato (framed true) o se la pagina era nascosta (framed false)', () => {
+    expect(SIGNAL_SRC).toContain('api.firstPaint(true)')
+    expect(SIGNAL_SRC).toContain('api.firstPaint(false)')
+    expect(SIGNAL_SRC).toContain("document.visibilityState === 'hidden'")
   })
 })

@@ -338,7 +338,7 @@ const api: SandbotApi = {
   bootRetry: () => ipcRenderer.invoke('boot:retry'),
   // P1 (fase primo-avvio): il primo paint di React — il main lo scrive nel
   // registro del ciclo di vita (renderer-ready)
-  firstPaint: () => ipcRenderer.invoke('app:first-paint'),
+  firstPaint: (framed) => ipcRenderer.invoke('app:first-paint', framed),
   /**
    * W3 (fase avvio-finestra): gancio delle SONDE — emette l'activate vero
    * (il clic sul Dock non si può simulare altrimenti). Rifiuta fuori dalle

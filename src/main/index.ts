@@ -51,6 +51,8 @@ import { installDaemonLogTimestamps } from '../daemon/log-timestamp'
 import { bringWindowToFront, showWhenReady, type ShowPolicyDeps } from './show-policy'
 // P3.3 (fase primo-avvio): prima dello show la finestra sta su uno schermo visibile
 import { onScreenBounds } from './window-placement'
+// P3.4 (fase primo-avvio): il cane da guardia del renderer (1 reload, 1 ricreazione, poi si ferma)
+import { createRendererWatchdog } from './renderer-watchdog'
 import { secondInstanceWhileQuitting } from './quit-behavior'
 // U6: il tray si distrugge all'uscita
 import { createTray, refreshTray, destroyTray } from './tray'
@@ -184,6 +186,27 @@ if (isDaemonMode(process.argv)) {
       bringToFront: (win) => bringWindowToFront(win, app, process.platform),
       beforeShow: ensureOnScreen
     }
+    // P3.4 (fase primo-avvio): il cane da guardia del renderer — UNA istanza
+    // per avvio: al massimo 1 reload della pagina e 1 ricreazione della
+    // finestra, questa dalla porta unica (showMainWindow di W1)
+    // reload: UN webContents.reload() della principale; recreate: la principale
+    // si chiude e si ricrea dalla porta unica
+    const watchdog = createRendererWatchdog(lifecycle, {
+      reload: () => { getMainWindow()?.webContents.reload() },
+      recreate: () => {
+        getMainWindow()?.close()
+        showMainWindow()
+      }
+    }, {
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout)
+    })
+    // P1/P3.4: il primo paint di una finestra va al SUO registro (renderer-ready)
+    // e dice al cane da guardia che il renderer è vivo
+    function firstPaintOf(win: BrowserWindow, framed: boolean): void {
+      windowWatchers.get(win)?.firstPaint(framed)
+      watchdog.onRendererReady()
+    }
     // U6 (fase mcp-ui): la PiP del turno (chiusa esplicitamente all'uscita)
     let pip: PipManager | null = null
 
@@ -299,7 +322,12 @@ function createPipHandle(options: Record<string, unknown>, url: string): PipWind
       })
       // P1 (fase primo-avvio): la finestra entra nel registro del ciclo di
       // vita — caricamento della pagina, primo paint, fotografia dopo ogni show
-      const watch = watchWindow(win, lifecycle, windowWatchDeps)
+      const watch = watchWindow(win, lifecycle, windowWatchDeps, {
+        // P3.4: al cane da guardia del renderer
+        didFinishLoad: () => watchdog.onDidFinishLoad(),
+        didFailLoad: (isMainFrame) => watchdog.onDidFailLoad(isMainFrame),
+        renderProcessGone: () => watchdog.onRenderProcessGone()
+      })
       windowWatchers.set(win, watch)
       // P3.2: si mostra su ready-to-show, o dopo 3 s comunque (show-fallback)
       const policy = showWhenReady(win, lifecycle, showPolicyDeps)
@@ -462,8 +490,8 @@ function createPipHandle(options: Record<string, unknown>, url: string): PipWind
         return main ? [main, ...all.filter((w) => w !== main)] : all
       }
       registerIpc(client, windowsForIpc, pip, boot, {
-        // P1: il primo paint di una finestra va al SUO registro (renderer-ready)
-        firstPaint: (win) => windowWatchers.get(win)?.firstPaint()
+        // P1: il primo paint di una finestra va al SUO registro (renderer-ready); P3.4: e al cane da guardia
+        firstPaint: firstPaintOf
       })
       // A8: prima di installare un aggiornamento il daemon si ferma BENE.
       // RV1 (fase beta.2): lo STESSO meccanismo dello spostamento in
@@ -578,6 +606,9 @@ function createPipHandle(options: Record<string, unknown>, url: string): PipWind
       quitting = true
       quitStartedAt = Date.now()
       lifecycle.line('before-quit', { windows: BrowserWindow.getAllWindows().length })
+      // P3.4: il cane da guardia del renderer si ferma (mai un reload o una
+      // ricreazione mentre l'app sta uscendo)
+      watchdog.dispose()
       try {
         destroyTray()
       } catch {
