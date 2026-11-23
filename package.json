@@ -29,7 +29,7 @@
   "keywords": [],
   "author": "Fabio Cantone",
   "homepage": "https://github.com/homun-app/homun-core",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "type": "module",
   "dependencies": {
     "@composio/core": "0.25.0",
