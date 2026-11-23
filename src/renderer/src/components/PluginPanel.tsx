@@ -963,9 +963,12 @@ export function YourRow({ row, lang, onOpen, onToggleActive }: {
             >
               {st.label}
               {st.action !== null && (
-                <button type="button" className="ml-1.5 underline-offset-2 hover:underline" data-testid={`plugin-action-${row.key}`} onClick={onAction}>
-                  {actionLabel}
-                </button>
+                <>
+                  {' · '}
+                  <button type="button" className="underline-offset-2 hover:underline" data-testid={`plugin-action-${row.key}`} onClick={onAction}>
+                    {actionLabel}
+                  </button>
+                </>
               )}
             </span>
           )}

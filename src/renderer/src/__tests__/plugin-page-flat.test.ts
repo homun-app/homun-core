@@ -97,7 +97,7 @@ describe('PP4: la riga — un solo segnale di stato', () => {
     const { root, onOpen } = renderRow(row('broken'))
     const state = byId(root, 'plugin-state-server:srv-broken')[0]!
     expect(has(state, 'text-destructive')).toBe(true)
-    expect(textOf(state)).toBe('non parteVedi perché')
+    expect(textOf(state)).toBe('non parte · Vedi perché')
     expect(el('plugin-active-server:srv-broken')).toBeTruthy()
     ;(el('plugin-action-server:srv-broken')!.props.onClick as (e: { stopPropagation(): void }) => void)({ stopPropagation: () => undefined })
     expect(onOpen).toHaveBeenCalledWith(row('broken'))
@@ -114,7 +114,7 @@ describe('PP4: la riga — un solo segnale di stato', () => {
 
   it('spento da Homun (non rispondeva): la parola neutra e «Riaccendi» AL POSTO dell\'interruttore — che accende', () => {
     const { root, onToggleActive } = renderRow(row('off-homun'))
-    expect(textOf(byId(root, 'plugin-state-server:srv-off-homun')[0]!)).toBe('spento da Homun: non rispondevaRiaccendi')
+    expect(textOf(byId(root, 'plugin-state-server:srv-off-homun')[0]!)).toBe('spento da Homun: non rispondeva · Riaccendi')
     expect(byId(root, 'plugin-active-server:srv-off-homun')).toHaveLength(0)
     ;(el('plugin-action-server:srv-off-homun')!.props.onClick as (e: { stopPropagation(): void }) => void)({ stopPropagation: () => undefined })
     expect(onToggleActive).toHaveBeenCalledWith(row('off-homun'), true)
@@ -122,7 +122,7 @@ describe('PP4: la riga — un solo segnale di stato', () => {
 
   it('accesso scaduto: «Ricollega» al posto dell\'interruttore, e apre la scheda su «Account e bot»', () => {
     const { root, onOpen } = renderRow(row('expired'))
-    expect(textOf(byId(root, 'plugin-state-server:srv-expired')[0]!)).toBe('accesso scadutoRicollega')
+    expect(textOf(byId(root, 'plugin-state-server:srv-expired')[0]!)).toBe('accesso scaduto · Ricollega')
     expect(byId(root, 'plugin-active-server:srv-expired')).toHaveLength(0)
     ;(el('plugin-action-server:srv-expired')!.props.onClick as (e: { stopPropagation(): void }) => void)({ stopPropagation: () => undefined })
     expect(onOpen).toHaveBeenCalledWith(row('expired'), 'accounts')
@@ -130,7 +130,7 @@ describe('PP4: la riga — un solo segnale di stato', () => {
 
   it('da completare: «Completa» al posto dell\'interruttore, e apre la scheda su «Account e bot»', () => {
     const { root, onOpen } = renderRow(row('setup'))
-    expect(textOf(byId(root, 'plugin-state-server:srv-setup')[0]!)).toBe('da completareCompleta')
+    expect(textOf(byId(root, 'plugin-state-server:srv-setup')[0]!)).toBe('da completare · Completa')
     expect(byId(root, 'plugin-active-server:srv-setup')).toHaveLength(0)
     ;(el('plugin-action-server:srv-setup')!.props.onClick as (e: { stopPropagation(): void }) => void)({ stopPropagation: () => undefined })
     expect(onOpen).toHaveBeenCalledWith(row('setup'), 'accounts')
