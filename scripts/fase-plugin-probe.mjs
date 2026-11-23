@@ -346,7 +346,8 @@ try {
   const tabsOk = await waitDom(cdp, `document.querySelector('[data-testid="plugin-card-tabs"]')?.textContent?.includes('Panoramica')`) && await pageEval(cdp, `return document.querySelector('[data-testid="plugin-card-tabs"]')?.textContent ?? ''`).then((t) => t.includes('Autorizzazioni') && t.includes('Account e bot'))
   check('PL2: le schede interne Panoramica · Autorizzazioni · Account e bot', tabsOk)
   // la Panoramica: la strada
-  check('PL2: la Panoramica mostra la Strada (sul Mac, il comando)', await waitDom(cdp, `document.querySelector('[data-testid="plugin-overview"]')?.textContent?.includes('Strada')`) && await waitDom(cdp, `document.querySelector('[data-testid="plugin-overview"]')?.textContent?.includes('node')`))
+  // PP4 (fase plugin-pulita): la Panoramica non ha più i riquadri né il titolo «Strada» — i fatti stanno in tre gruppi (Provenienza · Sicurezza · Dati); resta la strada (sul Mac) e il comando
+  check('PL2: la Panoramica mostra la Provenienza (la strada «sul Mac», il comando)', await waitDom(cdp, `document.querySelector('[data-testid="plugin-overview"]')?.textContent?.includes('Provenienza')`, 5_000) && await waitDom(cdp, `document.querySelector('[data-testid="plugin-overview"]')?.textContent?.includes('sul Mac')`) && await waitDom(cdp, `document.querySelector('[data-testid="plugin-overview"]')?.textContent?.includes('node')`))
   // la tab Autorizzazioni
   await pageEval(cdp, `
     const btn = [...document.querySelectorAll('[data-testid="plugin-card-tabs"] button')].find((b) => b.textContent.trim() === 'Autorizzazioni')

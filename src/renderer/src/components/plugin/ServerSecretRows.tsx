@@ -12,8 +12,8 @@
 import { useLingui, Trans } from '@lingui/react/macro'
 import { api } from '../../store'
 import type { McpServerInfo } from '../../../../shared/types'
-import { SettingsGroup } from '../settings/SettingsGroup'
-import { SettingsRow } from '../settings/SettingsRow'
+// PP4 (fase plugin-pulita): le righe a filo — la scheda non usa più i pezzi delle Impostazioni
+import { FlatList, FlatRow } from '../ui/flat-list'
 import {
   accountKindOf, secretPayloadOf, submitSecret,
   type SecretEditAction, type SecretEditState, type SecretEditResult, type SecretKind, type ServerSecretNames
@@ -47,8 +47,9 @@ function SecretFields({ kind, names, state, onAction, onSave }: {
 }): React.ReactNode {
   const { t } = useLingui()
   const canSave = !state.saving && Object.keys(secretPayloadOf(kind, state.values)).length > 0
+  // i campi stanno SOTTO la riga, nella sua stessa voce di lista (nessun filetto in mezzo)
   return (
-    <div className="w-full space-y-1.5">
+    <div className="w-full space-y-1.5 pb-3">
       {names.map((name) => (
         <label key={name} className="block">
           {kind !== 'bearer' && <span className="mb-0.5 block font-mono text-[12px] text-muted-foreground">{name}</span>}
@@ -91,7 +92,8 @@ function SecretFields({ kind, names, state, onAction, onSave }: {
 /**
  * Le righe dell'account di un SERVER (i connettori del catalogo hanno le
  * loro, nella scheda): «Account» con la sua azione e, quando un server stdio
- * ha delle variabili segrete salvate, «variabili segrete: N» con la sua.
+ * ha delle variabili segrete salvate, «variabili segrete: N» con la sua — A
+ * FILO (PP4). L'editor si apre sotto la sua riga, nella stessa voce.
  */
 export function ServerAccountRow({ server, names, state, onAction, onChanged }: {
   server: McpServerInfo
@@ -116,45 +118,51 @@ export function ServerAccountRow({ server, names, state, onAction, onChanged }: 
           : t`nessun account`
   const result = state.result !== null && state.result.kind !== 'env' ? state.result : null
   return (
-    <SettingsGroup label={<Trans>Account</Trans>}>
-      <SettingsRow
-        title={title}
-        description={result !== null ? <ResultText result={result} /> : undefined}
-        control={reconnect ? (
-          <button
-            type="button"
-            className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-            data-testid="plugin-reconnect"
-            onClick={() => { void api.connectorsReconnectServer(server.id).then(onChanged).catch(() => undefined) }}
-          >
-            <Trans>Ricollega</Trans>
-          </button>
-        ) : kind === 'bearer' ? (
-          <button type="button" className={QUIET} data-testid="plugin-token-change" onClick={() => onAction({ type: 'open', kind: 'bearer' })}>
-            <Trans>Cambia token</Trans>
-          </button>
-        ) : kind === 'headers' ? (
-          <button type="button" className={QUIET} data-testid="plugin-headers-change" disabled={!names} onClick={() => onAction({ type: 'open', kind: 'headers' })}>
-            <Trans>Cambia</Trans>
-          </button>
-        ) : undefined}
-      >
-        {state.kind === 'bearer' && <SecretFields kind="bearer" names={['token']} state={state} onAction={onAction} onSave={save} />}
-        {state.kind === 'headers' && headerNames.length > 0 && <SecretFields kind="headers" names={headerNames} state={state} onAction={onAction} onSave={save} />}
-      </SettingsRow>
-      {envNames.length > 0 && (
-        <SettingsRow
-          title={t`variabili segrete: ${envNames.length}`}
-          description={state.result !== null && state.result.kind === 'env' ? <ResultText result={state.result} /> : undefined}
-          control={state.kind === 'env' ? undefined : (
-            <button type="button" className={QUIET} data-testid="plugin-env-change" onClick={() => onAction({ type: 'open', kind: 'env' })}>
-              <Trans>Cambia</Trans>
-            </button>
-          )}
-        >
-          {state.kind === 'env' && <SecretFields kind="env" names={envNames} state={state} onAction={onAction} onSave={save} />}
-        </SettingsRow>
-      )}
-    </SettingsGroup>
+    <div data-testid="plugin-account-rows">
+      <h3 className="text-[13px] text-muted-foreground"><Trans>Account</Trans></h3>
+      <FlatList className="mt-1">
+        <div>
+          <FlatRow
+            title={title}
+            subtitle={result !== null ? <ResultText result={result} /> : undefined}
+            trailing={reconnect ? (
+              <button
+                type="button"
+                className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+                data-testid="plugin-reconnect"
+                onClick={() => { void api.connectorsReconnectServer(server.id).then(onChanged).catch(() => undefined) }}
+              >
+                <Trans>Ricollega</Trans>
+              </button>
+            ) : kind === 'bearer' ? (
+              <button type="button" className={QUIET} data-testid="plugin-token-change" onClick={() => onAction({ type: 'open', kind: 'bearer' })}>
+                <Trans>Cambia token</Trans>
+              </button>
+            ) : kind === 'headers' ? (
+              <button type="button" className={QUIET} data-testid="plugin-headers-change" disabled={!names} onClick={() => onAction({ type: 'open', kind: 'headers' })}>
+                <Trans>Cambia</Trans>
+              </button>
+            ) : undefined}
+          />
+          {state.kind === 'bearer' && <SecretFields kind="bearer" names={['token']} state={state} onAction={onAction} onSave={save} />}
+          {state.kind === 'headers' && headerNames.length > 0 && <SecretFields kind="headers" names={headerNames} state={state} onAction={onAction} onSave={save} />}
+        </div>
+        {envNames.length > 0 && (
+          <div>
+            <FlatRow
+              testId="plugin-env-row"
+              title={t`variabili segrete: ${envNames.length}`}
+              subtitle={state.result !== null && state.result.kind === 'env' ? <ResultText result={state.result} /> : undefined}
+              trailing={state.kind === 'env' ? undefined : (
+                <button type="button" className={QUIET} data-testid="plugin-env-change" onClick={() => onAction({ type: 'open', kind: 'env' })}>
+                  <Trans>Cambia</Trans>
+                </button>
+              )}
+            />
+            {state.kind === 'env' && <SecretFields kind="env" names={envNames} state={state} onAction={onAction} onSave={save} />}
+          </div>
+        )}
+      </FlatList>
+    </div>
   )
 }

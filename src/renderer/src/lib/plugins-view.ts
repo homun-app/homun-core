@@ -302,6 +302,34 @@ export function grayLineOf(row: YourPluginRow, lang: 'it' | 'en'): string {
   return parts.join(' · ')
 }
 
+/**
+ * PURA (PP4, fase plugin-pulita): la riga grigia della SCHEDA di un plugin —
+ * la stessa «tipo · strada · origine» della lista (grayLineOf), composta dai
+ * soli dati: per un server installato, o per un connettore del catalogo.
+ */
+export function cardGrayLineOf(
+  input: { server?: InstalledServerSourceLike | null; app?: { name: string; via?: 'direct' | 'composio' } | null },
+  lang: 'it' | 'en'
+): string {
+  const s = input.server
+  if (s) {
+    return grayLineOf({
+      key: '', kind: 'server', name: s.name, logo: null,
+      gray: { type: 'server', strada: stradaOfServer(s), origin: s.source?.name },
+      state: 'active', verified: false, bots: { all: true, names: [], extra: 0 },
+      open: { kind: 'server', serverId: s.id }
+    }, lang)
+  }
+  const a = input.app
+  if (!a) return ''
+  return grayLineOf({
+    key: '', kind: 'connector', name: a.name, logo: null,
+    gray: a.via === 'direct' ? { type: 'connector', strada: 'direct', origin: a.name } : { type: 'connector', strada: 'composio' },
+    state: 'active', verified: false, bots: { all: true, names: [], extra: 0 },
+    open: { kind: 'app', appId: '' }
+  }, lang)
+}
+
 /** L'etichetta dello stato, con l'azione che propone. */
 export function stateLabelOf(state: PluginState, lang: 'it' | 'en'): { label: string; action: 'why' | 'reconnect' | 'setup' | 'reenable' | null } {
   const via = (it: string, en: string): string => (lang === 'en' ? en : it)

@@ -152,7 +152,8 @@ describe('PL2: Account e bot', () => {
   it('lo stato, l\'account onesto («nessun account» per un server stdio senza variabili) e i bot', () => {
     const root = parseHtml(render())
     const texts = findAll(root, () => true).map((n) => textOf(n)).join('\n')
-    expect(texts).toContain('attivo')
+    // PP4 (fase plugin-pulita): lo stato in parole solo quando non va — un server che funziona non dice «attivo»
+    expect(texts).not.toContain('attivo')
     expect(texts).toContain('nessun account')
     expect(texts).toContain('Bot che lo usano')
     expect(texts).toContain('Tutti i bot')

@@ -927,6 +927,7 @@ msgstr "Alternative: via Composio"
 msgid "Alto"
 msgstr "High"
 
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Altre azioni"
@@ -1007,6 +1008,7 @@ msgstr "no steps yet"
 #: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/plugin/ServerSecretRows.tsx
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
@@ -1998,6 +2000,11 @@ msgstr "connected"
 msgid "Collegato"
 msgstr "Connected"
 
+#. placeholder {0}: (lastTest.tools ?? []).length
+#: src/renderer/src/components/PluginCard.tsx
+msgid "collegato · {0} strumenti"
+msgstr "connected · {0} tools"
+
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Colore {col}"
 msgstr "Color {col}"
@@ -2739,6 +2746,10 @@ msgstr "from the chat"
 #: src/renderer/src/lib/approvals-center.ts
 msgid "dalla notifica"
 msgstr "from the notification"
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Dati"
+msgstr "Data"
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Decide da solo le richieste semplici quando le Approvazioni sono su Automatico."
@@ -6214,10 +6225,6 @@ msgstr "To enable it, macOS asks for your approval"
 msgid "per bot"
 msgstr "by bot"
 
-#: src/renderer/src/components/PluginCard.tsx
-msgid "per bot:"
-msgstr "per bot:"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "Per gli aggiornamenti sposta Homun in Applicazioni"
 msgstr "To get updates, move Homun to Applications"
@@ -6529,9 +6536,17 @@ msgstr "Test"
 msgid "Prova la chiave"
 msgstr "Test the key"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Prova la connessione"
+msgstr "Test the connection"
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Proveniente da dati esterni"
 msgstr "From external data"
+
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Provenienza"
+msgstr "Origin"
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Provider"
@@ -6916,6 +6931,7 @@ msgstr "Requests"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/plugin/ServerSecretRows.tsx
+#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Ricollega"
@@ -7341,6 +7357,10 @@ msgstr "Pick a model: without one, Automatic always asks."
 msgid "Scegli una cartella…"
 msgstr "Choose a folder…"
 
+#: src/renderer/src/components/PluginCard.tsx
+msgid "Schede del plugin"
+msgstr "Plugin tabs"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.scheduleInvalid"
@@ -7733,8 +7753,8 @@ msgid "Si salvano cifrate sul tuo Mac quando premi Collega."
 msgstr "They are saved encrypted on your Mac when you press Connect."
 
 #: src/renderer/src/components/PluginCard.tsx
-msgid "Sicurezza e accesso"
-msgstr "Security and access"
+msgid "Sicurezza"
+msgstr "Security"
 
 #: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/Settings.tsx
@@ -7976,7 +7996,6 @@ msgstr "Tidying up the desk…"
 msgid "Storico delle versioni"
 msgstr "Version history"
 
-#: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Strada"
 msgstr "Route"

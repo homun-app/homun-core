@@ -2308,6 +2308,9 @@ export interface McpServerInfo {
   trustLabel?: string
   /** fase 17c (C5): il kind della fiducia — la UI lo traduce */
   trustKind?: 'verified-domain' | 'github-account' | 'unverified'
+  /** fase mcp-setup (M6.1) / V1: lo stato dell'ultima prova (connectors.state) e il suo errore in parole — come li manda connectors:installed */
+  stateStatus?: string
+  stateError?: string
   /** fase 13 (correzione L1): OAuth scaduto/da rifare → bottone "Riconnetti" nella scheda Installati */
   needsReauth?: boolean
   /**

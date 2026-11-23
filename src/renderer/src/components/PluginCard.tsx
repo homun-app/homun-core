@@ -8,12 +8,12 @@
 // «Consenti sempre». MAI dati inventati: un campo che non c'è non si mostra.
 import { useEffect, useMemo, useReducer, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
-import { Lock, ChevronLeft } from 'lucide-react'
+import { Lock, ChevronLeft, MoreHorizontal } from 'lucide-react'
 import { api, useStore, type PluginCardTab } from '../store'
 import { i18n } from '../lib/i18n'
 import type { McpServerInfo, PermissionsConfig, ConnectorInfo } from '../../../shared/types'
 import type { CatalogRowView } from '../lib/apps-view'
-import { stateLabelOf, stradaOfServer, stradaLabel, pluginStateOfServer } from '../lib/plugins-view'
+import { stateLabelOf, stradaOfServer, stradaLabel, pluginStateOfServer, cardGrayLineOf } from '../lib/plugins-view'
 import { classifyPluginTool, type FixedAskKind, type ToolGroup } from '../../../shared/tool-classify'
 import { toolRuleOf, withToolRule } from '../../../shared/permissions-tools'
 import { serverCommandLine } from '../lib/mcp-row'
@@ -29,10 +29,13 @@ import { PluginShell } from './plugin/PluginShell'
 // PP2 (fase plugin-pulita): il segreto si cambia dove vive il server — le righe «Account» e «variabili segrete»
 import { ServerAccountRow } from './plugin/ServerSecretRows'
 import { SECRET_EDIT_INITIAL, secretEditReducer, type SecretEditState, type ServerSecretNames } from '../lib/plugin-secret'
-import { SettingsGroup } from './settings/SettingsGroup'
-import { SettingsRow } from './settings/SettingsRow'
 import { Toggle } from './Settings'
-import { AppLogo, BotTogglesForApp, GatewayAccountsSection } from './AppsWindow'
+import { AppLogo, GatewayAccountsSection } from './AppsWindow'
+// PP4 (fase plugin-pulita): la scheda a filo — righe e schede come testo, niente riquadri
+import { FlatList, FlatRow } from './ui/flat-list'
+import { UnderlineTabs } from './ui/underline-tabs'
+// X2 (fase sicurezza-beta16): l'errore dell'ultima prova si mostra tagliato a 300
+import { clipErrorText } from '../../../main/mcp/error-category'
 
 /** La lingua attiva. */
 function uiLang(): 'it' | 'en' {
@@ -58,6 +61,8 @@ export interface PluginCardInitial {
   secretEdit?: SecretEditState
   /** PP2: la scheda interna di partenza (nei test senza clic) */
   tab?: PluginCardTab
+  /** PP4: la conferma di Rimuovi già aperta (per rendere «Rimuovi davvero» nei test) */
+  confirmRemove?: boolean
 }
 
 export function PluginCard({ app, server, initial, initialTab, directEnabledFor, onConnect, onClose, onChanged }: {
@@ -84,7 +89,7 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
   const [tab, setTab] = useState<PluginCardTab>(initialTab ?? initial?.tab ?? 'overview')
   const [tools, setTools] = useState<CardTool[] | null>(initial?.tools ? toolsOf(initial.tools, server) : null)
   const [perms, setPerms] = useState<PermissionsConfig | null>(initial?.permissions ?? null)
-  const [confirmRemove, setConfirmRemove] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState(initial?.confirmRemove ?? false)
   // PP2: l'editor del segreto (reducer puro: il valore non resta dopo il salvataggio) e i NOMI dei segreti salvati
   const [secretEdit, dispatchSecret] = useReducer(secretEditReducer, initial?.secretEdit ?? SECRET_EDIT_INITIAL)
   const [secretNames, setSecretNames] = useState<Record<string, ServerSecretNames> | null>(initial?.secretNames ?? null)
@@ -154,7 +159,7 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
 
   const state = isServer
     ? stateLabelOf(pluginStateOfServer(server), lang)
-    : stateLabelOf(app!.row.connected === 'connected' ? 'active' : 'expired', lang)
+    : stateLabelOf(app!.row.connected === 'reconnect' ? 'expired' : 'active', lang)
 
   /** V4 (fase stato-vivo): Riaccendi — il server spento NON dall'utente si
    *  riaccende e parte il test U5 di mcp:save (che se fallisce lascia il
@@ -189,16 +194,59 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
     }
   }
 
+  // ---- PP4 (fase plugin-pulita): la scheda a filo, come la lista ----
+  // lo stato in parole SOLO quando non va (com'è la lista); quando non va, la
+  // scheda dice anche PERCHÉ (l'errore dell'ultima prova, com'è — tagliato)
+  const serverState = isServer ? pluginStateOfServer(server) : 'active'
+  const stateOk = isServer ? serverState === 'active' : app!.row.connected === 'connected'
+  const stateTone = serverState === 'off-homun' || serverState === 'off-user' ? 'text-muted-foreground' : 'text-destructive'
+  const why = isServer && serverState === 'broken' && server.stateError ? clipErrorText(server.stateError) : ''
+  // l'esito di «Prova la connessione» (menu ⋯): resta finché non se ne fa un altro
+  const [lastTest, setLastTest] = useState<{ ok: boolean; tools?: string[]; error?: string } | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const runTest = (): void => {
+    if (!server) return
+    void api.mcpTest(server.id)
+      .then((r) => { setLastTest({ ok: r.ok, tools: r.tools, error: r.error }); onChanged() })
+      .catch((e) => { setLastTest({ ok: false, error: e instanceof Error ? e.message : String(e) }) })
+  }
+  const canReconnect = isServer
+    ? server.auth?.kind === 'oauth' || server.needsReauth === true
+    : app!.row.connected === 'reconnect' && onConnect !== undefined
+  const reconnect = (): void => {
+    if (isServer) void api.connectorsReconnectServer(server.id).then(() => onChanged()).catch(() => undefined)
+    else if (onConnect) onConnect(app!.row)
+  }
+  /** Rimuovi / Scollega: la strada giusta per ogni tipo di plugin (con la conferma: `confirmRemove`). */
+  const remove = async (): Promise<void> => {
+    if (isServer) {
+      if (server.catalogId || server.source) await api.connectorsUninstallServer(server.id).catch(() => undefined)
+      else await api.mcpDelete(server.id).catch(() => undefined)
+    } else if (gatewayApp) {
+      await api.composioGatewayRemove(app!.row.app.composioSlug!).catch(() => undefined)
+    } else if (keyApp) {
+      await api.composioDisconnect(app!.row.app.composioSlug!).catch(() => undefined)
+    } else if (app!.row.app.directId) {
+      await api.connectorsDisconnect(app!.row.app.directId).catch(() => undefined)
+    }
+    onChanged()
+    onClose()
+  }
+  // l'interruttore in testata: server MCP e connettori Composio; per lo spento da Homun prende il suo posto «Riaccendi» (com'è la lista)
+  const reenable = isServer && state.action === 'reenable'
+  const showToggle = activeChecked !== null && !reenable
+
   return (
     <PluginShell
       testId="plugin-card"
       size="md"
       z={30}
       columnClassName="px-6 py-5"
-      // la testata: indietro, logo, nome, stato
       header={(
-        <div className="flex items-center gap-3">
+        // la testata (PP4): indietro · logo 40 · nome + riga grigia · a destra l'interruttore senza etichetta e il menu ⋯
+        <div className="flex items-center gap-3" data-testid="plugin-card-head">
           <button
+            type="button"
             className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
             aria-label={t`Torna ai plugin`}
             onClick={onClose}
@@ -206,37 +254,40 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
             <ChevronLeft className="size-4" />
           </button>
           {logoUrl
-            ? <img src={logoUrl} alt="" className="size-12 shrink-0 rounded-[12px] object-cover dark:bg-white" />
-            : <AppLogo logo={app?.row.app.logo ?? null} name={name} className="size-12 text-lg" />}
+            ? <img src={logoUrl} alt="" className="size-10 shrink-0 rounded-[11px] object-cover dark:bg-white" />
+            : <AppLogo logo={app?.row.app.logo ?? null} name={name} className="size-10 text-base" />}
           <span className="min-w-0 flex-1">
             <span className="block truncate text-lg font-medium">{name}</span>
-            <span className={`block text-[13px] ${state.label === 'attivo' || state.label === 'active' ? 'text-chart-2' : 'text-muted-foreground'}`}>
-              {state.label}
-            </span>
+            <span className="block truncate text-[13px] text-muted-foreground" data-testid="plugin-card-gray">{cardGrayLineOf(isServer ? { server } : { app: { name: app!.row.app.name, via: app!.row.app.via } }, lang)}</span>
+            {!stateOk && (
+              <span className={`block text-[13px] ${stateTone}`} data-testid="plugin-card-state">{state.label}</span>
+            )}
+            {why !== '' && <span className="block truncate text-[12px] text-muted-foreground" title={why} data-testid="plugin-card-why">{why}</span>}
+            {lastTest !== null && (
+              <span className={`block truncate text-[12px] ${lastTest.ok ? 'text-chart-2' : 'text-destructive'}`} title={lastTest.error ?? ''} data-testid="plugin-card-test-result">
+                {lastTest.ok ? t`collegato · ${(lastTest.tools ?? []).length} strumenti` : clipErrorText(lastTest.error ?? '')}
+              </span>
+            )}
           </span>
           {/* PL4: non collegata — Connetti propone la PRIMA strada disponibile
               (la decisione sta in apps:connect, come la riga del catalogo) */}
           {!isServer && app!.row.connected === null && onConnect && (
             <button
-              className="h-8 shrink-0 rounded-full bg-foreground px-4 text-[13px] font-medium text-background transition hover:opacity-90"
+              type="button"
+              className="h-8 shrink-0 rounded-full bg-muted px-4 text-[13px] text-foreground transition hover:bg-accent"
               data-testid={`plugin-card-connect-${app!.row.app.id}`}
               onClick={() => onConnect(app!.row)}
             >
               <Trans>Connetti</Trans>
             </button>
           )}
-          {/* V5 (fase stato-vivo): l'interruttore Attivo — server MCP e
-              connettori Composio; le skill hanno il loro (libreria) */}
-          {activeChecked !== null && (
-            <span className="flex shrink-0 items-center gap-1.5 text-[13px] text-muted-foreground">
-              <Trans>Attivo</Trans>
-              <Toggle checked={activeChecked} onChange={setActive} label={t`Attivo`} testId="plugin-card-active" />
-            </span>
-          )}
+          {/* V5 (fase stato-vivo): l'interruttore — senza etichetta accanto (PP4; l'aria-label sì) */}
+          {showToggle && <Toggle checked={activeChecked} onChange={setActive} label={t`Attivo`} testId="plugin-card-active" />}
           {/* V4 (fase stato-vivo): spento da Homun → Riaccendi, che accende e
               testa; spento dall'utente non si propone niente (è la sua parola) */}
-          {isServer && state.action === 'reenable' && (
+          {reenable && (
             <button
+              type="button"
               className="h-8 shrink-0 rounded-full bg-foreground px-4 text-[13px] font-medium text-background transition hover:opacity-90"
               data-testid="plugin-card-reenable"
               onClick={reenableServer}
@@ -244,58 +295,97 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
               <Trans>Riaccendi</Trans>
             </button>
           )}
+          {/* il menu ⋯: Prova la connessione · Ricollega (OAuth) · Rimuovi/Scollega con conferma.
+              Sta SEMPRE nel DOM (nascosto quando chiuso): le sonde lo aprono col clic, i test lo leggono senza clic */}
+          <div className="relative">
+            <button
+              type="button"
+              className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              aria-label={t`Altre azioni`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              data-testid="plugin-card-menu-trigger"
+              onClick={() => setMenuOpen((o) => !o)}
+            >
+              <MoreHorizontal className="size-4" />
+            </button>
+            <div
+              role="menu"
+              aria-label={t`Altre azioni`}
+              className={`absolute right-0 top-full z-30 mt-1.5 flex w-64 flex-col gap-0.5 rounded-2xl bg-card p-1.5 shadow-soft ${menuOpen ? '' : 'hidden'}`}
+              data-testid="plugin-card-menu"
+            >
+              {isServer && (
+                <button type="button" role="menuitem" className={MENU_ITEM} data-testid="plugin-card-test" onClick={() => { setMenuOpen(false); runTest() }}>
+                  <Trans>Prova la connessione</Trans>
+                </button>
+              )}
+              {canReconnect && (
+                <button type="button" role="menuitem" className={MENU_ITEM} data-testid="plugin-card-reconnect" onClick={() => { setMenuOpen(false); reconnect() }}>
+                  <Trans>Ricollega</Trans>
+                </button>
+              )}
+              {confirmRemove ? (
+                <>
+                  <button type="button" role="menuitem" className={`${MENU_ITEM} text-destructive`} data-testid="plugin-card-remove-confirm" onClick={() => { setMenuOpen(false); void remove() }}>
+                    {isServer ? <Trans>Rimuovi davvero</Trans> : <Trans>Scollega davvero</Trans>}
+                  </button>
+                  <button type="button" role="menuitem" className={MENU_ITEM} data-testid="plugin-card-remove-cancel" onClick={() => { setMenuOpen(false); setConfirmRemove(false) }}>
+                    <Trans>Annulla</Trans>
+                  </button>
+                </>
+              ) : (
+                <button type="button" role="menuitem" className={`${MENU_ITEM} text-destructive`} data-testid="plugin-card-remove" onClick={() => setConfirmRemove(true)}>
+                  {isServer ? <Trans>Rimuovi</Trans> : <Trans>Scollega</Trans>}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
-      // le schede interne
       toolbar={(
-          <div className="flex items-center gap-1.5 border-b pb-2" data-testid="plugin-card-tabs">
-            {([
-              ['overview', t`Panoramica`],
-              ['permissions', t`Autorizzazioni`],
-              ['accounts', t`Account e bot`]
-            ] as const).map(([id, label]) => (
-              <button
-                key={id}
-                className={`rounded-full px-3 py-1 text-[13px] transition ${tab === id ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-                onClick={() => setTab(id)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+        // le schede interne come testo (PP4)
+        <UnderlineTabs<PluginCardTab>
+          tabs={[['overview', t`Panoramica`], ['permissions', t`Autorizzazioni`], ['accounts', t`Account e bot`]]}
+          value={tab}
+          onChange={setTab}
+          label={t`Schede del plugin`}
+          testId="plugin-card-tabs"
+        />
       )}
     >
       {/* i pannelli stanno TUTTI nel DOM (nascosti quando inattivi): le
           sonde aprono la scheda col clic, i test leggono senza clic */}
-      {/* --- PANORAMICA --- */}
-      <div hidden={tab !== 'overview'}>
-        <Overview
-          app={app?.row}
-          server={server}
-          directConnector={directConnector}
-          via={!isServer ? app!.row.app.via : undefined}
-          composioSlug={app?.row.app.composioSlug}
-        />
-      </div>
+      {/* --- PANORAMICA: i fatti a filo, in due colonne quando c'è spazio --- */}
+      <Overview
+        app={app?.row}
+        server={server}
+        directConnector={directConnector}
+        via={!isServer ? app!.row.app.via : undefined}
+        composioSlug={app?.row.app.composioSlug}
+        hidden={tab !== 'overview'}
+      />
 
-      {/* --- AUTORIZZAZIONI --- */}
-      <div className="space-y-4" hidden={tab !== 'permissions'} data-testid="plugin-permissions">
-          <p className="text-[13px] leading-relaxed text-muted-foreground">
-            <Trans>Scegli cosa i bot possono fare da soli. Le regole valgono per tutti i bot che usano questo plugin.</Trans>
-          </p>
-          {tools === null && <p className="text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>}
-          {tools !== null && tools.length === 0 && (
-            <p className="text-sm text-muted-foreground"><Trans>Nessuno strumento elencato.</Trans></p>
-          )}
-          {(['read', 'write', 'other'] as const).map((g) => {
-            const list = groups[g]
-            if (list.length === 0) return null
-            const label = g === 'read' ? t`Sola lettura` : g === 'write' ? t`Scrittura` : t`Altro`
-            return (
-              <section key={g} data-testid={`plugin-group-${g}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-[14px] font-medium">
-                    {label} <span className="text-muted-foreground">· {list.length}</span>
+      {/* --- AUTORIZZAZIONI: una tabella a filo --- */}
+      <div className="space-y-6" hidden={tab !== 'permissions'} data-testid="plugin-permissions">
+        <p className="text-[13px] leading-relaxed text-muted-foreground">
+          <Trans>Scegli cosa i bot possono fare da soli. Le regole valgono per tutti i bot che usano questo plugin.</Trans>
+        </p>
+        {tools === null && <p className="text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>}
+        {tools !== null && tools.length === 0 && (
+          <p className="text-sm text-muted-foreground"><Trans>Nessuno strumento elencato.</Trans></p>
+        )}
+        {(['read', 'write', 'other'] as const).map((g) => {
+          const list = groups[g]
+          if (list.length === 0) return null
+          const label = g === 'read' ? t`Sola lettura` : g === 'write' ? t`Scrittura` : t`Altro`
+          return (
+            <section key={g} data-testid={`plugin-group-${g}`}>
+              <FlatList>
+                {/* la riga d'intestazione: nome del gruppo · N, il selettore del gruppo a destra */}
+                <div className="flex items-center justify-between gap-3 py-2" data-testid={`plugin-group-head-${g}`}>
+                  <h3 className="text-[13px] text-muted-foreground">
+                    {label} <span>· {list.length}</span>
                   </h3>
                   <GroupSelect
                     testid={`plugin-group-select-${g}`}
@@ -304,119 +394,146 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
                     onChange={(mode) => setGroupRule(g, mode)}
                   />
                 </div>
-                <div className="mt-1.5 space-y-1">
-                  {list.map((tool) => (
-                    <div
-                      key={tool.full}
-                      className="flex items-center gap-3 rounded-[14px] bg-muted/50 px-3 py-2"
-                      data-testid={`plugin-tool-${tool.name}`}
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-1.5">
-                          <span className="truncate text-[14px]">{tool.name}</span>
-                          {tool.fixedAsk && (
-                            <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label={t`azione dell'insieme fisso: chiede sempre`} />
-                          )}
-                        </span>
-                        {tool.description && <span className="block truncate text-[12px] text-muted-foreground" title={tool.description}>{tool.description}</span>}
+                {/* le azioni: nome, descrizione su una riga troncata, selettore a destra — nessun fondo */}
+                {list.map((tool) => (
+                  <FlatRow
+                    key={tool.full}
+                    testId={`plugin-tool-${tool.name}`}
+                    title={(
+                      <span className="flex items-center gap-1.5">
+                        <span className="truncate text-[14px]">{tool.name}</span>
+                        {tool.fixedAsk && (
+                          <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label={t`azione dell'insieme fisso: chiede sempre`} />
+                        )}
                       </span>
+                    )}
+                    subtitle={tool.description ? <span title={tool.description}>{tool.description}</span> : undefined}
+                    trailing={(
                       <GroupSelect
                         testid={`plugin-tool-select-${tool.name}`}
                         fixed={tool.fixedAsk !== null}
                         value={perms ? toolRuleOf(perms, tool.full) : 'needs_approval'}
                         onChange={(mode) => setRule(tool.full, mode)}
                       />
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )
-          })}
-          {/* la frase F8 (vera nel codice: liftContaminatedAllow) */}
-          <p className="text-[12px] leading-relaxed text-muted-foreground">
-            <Trans>Le scelte: Consenti sempre · Chiedi · Blocca. Dopo che un bot ha letto contenuti non fidati, le azioni di scrittura tornano a chiedere anche se le hai consentite.</Trans>
-          </p>
-        </div>
+                    )}
+                  />
+                ))}
+              </FlatList>
+            </section>
+          )
+        })}
+        {/* la frase F8 (vera nel codice: liftContaminatedAllow) */}
+        <p className="text-[12px] leading-relaxed text-muted-foreground">
+          <Trans>Le scelte: Consenti sempre · Chiedi · Blocca. Dopo che un bot ha letto contenuti non fidati, le azioni di scrittura tornano a chiedere anche se le hai consentite.</Trans>
+        </p>
+      </div>
 
-      {/* --- ACCOUNT E BOT --- */}
-      <div className="space-y-4" hidden={tab !== 'accounts'} data-testid="plugin-accounts">
-          {/* gli account collegati: onesti, mai inventati. Un SERVER ha le sue
-              righe — il segreto si cambia qui (PP2) */}
-          {isServer ? (
-            <ServerAccountRow
-              server={server}
-              names={secretNames?.[server.id] ?? null}
-              state={secretEdit}
-              onAction={dispatchSecret}
-              onChanged={() => { onChanged(); reloadSecretNames() }}
-            />
-          ) : (
-            <SettingsGroup label={<Trans>Account</Trans>}>
-              {gatewayApp ? (
-                <div />
-              ) : keyApp ? (
-                <SettingsRow title={t`con la chiave di progetto`} control={<span className="text-[13px] text-muted-foreground">{state.label}</span>} />
-              ) : (
-                <SettingsRow title={t`con il tuo account`} control={<span className="text-[13px] text-muted-foreground">{state.label}</span>} />
+      {/* --- ACCOUNT E BOT: riga Account (con PP2), poi i bot a filo --- */}
+      <div className="space-y-6" hidden={tab !== 'accounts'} data-testid="plugin-accounts">
+        {isServer ? (
+          <ServerAccountRow
+            server={server}
+            names={secretNames?.[server.id] ?? null}
+            state={secretEdit}
+            onAction={dispatchSecret}
+            onChanged={() => { onChanged(); reloadSecretNames() }}
+          />
+        ) : (
+          <div>
+            <h3 className="text-[13px] text-muted-foreground"><Trans>Account</Trans></h3>
+            <FlatList className="mt-1">
+              {gatewayApp === null && (
+                <FlatRow
+                  title={keyApp ? t`con la chiave di progetto` : t`con il tuo account`}
+                  subtitle={!stateOk ? <span className={stateTone}>{state.label}</span> : undefined}
+                />
               )}
-            </SettingsGroup>
-          )}
-          {!isServer && gatewayApp && (
-            <GatewayAccountsSection app={gatewayApp} appName={name} onChanged={onChanged} />
-          )}
-
-          {/* i bot che lo usano: l'interruttore per bot (enabledFor) */}
-          {isServer ? (
-            <ServerBotToggles server={server} onChanged={onChanged} />
-          ) : app!.row.app.via === 'direct' && app!.row.app.directId ? (
-            <BotTogglesForApp
-              directId={app!.row.app.directId}
-              enabledFor={directEnabledFor}
-              agents={agents}
-              onChanged={onChanged}
-            />
-          ) : (
-            <p className="text-[13px] text-muted-foreground"><Trans>per bot:</Trans> <Trans>Tutti i bot</Trans></p>
-          )}
-
-          {/* Rimuovi in fondo (PP1: ora si raggiunge scorrendo). «Ricollega» sta
-              nella riga Account (PP2), sempre visibile per OAuth */}
-          <div className="flex items-center justify-end gap-2 pt-1">
-            {confirmRemove ? (
-              <button
-                className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-                onClick={async () => {
-                  if (isServer) {
-                    if (server.catalogId || server.source) await api.connectorsUninstallServer(server.id).catch(() => undefined)
-                    else await api.mcpDelete(server.id).catch(() => undefined)
-                  } else if (gatewayApp) {
-                    await api.composioGatewayRemove(app!.row.app.composioSlug!).catch(() => undefined)
-                  } else if (keyApp) {
-                    await api.composioDisconnect(app!.row.app.composioSlug!).catch(() => undefined)
-                  } else if (app!.row.app.directId) {
-                    await api.connectorsDisconnect(app!.row.app.directId).catch(() => undefined)
-                  }
-                  onChanged()
-                  onClose()
-                }}
-              >
-                {isServer ? <Trans>Rimuovi davvero</Trans> : <Trans>Scollega davvero</Trans>}
-              </button>
-            ) : (
-              <button
-                className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-                onClick={() => setConfirmRemove(true)}
-              >
-                {isServer ? <Trans>Rimuovi</Trans> : <Trans>Scollega</Trans>}
-              </button>
+            </FlatList>
+            {!isServer && gatewayApp && (
+              <GatewayAccountsSection app={gatewayApp} appName={name} onChanged={onChanged} />
             )}
           </div>
+        )}
+
+        {/* i bot che lo usano: l'interruttore per bot (enabledFor) — «Tutti i bot» e un bot per riga */}
+        <div>
+          <h3 className="text-[13px] text-muted-foreground"><Trans>Bot che lo usano</Trans></h3>
+          {isServer ? (
+            <BotRows serverId={server.id} enabledFor={server.enabledFor} agents={agents} onChanged={onChanged} className="mt-1" />
+          ) : app!.row.app.via === 'direct' && app!.row.app.directId ? (
+            <BotRows serverId={app!.row.app.directId} enabledFor={directEnabledFor} agents={agents} onChanged={onChanged} className="mt-1" />
+          ) : (
+            <FlatList className="mt-1">
+              <FlatRow title={<Trans>Tutti i bot</Trans>} />
+            </FlatList>
+          )}
         </div>
+
+        {/* Rimuovi in fondo come testo rosso (PP1: ora si raggiunge scorrendo) — e anche nel menu ⋯ */}
+        <div className="flex justify-end border-t border-border/50 pt-3">
+          <button
+            type="button"
+            className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+            data-testid="plugin-card-remove-bottom"
+            onClick={() => { if (confirmRemove) void remove(); else setConfirmRemove(true) }}
+          >
+            {confirmRemove ? (isServer ? <Trans>Rimuovi davvero</Trans> : <Trans>Scollega davvero</Trans>) : (isServer ? <Trans>Rimuovi</Trans> : <Trans>Scollega</Trans>)}
+          </button>
+        </div>
+      </div>
     </PluginShell>
   )
 }
 
 // ---- i pezzi piccoli ----
+
+/** Le voci del menu ⋯ della testata. */
+const MENU_ITEM = 'rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted'
+
+/**
+ * «Bot che lo usano» A FILO (PP4): la prima riga «Tutti i bot» con
+ * l'interruttore, poi UN bot per riga — nome a sinistra, interruttore a
+ * destra. Scrive enabledFor del server (server MCP o connettore diretto).
+ */
+function BotRows({ serverId, enabledFor: raw, agents, onChanged, className }: {
+  serverId: string
+  enabledFor: string[] | null | undefined
+  agents: Array<{ id: string; name: string }>
+  onChanged(): void
+  className?: string
+}): ReactNode {
+  const { t } = useLingui()
+  const enabledFor = raw ?? ['*']
+  const all = enabledFor.includes('*')
+  const save = (ids: string[]): void => {
+    void api.connectorsSetEnabledFor('server', serverId, ids).then(() => onChanged())
+  }
+  return (
+    <FlatList className={className} testId="plugin-card-bots">
+      <FlatRow title={<Trans>Tutti i bot</Trans>} trailing={<Toggle label={t`Tutti i bot`} checked={all} onChange={(v) => save(v ? ['*'] : [])} />} />
+      {agents.map((a) => (
+        <FlatRow
+          key={a.id}
+          title={a.name}
+          trailing={(
+            <Toggle
+              label={a.name}
+              checked={all || enabledFor.includes(a.id)}
+              disabled={all}
+              onChange={(v) => {
+                // da «tutti»: spegnere UN bot lascia TUTTI GLI ALTRI (come
+                // ServerSheet); il resto aggiunge/toglie l'id scelto
+                if (all) { save(v ? ['*'] : agents.map((x) => x.id).filter((id) => id !== a.id)); return }
+                const ids = enabledFor.filter((id) => id !== '*')
+                save(v ? [...ids, a.id] : ids.filter((id) => id !== a.id))
+              }}
+            />
+          )}
+        />
+      ))}
+    </FlatList>
+  )
+}
 
 /** Il selettore a tre scelte (l'insieme fisso ne ha due: mai «Consenti sempre»).
  *  A4 (fase approvazioni-chiare): col valore «Misto» quando le regole del
@@ -477,110 +594,87 @@ function groupValueOf(perms: PermissionsConfig | null, list: CardTool[]): Permis
   return GROUP_VALUE_MIXED
 }
 
-/** Gli interruttori per bot di un server (enabledFor, come i fogli di oggi). */
-function ServerBotToggles({ server, onChanged }: { server: McpServerInfo; onChanged(): void }): ReactNode {
-  const { t } = useLingui()
-  const agents = useStore((s) => s.agents)
-  const enabledFor = server.enabledFor ?? ['*']
-  const all = enabledFor.includes('*')
-  const save = (ids: string[]): void => {
-    void api.connectorsSetEnabledFor('server', server.id, ids).then(() => onChanged())
-  }
+// ---- Panoramica: i fatti, a filo — mai inventati ----
+
+/**
+ * Un gruppo di fatti della Panoramica (PP4): l'etichetta grigia e il valore.
+ * Una colonna di default (etichetta sopra il valore); due sopra i 560px del
+ * contenitore (etichetta a sinistra, valore a destra). Filetto in alto.
+ */
+function FactGroup({ label, children }: { label: ReactNode; children: ReactNode }): ReactNode {
   return (
-    <SettingsGroup label={<Trans>Bot che lo usano</Trans>}>
-      <SettingsRow
-        title={<Trans>Tutti i bot</Trans>}
-        control={<Toggle label={t`Tutti i bot`} checked={all} onChange={(v) => save(v ? ['*'] : [])} />}
-      />
-      {agents.map((a) => (
-        <SettingsRow
-          key={a.id}
-          title={a.name}
-          control={
-            <Toggle
-              label={a.name}
-              checked={all || enabledFor.includes(a.id)}
-              disabled={all}
-              onChange={(v) => {
-                // da «tutti»: spegnere UN bot lascia TUTTI GLI ALTRI (come
-                // ServerSheet); il resto aggiunge/toglie l'id scelto
-                if (all) { save(v ? ['*'] : agents.map((x) => x.id).filter((id) => id !== a.id)); return }
-                const ids = enabledFor.filter((id) => id !== '*')
-                save(v ? [...ids, a.id] : ids.filter((id) => id !== a.id))
-              }}
-            />
-          }
-        />
-      ))}
-    </SettingsGroup>
+    <div className="grid grid-cols-1 gap-x-8 border-t border-border/50 py-3 @[560px]:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+      <p className="text-[13px] text-muted-foreground">{label}</p>
+      <div className="mt-1 min-w-0 space-y-0.5 text-[14px] @[560px]:mt-0">{children}</div>
+    </div>
   )
 }
 
-// ---- Panoramica: i fatti, uno per riga, mai inventati ----
-
-function Overview({ app, server, directConnector, via, composioSlug }: {
+/** La Panoramica: la descrizione in testa (quando c'è) e i fatti in tre gruppi — Provenienza · Sicurezza · Dati — senza riquadri. */
+function Overview({ app, server, directConnector, via, composioSlug, hidden }: {
   app?: CatalogRowView
   server?: McpServerInfo
   directConnector: ConnectorInfo | null
   via?: 'direct' | 'composio'
   composioSlug?: string
+  hidden: boolean
 }): ReactNode {
   const { t } = useLingui()
   const lang = uiLang()
-  const row = (title: string, children: ReactNode): ReactNode => (
-    <div className="rounded-2xl bg-muted/50 px-3.5 py-2.5">
-      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{title}</p>
-      <div className="mt-0.5 space-y-0.5 text-[13px]">{children}</div>
-    </div>
-  )
-  const parts: ReactNode[] = []
-  // la descrizione, quando c'è
-  if (app?.tagline) parts.push(<p key="d" className="text-[14px] leading-relaxed">{app.tagline}</p>)
-  // la STRADA
-  const stradaBits: ReactNode[] = []
+  // PROVENIENZA: da dove arriva e con che strada
+  const provenance: ReactNode[] = []
+  // SICUREZZA: dove gira e chi vede i segreti
+  const security: ReactNode[] = []
+  // DATI: dove vanno — SOLO quando c'è un fatto da dire (mai inventato)
+  const data: ReactNode[] = []
   if (server) {
     const strada = stradaOfServer(server)
-    stradaBits.push(<p key="s">{stradaLabel(strada, stradaOrigin(server), lang)}</p>)
+    provenance.push(<p key="s">{stradaLabel(strada, stradaOrigin(server), lang)}</p>)
     const cmd = serverCommandLine(server) || server.url || ''
-    if (cmd) stradaBits.push(<p key="c" className="truncate font-mono text-[11px] text-muted-foreground" title={cmd}>{cmd}</p>)
+    if (cmd) provenance.push(<p key="c" className="truncate font-mono text-[12px] text-muted-foreground" title={cmd}>{cmd}</p>)
     if (server.source?.kind === 'npm') {
-      stradaBits.push(<p key="v" className="text-[12px] text-muted-foreground">{t`versione fissata ${server.source.version}`}</p>)
+      provenance.push(<p key="v" className="text-[12px] text-muted-foreground">{t`versione fissata ${server.source.version}`}</p>)
     }
-    if (server.egress) {
-      stradaBits.push(<p key="e" className="text-[12px] text-muted-foreground">{t`rete: solo ${server.egress.allowHosts.join(', ')}`}</p>)
-    }
-    // l'alternativa quando il catalogo ha il marchio doppio
-  } else if (via === 'direct') {
-    stradaBits.push(<p key="s">{t`MCP diretto di ${app!.app.name}`}</p>)
-    if (directConnector?.mcpUrl) {
-      const host = hostOf(directConnector.mcpUrl)
-      if (host) stradaBits.push(<p key="h" className="text-[12px] text-muted-foreground">{host} · {t`login con il tuo account`}</p>)
-    }
-    if (composioSlug) stradaBits.push(<p key="a" className="text-[12px] text-muted-foreground">{t`Alternativa: tramite Composio`}</p>)
-  } else {
-    stradaBits.push(<p key="s">{t`tramite Composio`}</p>)
-    if (app?.app.directId) stradaBits.push(<p key="a" className="text-[12px] text-muted-foreground">{t`Alternativa: MCP diretto`}</p>)
-  }
-  parts.push(<div key="strada">{row(t`Strada`, stradaBits)}</div>)
-  // la SICUREZZA
-  const secBits: ReactNode[] = []
-  if (server) {
-    if (server.source?.kind === 'npm' || server.box) secBits.push(<p key="w">{t`gira nel computer isolato`}</p>)
-    else secBits.push(<p key="w">{t`gira sul tuo Mac`}</p>)
+    security.push(<p key="w">{server.source?.kind === 'npm' || server.box ? t`gira nel computer isolato` : t`gira sul tuo Mac`}</p>)
     if (server.url) {
       const host = hostOf(server.url)
-      if (host) secBits.push(<p key="h">{t`i dati vanno a ${host}`}</p>)
+      if (host) data.push(<p key="h">{t`i dati vanno a ${host}`}</p>)
     }
-  } else if (via === 'direct' && directConnector?.mcpUrl) {
-    const host = hostOf(directConnector.mcpUrl)
-    if (host) secBits.push(<p key="h">{t`i dati vanno solo a ${host}`}</p>)
-    secBits.push(<p key="n">{t`nessun intermediario`}</p>)
+    if (server.egress) {
+      data.push(<p key="e" className="text-[12px] text-muted-foreground">{t`rete: solo ${server.egress.allowHosts.join(', ')}`}</p>)
+    }
+  } else if (via === 'direct') {
+    provenance.push(<p key="s">{t`MCP diretto di ${app!.app.name}`}</p>)
+    if (directConnector?.mcpUrl) {
+      const host = hostOf(directConnector.mcpUrl)
+      if (host) provenance.push(<p key="h" className="font-mono text-[12px] text-muted-foreground">{host}</p>)
+    }
+    if (composioSlug) provenance.push(<p key="a" className="text-[12px] text-muted-foreground">{t`Alternativa: tramite Composio`}</p>)
+    security.push(<p key="l">{t`login con il tuo account`}</p>)
+    security.push(<p key="n">{t`nessun intermediario`}</p>)
+    if (directConnector?.mcpUrl) {
+      const host = hostOf(directConnector.mcpUrl)
+      if (host) data.push(<p key="h">{t`i dati vanno solo a ${host}`}</p>)
+    }
   } else {
-    secBits.push(<p key="h">{t`i login e le azioni passano dai server di Composio`}</p>)
+    provenance.push(<p key="s">{t`tramite Composio`}</p>)
+    if (app?.app.directId) provenance.push(<p key="a" className="text-[12px] text-muted-foreground">{t`Alternativa: MCP diretto`}</p>)
+    security.push(<p key="h">{t`i login e le azioni passano dai server di Composio`}</p>)
   }
-  secBits.push(<p key="t">{t`i segreti stanno cifrati sul tuo Mac`}</p>)
-  parts.push(<div key="sec">{row(t`Sicurezza e accesso`, secBits)}</div>)
-  return <div className="space-y-3" data-testid="plugin-overview">{parts}</div>
+  security.push(<p key="t">{t`i segreti stanno cifrati sul tuo Mac`}</p>)
+  return (
+    <div className="@container" hidden={hidden} data-testid="plugin-overview">
+      <div className="space-y-6">
+        {/* la descrizione, quando c'è: in testa, 14px */}
+        {app?.tagline && <p className="text-[14px] leading-relaxed">{app.tagline}</p>}
+        <div>
+          <FactGroup label={t`Provenienza`}>{provenance}</FactGroup>
+          <FactGroup label={t`Sicurezza`}>{security}</FactGroup>
+          {data.length > 0 && <FactGroup label={t`Dati`}>{data}</FactGroup>}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 /** L'origine onesta del server, dal source (il nome del registro, il pacchetto npm, il plugin). */
@@ -602,4 +696,3 @@ function hostOf(url: string): string | null {
     return null
   }
 }
-
