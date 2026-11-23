@@ -11,6 +11,14 @@
 // pieno, il pulsante diventa «Collega» con la via OAuth attenuata. Ritocchi
 // (R2): le righe del modulo sono SEMPRE impilate (`stacked`) — i campi
 // vogliono la larghezza, a differenza degli interruttori del foglio.
+//
+// Fase design (DS4): ai token ciò che è del modulo — i campi e il bottone.
+// I campi sono alti 36 (h-control), col raggio dei controlli e il testo di
+// riga: prima erano larghi di raggio (14 px: quello delle superfici) e si
+// stringevano solo sopra i 640 px della finestra. Il bottone che collega è un
+// Button: l'azione che fa andare avanti, l'unica piena. I gruppi
+// (SettingsGroup, SettingsRow, SettingsAdvanced) restano quelli delle
+// Impostazioni, com'erano: li porta ai token chi li possiede.
 import { useEffect, useMemo, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { api } from '../store'
@@ -19,6 +27,10 @@ import { hostValueError, resolvedUrlOk, varLabel, varRole, setupCanConnect } fro
 import { SettingsAdvanced } from './settings/SettingsAdvanced'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
+import { Button } from './ui/button'
+
+/** Il campo del modulo (DS1): 36 px, il raggio dei controlli, il testo di riga, sul fondo chiaro della scheda tenue in cui sta. */
+const FIELD = 'h-control rounded-control bg-card px-3 text-body outline-none placeholder:text-muted-foreground'
 
 /** L'etichetta di una variabile, tradotta (varLabel decide la forma; R6: dal ruolo nel template, non dal nome). */
 function FieldLabel({ name, serverName, urlTemplate }: { name: string; serverName: string; urlTemplate?: string }): React.ReactNode {
@@ -41,10 +53,10 @@ function FieldError({ code }: { code: string }): React.ReactNode {
 /** L'esito sotto il pulsante (M3.3): la prova, il successo o l'errore umano. */
 export function ConnectOutcome({ state, result }: { state: 'idle' | 'connecting' | 'ok' | 'error'; result: McpServerConnectResult | null }): React.ReactNode {
   const { t } = useLingui()
-  if (state === 'connecting') return <p className="text-[13px] text-muted-foreground" data-testid="setup-connecting"><Trans>Provo a collegarmi…</Trans></p>
+  if (state === 'connecting') return <p className="text-small text-muted-foreground" data-testid="setup-connecting"><Trans>Provo a collegarmi…</Trans></p>
   if (state === 'ok') {
     return (
-      <p className="text-[13px] text-chart-2" data-testid="setup-connected">
+      <p className="text-small text-chart-2" data-testid="setup-connected">
         {t`✓ Collegato · ${(result?.tools ?? []).length} strumenti`}
       </p>
     )
@@ -53,7 +65,7 @@ export function ConnectOutcome({ state, result }: { state: 'idle' | 'connecting'
     const reason = result.reason
     return (
       <div className="space-y-0.5" data-testid="setup-error">
-        <p className="text-[13px] text-destructive">
+        <p className="text-small text-destructive">
           {reason === 'unreachable' ? <Trans>L'indirizzo non risponde: controllalo e riprova.</Trans>
             : reason === 'unauthorized' ? <Trans>Accesso rifiutato: il token non è valido.</Trans>
             : reason === 'not-mcp' ? <Trans>Questo non sembra un server MCP: controlla l'indirizzo.</Trans>
@@ -63,7 +75,7 @@ export function ConnectOutcome({ state, result }: { state: 'idle' | 'connecting'
             : <Trans>Non riesco a collegarmi: riprova.</Trans>}
         </p>
         {reason !== 'oauth' && reason !== 'invalid-value' && result.error && (
-          <p className="text-[11px] text-muted-foreground">{result.error}</p>
+          <p className="text-caption text-muted-foreground">{result.error}</p>
         )}
       </div>
     )
@@ -76,8 +88,8 @@ function SavedToken({ onChange, standalone = false }: { onChange(): void; standa
   const { t } = useLingui()
   return (
     <span className="block">
-      {standalone && <span data-testid="setup-token-label" className="mb-1 block text-[13px] font-medium">{t`Token di accesso (facoltativo)`}</span>}
-      <span className="flex items-center gap-2 text-[13px] text-muted-foreground">
+      {standalone && <span data-testid="setup-token-label" className="mb-1 block text-small font-medium">{t`Token di accesso (facoltativo)`}</span>}
+      <span className="flex items-center gap-2 text-small text-muted-foreground">
         <Trans>•••• salvato</Trans>
         <button type="button" className="underline underline-offset-2 transition hover:text-foreground" onClick={onChange}>
           <Trans>cambia</Trans>
@@ -101,13 +113,13 @@ function TokenField({ spec, token, setToken, standalone = false }: { spec: McpSe
   return (
     <label className="block min-w-0">
       {standalone
-        ? <span data-testid="setup-token-label" className="mb-1 block text-[13px] font-medium">{t`Token di accesso (facoltativo)`}</span>
+        ? <span data-testid="setup-token-label" className="mb-1 block text-small font-medium">{t`Token di accesso (facoltativo)`}</span>
         : <span className="sr-only">{t`Token di accesso (facoltativo)`}</span>}
       <input
         type="password"
         autoComplete="off"
         data-testid={`setup-token-${h.name.toLowerCase()}`}
-        className="h-9 w-full rounded-[10px] bg-card px-2.5 text-sm outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:w-64"
+        className={`${FIELD} w-64`}
         placeholder={t`Token di accesso (facoltativo)`}
         value={token}
         onChange={(e) => setToken(e.target.value)}
@@ -115,7 +127,7 @@ function TokenField({ spec, token, setToken, standalone = false }: { spec: McpSe
       {/* la descrizione solo quando il campo sta da SOLO (sotto «Avanzate»):
           nella riga «Token di accesso» la descrizione è già quella della riga,
           ripeterla sarebbe un doppione */}
-      {desc && standalone && <span className="mt-1 block max-w-md text-[12px] leading-snug text-muted-foreground">{desc}</span>}
+      {desc && standalone && <span className="mt-1 block max-w-md text-small text-muted-foreground">{desc}</span>}
     </label>
   )
 }
@@ -206,7 +218,7 @@ export function ServerSetupModule({ spec, onConnected, testid = 'server-setup' }
     : t`Collega`
 
   return (
-    <div data-testid={testid} className="space-y-3">
+    <div data-testid={testid} className="flex flex-col gap-block">
       {visibleVars.length > 0 && (
         <SettingsGroup label={<Trans>Configurazione</Trans>}>
           {visibleVars.map((f) => (
@@ -219,7 +231,7 @@ export function ServerSetupModule({ spec, onConnected, testid = 'server-setup' }
                 <span className="flex w-full min-w-0 flex-col gap-1">
                   <input
                     data-testid={`setup-field-${f.name}`}
-                    className="h-9 w-full rounded-[10px] bg-card px-2.5 text-sm outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    className={`${FIELD} w-full`}
                     placeholder={f.placeholder ?? f.name}
                     value={values[f.name] ?? ''}
                     onChange={(e) => {
@@ -235,7 +247,7 @@ export function ServerSetupModule({ spec, onConnected, testid = 'server-setup' }
                       }
                     }}
                   />
-                  {fieldErrors[f.name] ? <span className="text-[12px] text-destructive"><FieldError code={fieldErrors[f.name]} /></span> : null}
+                  {fieldErrors[f.name] ? <span className="text-small text-destructive"><FieldError code={fieldErrors[f.name]} /></span> : null}
                 </span>
               }
             />
@@ -271,15 +283,14 @@ export function ServerSetupModule({ spec, onConnected, testid = 'server-setup' }
         )}
         <div className="px-4 py-3">
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
+            {/* l'azione che fa andare avanti: l'unico bottone pieno del modulo */}
+            <Button
               data-testid="setup-connect"
-              className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-50"
               disabled={!canConnect || state === 'connecting'}
               onClick={() => void connect()}
             >
               {buttonLabel}
-            </button>
+            </Button>
             <ConnectOutcome state={state} result={result} />
           </div>
           {/* OAuth: il token sta sotto «Avanzate», CHIUSO — un errore di OAuth

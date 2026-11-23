@@ -193,7 +193,10 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
       source: 'plugin',
       id: p.name,
       name: p.name,
-      logo: '🧩',
+      // fase design (DS1): nessuna emoji nell'interfaccia. Un plugin non ha
+      // un file di logo nel repo: come i server, resta l'iniziale sulla
+      // piastrella tenue (prima qui c'era il puzzle come emoji)
+      logo: '',
       botsLabel: botsLabelOf(p.enabledFor ?? null, agents),
       status: 'connected',
       via: 'direct'

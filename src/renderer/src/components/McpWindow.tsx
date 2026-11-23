@@ -1,26 +1,56 @@
 // PL7 (fase plugin): i PEZZI della vecchia finestra «Server MCP» — la
 // finestra non esiste più (la casa è la pagina «Plugin»): qui restano
 // ManualServers (l'elenco dei server col test, il form stdio/http con le
-// variabili e l'import) e ImportList, Riusati dalla pagina così com'erano.
+// variabili e l'import) e ImportList, riusati dalla pagina così com'erano.
+//
+// Fase design (DS4): ai token, nella vista «Server MCP» della pagina.
+//  - I SERVER sono righe a filo come quelle di «I tuoi» (FlatRow): prima ogni
+//    server era un riquadro tondo col suo fondo, con il nome, il comando, le
+//    variabili e i bot su righe scritte a mano. Ora: logo 32 (o l'iniziale),
+//    il nome, e SOTTO le righe grigie (comando, variabili, bot) — la stessa
+//    casa della lista, così un server si riconosce in tutta la pagina.
+//  - LE AZIONI per riga restano ICONE (U1: nessun testo visibile, il nome
+//    accessibile) e sono Button ghost solo-icona: 32 px, tondi. Erano scritte
+//    qui a mano, 28 px, con un raggio loro.
+//  - I CAMPI sono alti 36 col raggio dei controlli (erano più bassi, e col
+//    testo più piccolo di quello dell'interfaccia); i bottoni sono Button.
+//  - IL BADGE del tipo di server non è più in maiuscoletto (DS1: nessun
+//    maiuscoletto): «stdio», «http», nel testo dei badge.
+//  - L'IMPORT è un pannello (racchiude ciò che è stato TROVATO e si sceglie)
+//    con gruppi a filo: il logo dell'app a 32, poi le righe.
 import { useEffect, useState } from 'react'
 import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { PlugZap, Pencil, Trash2, X, Terminal, Globe, KeyRound } from 'lucide-react'
 import { api, useStore } from '../store'
 import type { McpServerInfo, McpServerSecret } from '../../../shared/types'
 import { serverCommandLine } from '../lib/mcp-row'
+import { cn } from '../lib/utils'
 // E1 (fase mcp-env): le righe «Variabili» del form stdio
 import { envRowsFromServer, saveEnvPayload, newEnvRow, envNameLooksSecret, type EnvRow } from '../lib/mcp-env'
 // U2 (fase mcp-ui): l'elenco di import raggruppato per origine
 import { groupImportRows, importRowKey, type ImportGroupUi, type ImportScanRow, type ImportSkipRow, type ImportSource } from '../lib/mcp-import-groups'
 // K4 (fase team-bot): il logo VERO dell'app quando il file c'è nel repo
-import { logoUrlForName } from '../lib/app-logos'
+import { logoUrlForName, LOGO_CLASS, LOGO_TILE_CLASS } from '../lib/app-logos'
 // X2 (fase sicurezza-beta16): l'errore del test si mostra tagliato a 300
 import { clipErrorText } from '../../../main/mcp/error-category'
+import { FlatList, FlatRow } from './ui/flat-list'
+import { Section } from './ui/section'
+import { Button } from './ui/button'
 
 /**
- * U1 (fase mcp-ui): il bottone ICONA delle azioni per riga — 28×28, rounded-lg,
- * grigio, più scuro al passaggio (elimina rosso). NESSUN testo visibile:
- * l'etichetta tradotta sta in aria-label e title (l'accessibilità resta).
+ * Il campo di testo del form di un server (DS1): 36 px — la misura dei campi
+ * — col raggio dei controlli e il testo di riga. Sta sui pannelli tenui del
+ * form, dunque sul fondo della scheda; dentro il pannello delle variabili
+ * (che è già chiaro) si dice bg-muted.
+ */
+const FIELD = 'h-control min-w-0 rounded-control bg-card px-3 text-body outline-none placeholder:text-muted-foreground'
+
+/**
+ * U1 (fase mcp-ui): il bottone ICONA delle azioni per riga — grigio, più
+ * scuro al passaggio (elimina: rosso). NESSUN testo visibile: l'etichetta
+ * tradotta sta in aria-label e title (l'accessibilità resta).
+ * Fase design (DS4): è un Button ghost solo-icona — tondo, 32 px, il
+ * controllo piccolo di righe e fasce. Il colore lo porta la variante ghost.
  */
 function IconButton({ label, danger, testid, onClick, children }: {
   label: string
@@ -30,16 +60,18 @@ function IconButton({ label, danger, testid, onClick, children }: {
   children: React.ReactNode
 }): React.ReactNode {
   return (
-    <button
-      type="button"
-      className={`grid size-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted ${danger ? 'hover:text-destructive' : 'hover:text-foreground'}`}
+    <Button
+      variant="ghost"
+      size="sm"
+      icon
       aria-label={label}
       title={label}
       {...(testid ? { 'data-testid': testid } : {})}
+      className={danger ? 'hover:text-destructive' : undefined}
       onClick={onClick}
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -62,9 +94,9 @@ function RowTestStatus({ test }: { test: { ok: boolean; error?: string; tools?: 
       data-testid="mcp-row-status"
       title={tip}
     >
-      <span className={`h-2 w-2 shrink-0 rounded-full ${test.pending ? 'bg-muted-foreground/50' : test.ok ? 'bg-chart-2' : 'bg-destructive'}`} />
+      <span className={`size-2 shrink-0 rounded-full ${test.pending ? 'bg-muted-foreground/50' : test.ok ? 'bg-chart-2' : 'bg-destructive'}`} />
       {!test.pending && (
-        <span className={`max-w-48 truncate text-[11px] ${test.ok ? 'text-chart-2' : 'text-destructive'}`}>
+        <span className={`max-w-48 truncate text-small ${test.ok ? 'text-chart-2' : 'text-destructive'}`}>
           {test.ok ? <Plural value={n} one="# strumento" other="# strumenti" /> : error}
         </span>
       )}
@@ -82,7 +114,7 @@ export function ImportList({ groups, skipped = [], picks, onPicks, onImport, onC
   onCancel(): void
 }): React.ReactNode {
   const { t } = useLingui()
-  // U7: le otto app (i nomi propri non si tradiscono, il resto sì)
+  // U7: le otto app (i nomi propri non si traducono, il resto sì)
   const label = (s: ImportSource): string =>
     s === 'cursor' ? t`Cursor`
       : s === 'claude' ? t`Claude Desktop`
@@ -104,71 +136,77 @@ export function ImportList({ groups, skipped = [], picks, onPicks, onImport, onC
   const allRows = groups.flatMap((g) => g.rows)
   const n = allRows.filter((r) => !r.existing && picks[importRowKey(r)] === true).length
   return (
-    <div className="space-y-3 rounded-2xl bg-muted p-4" data-testid="mcp-import-list">
+    <div className="flex flex-col gap-3 rounded-surface bg-muted p-4" data-testid="mcp-import-list">
       {groups.map((g) => (
-        <section key={g.source} data-testid={`mcp-import-group-${g.source}`} className="space-y-2">
-          <header className="flex items-center gap-2 pt-1">
-            {/* K4: il logo dell'app quando il file c'è nel repo, altrimenti l'iniziale nel cerchio */}
+        <section key={g.source} data-testid={`mcp-import-group-${g.source}`} className="flex flex-col gap-2">
+          {/* la testa del gruppo: il logo dell'app (32, come i loghi delle righe) o l'iniziale, il nome, il percorso in grigio */}
+          <header className="flex items-center gap-row-gap py-1">
             {logoUrlForName(SOURCE_LOGO[g.source] ?? null)
-              ? <img src={logoUrlForName(SOURCE_LOGO[g.source] ?? null)!} alt="" data-testid="mcp-import-source-logo" className="grid size-6 shrink-0 place-items-center rounded-full object-cover dark:bg-white" />
-              : <span className="grid size-6 shrink-0 place-items-center rounded-full bg-card text-[11px] font-medium text-muted-foreground" aria-hidden="true">
+              ? <img src={logoUrlForName(SOURCE_LOGO[g.source] ?? null)!} alt="" data-testid="mcp-import-source-logo" className={`${LOGO_CLASS} size-8`} />
+              : <span className={`grid size-8 place-items-center ${LOGO_TILE_CLASS} text-body`} aria-hidden="true">
                   {label(g.source).slice(0, 1)}
                 </span>}
-            <span className="shrink-0 text-[13px] font-medium">{label(g.source)}</span>
-            <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title={g.sourcePath}>{g.sourcePath}</span>
+            <span className="shrink-0 text-body font-medium">{label(g.source)}</span>
+            <span className="min-w-0 flex-1 truncate text-small text-muted-foreground" title={g.sourcePath}>{g.sourcePath}</span>
           </header>
-          {g.rows.map((r) => (
-            <label key={importRowKey(r)} data-testid="mcp-import-row" className={`flex min-h-11 items-center gap-2.5 rounded-xl bg-card/70 px-3 ${r.existing ? 'opacity-60' : ''}`}>
-              <input
-                type="checkbox"
-                className="shrink-0"
-                data-testid="mcp-import-check"
-                checked={picks[importRowKey(r)] === true}
-                disabled={r.existing}
-                onChange={(e) => onPicks({ ...picks, [importRowKey(r)]: e.target.checked })}
-              />
-              {r.transport === 'stdio'
-                ? <Terminal className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                : <Globe className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm">{r.name}</span>
-                <span className="block truncate text-xs text-muted-foreground" title={r.detail}>{r.detail}</span>
-              </span>
-              {r.alsoIn.length > 0 && (
-                <span className="shrink-0 text-[11px] text-muted-foreground" data-testid="mcp-import-also">
-                  {t`anche in ${r.alsoIn.map(label).join(', ')}`}
+          <FlatList>
+            {g.rows.map((r) => (
+              // la riga È l'etichetta della casella: un clic ovunque la spunta
+              <label key={importRowKey(r)} data-testid="mcp-import-row" className={`flex min-h-row cursor-pointer items-center gap-row-gap py-row-pad ${r.existing ? 'opacity-60' : ''}`}>
+                {/* la casa da 32 tiene casella e tipo di server (comando locale o indirizzo): il testo della riga
+                    comincia dove comincia il nome del gruppo, sotto il suo logo */}
+                <span className="flex size-8 shrink-0 items-center justify-between">
+                  <input
+                    type="checkbox"
+                    className="shrink-0 accent-foreground"
+                    data-testid="mcp-import-check"
+                    checked={picks[importRowKey(r)] === true}
+                    disabled={r.existing}
+                    onChange={(e) => onPicks({ ...picks, [importRowKey(r)]: e.target.checked })}
+                  />
+                  {r.transport === 'stdio'
+                    ? <Terminal className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    : <Globe className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
                 </span>
-              )}
-              {r.secretCount > 0 && (
-                <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground" data-testid="mcp-import-secrets">
-                  <KeyRound className="size-3.5" aria-hidden="true" />
-                  <Plural value={r.secretCount} one="# segreto" other="# segreti" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-body font-medium">{r.name}</span>
+                  <span className="mt-0.5 block truncate text-small text-muted-foreground" title={r.detail}>{r.detail}</span>
                 </span>
-              )}
-              {r.existing && <span className="shrink-0 text-[11px] text-muted-foreground">{t`già collegato`}</span>}
-            </label>
-          ))}
-          {/* U7: le voci col formato non capito, SALTATE col motivo (senza casella) */}
-          {skipped.filter((k) => k.source === g.source).map((k) => (
-            <p key={`skip:${k.source}:${k.name}`} data-testid="mcp-import-skipped" className="min-h-6 rounded-xl px-3 py-1 text-[11px] text-muted-foreground/70">
-              {k.name} — {t`non importato`}: {skipReason(k.reason)}
-            </p>
-          ))}
+                {r.alsoIn.length > 0 && (
+                  <span className="shrink-0 text-small text-muted-foreground" data-testid="mcp-import-also">
+                    {t`anche in ${r.alsoIn.map(label).join(', ')}`}
+                  </span>
+                )}
+                {r.secretCount > 0 && (
+                  <span className="flex shrink-0 items-center gap-1 text-small text-muted-foreground" data-testid="mcp-import-secrets">
+                    <KeyRound className="size-4 shrink-0" aria-hidden="true" />
+                    <Plural value={r.secretCount} one="# segreto" other="# segreti" />
+                  </span>
+                )}
+                {r.existing && <span className="shrink-0 text-small text-muted-foreground">{t`già collegato`}</span>}
+              </label>
+            ))}
+            {/* U7: le voci col formato non capito, SALTATE col motivo (senza casella) */}
+            {skipped.filter((k) => k.source === g.source).map((k) => (
+              <p key={`skip:${k.source}:${k.name}`} data-testid="mcp-import-skipped" className="py-2 text-small text-muted-foreground">
+                {k.name} — {t`non importato`}: {skipReason(k.reason)}
+              </p>
+            ))}
+          </FlatList>
         </section>
       ))}
       <div className="flex items-center gap-2 pt-1">
-        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate text-small text-muted-foreground">
           <Plural value={n} one="# selezionato" other="# selezionati" />
         </span>
-        <button className="rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={onCancel}><Trans>Annulla</Trans></button>
-        <button
-          className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+        <Button variant="ghost" onClick={onCancel}><Trans>Annulla</Trans></Button>
+        <Button
           disabled={n === 0}
           data-testid="mcp-import-apply"
           onClick={onImport}
         >
           {t`Importa ${n}`}
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -209,7 +247,7 @@ export function ManualServers() {
   }
 
   /**
-   * U2: la conferma dell'import — le voci SPISTATE diventano server manuali
+   * U2: la conferma dell'import — le voci SPIATE diventano server manuali
    * (i doppioni non si sovrascrivono, i segreti vanno cifrati nel main).
    * U5: ogni server CREATO riceve subito il test di connessione (il pallino
    * della riga, verde «N strumenti» o rosso con l'errore).
@@ -237,88 +275,105 @@ export function ManualServers() {
   }
 
   return (
-    <div className="space-y-3">
-      <strong className="block font-display text-lg"><Trans>Server MCP personalizzato</Trans></strong>
-      <p className="text-xs text-muted-foreground"><Trans>Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati).</Trans></p>
-      {servers.map((s) => (
-        <div key={s.id} data-testid="mcp-server-row" className="rounded-2xl bg-muted px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            {/* K4: il logo dell'app quando c'è (per nome: «Mattermost»); se manca, la riga resta com'è */}
-            {logoUrlForName(s.name) && (
-              <img src={logoUrlForName(s.name)!} alt="" data-testid="mcp-server-logo" className="size-5 shrink-0 rounded-[5px] object-cover dark:bg-white" />
-            )}
-            <span className={`h-2 w-2 shrink-0 rounded-full ${s.enabled ? 'bg-chart-2' : 'bg-muted-foreground/40'}`} />
-            <span className="shrink-0 text-sm">{s.name}</span>
-            <span className="shrink-0 rounded-full bg-card px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{s.transport}</span>
-            {/* U7: le variabili riferite importate «da compilare» */}
-            {s.needsAuth && (
-              <span className="shrink-0 rounded-full bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground" data-testid="mcp-needs-fill">{t`da compilare`}</span>
-            )}
-            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" data-testid="mcp-row-command">{serverCommandLine(s)}</span>
-            {/* U1: il risultato del test come PALLINO nella riga (U5: parte da solo) */}
-            {tests[s.id] && <RowTestStatus test={tests[s.id]!} />}
-            {/* U1: test, modifica ed elimina come ICONE (niente testo visibile) */}
-            <IconButton label={t`Test della connessione`} testid="mcp-test-button" onClick={() => { void runTest(s.id) }}>
-              <PlugZap className="size-4" />
-            </IconButton>
-            <IconButton label={t`Modifica il server`} testid="mcp-edit-button" onClick={() => { setEdit(s); setEditBearer(''); setEnvRows(envRowsFromServer(s)) }}>
-              <Pencil className="size-4" />
-            </IconButton>
-            <IconButton label={t`Elimina il server`} testid="mcp-delete-button" danger onClick={async () => { await api.mcpDelete(s.id); await refresh() }}>
-              <Trash2 className="size-4" />
-            </IconButton>
-          </div>
-          {/* E1 (fase mcp-env): i NOMI delle variabili del server stdio — i
-              valori segreti mai, solo •••• */}
-          {(s.envSpec?.length ?? 0) > 0 && (
-            <p className="mt-0.5 truncate pl-4 text-[11px] text-muted-foreground" data-testid="mcp-env-names">
-              {s.envSpec!.map((v) => `${v.name} = ${v.secret ? '••••' : (s.envValues?.[v.name] ?? '')}`).join(', ')}
-            </p>
-          )}
-          {/* M2: da quali bot è usato, quando il dato esiste già (enabledFor) */}
-          {s.enabledFor && (
-            <p className="mt-0.5 truncate pl-4 text-[11px] text-muted-foreground">
-              {s.enabledFor.includes('*') ? t`usato da tutti i bot`
-                : t`usato da: ${s.enabledFor.map((id) => agents.find((a) => a.id === id)?.name ?? id).join(', ')}`}
-            </p>
-          )}
-        </div>
-      ))}
+    <Section size="body" title={<Trans>Server MCP personalizzato</Trans>}>
+      <p className="text-small text-muted-foreground"><Trans>Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati).</Trans></p>
+      {servers.length > 0 && (
+        <FlatList>
+          {servers.map((s) => (
+            <FlatRow
+              key={s.id}
+              testId="mcp-server-row"
+              leading={logoUrlForName(s.name)
+                // K4: il logo dell'app quando c'è (per nome: «Mattermost»); se manca, l'iniziale sulla piastrella tenue
+                ? <img src={logoUrlForName(s.name)!} alt="" data-testid="mcp-server-logo" className={`${LOGO_CLASS} size-8`} />
+                : <span className={`grid size-8 place-items-center ${LOGO_TILE_CLASS} text-body`} aria-hidden="true">{s.name.slice(0, 1).toUpperCase()}</span>}
+              title={(
+                <span className="flex items-center gap-2">
+                  {/* acceso o spento: il pallino davanti al nome */}
+                  <span className={`size-2 shrink-0 rounded-full ${s.enabled ? 'bg-chart-2' : 'bg-muted-foreground/40'}`} aria-hidden="true" />
+                  <span className="truncate">{s.name}</span>
+                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground">{s.transport}</span>
+                  {/* U7: le variabili riferite importate «da compilare» */}
+                  {s.needsAuth && (
+                    <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground" data-testid="mcp-needs-fill">{t`da compilare`}</span>
+                  )}
+                </span>
+              )}
+              subtitle={(
+                <>
+                  <span className="block truncate" data-testid="mcp-row-command">{serverCommandLine(s)}</span>
+                  {/* E1 (fase mcp-env): i NOMI delle variabili del server stdio — i
+                      valori segreti mai, solo •••• */}
+                  {(s.envSpec?.length ?? 0) > 0 && (
+                    <span className="block truncate" data-testid="mcp-env-names">
+                      {s.envSpec!.map((v) => `${v.name} = ${v.secret ? '••••' : (s.envValues?.[v.name] ?? '')}`).join(', ')}
+                    </span>
+                  )}
+                  {/* M2: da quali bot è usato, quando il dato esiste già (enabledFor) */}
+                  {s.enabledFor && (
+                    <span className="block truncate">
+                      {s.enabledFor.includes('*') ? t`usato da tutti i bot`
+                        : t`usato da: ${s.enabledFor.map((id) => agents.find((a) => a.id === id)?.name ?? id).join(', ')}`}
+                    </span>
+                  )}
+                </>
+              )}
+              trailing={(
+                <>
+                  {/* U1: il risultato del test come PALLINO nella riga (U5: parte da solo) */}
+                  {tests[s.id] && <RowTestStatus test={tests[s.id]!} />}
+                  {/* U1: test, modifica ed elimina come ICONE (niente testo visibile) */}
+                  <IconButton label={t`Test della connessione`} testid="mcp-test-button" onClick={() => { void runTest(s.id) }}>
+                    <PlugZap className="size-4" />
+                  </IconButton>
+                  <IconButton label={t`Modifica il server`} testid="mcp-edit-button" onClick={() => { setEdit(s); setEditBearer(''); setEnvRows(envRowsFromServer(s)) }}>
+                    <Pencil className="size-4" />
+                  </IconButton>
+                  <IconButton label={t`Elimina il server`} testid="mcp-delete-button" danger onClick={async () => { await api.mcpDelete(s.id); await refresh() }}>
+                    <Trash2 className="size-4" />
+                  </IconButton>
+                </>
+              )}
+            />
+          ))}
+        </FlatList>
+      )}
       {edit ? (
-        <div className="space-y-2 rounded-2xl bg-muted p-3">
-          <div className="grid grid-cols-2 gap-2">
-            <input className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`Nome (es. weather)`} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
-            <select className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" value={edit.transport} onChange={(e) => setEdit({ ...edit, transport: e.target.value as 'stdio' | 'http' })}>
+        <div className="flex flex-col gap-3 rounded-surface bg-muted p-4">
+          <div className="grid grid-cols-2 gap-3">
+            <input className={FIELD} placeholder={t`Nome (es. weather)`} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+            <select className={FIELD} value={edit.transport} onChange={(e) => setEdit({ ...edit, transport: e.target.value as 'stdio' | 'http' })}>
               <option value="stdio">{t`stdio (comando locale)`}</option>
               <option value="http">{t`http (URL)`}</option>
             </select>
           </div>
           {edit.transport === 'stdio' ? (
             <>
-              <div className="grid grid-cols-2 gap-2">
-                <input className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`Comando (es. node)`} value={edit.command ?? ''} onChange={(e) => setEdit({ ...edit, command: e.target.value })} />
-                <input className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`Argomenti separati per spazio`} value={(edit.args ?? []).join(' ')} onChange={(e) => setEdit({ ...edit, args: e.target.value ? e.target.value.split(/\s+/) : [] })} />
+              <div className="grid grid-cols-2 gap-3">
+                <input className={FIELD} placeholder={t`Comando (es. node)`} value={edit.command ?? ''} onChange={(e) => setEdit({ ...edit, command: e.target.value })} />
+                <input className={FIELD} placeholder={t`Argomenti separati per spazio`} value={(edit.args ?? []).join(' ')} onChange={(e) => setEdit({ ...edit, args: e.target.value ? e.target.value.split(/\s+/) : [] })} />
               </div>
               {/* E1 (fase mcp-env): le VARIABILI del server — righe nome = valore
                   con interruttore «segreto»; i segreti si salvano CIFRATI e in
                   modifica si sostituiscono, non si leggono */}
-              <div className="rounded-2xl bg-card p-2.5">
+              <div className="rounded-surface bg-card p-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium"><Trans>Variabili</Trans></span>
-                  <button
-                    type="button"
-                    className="rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                  <span className="text-body font-medium"><Trans>Variabili</Trans></span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="-mr-3"
                     data-testid="mcp-env-add"
                     onClick={() => setEnvRows((rows) => [...rows, newEnvRow()])}
                   >
                     <Trans>+ Variabile</Trans>
-                  </button>
+                  </Button>
                 </div>
-                <div data-testid="mcp-env-rows" className="mt-1.5 space-y-1.5">
+                <div data-testid="mcp-env-rows" className="mt-2 flex flex-col gap-2">
                   {envRows.map((row, i) => (
-                    <div key={i} className="flex items-center gap-1.5">
+                    <div key={i} className="flex items-center gap-2">
                       <input
-                        className="w-2/5 rounded-lg bg-muted px-2 py-1 text-xs outline-none"
+                        className={`${FIELD} w-2/5 bg-muted`}
                         placeholder={t`Nome (es. MATTERMOST_URL)`}
                         value={row.name}
                         onChange={(e) => {
@@ -326,46 +381,49 @@ export function ManualServers() {
                           setEnvRows((rows) => rows.map((r, j) => j === i ? { ...r, name, secret: name ? envNameLooksSecret(name) : r.secret } : r))
                         }}
                       />
-                      <span className="text-xs text-muted-foreground">=</span>
+                      <span className="text-small text-muted-foreground">=</span>
                       <input
-                        className="min-w-0 flex-1 rounded-lg bg-muted px-2 py-1 text-xs outline-none"
+                        className={cn(FIELD, 'min-w-0 flex-1 bg-muted')}
                         type={row.secret ? 'password' : 'text'}
                         placeholder={row.secret && row.saved ? t`salvato cifrato — scrivi per sostituire` : t`Valore`}
                         value={row.value}
                         onChange={(e) => setEnvRows((rows) => rows.map((r, j) => j === i ? { ...r, value: e.target.value } : r))}
                       />
-                      <label className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground" title={t`Segreto (salvato cifrato)`}>
+                      <label className="flex shrink-0 items-center gap-1 text-small text-muted-foreground" title={t`Segreto (salvato cifrato)`}>
                         <input
                           type="checkbox"
+                          className="shrink-0 accent-foreground"
                           data-testid="mcp-env-secret"
                           checked={row.secret}
                           onChange={(e) => setEnvRows((rows) => rows.map((r, j) => j === i ? { ...r, secret: e.target.checked } : r))}
                         />
                         <Trans>segreto</Trans>
                       </label>
-                      <button
-                        type="button"
-                        className="grid size-6 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-destructive"
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon
+                        className="-mr-2 hover:text-destructive"
                         aria-label={t`Togli la variabile`}
                         title={t`Togli la variabile`}
                         data-testid="mcp-env-remove"
                         onClick={() => setEnvRows((rows) => rows.filter((_, j) => j !== i))}
                       >
-                        <X className="size-3.5" />
-                      </button>
+                        <X className="size-4" />
+                      </Button>
                     </div>
                   ))}
                 </div>
-                <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
+                <p className="mt-2 text-small text-muted-foreground">
                   <Trans>Arrivano al comando come variabili d'ambiente. Quelle segrete si salvano cifrate: nell'elenco si vedono solo i nomi.</Trans>
                 </p>
               </div>
             </>
           ) : (
             <>
-              <input className="w-full rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`URL (es. http://localhost:3001/mcp)`} value={edit.url ?? ''} onChange={(e) => setEdit({ ...edit, url: e.target.value })} />
+              <input className={`${FIELD} w-full`} placeholder={t`URL (es. http://localhost:3001/mcp)`} value={edit.url ?? ''} onChange={(e) => setEdit({ ...edit, url: e.target.value })} />
               <input
-                className="w-full rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none"
+                className={`${FIELD} w-full`}
                 type="password"
                 placeholder={t`Bearer token (opzionale — salvato cifrato)`}
                 value={editBearer}
@@ -373,10 +431,9 @@ export function ManualServers() {
               />
             </>
           )}
-          <div className="flex justify-end gap-2 pt-1">
-            <button className="rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setEdit(null)}><Trans>Annulla</Trans></button>
-            <button
-              className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setEdit(null)}><Trans>Annulla</Trans></Button>
+            <Button
               onClick={async () => {
                 // E1: le Variabili — la dichiarazione e i valori NON segreti
                 // nella config, i SEGRETI solo nel parametro cifrato
@@ -395,33 +452,36 @@ export function ManualServers() {
               }}
             >
               <Trans>Salva</Trans>
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
-        <div className="space-y-2">
-          <button className="w-full rounded-2xl bg-muted px-3 py-2.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={() => { setEdit({ id: '', name: '', transport: 'stdio', command: '', args: [], enabled: true }); setEditBearer(''); setEnvRows([newEnvRow()]) }}>
-            <Trans>+ Aggiungi server MCP</Trans>
-          </button>
-          {/* E2 (fase mcp-env): i file di Cursor/Claude/ZCode si leggono SOLO
-              al clic di questo bottone, nel main; l'elenco che torna non ha
-              MAI valori segreti e niente è spuntato di default */}
-          <button
-            className="w-full rounded-2xl bg-muted px-3 py-2.5 text-sm text-muted-foreground transition hover:text-foreground"
-            data-testid="mcp-import-button"
-            onClick={async () => {
-              const scan = await api.mcpImportScan().catch(() => ({ rows: [] as ImportScanRow[], skipped: [] as ImportSkipRow[] }))
-              setImportRows(scan.rows as ImportScanRow[])
-              setImportSkipped((scan.skipped ?? []) as ImportSkipRow[])
-              setImportPicks({})
-            }}
-          >
-            <Trans>Importa da altre app</Trans>
-          </button>
+        <div className="flex flex-col gap-block">
+          {/* aggiungere un server è l'azione di questa vista; l'import è la seconda strada */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={() => { setEdit({ id: '', name: '', transport: 'stdio', command: '', args: [], enabled: true }); setEditBearer(''); setEnvRows([newEnvRow()]) }}>
+              <Trans>+ Aggiungi server MCP</Trans>
+            </Button>
+            {/* E2 (fase mcp-env): i file di Cursor/Claude/ZCode si leggono SOLO
+                al clic di questo bottone, nel main; l'elenco che torna non ha
+                MAI valori segreti e niente è spuntato di default */}
+            <Button
+              variant="secondary"
+              data-testid="mcp-import-button"
+              onClick={async () => {
+                const scan = await api.mcpImportScan().catch(() => ({ rows: [] as ImportScanRow[], skipped: [] as ImportSkipRow[] }))
+                setImportRows(scan.rows as ImportScanRow[])
+                setImportSkipped((scan.skipped ?? []) as ImportSkipRow[])
+                setImportPicks({})
+              }}
+            >
+              <Trans>Importa da altre app</Trans>
+            </Button>
+          </div>
           {importRows && (
             importRows.length === 0 ? (
-              <div className="rounded-2xl bg-muted p-4" data-testid="mcp-import-list">
-                <p className="text-xs text-muted-foreground"><Trans>Nessun server trovato nelle altre app.</Trans></p>
+              <div className="rounded-surface bg-muted p-4" data-testid="mcp-import-list">
+                <p className="text-small text-muted-foreground"><Trans>Nessun server trovato nelle altre app.</Trans></p>
               </div>
             ) : (
               <ImportList
@@ -436,6 +496,6 @@ export function ManualServers() {
           )}
         </div>
       )}
-    </div>
+    </Section>
   )
 }

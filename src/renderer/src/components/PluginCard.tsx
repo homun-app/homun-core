@@ -6,9 +6,25 @@
 // shared/permissions-tools) — nessun modello nuovo — e gli strumenti
 // dell'insieme fisso (invii, pagamenti) mostrano il lucchetto e non offrono
 // «Consenti sempre». MAI dati inventati: un campo che non c'è non si mostra.
+//
+// Fase design (DS4): la scheda è un guscio come la pagina (PageShell, sopra
+// di lei) con la testata di sistema (PageHeader). Cosa cambia, e perché:
+//  - LA RIGA DEI 52 è una come tutte: indietro · logo 40 · nome (text-page) ·
+//    azioni. Prima il nome e la riga grigia stavano AMBEDUE nella riga, che
+//    così era più alta di quella delle altre colonne. La riga grigia (e lo
+//    stato, il perché, l'esito della prova) stanno SOTTO, nella descrizione:
+//    è il posto che la testata dà a ciò che completa il titolo.
+//  - I CONTROLLI della testata sono alti 32 (la misura dei controlli piccoli,
+//    quella delle fasce di trascinamento): «Connetti» e «Riaccendi» sono
+//    Button, il menu ⋯ è un Button solo-icona tondo; l'interruttore (24) sta
+//    in una casa alta 32. Tutti no-drag: la riga trascina la finestra.
+//  - LE SCHEDE INTERNE stanno nella barra degli strumenti, ferme sopra il
+//    corpo che scorre; la loro sottolineatura corre per tutta la colonna.
+//  - I TITOLI DI GRUPPO («Account», «Bot che lo usano») sono sezioni: la
+//    stessa etichetta grigia che hanno altrove; le righe restano a filo.
 import { useEffect, useMemo, useReducer, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
-import { Lock, ChevronLeft, MoreHorizontal } from 'lucide-react'
+import { Lock, MoreHorizontal } from 'lucide-react'
 import { api, useStore, type PluginCardTab } from '../store'
 import { i18n } from '../lib/i18n'
 import type { McpServerInfo, PermissionsConfig, ConnectorInfo } from '../../../shared/types'
@@ -23,9 +39,10 @@ import { toolSlugOf } from '../../../main/mcp/slug'
 // A4 (fase approvazioni-chiare): il nome e la descrizione senza il prefisso
 // interno [MCP:<nome>] (mcpToolPresentation, la funzione unica della UI)
 import { mcpToolPresentation } from '../../../shared/tool-names'
-import { logoUrlForName } from '../lib/app-logos'
-// PP1 (fase plugin-pulita): l'invaso unico — «Rimuovi» e le autorizzazioni lunghe si raggiungono scorrendo
-import { PluginShell } from './plugin/PluginShell'
+import { logoUrlForName, LOGO_CLASS } from '../lib/app-logos'
+// Fase design (DS2): il guscio di ogni pagina a tutta area e la sua testata — «Rimuovi» e le autorizzazioni lunghe si raggiungono scorrendo
+import { PageShell } from './ui/page-shell'
+import { PageHeader } from './ui/page-header'
 // PP2 (fase plugin-pulita): il segreto si cambia dove vive il server — le righe «Account» e «variabili segrete»
 import { ServerAccountRow } from './plugin/ServerSecretRows'
 import { SECRET_EDIT_INITIAL, secretEditReducer, type SecretEditState, type ServerSecretNames } from '../lib/plugin-secret'
@@ -34,6 +51,8 @@ import { AppLogo, GatewayAccountsSection } from './AppsWindow'
 // PP4 (fase plugin-pulita): la scheda a filo — righe e schede come testo, niente riquadri
 import { FlatList, FlatRow } from './ui/flat-list'
 import { UnderlineTabs } from './ui/underline-tabs'
+import { Section } from './ui/section'
+import { Button } from './ui/button'
 // X2 (fase sicurezza-beta16): l'errore dell'ultima prova si mostra tagliato a 300
 import { clipErrorText } from '../../../main/mcp/error-category'
 
@@ -64,6 +83,11 @@ export interface PluginCardInitial {
   /** PP4: la conferma di Rimuovi già aperta (per rendere «Rimuovi davvero» nei test) */
   confirmRemove?: boolean
 }
+
+/** Le voci del menu ⋯ della testata: il raggio è quello delle celle selezionate (8 px), il testo di riga — come il menu «Aggiungi» della pagina. */
+const MENU_ITEM = 'rounded-control px-3 py-2 text-left text-body transition hover:bg-muted'
+/** Un'azione rossa che non riempie: testo (ghost) nel colore del distruttivo, anche al passaggio. */
+const QUIET_RED = 'text-destructive hover:bg-destructive/10 hover:text-destructive'
 
 export function PluginCard({ app, server, initial, initialTab, directEnabledFor, onConnect, onClose, onChanged }: {
   /** il connettore del catalogo (diretto o Composio) */
@@ -163,7 +187,7 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
 
   /** V4 (fase stato-vivo): Riaccendi — il server spento NON dall'utente si
    *  riaccende e parte il test U5 di mcp:save (che se fallisce lascia il
-   *  server ACCESO con «non parte · Vedi perché»: non si rispegne da solo). */
+   *  server ACCESO con «non parte · Vedi perché»: non si rispegge da solo). */
   const reenableServer = (): void => {
     if (!server) return
     const { disabledReason: _r, ...rest } = server
@@ -174,7 +198,7 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
   // Server MCP: scrive enabled — OFF scrive disabledReason 'user' (la parola
   // dell'utente: migrazioni e riparazioni non lo toccano), ON toglie il
   // motivo e parte il test U5 di mcp:save (se fallisce resta ACCESO con
-  // «non parte · Vedi perché», non si rispegne da solo). Connettore
+  // «non parte · Vedi perché», non si rispegge da solo). Connettore
   // Composio: l'enabled della VOCE, senza scollegare l'account.
   const composioSlug = !isServer && app!.row.app.composioSlug ? app!.row.app.composioSlug : null
   const composioDisabled = new Set(composio?.disabled ?? [])
@@ -235,124 +259,126 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
   // l'interruttore in testata: server MCP e connettori Composio; per lo spento da Homun prende il suo posto «Riaccendi» (com'è la lista)
   const reenable = isServer && state.action === 'reenable'
   const showToggle = activeChecked !== null && !reenable
+  const removeLabel = confirmRemove
+    ? (isServer ? <Trans>Rimuovi davvero</Trans> : <Trans>Scollega davvero</Trans>)
+    : (isServer ? <Trans>Rimuovi</Trans> : <Trans>Scollega</Trans>)
 
   return (
-    <PluginShell
+    <PageShell
+      width="page"
       testId="plugin-card"
-      size="md"
       z={30}
-      columnClassName="px-6 py-5"
       header={(
-        // la testata (PP4): indietro · logo 40 · nome + riga grigia · a destra l'interruttore senza etichetta e il menu ⋯
-        <div className="flex items-center gap-3" data-testid="plugin-card-head">
-          <button
-            type="button"
-            className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            aria-label={t`Torna ai plugin`}
-            onClick={onClose}
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          {logoUrl
-            ? <img src={logoUrl} alt="" className="size-10 shrink-0 rounded-[11px] object-cover dark:bg-white" />
-            : <AppLogo logo={app?.row.app.logo ?? null} name={name} className="size-10 text-base" />}
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-lg font-medium">{name}</span>
-            <span className="block truncate text-[13px] text-muted-foreground" data-testid="plugin-card-gray">{cardGrayLineOf(isServer ? { server } : { app: { name: app!.row.app.name, via: app!.row.app.via } }, lang)}</span>
-            {!stateOk && (
-              <span className={`block text-[13px] ${stateTone}`} data-testid="plugin-card-state">{state.label}</span>
-            )}
-            {why !== '' && <span className="block truncate text-[12px] text-muted-foreground" title={why} data-testid="plugin-card-why">{why}</span>}
-            {lastTest !== null && (
-              <span className={`block truncate text-[12px] ${lastTest.ok ? 'text-chart-2' : 'text-destructive'}`} title={lastTest.error ?? ''} data-testid="plugin-card-test-result">
-                {lastTest.ok ? t`collegato · ${(lastTest.tools ?? []).length} strumenti` : clipErrorText(lastTest.error ?? '')}
-              </span>
-            )}
-          </span>
-          {/* PL4: non collegata — Connetti propone la PRIMA strada disponibile
-              (la decisione sta in apps:connect, come la riga del catalogo) */}
-          {!isServer && app!.row.connected === null && onConnect && (
-            <button
-              type="button"
-              className="h-8 shrink-0 rounded-full bg-muted px-4 text-[13px] text-foreground transition hover:bg-accent"
-              data-testid={`plugin-card-connect-${app!.row.app.id}`}
-              onClick={() => onConnect(app!.row)}
-            >
-              <Trans>Connetti</Trans>
-            </button>
+        // la testata (PP4, fase design): indietro · logo 40 · nome · a destra le azioni; SOTTO la riga, la riga grigia e lo stato
+        <PageHeader
+          testId="plugin-card-head"
+          back={{ onClick: onClose, label: t`Torna ai plugin` }}
+          logo={logoUrl
+            ? <img src={logoUrl} alt="" className={`${LOGO_CLASS} size-10`} />
+            : <AppLogo logo={app?.row.app.logo ?? null} name={name} className="size-10 text-reading" />}
+          title={name}
+          actions={(
+            <>
+              {/* PL4: non collegata — Connetti propone la PRIMA strada disponibile
+                  (la decisione sta in apps:connect, come la riga del catalogo) */}
+              {!isServer && app!.row.connected === null && onConnect && (
+                <Button variant="secondary" size="sm" className="no-drag" data-testid={`plugin-card-connect-${app!.row.app.id}`} onClick={() => onConnect(app!.row)}>
+                  <Trans>Connetti</Trans>
+                </Button>
+              )}
+              {/* V5 (fase stato-vivo): l'interruttore — senza etichetta accanto (PP4; l'aria-label sì).
+                  Sta in una casa alta 32: la misura dei controlli della testata */}
+              {showToggle && (
+                <span className="no-drag flex h-control-sm items-center">
+                  <Toggle checked={activeChecked} onChange={setActive} label={t`Attivo`} testId="plugin-card-active" />
+                </span>
+              )}
+              {/* V4 (fase stato-vivo): spento da Homun → Riaccendi, che accende e
+                  testa; spento dall'utente non si propone niente (è la sua parola) */}
+              {reenable && (
+                <Button size="sm" className="no-drag" data-testid="plugin-card-reenable" onClick={reenableServer}>
+                  <Trans>Riaccendi</Trans>
+                </Button>
+              )}
+              {/* il menu ⋯: Prova la connessione · Ricollega (OAuth) · Rimuovi/Scollega con conferma.
+                  Sta SEMPRE nel DOM (nascosto quando chiuso): le sonde lo aprono col clic, i test lo leggono senza clic */}
+              <div className="no-drag relative">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon
+                  className="no-drag"
+                  aria-label={t`Altre azioni`}
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  data-testid="plugin-card-menu-trigger"
+                  onClick={() => setMenuOpen((o) => !o)}
+                >
+                  <MoreHorizontal className="size-4" />
+                </Button>
+                <div
+                  role="menu"
+                  aria-label={t`Altre azioni`}
+                  className={`absolute right-0 top-full z-30 mt-1.5 flex w-64 flex-col gap-0.5 rounded-surface bg-card p-1 shadow-soft ${menuOpen ? '' : 'hidden'}`}
+                  data-testid="plugin-card-menu"
+                >
+                  {isServer && (
+                    <button type="button" role="menuitem" className={MENU_ITEM} data-testid="plugin-card-test" onClick={() => { setMenuOpen(false); runTest() }}>
+                      <Trans>Prova la connessione</Trans>
+                    </button>
+                  )}
+                  {canReconnect && (
+                    <button type="button" role="menuitem" className={MENU_ITEM} data-testid="plugin-card-reconnect" onClick={() => { setMenuOpen(false); reconnect() }}>
+                      <Trans>Ricollega</Trans>
+                    </button>
+                  )}
+                  {confirmRemove ? (
+                    <>
+                      <button type="button" role="menuitem" className={`${MENU_ITEM} ${QUIET_RED}`} data-testid="plugin-card-remove-confirm" onClick={() => { setMenuOpen(false); void remove() }}>
+                        {removeLabel}
+                      </button>
+                      <button type="button" role="menuitem" className={MENU_ITEM} data-testid="plugin-card-remove-cancel" onClick={() => { setMenuOpen(false); setConfirmRemove(false) }}>
+                        <Trans>Annulla</Trans>
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" role="menuitem" className={`${MENU_ITEM} ${QUIET_RED}`} data-testid="plugin-card-remove" onClick={() => setConfirmRemove(true)}>
+                      {removeLabel}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </>
           )}
-          {/* V5 (fase stato-vivo): l'interruttore — senza etichetta accanto (PP4; l'aria-label sì) */}
-          {showToggle && <Toggle checked={activeChecked} onChange={setActive} label={t`Attivo`} testId="plugin-card-active" />}
-          {/* V4 (fase stato-vivo): spento da Homun → Riaccendi, che accende e
-              testa; spento dall'utente non si propone niente (è la sua parola) */}
-          {reenable && (
-            <button
-              type="button"
-              className="h-8 shrink-0 rounded-full bg-foreground px-4 text-[13px] font-medium text-background transition hover:opacity-90"
-              data-testid="plugin-card-reenable"
-              onClick={reenableServer}
-            >
-              <Trans>Riaccendi</Trans>
-            </button>
+          description={(
+            <>
+              {/* la riga grigia: «tipo · strada · origine», la stessa della lista */}
+              <span className="block truncate" data-testid="plugin-card-gray">{cardGrayLineOf(isServer ? { server } : { app: { name: app!.row.app.name, via: app!.row.app.via } }, lang)}</span>
+              {!stateOk && (
+                <span className={`block truncate ${stateTone}`} data-testid="plugin-card-state">{state.label}</span>
+              )}
+              {why !== '' && <span className="block truncate text-muted-foreground" title={why} data-testid="plugin-card-why">{why}</span>}
+              {lastTest !== null && (
+                <span className={`block truncate ${lastTest.ok ? 'text-chart-2' : 'text-destructive'}`} title={lastTest.error ?? ''} data-testid="plugin-card-test-result">
+                  {lastTest.ok ? t`collegato · ${(lastTest.tools ?? []).length} strumenti` : clipErrorText(lastTest.error ?? '')}
+                </span>
+              )}
+            </>
           )}
-          {/* il menu ⋯: Prova la connessione · Ricollega (OAuth) · Rimuovi/Scollega con conferma.
-              Sta SEMPRE nel DOM (nascosto quando chiuso): le sonde lo aprono col clic, i test lo leggono senza clic */}
-          <div className="relative">
-            <button
-              type="button"
-              className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              aria-label={t`Altre azioni`}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              data-testid="plugin-card-menu-trigger"
-              onClick={() => setMenuOpen((o) => !o)}
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
-            <div
-              role="menu"
-              aria-label={t`Altre azioni`}
-              className={`absolute right-0 top-full z-30 mt-1.5 flex w-64 flex-col gap-0.5 rounded-2xl bg-card p-1.5 shadow-soft ${menuOpen ? '' : 'hidden'}`}
-              data-testid="plugin-card-menu"
-            >
-              {isServer && (
-                <button type="button" role="menuitem" className={MENU_ITEM} data-testid="plugin-card-test" onClick={() => { setMenuOpen(false); runTest() }}>
-                  <Trans>Prova la connessione</Trans>
-                </button>
-              )}
-              {canReconnect && (
-                <button type="button" role="menuitem" className={MENU_ITEM} data-testid="plugin-card-reconnect" onClick={() => { setMenuOpen(false); reconnect() }}>
-                  <Trans>Ricollega</Trans>
-                </button>
-              )}
-              {confirmRemove ? (
-                <>
-                  <button type="button" role="menuitem" className={`${MENU_ITEM} text-destructive`} data-testid="plugin-card-remove-confirm" onClick={() => { setMenuOpen(false); void remove() }}>
-                    {isServer ? <Trans>Rimuovi davvero</Trans> : <Trans>Scollega davvero</Trans>}
-                  </button>
-                  <button type="button" role="menuitem" className={MENU_ITEM} data-testid="plugin-card-remove-cancel" onClick={() => { setMenuOpen(false); setConfirmRemove(false) }}>
-                    <Trans>Annulla</Trans>
-                  </button>
-                </>
-              ) : (
-                <button type="button" role="menuitem" className={`${MENU_ITEM} text-destructive`} data-testid="plugin-card-remove" onClick={() => setConfirmRemove(true)}>
-                  {isServer ? <Trans>Rimuovi</Trans> : <Trans>Scollega</Trans>}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+        />
       )}
       toolbar={(
-        // le schede interne come testo (PP4)
+        // le schede interne come testo (PP4), nella barra degli strumenti: la sottolineatura corre per tutta la colonna
         <UnderlineTabs<PluginCardTab>
           tabs={[['overview', t`Panoramica`], ['permissions', t`Autorizzazioni`], ['accounts', t`Account e bot`]]}
           value={tab}
           onChange={setTab}
           label={t`Schede del plugin`}
           testId="plugin-card-tabs"
+          className="w-full"
         />
       )}
+      contentClassName="flex flex-col gap-section pb-6"
     >
       {/* i pannelli stanno TUTTI nel DOM (nascosti quando inattivi): le
           sonde aprono la scheda col clic, i test leggono senza clic */}
@@ -367,13 +393,13 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
       />
 
       {/* --- AUTORIZZAZIONI: una tabella a filo --- */}
-      <div className="space-y-6" hidden={tab !== 'permissions'} data-testid="plugin-permissions">
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
+      <div className="flex flex-col gap-block" hidden={tab !== 'permissions'} data-testid="plugin-permissions">
+        <p className="text-small text-muted-foreground">
           <Trans>Scegli cosa i bot possono fare da soli. Le regole valgono per tutti i bot che usano questo plugin.</Trans>
         </p>
-        {tools === null && <p className="text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>}
+        {tools === null && <p className="text-small text-muted-foreground"><Trans>caricamento…</Trans></p>}
         {tools !== null && tools.length === 0 && (
-          <p className="text-sm text-muted-foreground"><Trans>Nessuno strumento elencato.</Trans></p>
+          <p className="text-small text-muted-foreground"><Trans>Nessuno strumento elencato.</Trans></p>
         )}
         {(['read', 'write', 'other'] as const).map((g) => {
           const list = groups[g]
@@ -384,7 +410,7 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
               <FlatList>
                 {/* la riga d'intestazione: nome del gruppo · N, il selettore del gruppo a destra */}
                 <div className="flex items-center justify-between gap-3 py-2" data-testid={`plugin-group-head-${g}`}>
-                  <h3 className="text-[13px] text-muted-foreground">
+                  <h3 className="text-caption font-medium text-muted-foreground">
                     {label} <span>· {list.length}</span>
                   </h3>
                   <GroupSelect
@@ -401,9 +427,9 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
                     testId={`plugin-tool-${tool.name}`}
                     title={(
                       <span className="flex items-center gap-1.5">
-                        <span className="truncate text-[14px]">{tool.name}</span>
+                        <span className="truncate">{tool.name}</span>
                         {tool.fixedAsk && (
-                          <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label={t`azione dell'insieme fisso: chiede sempre`} />
+                          <Lock className="size-4 shrink-0 text-muted-foreground" aria-label={t`azione dell'insieme fisso: chiede sempre`} />
                         )}
                       </span>
                     )}
@@ -423,13 +449,13 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
           )
         })}
         {/* la frase F8 (vera nel codice: liftContaminatedAllow) */}
-        <p className="text-[12px] leading-relaxed text-muted-foreground">
+        <p className="text-small text-muted-foreground">
           <Trans>Le scelte: Consenti sempre · Chiedi · Blocca. Dopo che un bot ha letto contenuti non fidati, le azioni di scrittura tornano a chiedere anche se le hai consentite.</Trans>
         </p>
       </div>
 
       {/* --- ACCOUNT E BOT: riga Account (con PP2), poi i bot a filo --- */}
-      <div className="space-y-6" hidden={tab !== 'accounts'} data-testid="plugin-accounts">
+      <div className="flex flex-col gap-block" hidden={tab !== 'accounts'} data-testid="plugin-accounts">
         {isServer ? (
           <ServerAccountRow
             server={server}
@@ -439,68 +465,67 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
             onChanged={() => { onChanged(); reloadSecretNames() }}
           />
         ) : (
-          <div>
-            <h3 className="text-[13px] text-muted-foreground"><Trans>Account</Trans></h3>
-            <FlatList className="mt-1">
-              {gatewayApp === null && (
+          <Section title={<Trans>Account</Trans>}>
+            {gatewayApp === null && (
+              <FlatList>
                 <FlatRow
                   title={keyApp ? t`con la chiave di progetto` : t`con il tuo account`}
                   subtitle={!stateOk ? <span className={stateTone}>{state.label}</span> : undefined}
                 />
-              )}
-            </FlatList>
-            {!isServer && gatewayApp && (
+              </FlatList>
+            )}
+            {/* gli account del gateway (CA2): una riga per account, a filo */}
+            {gatewayApp && (
               <GatewayAccountsSection app={gatewayApp} appName={name} onChanged={onChanged} />
             )}
-          </div>
+          </Section>
         )}
 
         {/* i bot che lo usano: l'interruttore per bot (enabledFor) — «Tutti i bot» e un bot per riga */}
-        <div>
-          <h3 className="text-[13px] text-muted-foreground"><Trans>Bot che lo usano</Trans></h3>
+        <Section title={<Trans>Bot che lo usano</Trans>}>
           {isServer ? (
-            <BotRows serverId={server.id} enabledFor={server.enabledFor} agents={agents} onChanged={onChanged} className="mt-1" />
+            <BotRows serverId={server.id} enabledFor={server.enabledFor} agents={agents} onChanged={onChanged} testId="plugin-card-bots" />
           ) : app!.row.app.via === 'direct' && app!.row.app.directId ? (
-            <BotRows serverId={app!.row.app.directId} enabledFor={directEnabledFor} agents={agents} onChanged={onChanged} className="mt-1" />
+            <BotRows serverId={app!.row.app.directId} enabledFor={directEnabledFor} agents={agents} onChanged={onChanged} testId="plugin-card-bots" />
           ) : (
-            <FlatList className="mt-1">
+            <FlatList>
               <FlatRow title={<Trans>Tutti i bot</Trans>} />
             </FlatList>
           )}
-        </div>
+        </Section>
 
-        {/* Rimuovi in fondo come testo rosso (PP1: ora si raggiunge scorrendo) — e anche nel menu ⋯ */}
+        {/* Rimuovi in fondo come testo rosso (PP1: ora si raggiunge scorrendo) — e anche nel menu ⋯.
+            -mr-3: il testo finisce sul bordo destro del contenuto (il bottone ha il suo respiro interno) */}
         <div className="flex justify-end border-t border-border/50 pt-3">
-          <button
-            type="button"
-            className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`-mr-3 ${QUIET_RED}`}
             data-testid="plugin-card-remove-bottom"
             onClick={() => { if (confirmRemove) void remove(); else setConfirmRemove(true) }}
           >
-            {confirmRemove ? (isServer ? <Trans>Rimuovi davvero</Trans> : <Trans>Scollega davvero</Trans>) : (isServer ? <Trans>Rimuovi</Trans> : <Trans>Scollega</Trans>)}
-          </button>
+            {removeLabel}
+          </Button>
         </div>
       </div>
-    </PluginShell>
+    </PageShell>
   )
 }
 
 // ---- i pezzi piccoli ----
-
-/** Le voci del menu ⋯ della testata. */
-const MENU_ITEM = 'rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted'
 
 /**
  * «Bot che lo usano» A FILO (PP4): la prima riga «Tutti i bot» con
  * l'interruttore, poi UN bot per riga — nome a sinistra, interruttore a
  * destra. Scrive enabledFor del server (server MCP o connettore diretto).
  */
-function BotRows({ serverId, enabledFor: raw, agents, onChanged, className }: {
+function BotRows({ serverId, enabledFor: raw, agents, onChanged, testId }: {
   serverId: string
   enabledFor: string[] | null | undefined
   agents: Array<{ id: string; name: string }>
   onChanged(): void
-  className?: string
+  /** il testid dell'elenco */
+  testId?: string
 }): ReactNode {
   const { t } = useLingui()
   const enabledFor = raw ?? ['*']
@@ -509,7 +534,7 @@ function BotRows({ serverId, enabledFor: raw, agents, onChanged, className }: {
     void api.connectorsSetEnabledFor('server', serverId, ids).then(() => onChanged())
   }
   return (
-    <FlatList className={className} testId="plugin-card-bots">
+    <FlatList testId={testId}>
       <FlatRow title={<Trans>Tutti i bot</Trans>} trailing={<Toggle label={t`Tutti i bot`} checked={all} onChange={(v) => save(v ? ['*'] : [])} />} />
       {agents.map((a) => (
         <FlatRow
@@ -537,7 +562,9 @@ function BotRows({ serverId, enabledFor: raw, agents, onChanged, className }: {
 
 /** Il selettore a tre scelte (l'insieme fisso ne ha due: mai «Consenti sempre»).
  *  A4 (fase approvazioni-chiare): col valore «Misto» quando le regole del
- *  gruppo differiscono — sceglierne uno vale per tutti. */
+ *  gruppo differiscono — sceglierne uno vale per tutti.
+ *  Fase design (DS4): alto 32 (il controllo piccolo: sta in una riga da 52) col
+ *  raggio dei controlli — prima era una pillola col testo a 12 px. */
 function GroupSelect({ testid, fixed, value, onChange }: {
   testid: string
   fixed: boolean
@@ -551,7 +578,7 @@ function GroupSelect({ testid, fixed, value, onChange }: {
   if (value === GROUP_VALUE_MIXED) options.unshift([GROUP_VALUE_MIXED, t`Misto`])
   return (
     <select
-      className="shrink-0 rounded-full bg-card px-2.5 py-1 text-[12px] outline-none"
+      className="h-control-sm shrink-0 rounded-control bg-card pl-3 pr-2 text-body outline-none"
       data-testid={testid}
       value={value}
       onChange={(e) => onChange(e.target.value as PermissionsConfig['default'])}
@@ -604,8 +631,8 @@ function groupValueOf(perms: PermissionsConfig | null, list: CardTool[]): Permis
 function FactGroup({ label, children }: { label: ReactNode; children: ReactNode }): ReactNode {
   return (
     <div className="grid grid-cols-1 gap-x-8 border-t border-border/50 py-3 @[560px]:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-      <p className="text-[13px] text-muted-foreground">{label}</p>
-      <div className="mt-1 min-w-0 space-y-0.5 text-[14px] @[560px]:mt-0">{children}</div>
+      <p className="text-small text-muted-foreground">{label}</p>
+      <div className="mt-1 flex min-w-0 flex-col gap-0.5 text-body @[560px]:mt-0">{children}</div>
     </div>
   )
 }
@@ -631,9 +658,9 @@ function Overview({ app, server, directConnector, via, composioSlug, hidden }: {
     const strada = stradaOfServer(server)
     provenance.push(<p key="s">{stradaLabel(strada, stradaOrigin(server), lang)}</p>)
     const cmd = serverCommandLine(server) || server.url || ''
-    if (cmd) provenance.push(<p key="c" className="truncate font-mono text-[12px] text-muted-foreground" title={cmd}>{cmd}</p>)
+    if (cmd) provenance.push(<p key="c" className="truncate font-mono text-small text-muted-foreground" title={cmd}>{cmd}</p>)
     if (server.source?.kind === 'npm') {
-      provenance.push(<p key="v" className="text-[12px] text-muted-foreground">{t`versione fissata ${server.source.version}`}</p>)
+      provenance.push(<p key="v" className="text-small text-muted-foreground">{t`versione fissata ${server.source.version}`}</p>)
     }
     security.push(<p key="w">{server.source?.kind === 'npm' || server.box ? t`gira nel computer isolato` : t`gira sul tuo Mac`}</p>)
     if (server.url) {
@@ -641,15 +668,15 @@ function Overview({ app, server, directConnector, via, composioSlug, hidden }: {
       if (host) data.push(<p key="h">{t`i dati vanno a ${host}`}</p>)
     }
     if (server.egress) {
-      data.push(<p key="e" className="text-[12px] text-muted-foreground">{t`rete: solo ${server.egress.allowHosts.join(', ')}`}</p>)
+      data.push(<p key="e" className="text-small text-muted-foreground">{t`rete: solo ${server.egress.allowHosts.join(', ')}`}</p>)
     }
   } else if (via === 'direct') {
     provenance.push(<p key="s">{t`MCP diretto di ${app!.app.name}`}</p>)
     if (directConnector?.mcpUrl) {
       const host = hostOf(directConnector.mcpUrl)
-      if (host) provenance.push(<p key="h" className="font-mono text-[12px] text-muted-foreground">{host}</p>)
+      if (host) provenance.push(<p key="h" className="font-mono text-small text-muted-foreground">{host}</p>)
     }
-    if (composioSlug) provenance.push(<p key="a" className="text-[12px] text-muted-foreground">{t`Alternativa: tramite Composio`}</p>)
+    if (composioSlug) provenance.push(<p key="a" className="text-small text-muted-foreground">{t`Alternativa: tramite Composio`}</p>)
     security.push(<p key="l">{t`login con il tuo account`}</p>)
     security.push(<p key="n">{t`nessun intermediario`}</p>)
     if (directConnector?.mcpUrl) {
@@ -658,15 +685,15 @@ function Overview({ app, server, directConnector, via, composioSlug, hidden }: {
     }
   } else {
     provenance.push(<p key="s">{t`tramite Composio`}</p>)
-    if (app?.app.directId) provenance.push(<p key="a" className="text-[12px] text-muted-foreground">{t`Alternativa: MCP diretto`}</p>)
+    if (app?.app.directId) provenance.push(<p key="a" className="text-small text-muted-foreground">{t`Alternativa: MCP diretto`}</p>)
     security.push(<p key="h">{t`i login e le azioni passano dai server di Composio`}</p>)
   }
   security.push(<p key="t">{t`i segreti stanno cifrati sul tuo Mac`}</p>)
   return (
     <div className="@container" hidden={hidden} data-testid="plugin-overview">
-      <div className="space-y-6">
-        {/* la descrizione, quando c'è: in testa, 14px */}
-        {app?.tagline && <p className="text-[14px] leading-relaxed">{app.tagline}</p>}
+      <div className="flex flex-col gap-block">
+        {/* la descrizione, quando c'è: in testa, il testo di riga */}
+        {app?.tagline && <p className="text-body">{app.tagline}</p>}
         <div>
           <FactGroup label={t`Provenienza`}>{provenance}</FactGroup>
           <FactGroup label={t`Sicurezza`}>{security}</FactGroup>

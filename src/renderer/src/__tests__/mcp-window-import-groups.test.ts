@@ -101,13 +101,16 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 const WIN_SRC = readFileSync(fileURLToPath(new URL('../components/McpWindow.tsx', import.meta.url)), 'utf8')
 describe('U2: le classi di impaginazione dell\'elenco import (guardia sul sorgente)', () => {
-  it('padding 16–20 nel riquadro (p-4), 12 px tra i gruppi (space-y-3 / gap-3), righe ~44 px (min-h-11)', () => {
+  // fase design (DS4): le righe sono quelle di sistema (min-h-row, 52: la riga
+  // con un'icona) dentro un FlatList — separate da un filetto, senza spazio fra
+  // loro (prima ~44 px scritte qui e 8 px di spazio tra una e l'altra)
+  it('padding 16–20 nel riquadro (p-4), 12 px tra i gruppi (space-y-3 / gap-3), righe da 52 (min-h-row) in un FlatList', () => {
     const start = WIN_SRC.indexOf('export function ImportList(')
     const block = WIN_SRC.slice(start, WIN_SRC.indexOf('\nfunction ', start + 10))
     expect(block).toMatch(/p-4/)            // 16 px nel riquadro
     expect(block).toMatch(/space-y-3|gap-3/) // 12 px tra i gruppi
-    expect(block).toMatch(/min-h-11/)       // ~44 px la riga
-    expect(block).toMatch(/space-y-2/)      // spazio tra le righe
+    expect(block).toMatch(/min-h-row\b/)     // la riga di sistema, 52 px
+    expect(block).toMatch(/<FlatList>/)      // le righe a filo: un filetto fra loro, nessuno spazio scritto a mano
   })
 })
 

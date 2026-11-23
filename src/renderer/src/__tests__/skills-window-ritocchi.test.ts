@@ -7,9 +7,13 @@
 // niente anello di focus all'apertura. Senza DOM (niente jsdom): si legge il
 // sorgente, come le altre guardie del renderer; il comportamento VERO lo
 // verifica la sonda scripts/fase-skill-sfoglia-probe.mjs sul DOM.
+// (Fase design, DS4: in fondo anche il render dell'editor, per i campi e i bottoni ai token.)
+import './render-helper-install'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { createElement } from 'react'
+import { renderHtml, parseHtml, findAll } from './render-helper'
 
 const WINDOW = fileURLToPath(new URL('../components/SkillsWindow.tsx', import.meta.url))
 const PANEL = fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url))
@@ -97,5 +101,54 @@ describe('T5 → PL7: niente più dialogo della finestra Skill (niente anello di
   it('la pagina Plugin non è un Dialog: nessun onOpenAutoFocus da compensare', () => {
     expect(src).not.toContain('onOpenAutoFocus')
     expect(pieces).not.toContain('onOpenAutoFocus')
+  })
+})
+
+// ---- Fase design (DS4): i pezzi delle skill ai token ----
+describe('T1–T5 → DS4 (fase design): i pezzi delle skill ai token', () => {
+  /** Il codice dei pezzi, senza i commenti (che raccontano com'era). */
+  const code = pieces.replace(/^\s*\/\/.*$/gm, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+
+  it('niente più emoji né glifi al posto di un\'icona: davanti al nome di una skill di plugin e di una voce del catalogo c\'è un\'icona lucide, in una casa da 40 (il logo delle testate di scheda)', () => {
+    expect(code).not.toMatch(/🧩|✦/)
+    expect(code).toContain('<Puzzle className="size-5" />')
+    expect(code).toContain('<Sparkles className="size-5" />')
+    expect(code).toMatch(/const TILE = '[^']*size-10[^']*'/)
+    // e il nome della skill, nel dettaglio di plugin e nell'anteprima, è il titolo del foglio (text-title)
+    expect(code).toContain('text-title font-semibold">{humanizeSkillName(name)}')
+    expect(code).toContain('text-title font-semibold" data-testid="skills-catalog-preview-title">{humanizeSkillName(entry.id)}')
+    // niente più un 48 px col raggio suo: la misura è quella dei loghi
+    expect(code).not.toContain('size-12')
+  })
+
+  it('i bottoni sono Button, e le azioni che ANNULLANO sono testo (ghost): mai un bottone pieno per «Annulla»', () => {
+    const annulla = code.match(/<Button(?:(?!<\/Button>)[\s\S])*?<Trans>Annulla<\/Trans>\s*<\/Button>/g) ?? []
+    // tre: l'aggiornamento da GitHub, il fondo dell'anteprima, il diff dell'aggiornamento del catalogo
+    expect(annulla).toHaveLength(3)
+    for (const b of annulla) expect(b).toContain('variant="ghost"')
+    // nessun <button> scritto a mano porta il testo di un'azione di salvataggio
+    for (const hand of code.match(/<button\b[\s\S]*?<\/button>/g) ?? []) expect(hand).not.toMatch(/Salva|Aggiorna|Aggiungi|Rimuovi|Collega/)
+  })
+
+  it('l\'editor di una skill nuova: i campi sono alti 36 col raggio dei controlli; «Salva» è l\'unico pieno; «Indietro» sta in una casa alta 32', async () => {
+    const { SkillEditor } = await import('../components/SkillsWindow')
+    const root = parseHtml(renderHtml(createElement(SkillEditor, { folder: null, onDone: () => undefined, onCancel: () => undefined })))
+    // il campo su una riga: 36. Le aree di testo (descrizione, istruzioni) non hanno un'altezza fissa —
+    // crescono col testo — ma il raggio e il testo sono quelli dei campi
+    const name = findAll(root, (n) => n.attrs['data-testid'] === 'skill-field-name')[0]!
+    for (const cls of ['h-control', 'rounded-control', 'text-body']) expect(name.attrs.class ?? '', cls).toContain(cls)
+    const description = findAll(root, (n) => n.attrs['data-testid'] === 'skill-field-description')[0]!
+    expect(description.tag).toBe('textarea')
+    for (const cls of ['rounded-control', 'text-body', 'min-h-16']) expect(description.attrs.class ?? '').toContain(cls)
+    // le istruzioni sono codice (markdown): monospazio, a 13 px — non una taglia sotto i 12 come prima
+    const body = findAll(root, (n) => n.attrs['data-testid'] === 'skill-field-body')[0]!
+    expect(body.tag).toBe('textarea')
+    for (const cls of ['rounded-control', 'font-mono', 'text-small', 'min-h-40']) expect(body.attrs.class ?? '').toContain(cls)
+    const save = findAll(root, (n) => n.attrs['data-testid'] === 'skill-save')[0]!
+    expect(save.attrs['data-slot']).toBe('button')
+    expect(save.attrs.class).toContain('bg-foreground')
+    expect(save.attrs.class).toContain('h-control')
+    const back = findAll(root, (n) => n.attrs['data-testid'] === 'skill-back')[0]!
+    expect(back.attrs.class).toContain('h-control-sm')
   })
 })

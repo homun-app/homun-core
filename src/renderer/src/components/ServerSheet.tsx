@@ -8,19 +8,26 @@
 // «Rimuovi» (rosso, con conferma). Via il pallino, il badge «REGISTRY», le
 // caselle, «salva cifrato» e il paragrafo da sviluppatore: al suo posto, in
 // Avanzate, una sola riga «I token stanno cifrati sul tuo Mac.»
+//
+// Fase design (DS4): ai token. Il logo della testata è quello delle testate
+// di scheda (40: prima 48, con un raggio suo), il nome è un titolo di scheda
+// (text-title), l'ambra di «Da completare» è quella del tema (waiting), i
+// bottoni sono Button. I gruppi di impostazioni restano quelli delle
+// Impostazioni, com'erano: li porta ai token chi li possiede.
 import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { api, useStore } from '../store'
 import type { McpServerConnectResult, McpServerSetupSpec } from '../../../shared/types'
 import { fillTemplate } from '../../../shared/registry-vars'
 // K4 (fase team-bot): il logo VERO dell'app quando il file c'è nel repo
-import { logoUrlForName } from '../lib/app-logos'
+import { logoUrlForName, LOGO_CLASS, LOGO_TILE_CLASS } from '../lib/app-logos'
 import { serverRowStatus, type InstalledServerLike } from '../lib/apps-view'
 import { SettingsAdvanced } from './settings/SettingsAdvanced'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
 import { Toggle } from './Settings'
 import { ServerSetupModule } from './ServerSetup'
+import { Button } from './ui/button'
 // X2 (fase sicurezza-beta16): l'errore del server si mostra tagliato a 300
 import { clipErrorText } from '../../../main/mcp/error-category'
 
@@ -56,10 +63,10 @@ function ServerLogo({ sv }: { sv: ServerSheetInfo }): React.ReactNode {
   const publisher = publisherLine(sv)
   const url = logoUrlForName(sv.name) ?? logoUrlForName(publisher)
   if (url) {
-    return <img src={url} alt="" data-testid="server-sheet-logo" className="size-12 shrink-0 rounded-[12px] object-cover dark:bg-white" />
+    return <img src={url} alt="" data-testid="server-sheet-logo" className={`${LOGO_CLASS} size-10`} />
   }
   return (
-    <span className="grid size-12 shrink-0 place-items-center rounded-[12px] bg-muted text-lg font-bold text-foreground/70">
+    <span className={`grid place-items-center ${LOGO_TILE_CLASS} size-10 text-reading`}>
       {sv.name.slice(0, 1).toUpperCase()}
     </span>
   )
@@ -116,27 +123,28 @@ export function ServerSheet({ sv, onDone }: { sv: ServerSheetInfo; onDone(): voi
     : [sv.box?.command ?? sv.command ?? '', ...(sv.box?.args ?? sv.args ?? [])].join(' ')
 
   return (
-    <div className="space-y-4" data-testid="server-sheet">
+    <div className="flex flex-col gap-block" data-testid="server-sheet">
       {/* la testata: logo, nome umano, mezza riga, stato */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-row-gap">
         <ServerLogo sv={sv} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-lg font-medium">{sv.name}</span>
-          <span className="block truncate text-[13px] text-muted-foreground">
+          <span className="block truncate text-title font-semibold">{sv.name}</span>
+          <span className="block truncate text-small text-muted-foreground">
             {publisherLine(sv)
               ? t`Server MCP · Pubblicato da ${publisherLine(sv)!}`
               : t`Server MCP`}
           </span>
         </span>
         {status === 'connected' && (
-          <span className="shrink-0 rounded-full bg-chart-2/15 px-2.5 py-1 text-[12px] text-chart-2" data-testid="server-sheet-connected"><Trans>Connessa</Trans></span>
+          <span className="shrink-0 rounded-full bg-chart-2/15 px-3 py-1 text-caption text-chart-2" data-testid="server-sheet-connected"><Trans>Connessa</Trans></span>
         )}
         {status === 'setup' && (
-          <span className="shrink-0 rounded-full bg-amber-500/15 px-2.5 py-1 text-[12px] text-amber-600 dark:text-amber-400" data-testid="server-sheet-setup"><Trans>Da completare</Trans></span>
+          // l'ambra dei «da fare» è quella del tema: vale per chiaro e scuro (prima due classi amber scritte a mano)
+          <span className="shrink-0 rounded-full bg-waiting/15 px-3 py-1 text-caption text-waiting" data-testid="server-sheet-setup"><Trans>Da completare</Trans></span>
         )}
         {status === 'reconnect' && (
-          <button
-            className="shrink-0 rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+          <Button
+            size="sm"
             data-testid="server-sheet-reconnect"
             onClick={async () => {
               const r = await api.connectorsReconnectServer(sv.id).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
@@ -145,7 +153,7 @@ export function ServerSheet({ sv, onDone }: { sv: ServerSheetInfo; onDone(): voi
             }}
           >
             <Trans>Ricollega</Trans>
-          </button>
+          </Button>
         )}
       </div>
 
@@ -154,7 +162,7 @@ export function ServerSheet({ sv, onDone }: { sv: ServerSheetInfo; onDone(): voi
           X2 (fase sicurezza-beta16): mostrato come TESTO e tagliato a 300
           caratteri (il corpo può averlo scelto il server) */}
       {sv.stateStatus === 'error' && sv.stateError && (
-        <p className="text-[12px] leading-snug text-destructive" data-testid="server-sheet-error">{clipErrorText(sv.stateError)}</p>
+        <p className="text-small text-destructive" data-testid="server-sheet-error">{clipErrorText(sv.stateError)}</p>
       )}
 
       {/* il modulo M3, quando serve; collegato e senza coda: niente (R5 —
@@ -166,7 +174,7 @@ export function ServerSheet({ sv, onDone }: { sv: ServerSheetInfo; onDone(): voi
           testid="server-sheet-setup"
         />
       )}
-      {note && <p className="text-[12px] text-muted-foreground">{note}</p>}
+      {note && <p className="text-small text-muted-foreground">{note}</p>}
 
       {/* Bot che lo usano: un interruttore per bot + «Tutti i bot» */}
       <SettingsGroup label={<Trans>Bot che lo usano</Trans>}>
@@ -196,18 +204,18 @@ export function ServerSheet({ sv, onDone }: { sv: ServerSheetInfo; onDone(): voi
       <SettingsAdvanced>
         <SettingsGroup>
           {sv.transport === 'http' && (
-            <SettingsRow title={<Trans>Indirizzo</Trans>} control={<code className="max-w-[55%] truncate rounded bg-card px-2 py-1 text-[12px]">{resolvedAddress}</code>} />
+            <SettingsRow title={<Trans>Indirizzo</Trans>} control={<code className="max-w-[55%] truncate rounded-control bg-card px-2 py-1 text-small">{resolvedAddress}</code>} />
           )}
           {sv.transport !== 'http' && (
-            <SettingsRow title={<Trans>Comando</Trans>} control={<code className="max-w-[55%] truncate rounded bg-card px-2 py-1 text-[12px]">{resolvedAddress}</code>} />
+            <SettingsRow title={<Trans>Comando</Trans>} control={<code className="max-w-[55%] truncate rounded-control bg-card px-2 py-1 text-small">{resolvedAddress}</code>} />
           )}
           {sv.source?.name && sv.source.name !== sv.name && (
-            <SettingsRow title={<Trans>Nome tecnico</Trans>} control={<code className="max-w-[55%] truncate rounded bg-card px-2 py-1 text-[11px] text-muted-foreground">{sv.source.name}</code>} />
+            <SettingsRow title={<Trans>Nome tecnico</Trans>} control={<code className="max-w-[55%] truncate rounded-control bg-card px-2 py-1 text-small text-muted-foreground">{sv.source.name}</code>} />
           )}
           <SettingsRow
             title={<Trans>Fonte</Trans>}
             control={
-              <span className="text-[13px] text-muted-foreground">
+              <span className="text-small text-muted-foreground">
                 {sv.source?.kind === 'registry' ? <Trans>registro MCP</Trans>
                   : sv.source?.kind === 'plugin' ? <Trans>plugin</Trans>
                   : sv.source?.kind === 'gateway' ? <Trans>gateway</Trans>
@@ -217,25 +225,28 @@ export function ServerSheet({ sv, onDone }: { sv: ServerSheetInfo; onDone(): voi
             }
           />
         </SettingsGroup>
-        <p className="text-[13px] text-muted-foreground"><Trans>I token stanno cifrati sul tuo Mac.</Trans></p>
+        <p className="text-small text-muted-foreground"><Trans>I token stanno cifrati sul tuo Mac.</Trans></p>
       </SettingsAdvanced>
 
-      {/* Rimuovi (rosso, con conferma) — al posto di «Disinstalla» */}
+      {/* Rimuovi (rosso, con conferma) — al posto di «Disinstalla»;
+          testo rosso (ghost), non un bottone pieno */}
       <div className="flex items-center justify-end gap-2 pt-1">
         {confirmRemove ? (
-          <button
-            className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+          <Button
+            variant="ghost"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
             onClick={async () => { await api.connectorsUninstallServer(sv.id); onDone() }}
           >
             <Trans>Rimuovi davvero</Trans>
-          </button>
+          </Button>
         ) : (
-          <button
-            className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+          <Button
+            variant="ghost"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
             onClick={() => setConfirmRemove(true)}
           >
             <Trans>Rimuovi</Trans>
-          </button>
+          </Button>
         )}
       </div>
     </div>

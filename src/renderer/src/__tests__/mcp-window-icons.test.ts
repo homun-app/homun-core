@@ -1,7 +1,10 @@
 // U1 (fase mcp-ui): le azioni per riga nella finestra «Server MCP» diventano
 // BOTTONI ICONA lucide (test → PlugZap, modifica → Pencil, elimina → Trash2),
-// 28×28, rounded-lg, grigi (elimina rosso al passaggio), con aria-label e
-// title tradotti e NESSUN testo visibile. Il risultato del test è un PALLINO
+// grigi (elimina rosso al passaggio), con aria-label e title tradotti e
+// NESSUN testo visibile. Fase design (DS4): sono Button ghost solo-icona —
+// tondi, 32 px, la misura dei controlli piccoli (prima 28×28 con un raggio
+// loro, scritti qui: la misura e il colore ora li dà la variante di Button).
+// Il risultato del test è un PALLINO
 // nella riga (verde «connesso»/rosso «errore») col messaggio nel suggerimento:
 // niente testo che allarga la riga. Stessa regola nel resto della finestra:
 // l'azione ripetuta per riga (togliere una variabile) è un'icona col suo
@@ -40,14 +43,18 @@ describe('U1: le azioni della riga di un server sono BOTTONI ICONA lucide', () =
     expect(block).not.toMatch(/>\s*elimina\s*</)
   })
 
-  it('i bottoni icona hanno aria-label E title tradotti, 28×28 (size-7), rounded-lg, grigi; elimina rosso al passaggio', () => {
+  it('i bottoni icona hanno aria-label E title tradotti e sono Button ghost solo-icona (32 px, tondi, grigi: misura e colore della variante); elimina rosso al passaggio', () => {
     const btn = WIN_SRC.slice(WIN_SRC.indexOf('function IconButton('), WIN_SRC.indexOf('\nfunction ', WIN_SRC.indexOf('function IconButton(')))
     expect(btn).not.toBe('')
     expect(btn).toMatch(/aria-label=\{label\}/)
     expect(btn).toMatch(/title=\{label\}/)
-    expect(btn).toMatch(/size-7/)
-    expect(btn).toMatch(/rounded-lg/)
-    expect(btn).toMatch(/text-muted-foreground/)
+    // fase design (DS4): più niente misure scritte qui (size-7, rounded-lg, text-muted-foreground) —
+    // le dà Button: ghost (grigio), sm (32 px), icon (quadrato; per il ghost tondo)
+    expect(btn).toMatch(/<Button\b/)
+    expect(btn).toMatch(/variant="ghost"/)
+    expect(btn).toMatch(/size="sm"/)
+    expect(btn).toMatch(/\bicon\b/)
+    expect(btn).not.toMatch(/className="[^"]*(size-7|rounded-(?!control))/)
     expect(btn).toMatch(/hover:text-destructive/)
     // i TRE bottoni della riga passano l'etichetta tradotta (t`…`)
     const block = manualServersBlock()

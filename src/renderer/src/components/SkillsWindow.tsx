@@ -29,11 +29,26 @@
 //              finestra è un @container (le righe col controllo a destra),
 //              «‹ Indietro» in alto nell'anteprima (UN solo «Annulla»),
 //              focus d'apertura sul campo.
+//
+// Fase design (DS4): la finestra non c'è più — restano i PEZZI che la pagina
+// Plugin riusa (l'editor per «Crea una skill» e per il dettaglio, il dettaglio
+// di una skill di plugin, l'anteprima del catalogo) e passano ai token:
+//  - i campi sono alti 36, col raggio dei controlli e il testo di riga (prima
+//    ogni campo aveva la sua altezza e le sue taglie: 14, 13, 12, 11 px);
+//  - i bottoni sono Button: l'azione che salva è l'unica piena (Salva,
+//    Aggiorna, Aggiungi), le altre sono testo;
+//  - il codice (istruzioni, file, versioni) è a 13 px: sotto si faticava;
+//  - la piastrella davanti al nome, nell'anteprima e nel dettaglio di plugin,
+//    è un'icona lucide in una casa da 40 (il logo delle testate di scheda):
+//    prima erano l'emoji del puzzle e un ✦ scritti nel testo;
+//  - i gruppi di impostazioni (SettingsGroup/SettingsRow/SettingsAdvanced)
+//    restano quelli delle Impostazioni, com'erano: li porta ai token chi li
+//    possiede.
 import { useEffect, useMemo, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import ReactMarkdown from 'react-markdown'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, Puzzle, Sparkles } from 'lucide-react'
 import { api, useStore } from '../store'
 import type {
   SkillLibraryItem, SkillGithubUpdatePreview, SkillVersion,
@@ -48,32 +63,47 @@ import { SettingsAdvanced } from './settings/SettingsAdvanced'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
 import { Toggle } from './Settings'
+import { Button } from './ui/button'
 
 function issueText(i: { uiId: string; values?: Record<string, string | number> }, i18n: { _(m: unknown, values?: Record<string, unknown>): string }): string {
   return i18n._({ id: i.uiId }, i.values)
 }
+
+/**
+ * Il campo dell'editor (DS1): 36 px — la misura dei campi — col raggio dei
+ * controlli e il testo di riga. Sta dentro le schede tenui dei gruppi di
+ * impostazioni, dunque sul fondo della pagina (bg-background).
+ */
+const FIELD = 'h-control w-full rounded-control bg-background px-3 text-body outline-none placeholder:text-muted-foreground'
+/** L'azione rossa che non riempie: testo (ghost) nel colore del distruttivo, anche al passaggio. */
+const QUIET_RED = 'text-destructive hover:bg-destructive/10 hover:text-destructive'
+/** «‹ Indietro» in cima a un foglio: testo grigio, in una casa alta 32 (un bottone, non una riga di testo da 18 px). */
+const BACK = 'flex h-control-sm items-center gap-1 text-small text-muted-foreground transition hover:text-foreground'
+/** La piastrella davanti al nome di una skill del catalogo o di un plugin (40: il logo delle testate di scheda). */
+const TILE = 'grid size-10 shrink-0 place-items-center rounded-surface bg-muted text-muted-foreground'
 
 export function PluginDetail({ name, plugins, onClose }: { name: string; plugins: Array<{ plugin: string; skills: Array<{ name: string; description: string }> }>; onClose(): void }): React.ReactNode {
   const { i18n } = useLingui()
   const group = plugins.find((g) => g.skills.some((s) => s.name === name))
   const skill = group?.skills.find((s) => s.name === name)
   return (
-    <div className="space-y-4" data-testid="skill-plugin-detail">
-      <button type="button" className="flex items-center gap-1 text-[13px] text-muted-foreground transition hover:text-foreground" onClick={onClose}>
+    <div className="flex flex-col gap-block" data-testid="skill-plugin-detail">
+      <button type="button" className={BACK} onClick={onClose}>
         <ChevronLeft className="size-4" /><Trans>Indietro</Trans>
       </button>
-      <div className="flex items-center gap-3">
-        <span className="grid size-12 shrink-0 place-items-center rounded-[12px] bg-muted text-lg">🧩</span>
+      <div className="flex items-center gap-row-gap">
+        <span className={TILE} aria-hidden="true"><Puzzle className="size-5" /></span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-lg font-medium">{humanizeSkillName(name)}</span>
-          <span className="block truncate text-[13px] text-muted-foreground">{skill?.description}</span>
+          {/* il nome è il titolo del foglio (text-title: titoli di dialoghi e schede) */}
+          <span className="block truncate text-title font-semibold">{humanizeSkillName(name)}</span>
+          <span className="mt-0.5 block truncate text-small text-muted-foreground">{skill?.description}</span>
         </span>
       </div>
-      <p className="rounded-xl bg-muted/60 px-3 py-2 text-[13px] text-muted-foreground">
+      <p className="rounded-surface bg-muted/60 px-3 py-2 text-small text-muted-foreground">
         <Trans>Viene dal plugin {group?.plugin}: si aggiorna aggiornando il plugin.</Trans>
       </p>
       <SettingsAdvanced label={i18n._(msg`Istruzioni`)}>
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-muted/60 px-3 py-2 text-[12px] text-muted-foreground">
+        <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-surface bg-muted/60 px-3 py-2 text-small text-muted-foreground">
           {i18n._(msg`(le istruzioni complete le vede il bot col tool skill)`)}
         </pre>
       </SettingsAdvanced>
@@ -196,31 +226,33 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
 
   const agentName = (id: string): string => agents.find((a) => a.id === id)?.name ?? id
 
-  if (loading) return <p className="py-6 text-center text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>
+  if (loading) return <p className="py-6 text-center text-small text-muted-foreground"><Trans>caricamento…</Trans></p>
 
   return (
-    <div className="space-y-4" data-testid={folder === null ? 'skill-editor-new' : 'skill-editor'}>
+    <div className="flex flex-col gap-block" data-testid={folder === null ? 'skill-editor-new' : 'skill-editor'}>
       {/* Indietro: torna all'elenco (dal foglio) o chiude il modulo (nuova) */}
-      <button type="button" className="flex items-center gap-1 text-[13px] text-muted-foreground transition hover:text-foreground" onClick={onCancel} data-testid="skill-back">
-        <ChevronLeft className="size-4" /><Trans>Indietro</Trans>
-      </button>
+      <div>
+        <button type="button" className={BACK} onClick={onCancel} data-testid="skill-back">
+          <ChevronLeft className="size-4" /><Trans>Indietro</Trans>
+        </button>
+      </div>
 
       {/* nome, descrizione, istruzioni: editor semplice con anteprima markdown */}
       <SettingsGroup label={<Trans>Skill</Trans>}>
-        <div className="space-y-3 px-4 py-3.5">
+        <div className="flex flex-col gap-3 px-4 py-3">
           <label className="block">
-            <span className="mb-1 block text-[13px] text-muted-foreground"><Trans>Nome</Trans></span>
+            <span className="mb-1 block text-small text-muted-foreground"><Trans>Nome</Trans></span>
             <input
-              className="h-9 w-full rounded-lg bg-background px-3 text-sm outline-none"
+              className={FIELD}
               value={name}
               onChange={(e) => setName(e.target.value)}
               data-testid="skill-field-name"
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[13px] text-muted-foreground"><Trans>Descrizione (cosa fa e quando usarla)</Trans></span>
+            <span className="mb-1 block text-small text-muted-foreground"><Trans>Descrizione (cosa fa e quando usarla)</Trans></span>
             <textarea
-              className="min-h-16 w-full resize-y rounded-lg bg-background px-3 py-2 text-sm outline-none"
+              className="min-h-16 w-full resize-y rounded-control bg-background px-3 py-2 text-body outline-none"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               data-testid="skill-field-description"
@@ -228,18 +260,18 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
           </label>
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <span className="text-[13px] text-muted-foreground"><Trans>Istruzioni (markdown)</Trans></span>
-              <button type="button" className="text-[12px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={() => setPreview(!preview)}>
+              <span className="text-small text-muted-foreground"><Trans>Istruzioni (markdown)</Trans></span>
+              <button type="button" className="h-control-sm text-small text-muted-foreground underline-offset-2 transition hover:text-foreground hover:underline" onClick={() => setPreview(!preview)}>
                 {preview ? t`modifica` : t`anteprima`}
               </button>
             </div>
             {preview ? (
-              <div className="max-h-72 overflow-y-auto rounded-lg bg-background px-3 py-2 text-sm" data-testid="skill-body-preview">
+              <div className="max-h-72 overflow-y-auto rounded-control bg-background px-3 py-2 text-body" data-testid="skill-body-preview">
                 <ReactMarkdown>{body}</ReactMarkdown>
               </div>
             ) : (
               <textarea
-                className="min-h-40 w-full resize-y rounded-lg bg-background px-3 py-2 font-mono text-[12px] leading-relaxed outline-none"
+                className="min-h-40 w-full resize-y rounded-control bg-background px-3 py-2 font-mono text-small outline-none"
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 data-testid="skill-field-body"
@@ -247,29 +279,27 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
             )}
           </div>
           {issues.length > 0 && (
-            <div className="space-y-1 rounded-lg bg-destructive/10 px-3 py-2" data-testid="skill-field-errors" role="alert">
-              {issues.map((i, idx) => <p key={idx} className="text-[12px] text-destructive">{issueText(i, i18n)}</p>)}
+            <div className="flex flex-col gap-1 rounded-control bg-destructive/10 px-3 py-2" data-testid="skill-field-errors" role="alert">
+              {issues.map((i, idx) => <p key={idx} className="text-small text-destructive">{issueText(i, i18n)}</p>)}
             </div>
           )}
-          {note && <p className="text-[12px] text-muted-foreground">{note}</p>}
+          {note && <p className="text-small text-muted-foreground">{note}</p>}
           <div className="flex justify-end">
-            <button
-              type="button"
-              className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+            <Button
               onClick={() => void save()}
               data-testid="skill-save"
             >
               <Trans>Salva</Trans>
-            </button>
+            </Button>
           </div>
         </div>
       </SettingsGroup>
 
       {/* K4 (fase skill · catalogo): le note per Homun della voce, in sola lettura */}
       {folder !== null && meta?.homunNotes && (
-        <div className="space-y-1" data-testid="skill-homun-notes">
-          <p className="text-[13px] text-muted-foreground"><Trans>Adattamenti di Homun</Trans></p>
-          <p className="max-h-40 overflow-y-auto scroll-thin whitespace-pre-wrap rounded-xl bg-muted/40 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">{meta.homunNotes}</p>
+        <div className="flex flex-col gap-1" data-testid="skill-homun-notes">
+          <p className="text-small text-muted-foreground"><Trans>Adattamenti di Homun</Trans></p>
+          <p className="max-h-40 overflow-y-auto scroll-thin whitespace-pre-wrap rounded-surface bg-muted/40 px-3 py-2 text-small text-muted-foreground">{meta.homunNotes}</p>
         </div>
       )}
 
@@ -293,23 +323,23 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
           {/* File: elenco in sola lettura, apribile in un riquadro di testo */}
           <SettingsGroup label={<Trans>File</Trans>}>
             {meta.files.length === 0 ? (
-              <p className="px-4 py-3 text-[13px] text-muted-foreground"><Trans>Nessun file di supporto.</Trans></p>
+              <p className="px-4 py-3 text-small text-muted-foreground"><Trans>Nessun file di supporto.</Trans></p>
             ) : fileOpen === null ? (
               <div className="divide-y divide-border/60">
                 {meta.files.map((f) => (
-                  <button key={f} type="button" className="flex w-full items-center justify-between px-4 py-2 text-left text-[13px] transition hover:bg-muted/60" onClick={() => openFile(f)}>
-                    <span className="truncate font-mono text-[12px]">{f}</span>
-                    <span className="text-[11px] text-muted-foreground"><Trans>apri</Trans></span>
+                  <button key={f} type="button" className="flex min-h-row-text w-full items-center justify-between gap-3 px-4 py-2 text-left text-body transition hover:bg-muted/60" onClick={() => openFile(f)}>
+                    <span className="truncate font-mono text-small">{f}</span>
+                    <span className="shrink-0 text-small text-muted-foreground"><Trans>apri</Trans></span>
                   </button>
                 ))}
               </div>
             ) : (
-              <div className="space-y-2 px-4 py-3">
-                <div className="flex items-center justify-between">
-                  <span className="truncate font-mono text-[12px] text-muted-foreground">{fileOpen}</span>
-                  <button type="button" className="text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setFileOpen(null)}><Trans>chiudi</Trans></button>
+              <div className="flex flex-col gap-2 px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="truncate font-mono text-small text-muted-foreground">{fileOpen}</span>
+                  <button type="button" className="h-control-sm shrink-0 text-small text-muted-foreground transition hover:text-foreground" onClick={() => setFileOpen(null)}><Trans>chiudi</Trans></button>
                 </div>
-                <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-background px-3 py-2 text-[11px] leading-relaxed text-muted-foreground" data-testid="skill-file-view">{fileText}</pre>
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-control bg-background px-3 py-2 text-small text-muted-foreground" data-testid="skill-file-view">{fileText}</pre>
               </div>
             )}
           </SettingsGroup>
@@ -318,13 +348,13 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
           <SettingsAdvanced>
             <SettingsGroup>
               {meta.name !== meta.folder && (
-                <SettingsRow title={<Trans>Nome tecnico</Trans>} control={<code className="max-w-[55%] truncate rounded bg-card px-2 py-1 text-[11px] text-muted-foreground">{meta.name}</code>} />
+                <SettingsRow title={<Trans>Nome tecnico</Trans>} control={<code className="max-w-[55%] truncate rounded-control bg-card px-2 py-1 text-small text-muted-foreground">{meta.name}</code>} />
               )}
-              <SettingsRow title={<Trans>Nome cartella</Trans>} control={<code className="max-w-[55%] truncate rounded bg-card px-2 py-1 text-[11px] text-muted-foreground">{meta.folder}</code>} />
+              <SettingsRow title={<Trans>Nome cartella</Trans>} control={<code className="max-w-[55%] truncate rounded-control bg-card px-2 py-1 text-small text-muted-foreground">{meta.folder}</code>} />
               <SettingsRow
                 title={<Trans>Origine</Trans>}
                 control={
-                  <span className="text-[13px] text-muted-foreground">
+                  <span className="text-small text-muted-foreground">
                     {meta.source === 'github' && meta.origin
                       ? <Trans>GitHub · {meta.origin.repo} @ {meta.origin.commit.slice(0, 8)} · {meta.origin.path}</Trans>
                       : meta.source === 'bot' && meta.createdBy
@@ -335,39 +365,40 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
                 }
               />
               {parsedLicense && (
-                <SettingsRow title={<Trans>Licenza</Trans>} control={<span className="text-[13px] text-muted-foreground">{parsedLicense}</span>} />
+                <SettingsRow title={<Trans>Licenza</Trans>} control={<span className="text-small text-muted-foreground">{parsedLicense}</span>} />
               )}
               <SettingsRow title={<Trans>Mostra nel Finder</Trans>} control={
-                <button type="button" className="rounded-full px-3 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground" onClick={() => { void api.skillsShowInFinder(folder) }}>
+                // aprire una cartella o esportare sono azioni da riga: testo, non pieno
+                <Button variant="ghost" size="sm" onClick={() => { void api.skillsShowInFinder(folder) }}>
                   <Trans>Apri</Trans>
-                </button>
+                </Button>
               } />
               <SettingsRow title={<Trans>Esporta</Trans>} description={<Trans>Copia la cartella in ~/Downloads/Homun/skills/</Trans>} control={
-                <button type="button" className="rounded-full px-3 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground" data-testid="skill-export" onClick={() => {
+                <Button variant="ghost" size="sm" data-testid="skill-export" onClick={() => {
                   void api.skillsExport(folder).then((r) => setNote(r.path))
                 }}>
                   <Trans>Esporta</Trans>
-                </button>
+                </Button>
               } />
             </SettingsGroup>
 
             {/* Versioni precedenti (S5): data e origine, con Ripristina */}
             <SettingsGroup label={<Trans>Versioni precedenti</Trans>}>
               {!versions || versions.length === 0 ? (
-                <p className="px-4 py-3 text-[13px] text-muted-foreground"><Trans>Nessuna versione precedente.</Trans></p>
+                <p className="px-4 py-3 text-small text-muted-foreground"><Trans>Nessuna versione precedente.</Trans></p>
               ) : (
                 <div className="divide-y divide-border/60">
                   {versions.map((v) => (
-                    <div key={v.file} className="flex items-center justify-between px-4 py-2">
-                      <span className="text-[13px]">
+                    <div key={v.file} className="flex min-h-row-text items-center justify-between gap-3 px-4 py-2">
+                      <span className="min-w-0 text-body">
                         {new Date(v.ts).toLocaleString()}
-                        <span className="ml-2 text-[11px] text-muted-foreground">
+                        <span className="ml-2 text-small text-muted-foreground">
                           {v.origin === 'user' ? t`tu` : v.origin === 'github' ? t`GitHub` : v.by ? agentName(v.by) : t`bot`}
                         </span>
                       </span>
-                      <button
-                        type="button"
-                        className="rounded-full px-2.5 py-1 text-[11px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         data-testid="skill-restore"
                         onClick={() => {
                           void api.skillsRestoreVersion(folder, v.file).then(() => {
@@ -388,7 +419,7 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
                         }}
                       >
                         <Trans>Ripristina</Trans>
-                      </button>
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -400,9 +431,9 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
               <SettingsGroup label={<Trans>Aggiorna da GitHub</Trans>}>
                 {updatePreview === null ? (
                   <div className="px-4 py-3">
-                    <button
-                      type="button"
-                      className="rounded-full px-3 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       data-testid="skill-update-preview"
                       onClick={() => {
                         setUpdateNote('')
@@ -412,16 +443,17 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
                       }}
                     >
                       <Trans>Controlla aggiornamenti</Trans>
-                    </button>
-                    {updateNote && <p className="mt-2 text-[12px] text-destructive">{updateNote}</p>}
+                    </Button>
+                    {updateNote && <p className="mt-2 text-small text-destructive">{updateNote}</p>}
                   </div>
                 ) : (
-                  <div className="space-y-2 px-4 py-3 text-[13px]" data-testid="skill-update-diff">
-                    <p className="font-mono text-[11px] text-muted-foreground">
+                  <div className="flex flex-col gap-2 px-4 py-3 text-body" data-testid="skill-update-diff">
+                    <p className="font-mono text-small text-muted-foreground">
                       {updatePreview.diff.oldCommit.slice(0, 8)} → {updatePreview.diff.newCommit.slice(0, 8)}
                     </p>
                     {meta.source === 'user' && (
-                      <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[12px] text-amber-600 dark:text-amber-400">
+                      // l'ambra dei «attenzione» del tema (waiting), non un ambra scritto a mano per chiaro e scuro
+                      <p className="rounded-control bg-waiting/10 px-3 py-2 text-small text-waiting">
                         <Trans>Questa skill è stata modificata: l'aggiornamento sovrascrive le modifiche (la versione attuale va nelle precedenti).</Trans>
                       </p>
                     )}
@@ -429,12 +461,10 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
                     {updatePreview.diff.removed.length > 0 && <p><Trans>File tolti: {updatePreview.diff.removed.join(', ')}</Trans></p>}
                     {updatePreview.diff.changed.length > 0 && <p><Trans>File cambiati: {updatePreview.diff.changed.join(', ')}</Trans></p>}
                     <div className="flex justify-end gap-2 pt-1">
-                      <button type="button" className="rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setUpdatePreview(null)}>
+                      <Button variant="ghost" onClick={() => setUpdatePreview(null)}>
                         <Trans>Annulla</Trans>
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background hover:opacity-90"
+                      </Button>
+                      <Button
                         data-testid="skill-update-apply"
                         onClick={() => {
                           void api.skillsGithubUpdateApply(updatePreview.id, folder).then(() => {
@@ -445,36 +475,36 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
                         }}
                       >
                         <Trans>Aggiorna</Trans>
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
               </SettingsGroup>
             )}
 
-            <p className="text-[13px] text-muted-foreground"><Trans>Le versioni precedenti si conservano in .versions/ (le ultime 10).</Trans></p>
+            <p className="text-small text-muted-foreground"><Trans>Le versioni precedenti si conservano in .versions/ (le ultime 10).</Trans></p>
           </SettingsAdvanced>
 
           {/* Rimuovi (rosso, con conferma) */}
           <div className="flex items-center justify-end gap-2 pt-1">
             {confirmRemove ? (
-              <button
-                type="button"
-                className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+              <Button
+                variant="ghost"
+                className={QUIET_RED}
                 data-testid="skill-remove-confirm"
                 onClick={() => { void api.skillsDelete(folder).then(() => { onDone(); onCancel() }) }}
               >
                 <Trans>Rimuovi davvero</Trans>
-              </button>
+              </Button>
             ) : (
-              <button
-                type="button"
-                className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+              <Button
+                variant="ghost"
+                className={QUIET_RED}
                 data-testid="skill-remove"
                 onClick={() => setConfirmRemove(true)}
               >
                 <Trans>Rimuovi</Trans>
-              </button>
+              </Button>
             )}
           </div>
         </>
@@ -543,51 +573,51 @@ export function CatalogPreview({ entry, state, installedFolder, onClose, onChang
   }
 
   return (
-    <div className="space-y-4" data-testid="skills-catalog-preview">
-      <button type="button" className="flex items-center gap-1 text-[13px] text-muted-foreground transition hover:text-foreground" onClick={onClose} data-testid="skills-catalog-back">
+    <div className="flex flex-col gap-block" data-testid="skills-catalog-preview">
+      <button type="button" className={BACK} onClick={onClose} data-testid="skills-catalog-back">
         <ChevronLeft className="size-4" /><Trans>Indietro</Trans>
       </button>
-      {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-[13px] text-destructive" data-testid="skills-catalog-preview-error">{error}</p>}
-      {!preview && !error && <p className="py-6 text-center text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>}
+      {error && <p role="alert" className="rounded-control bg-destructive/10 px-3 py-2 text-small text-destructive" data-testid="skills-catalog-preview-error">{error}</p>}
+      {!preview && !error && <p className="py-6 text-center text-small text-muted-foreground"><Trans>caricamento…</Trans></p>}
       {preview && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <span className="grid size-12 shrink-0 place-items-center rounded-[12px] bg-muted text-lg">✦</span>
+        <div className="flex flex-col gap-block">
+          <div className="flex items-center gap-row-gap">
+            <span className={TILE} aria-hidden="true"><Sparkles className="size-5" /></span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-lg font-medium" data-testid="skills-catalog-preview-title">{humanizeSkillName(entry.id)}</span>
-              <span className="block truncate text-[13px] text-muted-foreground">
+              <span className="block truncate text-title font-semibold" data-testid="skills-catalog-preview-title">{humanizeSkillName(entry.id)}</span>
+              <span className="mt-0.5 block truncate text-small text-muted-foreground">
                 <span className="font-mono" data-testid="skills-catalog-preview-source">{entry.source.repo}</span> · <span data-testid="skills-catalog-preview-commit" className="font-mono">{preview.commit.slice(0, 12)}</span>
               </span>
             </span>
           </div>
-          <p className="text-[13px] text-muted-foreground" data-testid="skills-catalog-preview-description">
+          <p className="text-small text-muted-foreground" data-testid="skills-catalog-preview-description">
             {skillCatalogDescription(entry, i18n.locale === 'en' ? 'en' : 'it')}
           </p>
-          <p className="text-[12px] text-muted-foreground" data-testid="skills-catalog-preview-license">
+          <p className="text-small text-muted-foreground" data-testid="skills-catalog-preview-license">
             <Trans>Licenza</Trans>: <span className="font-mono">{preview.license}</span>
           </p>
           {preview.invocation === 'user' && (
-            <p className="rounded-xl bg-muted/60 px-3 py-2 text-[12px] text-muted-foreground"><Trans>solo con /</Trans></p>
+            <p className="rounded-surface bg-muted/60 px-3 py-2 text-small text-muted-foreground"><Trans>solo con /</Trans></p>
           )}
           {/* i file che entreranno (le esclusioni del catalogo sono già applicate) */}
-          <div className="space-y-1" data-testid="skills-catalog-preview-files">
-            <p className="text-[13px] text-muted-foreground"><Trans>File che entrano</Trans> ({preview.files.length})</p>
-            <ul className="max-h-40 space-y-0.5 overflow-y-auto scroll-thin rounded-xl bg-muted/40 px-3 py-2">
+          <div className="flex flex-col gap-1" data-testid="skills-catalog-preview-files">
+            <p className="text-small text-muted-foreground"><Trans>File che entrano</Trans> ({preview.files.length})</p>
+            <ul className="max-h-40 space-y-0.5 overflow-y-auto scroll-thin rounded-surface bg-muted/40 px-3 py-2">
               {preview.files.map((f) => (
-                <li key={f} className="truncate font-mono text-[11px] text-muted-foreground">{f}</li>
+                <li key={f} className="truncate font-mono text-small text-muted-foreground">{f}</li>
               ))}
             </ul>
           </div>
           {/* K4: le note per Homun, in un riquadro piccolo, sola lettura */}
           {preview.homunNotes && (
-            <div className="space-y-1" data-testid="skills-catalog-preview-notes">
-              <p className="text-[13px] text-muted-foreground"><Trans>Adattamenti di Homun</Trans></p>
-              <p className="max-h-40 overflow-y-auto scroll-thin whitespace-pre-wrap rounded-xl bg-muted/40 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">{preview.homunNotes}</p>
+            <div className="flex flex-col gap-1" data-testid="skills-catalog-preview-notes">
+              <p className="text-small text-muted-foreground"><Trans>Adattamenti di Homun</Trans></p>
+              <p className="max-h-40 overflow-y-auto scroll-thin whitespace-pre-wrap rounded-surface bg-muted/40 px-3 py-2 text-small text-muted-foreground">{preview.homunNotes}</p>
             </div>
           )}
           {!preview.valid && preview.issues.length > 0 && (
-            <div className="space-y-1 rounded-lg bg-destructive/10 px-3 py-2" role="alert">
-              {preview.issues.map((i, idx) => <p key={idx} className="text-[12px] text-destructive">{issueText(i, i18n)}</p>)}
+            <div className="flex flex-col gap-1 rounded-control bg-destructive/10 px-3 py-2" role="alert">
+              {preview.issues.map((i, idx) => <p key={idx} className="text-small text-destructive">{issueText(i, i18n)}</p>)}
             </div>
           )}
 
@@ -596,9 +626,9 @@ export function CatalogPreview({ entry, state, installedFolder, onClose, onChang
             <SettingsGroup label={<Trans>Aggiornamento disponibile</Trans>}>
               {updateDiff === null ? (
                 <div className="px-4 py-3">
-                  <button
-                    type="button"
-                    className="rounded-full px-3 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     data-testid="skills-catalog-update-preview"
                     onClick={() => {
                       setUpdateNote('')
@@ -608,24 +638,22 @@ export function CatalogPreview({ entry, state, installedFolder, onClose, onChang
                     }}
                   >
                     <Trans>Controlla aggiornamenti</Trans>
-                  </button>
-                  {updateNote && <p className="mt-2 text-[12px] text-destructive">{updateNote}</p>}
+                  </Button>
+                  {updateNote && <p className="mt-2 text-small text-destructive">{updateNote}</p>}
                 </div>
               ) : (
-                <div className="space-y-2 px-4 py-3 text-[13px]" data-testid="skills-catalog-update-diff">
-                  <p className="font-mono text-[11px] text-muted-foreground">
+                <div className="flex flex-col gap-2 px-4 py-3 text-body" data-testid="skills-catalog-update-diff">
+                  <p className="font-mono text-small text-muted-foreground">
                     {updateDiff.diff.oldCommit.slice(0, 8)} → {updateDiff.diff.newCommit.slice(0, 8)}
                   </p>
                   {updateDiff.diff.added.length > 0 && <p><Trans>File aggiunti: {updateDiff.diff.added.join(', ')}</Trans></p>}
                   {updateDiff.diff.removed.length > 0 && <p><Trans>File tolti: {updateDiff.diff.removed.join(', ')}</Trans></p>}
                   {updateDiff.diff.changed.length > 0 && <p><Trans>File cambiati: {updateDiff.diff.changed.join(', ')}</Trans></p>}
                   <div className="flex justify-end gap-2 pt-1">
-                    <button type="button" className="rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setUpdateDiff(null)}>
+                    <Button variant="ghost" onClick={() => setUpdateDiff(null)}>
                       <Trans>Annulla</Trans>
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background hover:opacity-90"
+                    </Button>
+                    <Button
                       data-testid="skills-catalog-update-apply"
                       onClick={() => {
                         void api.skillsGithubUpdateApply(updateDiff.id, installedFolder).then(() => {
@@ -637,7 +665,7 @@ export function CatalogPreview({ entry, state, installedFolder, onClose, onChang
                       }}
                     >
                       <Trans>Aggiorna</Trans>
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -658,23 +686,20 @@ export function CatalogPreview({ entry, state, installedFolder, onClose, onChang
             ))}
           </SettingsGroup>
           <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              className="rounded-full px-4 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
+            <Button
+              variant="ghost"
               onClick={onClose}
               data-testid="skills-catalog-cancel"
             >
               <Trans>Annulla</Trans>
-            </button>
-            <button
-              type="button"
-              className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+            </Button>
+            <Button
               disabled={adding || !preview.valid}
               data-testid="skills-catalog-add"
               onClick={add}
             >
               <Trans>Aggiungi</Trans>
-            </button>
+            </Button>
           </div>
         </div>
       )}

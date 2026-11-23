@@ -23,8 +23,9 @@ function block(name: string): string {
 
 describe('K2 → PL5: la sezione «Sfoglia» sta nella pagina Plugin (segmento Skill)', () => {
   it('sta DOPO le righe delle skill (libreria e plugin) nel segmento', () => {
-    const atRows = src.indexOf('data-testid="plugin-skills"')
-    const atCatalog = src.indexOf('data-testid="plugin-skills-catalog"')
+    // fase design (DS4): il segmento è la sezione di sistema — il testid lo porta la prop testId di Section
+    const atRows = src.indexOf('testId="plugin-skills"')
+    const atCatalog = src.indexOf('testId="plugin-skills-catalog"')
     expect(atRows).toBeGreaterThan(0)
     expect(atCatalog).toBeGreaterThan(atRows)
   })

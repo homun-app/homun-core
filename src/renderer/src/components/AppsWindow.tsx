@@ -9,8 +9,24 @@
 // non sulle righe. Composio è un ACCOUNT, non un'app: in fondo una riga
 // discreta «Account Composio · connesso». Il mercato dei plugin, i gateway, i
 // server manuali e la chiave di progetto stanno nel foglio «Per sviluppatori».
+//
+// Fase design (DS4, la pagina Plugin): la finestra non c'è più da PL7 — qui
+// restano i PEZZI che la pagina riusa (la riga del catalogo, il logo, i flussi
+// «Connetti», gli account Composio e il contenuto «Per sviluppatori») e
+// passano ai token di DS1. Le regole che questa pagina segue, scritte una volta:
+//   - le righe sono FlatRow a filo (anche gli account e i risultati del
+//     registro: prima erano riquadri tenui dentro la scheda — «un muro di
+//     contenitori»);
+//   - le azioni dentro una riga sono TESTO (Button ghost); l'azione che fa
+//     andare avanti un modulo è l'unica piena (primary);
+//   - i campi sono alti 36 (h-control), col raggio dei controlli e il testo
+//     di riga: prima ogni campo aveva la sua altezza (py-1.5, h-9) e il suo
+//     raggio. Il campo delle finestre dei plugin sta qui in FIELD perché il
+//     pezzo di sistema (components/ui/input) non è ancora ai token: quando lo
+//     sarà, questo file lo userà e la costante esce.
 import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
+import { Plus } from 'lucide-react'
 import { api, useStore } from '../store'
 import { i18n } from '../lib/i18n'
 import type { AppsRegistryResult, ComposioGatewayAppInfo, ComposioGatewayStatusInfo } from '../../../shared/types'
@@ -18,13 +34,24 @@ import { botsToggleState, gatewayAccountRows, accountLimitMessage, type CatalogR
 // B3 (fase b20-bug): il flusso «Connetti» è PURO (tempo massimo, esiti in riga) — qui solo il cablaggio
 import { createAppConnectFlows, type AppConnectFlows, type AppFlowFailure, type AppFlowKind } from '../lib/app-connect-flow'
 // PP4 (fase plugin-pulita): la riga del catalogo è a filo
-import { FlatRow } from './ui/flat-list'
+import { FlatList, FlatRow } from './ui/flat-list'
+import { Section } from './ui/section'
+import { Button, buttonVariants } from './ui/button'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
 import { Toggle } from './Settings'
-import { catalogLogoUrl } from '../lib/app-logos'
+import { catalogLogoUrl, LOGO_CLASS, LOGO_TILE_CLASS } from '../lib/app-logos'
 
 export type { AppFlowFailure, AppFlowKind }
+
+/**
+ * Il campo di testo delle finestre dei plugin (DS1): 36 px di altezza —
+ * l'altezza è la MISURA (h-), non padding più testo, così un campo e un
+ * Button affiancati si allineano sempre — col raggio dei controlli, il testo
+ * di riga e il fondo della scheda (sta dentro i pannelli tenui). Il colore
+ * del testo lo eredita; il segnaposto è grigio.
+ */
+const FIELD = 'h-control min-w-0 rounded-control bg-card px-3 text-body outline-none placeholder:text-muted-foreground'
 
 /** La lingua attiva come UiLanguage. */
 function uiLang(): 'it' | 'en' {
@@ -34,7 +61,7 @@ function uiLang(): 'it' | 'en' {
 /** A7: l'etichetta piccola sulla provenienza dei dati (sta nel dettaglio, non sulle righe). */
 export function ProvenanceTag({ via }: { via: 'direct' | 'composio' }) {
   return (
-    <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${via === 'composio' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+    <span className={`rounded-full px-2 py-0.5 text-caption ${via === 'composio' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
       {via === 'composio'
         ? <Trans>Tramite Composio: login e azioni passano dai suoi server</Trans>
         : <Trans>Diretta: il permesso resta sul tuo Mac</Trans>}
@@ -42,19 +69,27 @@ export function ProvenanceTag({ via }: { via: 'direct' | 'composio' }) {
   )
 }
 
-/** Il logo di una riga: il file del catalogo, un data: URL, un'emoji o l'iniziale su un fondo tenue. */
-export function AppLogo({ logo, name, className = 'size-10 text-base' }: { logo: string | null; name: string; className?: string }) {
+/**
+ * Il logo di una riga o di una testata: il file del catalogo (o un data: URL)
+ * oppure, quando manca, l'iniziale su una piastrella tenue.
+ *
+ * La MISURA la dà chi lo rende, con `className`: size-8 nelle righe e size-10
+ * nelle testate di scheda (DS1), e la taglia dell'iniziale. Il raggio e il
+ * fondo del tema scuro sono di lib/app-logos, in un posto solo: prima ogni
+ * file che rendeva un logo scriveva il suo (rounded-[11px], rounded-[9px],
+ * rounded-[5px]).
+ *
+ * Fase design (DS1): niente più emoji al posto del logo — nell'interfaccia ci
+ * sono solo icone. Chi non ha un file di logo mostra l'iniziale.
+ */
+export function AppLogo({ logo, name, className = 'size-10 text-reading' }: { logo: string | null; name: string; className?: string }) {
   const url = catalogLogoUrl(logo)
   if (url || logo?.startsWith('data:')) {
-    // nel tema scuro una piastrella chiara dietro il logo: i marchi neri su
-    // fondo trasparente (Apaleo, FreshBooks…) altrimenti spariscono; i loghi
-    // pieni la coprono del tutto e restano identici
-    return <img src={url ?? logo!} alt="" className={`shrink-0 rounded-[11px] object-cover dark:bg-white ${className}`} />
+    return <img src={url ?? logo!} alt="" className={`${LOGO_CLASS} ${className}`} />
   }
-  const emoji = logo && logo.length <= 4 ? logo : null
   return (
-    <span className={`grid ${className} shrink-0 place-items-center rounded-[11px] bg-muted font-bold ${emoji ? '' : 'text-foreground/70'}`}>
-      {emoji ?? name.slice(0, 1).toUpperCase()}
+    <span className={`grid place-items-center ${LOGO_TILE_CLASS} ${className}`}>
+      {name.slice(0, 1).toUpperCase()}
     </span>
   )
 }
@@ -66,28 +101,48 @@ function MarketplaceTab() {
   const [error, setError] = useState('')
   const refresh = async (): Promise<void> => setList(await api.marketplaceList())
   useEffect(() => { void refresh() }, [])
+  const marketplaces = list ?? []
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
+    <div className="flex flex-col gap-block">
+      <p className="text-small text-muted-foreground">
         <Trans>Plugin nel formato di Claude Code. Predefinito: <code>anthropics/claude-plugins-official</code> (puoi rimuoverlo). Di un plugin Homun importa SOLO skill e server MCP; hook, bin/ e comandi non girano mai.</Trans>
       </p>
-      {(list ?? []).map((m) => (
-        <div key={m.source} className="flex items-center gap-2 rounded-2xl bg-muted px-3 py-2">
-          <span className="text-sm">{m.name}</span>
-          {m.official && <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"><Trans>marketplace ufficiale</Trans></span>}
-          <span className="flex-1 truncate text-xs text-muted-foreground">{m.source}</span>
-          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.marketplaceRemove(m.source); await refresh() }}><Trans>rimuovi</Trans></button>
-        </div>
-      ))}
-      <div className="flex gap-1">
+      {/* l'elenco solo quando ha righe: una lista vuota in una colonna con lo
+          scarto fra i blocchi farebbe uno spazio a vuoto in fondo */}
+      {marketplaces.length > 0 && (
+        <FlatList>
+          {marketplaces.map((m) => (
+            <FlatRow
+              key={m.source}
+              title={(
+                <span className="flex items-center gap-2">
+                  <span className="truncate">{m.name}</span>
+                  {m.official && <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-caption text-primary"><Trans>marketplace ufficiale</Trans></span>}
+                </span>
+              )}
+              subtitle={m.source}
+              trailing={(
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="hover:text-destructive"
+                  onClick={async () => { await api.marketplaceRemove(m.source); await refresh() }}
+                >
+                  <Trans>rimuovi</Trans>
+                </Button>
+              )}
+            />
+          ))}
+        </FlatList>
+      )}
+      <div className="flex items-center gap-2">
         <input
-          className="min-w-0 flex-1 rounded-full bg-muted px-3 py-1.5 text-xs outline-none"
+          className={`${FIELD} flex-1`}
           placeholder={t`owner/repo di GitHub oppure URL git https`}
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />
-        <button
-          className="rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+        <Button
           disabled={!input.trim()}
           onClick={async () => {
             setError('')
@@ -101,9 +156,9 @@ function MarketplaceTab() {
           }}
         >
           <Trans>aggiungi</Trans>
-        </button>
+        </Button>
       </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="text-small text-destructive">{error}</p>}
     </div>
   )
 }
@@ -120,52 +175,54 @@ function GatewayTab() {
   useEffect(() => {
     void api.connectorsGatewayPresets().then((r) => { setPresets(r.presets); setWarning(r.warning) }).catch(() => setPresets([]))
   }, [])
+  const chosen = (presets ?? []).find((p) => p.name === name)
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">{warning || t`Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi`}</p>
-      <div className="flex flex-wrap gap-1">
+    <div className="flex flex-col gap-block">
+      <p className="text-small text-muted-foreground">{warning || t`Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi`}</p>
+      {/* i preset: scelte che COMPILANO il modulo qui sotto — secondarie, non
+          l'azione che fa andare avanti (quella è «aggiungi gateway») */}
+      <div className="flex flex-wrap gap-2">
         {(presets ?? []).map((p) => (
-          <button
+          <Button
             key={p.id}
-            className="rounded-full bg-muted px-2.5 py-1 text-[11px] transition hover:bg-accent"
-            onClick={() => { setName(p.name); setUrl(''); setToken('') }}
+            variant="secondary"
+            size="sm"
             title={p.help}
+            onClick={() => { setName(p.name); setUrl(''); setToken('') }}
           >
             {p.name}
-          </button>
+          </Button>
         ))}
       </div>
-      <div className="space-y-2 rounded-2xl bg-muted p-3">
-        <div className="grid grid-cols-2 gap-2">
-          <input className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`Nome (es. Composio)`} value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`URL https del server MCP`} value={url} onChange={(e) => setUrl(e.target.value)} />
+      <div className="flex flex-col gap-3 rounded-surface bg-muted p-4">
+        <div className="grid grid-cols-2 gap-3">
+          <input className={FIELD} placeholder={t`Nome (es. Composio)`} value={name} onChange={(e) => setName(e.target.value)} />
+          <input className={FIELD} placeholder={t`URL https del server MCP`} value={url} onChange={(e) => setUrl(e.target.value)} />
         </div>
-        <input className="w-full rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" type="password" placeholder={t`chiave / token Bearer (salvata cifrata)`} value={token} onChange={(e) => setToken(e.target.value)} />
-        {(presets ?? []).find((p) => p.name === name)?.help && (
-          <p className="text-[11px] text-muted-foreground">{presets!.find((p) => p.name === name)!.help}</p>
-        )}
-        <button
-          className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
-          disabled={!name.trim() || !url.trim().startsWith('https://') || !token.trim()}
-          onClick={async () => {
-            setError('')
-            const preset = (presets ?? []).find((p) => p.name === name)
-            try {
-              await api.connectorsAddGateway({
-                name: name.trim(), url: url.trim(),
-                auth: preset?.auth === 'bearer' ? 'bearer' : 'headers',
-                ...(preset ? { preset: preset.id } : {}),
-                ...(preset?.headerName ? { headerName: preset.headerName, headers: { [preset.headerName]: token.trim() } } : { headers: { Authorization: `Bearer ${token.trim()}` } })
-              })
-              setName(''); setUrl(''); setToken('')
-            } catch (e) {
-              setError(e instanceof Error ? e.message : String(e))
-            }
-          }}
-        >
-          <Trans>aggiungi gateway</Trans>
-        </button>
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        <input className={`${FIELD} w-full`} type="password" placeholder={t`chiave / token Bearer (salvata cifrata)`} value={token} onChange={(e) => setToken(e.target.value)} />
+        {chosen?.help && <p className="text-small text-muted-foreground">{chosen.help}</p>}
+        <div>
+          <Button
+            disabled={!name.trim() || !url.trim().startsWith('https://') || !token.trim()}
+            onClick={async () => {
+              setError('')
+              try {
+                await api.connectorsAddGateway({
+                  name: name.trim(), url: url.trim(),
+                  auth: chosen?.auth === 'bearer' ? 'bearer' : 'headers',
+                  ...(chosen ? { preset: chosen.id } : {}),
+                  ...(chosen?.headerName ? { headerName: chosen.headerName, headers: { [chosen.headerName]: token.trim() } } : { headers: { Authorization: `Bearer ${token.trim()}` } })
+                })
+                setName(''); setUrl(''); setToken('')
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e))
+              }
+            }}
+          >
+            <Trans>aggiungi gateway</Trans>
+          </Button>
+        </div>
+        {error && <p className="text-small text-destructive">{error}</p>}
       </div>
     </div>
   )
@@ -180,11 +237,11 @@ function ClientMetadataUrlRow() {
   }, [])
   if (url === null) return null
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-muted px-3 py-2.5">
-      <span className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>OAuth</Trans></span>
-      <span className="text-[11px] text-muted-foreground"><Trans>Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR).</Trans></span>
+    <div className="rounded-surface bg-muted p-4">
+      <p className="text-body font-medium"><Trans>OAuth</Trans></p>
+      <p className="mt-1 text-small text-muted-foreground"><Trans>Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR).</Trans></p>
       <input
-        className="min-w-0 flex-1 rounded-full bg-card px-3 py-1.5 text-xs outline-none"
+        className={`${FIELD} mt-3 w-full`}
         placeholder={t`https://utente.github.io/sandbot/client.json`}
         value={url}
         onChange={(e) => setUrl(e.target.value)}
@@ -234,105 +291,109 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
     }
   }
 
-  const stepBox = 'rounded-2xl bg-muted p-4'
+  // ogni passo è un pannello tenue: i tre passi si leggono come altrettanti
+  // momenti, e dentro ciascuno le righe stanno a 12 px (gap-3)
+  const stepBox = 'rounded-surface bg-muted p-4'
   return (
     <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="composio-activation">
-        <strong className="block font-display text-lg"><Trans>Più di mille app con Composio</Trans></strong>
+      <div className="max-h-[85vh] w-full max-w-reading overflow-y-auto scroll-thin rounded-surface bg-card p-6 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="composio-activation">
+        {/* il titolo del dialogo: text-title, in Figtree — il Bricolage (font-display) è solo del titolo di pagina */}
+        <strong className="block text-title font-semibold"><Trans>Più di mille app con Composio</Trans></strong>
 
         {/* passo 1: cos'è */}
-        <div className={`mt-3 ${stepBox}`}>
-          <p className="text-[13px] leading-relaxed text-foreground/80">
+        <div className={`mt-6 ${stepBox}`}>
+          <p className="text-body">
             <Trans>Composio è un servizio di terzi: i login e le azioni delle app collegate tramite Composio passano dai suoi server, non restano solo sul tuo Mac.</Trans>
           </p>
-          <p className="mt-1 text-[13px] text-foreground/80"><Trans>Ha un piano gratuito.</Trans></p>
-          <div className="mt-2 flex items-center gap-2">
+          <p className="mt-1 text-body"><Trans>Ha un piano gratuito.</Trans></p>
+          <div className="mt-3 flex items-center gap-2">
+            {/* un link VESTITO da bottone pieno (la via principale): le classi di Button, da sole */}
             <a
-              className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+              className={buttonVariants({ size: 'sm' })}
               href="https://composio.dev"
               target="_blank"
               rel="noreferrer"
             >
               <Trans>Apri Composio</Trans>
             </a>
-            <button className="rounded-full bg-card px-3.5 py-1.5 text-xs transition hover:bg-card/80" onClick={() => setStep(2)}>
+            <Button variant="secondary" size="sm" onClick={() => setStep(2)}>
               <Trans>Avanti</Trans>
-            </button>
+            </Button>
           </div>
         </div>
 
         {/* passo 2: incolla la chiave */}
         {step >= 2 && (
-          <div className={`mt-3 ${stepBox}`}>
-            <p className="text-[13px] font-medium"><Trans>Incolla la chiave</Trans></p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
+          <div className={`mt-4 ${stepBox}`}>
+            <p className="text-body font-medium"><Trans>Incolla la chiave</Trans></p>
+            <p className="mt-1 text-small text-muted-foreground">
               <Trans>Dove la trovo? Copia la chiave API dalle impostazioni del tuo progetto su Composio (composio.dev → Settings → API Keys).</Trans>
             </p>
-            <div className="mt-2 flex gap-1">
+            <div className="mt-3 flex items-center gap-2">
               <input
-                className="min-w-0 flex-1 rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none"
+                className={`${FIELD} flex-1`}
                 type="password"
                 placeholder={t`chiave API di Composio`}
                 value={key}
                 onChange={(e) => { setKey(e.target.value); setStatus('idle'); setTestError('') }}
                 autoFocus
               />
-              <button
-                className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+              <Button
+                variant="secondary"
                 disabled={key.trim().length < 8}
                 onClick={() => setStep(3)}
               >
                 <Trans>Avanti</Trans>
-              </button>
+              </Button>
             </div>
           </div>
         )}
 
         {/* passo 3: prova */}
         {step >= 3 && (
-          <div className={`mt-3 ${stepBox}`}>
-            <p className="text-[13px] font-medium"><Trans>Prova</Trans></p>
-            <p className="mt-1 text-[11px] text-muted-foreground"><Trans>Homun crea il client e chiede a Composio l'elenco delle app: se riesce, la chiave viene salvata cifrata sul tuo Mac.</Trans></p>
-            <button
-              className="mt-2 rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-50"
+          <div className={`mt-4 ${stepBox}`}>
+            <p className="text-body font-medium"><Trans>Prova</Trans></p>
+            <p className="mt-1 text-small text-muted-foreground"><Trans>Homun crea il client e chiede a Composio l'elenco delle app: se riesce, la chiave viene salvata cifrata sul tuo Mac.</Trans></p>
+            <Button
+              className="mt-3"
               disabled={testing || key.trim().length < 8}
               onClick={() => void runTest()}
             >
               {testing ? t`provo…` : <Trans>Prova la chiave</Trans>}
-            </button>
-            {status === 'ok' && <p className="mt-2 text-[13px] text-chart-2" data-testid="composio-active"><Trans>Composio attivo</Trans></p>}
-            {status === 'invalid-key' && <p className="mt-2 text-[13px] text-destructive"><Trans>Chiave non valida: controllala e riprova.</Trans></p>}
-            {status === 'unreachable' && <p className="mt-2 text-[13px] text-destructive"><Trans>Composio non raggiungibile: controlla la connessione e riprova.</Trans></p>}
+            </Button>
+            {status === 'ok' && <p className="mt-3 text-small text-chart-2" data-testid="composio-active"><Trans>Composio attivo</Trans></p>}
+            {status === 'invalid-key' && <p className="mt-3 text-small text-destructive"><Trans>Chiave non valida: controllala e riprova.</Trans></p>}
+            {status === 'unreachable' && <p className="mt-3 text-small text-destructive"><Trans>Composio non raggiungibile: controlla la connessione e riprova.</Trans></p>}
             {status === 'gateway-active' && (
-              <div className="mt-2 rounded-2xl bg-card px-3 py-2 text-[13px]">
+              <div className="mt-3 rounded-surface bg-card p-3 text-body">
                 <p><Trans>Composio è già collegato con il login. Le due strade non possono stare insieme: disattivo il login e uso la chiave di progetto?</Trans></p>
-                <button
-                  className="mt-1.5 rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+                <Button
+                  className="mt-2"
                   onClick={async () => {
                     await api.connectorsDisconnect('composio').catch(() => undefined)
                     await runTest()
                   }}
                 >
                   <Trans>Disattiva il login e riprova</Trans>
-                </button>
+                </Button>
               </div>
             )}
             {status === 'consumer-key' && (
-              <p className="mt-2 text-[13px] text-destructive">
+              <p className="mt-3 text-small text-destructive">
                 <Trans>Questa è una chiave di Composio «For You» (inizia con ck_). Homun usa la chiave di un progetto Composio: su composio.dev apri il pannello per sviluppatori, crea un progetto e copia la sua chiave API da Settings → API Keys (inizia con ak_).</Trans>
               </p>
             )}
-            {status === 'error' && testError && <p className="mt-2 text-[13px] text-destructive">{testError}</p>}
+            {status === 'error' && testError && <p className="mt-3 text-small text-destructive">{testError}</p>}
             {status !== 'ok' && status !== 'idle' && (
-              <p className="mt-1 text-[11px] text-muted-foreground"><Trans>La chiave non è stata salvata.</Trans></p>
+              <p className="mt-1 text-small text-muted-foreground"><Trans>La chiave non è stata salvata.</Trans></p>
             )}
           </div>
         )}
 
-        <div className="mt-4 flex justify-end">
-          <button className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
+        <div className="mt-6 flex justify-end">
+          <Button variant="ghost" onClick={onClose}>
             {status === 'ok' ? <Trans>Fatto</Trans> : <Trans>Chiudi</Trans>}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -353,6 +414,12 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
  * PL1 (fase plugin): il CONTENUTO vive in DevelopersContent (esportata) —
  * la pagina Plugin lo incorpora in «Avanzate»; il foglio resta il wrapper
  * di oggi finché le finestre esistono.
+ *
+ * Fase design (DS4): è una sezione come le altre — il titolo (text-title: è
+ * il titolo di ciò che si apre sotto la riga «Per sviluppatori»), l'angolo
+ * in alto dove si va a finire con lo scorrimento, e i blocchi a 16 px l'uno
+ * dall'altro. I blocchi CON un titolo sono sezioni a loro volta (testo di
+ * riga, grigio): stanno dentro, non prendono lo scarto delle sezioni (32).
  */
 export function DevelopersContent({ scrollTo, footer }: { scrollTo?: 'gateway' | 'marketplace' | null; footer?: ReactNode }): ReactNode {
   const { t } = useLingui()
@@ -381,50 +448,53 @@ export function DevelopersContent({ scrollTo, footer }: { scrollTo?: 'gateway' |
     document.getElementById(`developers-${scrollTo}`)?.scrollIntoView({ block: 'start' })
   }, [scrollTo])
 
+  const found = registry ?? []
   return (
-    <>
-      <strong className="block font-display text-lg"><Trans>Per sviluppatori</Trans></strong>
-      <p className="mt-1 text-xs text-muted-foreground"><Trans>Server personalizzati, plugin, gateway e registro: chi sa cos'è un server MCP lo trova qui.</Trans></p>
-      <div className="mt-4 space-y-6">
-        {/* U3: il GATEWAY per primo (è qui che porta il link della finestra
-            «Server MCP»), poi i plugin, poi il registro */}
-        <div id="developers-gateway" data-testid="developers-gateway" className="scroll-mt-4">
-          <GatewayTab />
-        </div>
-        <div id="developers-marketplace" className="scroll-mt-4">
-          <MarketplaceTab />
-        </div>
-        <ClientMetadataUrlRow />
-        <div className="space-y-2">
-          <p className="text-[13px] font-medium"><Trans>Cerca nel registro MCP</Trans></p>
-          <input
-            className="w-full rounded-full bg-muted px-3.5 py-2 text-sm outline-none"
-            placeholder={t`cerca nel registro (2+ lettere)`}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          {searching && <p className="text-xs text-muted-foreground"><Trans>Cerco nel registro…</Trans></p>}
-          {registryFailed && <p className="text-xs text-muted-foreground"><Trans>Non riesco a cercare nel registro</Trans></p>}
-          {registry !== null && registry.length === 0 && !searching && <p className="text-xs text-muted-foreground"><Trans>Nessun server trovato.</Trans></p>}
-          {(registry ?? []).map((r) => (
-            <div key={r.id} className="flex items-center gap-3 rounded-[14px] bg-muted/60 px-3 py-2">
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm">{r.name}</span>
-                <span className="block truncate text-xs text-muted-foreground">{r.description}</span>
-              </span>
-              <a className="shrink-0 text-xs text-primary hover:underline" href="https://github.com/modelcontextprotocol/registry" target="_blank" rel="noreferrer">
-                <Trans>il registro ›</Trans>
-              </a>
-            </div>
-          ))}
-        </div>
-        {/* fase Composio OAuth (C6): la strada della CHIAVE resta, ma solo
-            qui — per la maggior parte delle persone c'è il «Connetti» delle
-            app dell'elenco; le due strade non insieme */}
-        <ComposioKeySection />
+    <Section size="title" title={<Trans>Per sviluppatori</Trans>}>
+      <p className="text-small text-muted-foreground"><Trans>Server personalizzati, plugin, gateway e registro: chi sa cos'è un server MCP lo trova qui.</Trans></p>
+      {/* U3: il GATEWAY per primo (è qui che porta il link della finestra
+          «Server MCP»), poi i plugin, poi il registro */}
+      <div id="developers-gateway" data-testid="developers-gateway" className="scroll-mt-4">
+        <GatewayTab />
       </div>
+      <div id="developers-marketplace" className="scroll-mt-4">
+        <MarketplaceTab />
+      </div>
+      <ClientMetadataUrlRow />
+      <Section size="body" title={<Trans>Cerca nel registro MCP</Trans>}>
+        {/* la ricerca: 36 px come tutti i campi (prima era una pillola più bassa) */}
+        <input
+          className={`${FIELD} w-full bg-muted`}
+          placeholder={t`cerca nel registro (2+ lettere)`}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {searching && <p className="text-small text-muted-foreground"><Trans>Cerco nel registro…</Trans></p>}
+        {registryFailed && <p className="text-small text-muted-foreground"><Trans>Non riesco a cercare nel registro</Trans></p>}
+        {registry !== null && registry.length === 0 && !searching && <p className="text-small text-muted-foreground"><Trans>Nessun server trovato.</Trans></p>}
+        {found.length > 0 && (
+          <FlatList>
+            {found.map((r) => (
+              <FlatRow
+                key={r.id}
+                title={r.name}
+                subtitle={r.description}
+                trailing={(
+                  <a className="shrink-0 text-small text-primary hover:underline" href="https://github.com/modelcontextprotocol/registry" target="_blank" rel="noreferrer">
+                    <Trans>il registro ›</Trans>
+                  </a>
+                )}
+              />
+            ))}
+          </FlatList>
+        )}
+      </Section>
+      {/* fase Composio OAuth (C6): la strada della CHIAVE resta, ma solo
+          qui — per la maggior parte delle persone c'è il «Connetti» delle
+          app dell'elenco; le due strade non insieme */}
+      <ComposioKeySection />
       {footer}
-    </>
+    </Section>
   )
 }
 
@@ -435,40 +505,41 @@ function ComposioKeySection() {
   const [open, setOpen] = useState(false)
   if (composio?.active) {
     return (
-      <div className="space-y-1">
-        <p className="text-[13px] font-medium"><Trans>Chiave di progetto Composio (sviluppatori)</Trans></p>
-        <p className="text-xs text-muted-foreground"><Trans>Attiva con la chiave ak_ del tuo progetto.</Trans></p>
-        <button
-          className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-          onClick={async () => {
-            await api.composioDisable().catch(() => undefined)
-            await refreshComposio()
-          }}
-        >
-          <Trans>Disattiva la chiave</Trans>
-        </button>
-      </div>
+      <Section size="body" title={<Trans>Chiave di progetto Composio (sviluppatori)</Trans>}>
+        <p className="text-small text-muted-foreground"><Trans>Attiva con la chiave ak_ del tuo progetto.</Trans></p>
+        <div>
+          {/* spegnere non è l'azione che fa andare avanti: testo rosso, non un bottone pieno */}
+          <Button
+            variant="ghost"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={async () => {
+              await api.composioDisable().catch(() => undefined)
+              await refreshComposio()
+            }}
+          >
+            <Trans>Disattiva la chiave</Trans>
+          </Button>
+        </div>
+      </Section>
     )
   }
   return (
-    <div className="space-y-1">
-      <p className="text-[13px] font-medium"><Trans>Chiave di progetto Composio (sviluppatori)</Trans></p>
-      <p className="text-xs text-muted-foreground">
+    <Section size="body" title={<Trans>Chiave di progetto Composio (sviluppatori)</Trans>}>
+      <p className="text-small text-muted-foreground">
         <Trans>Per la maggior parte delle persone è meglio «Accedi con Composio» nella vista principale: un clic nel browser, niente chiavi. La chiave ak_ di un progetto la usano gli sviluppatori.</Trans>
       </p>
-      <button
-        className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-        onClick={() => setOpen(true)}
-      >
-        {t`Usa la chiave di progetto`}
-      </button>
-      {open && (
-        <ComposioActivationSheet
-          onClose={() => setOpen(false)}
-          onDone={() => { setOpen(false); void refreshComposio() }}
-        />
-      )}
-    </div>
+      <div>
+        <Button onClick={() => setOpen(true)}>
+          {t`Usa la chiave di progetto`}
+        </Button>
+        {open && (
+          <ComposioActivationSheet
+            onClose={() => setOpen(false)}
+            onDone={() => { setOpen(false); void refreshComposio() }}
+          />
+        )}
+      </div>
+    </Section>
   )
 }
 
@@ -478,7 +549,8 @@ function ComposioKeySection() {
 export function FilterPill({ active, onClick, children }: { active: boolean; onClick(): void; children: ReactNode }) {
   return (
     <button
-      className={`rounded-full px-3 py-1 text-[12px] transition ${active ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+      type="button"
+      className={`rounded-full px-3 py-1 text-caption transition ${active ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
       onClick={onClick}
     >
       {children}
@@ -602,6 +674,14 @@ export function useConnectFlows(rows: CatalogRowView[], options: { maxMs?: numbe
  * B3 (fase b20-bug): in avvio lo dice; quando non è partito mostra il motivo
  * per esteso (sotto la riga) con «Riprova» — mai muta, mai senza uscita. Il
  * contenitore porta `data-flow` (lo stato) per le sonde.
+ *
+ * Fase design (DS4): le azioni della riga sono testo (Button ghost, 32 px:
+ * l'altezza delle righe) — prima erano pillole scritte a mano; lo stato in
+ * parole è la riga grigia (text-small), rossa quando non è partito. Ciò che
+ * sta SOTTO la riga (il motivo per esteso, il conflitto) comincia sotto il
+ * nome, alla stessa ascissa: FlatRow mette il testo dopo lo slot del logo
+ * (32) e lo scarto fra logo e testo (12) — qui la stessa casa vuota, perché
+ * 44 px non sono nella scala delle spaziature (pl-11 era scritto a mano).
  */
 export function AppRow({ row, flow, failure, onConnect, onCancel, onConflictResolve, onOpen }: {
   row: CatalogRowView
@@ -615,56 +695,58 @@ export function AppRow({ row, flow, failure, onConnect, onCancel, onConflictReso
 }): ReactNode {
   const { t } = useLingui()
   const stop = (e: { stopPropagation(): void }): void => e.stopPropagation()
-  const quiet = 'rounded-full px-3.5 py-1.5 text-[13px] text-foreground transition hover:bg-muted'
   const statusLine =
     flow === 'login' ? t`Accedi a Composio nel browser…`
     : flow === 'app' ? t`Completa il login di ${row.app.name} nel browser…`
     : row.tagline
   const failed = flow === 'failed' ? failure ?? null : null
+  /** Ciò che sta sotto la riga: la casa vuota del logo, poi il testo alla stessa ascissa del nome. */
+  const underRow = 'flex gap-row-gap pb-3'
+  const logoRoom = <span className="size-8 shrink-0" aria-hidden="true" />
   return (
     <div data-testid={`app-state-${row.app.id}`} data-flow={flow ?? 'idle'} {...(failed ? { 'data-flow-reason': failed.reason } : {})}>
       <FlatRow
         clickable
         testId={`app-row-${row.app.id}`}
         onClick={() => onOpen(row)}
-        leading={<AppLogo logo={row.app.logo} name={row.app.name} className="size-8 text-sm" />}
+        leading={<AppLogo logo={row.app.logo} name={row.app.name} className="size-8 text-body" />}
         title={row.app.name}
         subtitle={statusLine ?? undefined}
         trailing={
           <>
             {flow === null && row.connected === 'reconnect' && (
-              <button type="button" className={quiet} data-testid={`app-connect-${row.app.id}`} onClick={(e) => { stop(e); onConnect(row) }}>
+              <Button variant="ghost" size="sm" data-testid={`app-connect-${row.app.id}`} onClick={(e) => { stop(e); onConnect(row) }}>
                 <Trans>Ricollega</Trans>
-              </button>
+              </Button>
             )}
             {flow === null && row.connected === null && (
-              <button type="button" className={quiet} data-testid={`app-connect-${row.app.id}`} onClick={(e) => { stop(e); onConnect(row) }}>
+              <Button variant="ghost" size="sm" data-testid={`app-connect-${row.app.id}`} onClick={(e) => { stop(e); onConnect(row) }}>
                 <Trans>Connetti</Trans>
-              </button>
+              </Button>
             )}
             {flow === 'starting' && (
-              <span className="text-[13px] text-muted-foreground" data-testid={`app-status-${row.app.id}`}>
+              <span className="text-small text-muted-foreground" data-testid={`app-status-${row.app.id}`}>
                 {t`Avvio del collegamento…`}
               </span>
             )}
-            {flow === 'direct' && <span className="text-[13px] text-muted-foreground">{t`autorizza nel browser…`}</span>}
+            {flow === 'direct' && <span className="text-small text-muted-foreground">{t`autorizza nel browser…`}</span>}
             {(flow === 'login' || flow === 'app') && (
-              <button type="button" className={quiet} data-testid={`app-cancel-${row.app.id}`} onClick={(e) => { stop(e); onCancel(row) }}>
+              <Button variant="ghost" size="sm" data-testid={`app-cancel-${row.app.id}`} onClick={(e) => { stop(e); onCancel(row) }}>
                 <Trans>Annulla</Trans>
-              </button>
+              </Button>
             )}
             {flow === 'failed' && (
               <>
-                <span className="text-[13px] text-destructive" data-testid={`app-status-${row.app.id}`}>
+                <span className="text-small text-destructive" data-testid={`app-status-${row.app.id}`}>
                   {failed?.reason === 'not-connectable'
                     ? <Trans>Non si può collegare</Trans>
                     : failed?.reason === 'timeout'
                       ? <Trans>Nessuna risposta</Trans>
                       : <Trans>Non riuscito</Trans>}
                 </span>
-                <button type="button" className={quiet} data-testid={`app-retry-${row.app.id}`} onClick={(e) => { stop(e); onConnect(row) }}>
+                <Button variant="ghost" size="sm" data-testid={`app-retry-${row.app.id}`} onClick={(e) => { stop(e); onConnect(row) }}>
                   <Trans>Riprova</Trans>
-                </button>
+                </Button>
               </>
             )}
           </>
@@ -672,30 +754,28 @@ export function AppRow({ row, flow, failure, onConnect, onCancel, onConflictReso
       />
       {/* B3: il motivo per esteso, sotto la riga (la mezza riga si tronca: un motivo non si taglia) */}
       {flow === 'failed' && failed && (
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 pb-3 pl-11 text-[13px]" onClick={stop} data-testid={`app-error-${row.app.id}`}>
-          <p className="min-w-0 flex-1 basis-64 text-foreground/80">{failed.text}</p>
+        <div className={`${underRow} flex-wrap items-baseline gap-y-1`} onClick={stop} data-testid={`app-error-${row.app.id}`}>
+          {logoRoom}
+          <p className="min-w-0 flex-1 basis-64 text-small text-foreground/80">{failed.text}</p>
           {failed.detail && (
-            <p className="min-w-0 flex-1 basis-64 truncate text-[12px] text-muted-foreground" title={failed.detail} data-testid={`app-error-detail-${row.app.id}`}>
+            <p className="min-w-0 flex-1 basis-64 truncate text-caption text-muted-foreground" title={failed.detail} data-testid={`app-error-detail-${row.app.id}`}>
               {failed.detail}
             </p>
           )}
         </div>
       )}
       {flow === 'conflict' && (
-        <div className="flex flex-wrap items-center gap-2 pb-3 text-[13px]" onClick={stop} data-testid={`app-conflict-${row.app.id}`}>
-          <p className="min-w-0 flex-1">
+        <div className={`${underRow} flex-wrap items-center`} onClick={stop} data-testid={`app-conflict-${row.app.id}`}>
+          {logoRoom}
+          <p className="min-w-0 flex-1 text-small">
             <Trans>Composio è già attivo con la chiave di progetto (sviluppatori). Le due strade non possono stare insieme: disattivo la chiave e collego con il login?</Trans>
           </p>
-          <button
-            type="button"
-            className="rounded-full bg-muted px-3.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
-            onClick={() => onConflictResolve(row)}
-          >
+          <Button variant="secondary" size="sm" onClick={() => onConflictResolve(row)}>
             <Trans>Disattiva la chiave e collega</Trans>
-          </button>
-          <button type="button" className="rounded-full px-3 py-1.5 text-xs text-muted-foreground transition hover:text-foreground" onClick={() => onCancel(row)}>
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => onCancel(row)}>
             <Trans>Annulla</Trans>
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -752,18 +832,24 @@ export function BotTogglesForApp({ directId, enabledFor, agents, onChanged }: {
 
 /**
  * CA2 (fase composio-account): gli account di un'app Composio collegata nel
- * dettaglio della finestra App — una riga per account (alias in grassetto,
- * email in grigio, «Da ricollegare» per i non attivi) con «Rinomina» e
- * «Togli» (con conferma), e sotto «Aggiungi un altro account»: chiede un
- * nome facoltativo («lavoro, personale…») e apre il login come oggi. Il
- * limite di account del server si dice in parole semplici, mai l'errore
- * grezzo. Stile della finestra di oggi: niente bordi, fondi tenui.
+ * dettaglio — una riga per account (alias, email in grigio, «Da ricollegare»
+ * per i non attivi) con «Rinomina» e «Togli» (con conferma), e sotto
+ * «Aggiungi un altro account»: chiede un nome facoltativo («lavoro,
+ * personale…») e apre il login come oggi. Il limite di account del server si
+ * dice in parole semplici, mai l'errore grezzo.
+ *
+ * Fase design (DS4): a filo come il resto della scheda (PP4) — prima ogni
+ * account era un riquadro tenue. Il nome dell'account è il titolo di riga,
+ * l'email la riga grigia; le azioni sono testo. «Rinomina» e l'aggiunta
+ * aprono il loro campo nella riga stessa (in altezza 32: sta in una riga da
+ * 52), e il campo dell'aggiunta è l'UNICO input della sezione finché è
+ * aperto — le sonde lo trovano come primo input di «app-accounts».
  */
 export function GatewayAccountsSection({ app, appName, onChanged }: {
   app: ComposioGatewayAppInfo
   appName: string
   onChanged(): void
-}) {
+}): ReactNode {
   const { t } = useLingui()
   const rows = gatewayAccountRows(app)
   const [renaming, setRenaming] = useState<{ key: string; value: string } | null>(null)
@@ -795,80 +881,88 @@ export function GatewayAccountsSection({ app, appName, onChanged }: {
     }
   }
 
+  /** Il campo di un nome scritto sul posto (rinomina, aggiunta): 32 px, sta in una riga. */
+  const nameField = 'h-control-sm w-40 rounded-control bg-card px-2 text-body outline-none placeholder:text-muted-foreground'
+  const togli = 'text-destructive hover:text-destructive'
+
   return (
-    <div className="mt-3 space-y-1.5" data-testid="app-accounts">
-      {rows.map((row) => (
-        <div key={row.key} className="rounded-xl bg-muted/60 px-3 py-2" data-testid={`app-account-${row.key}`}>
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-            <span className="text-[13px] font-semibold">{row.alias}</span>
-            {row.email && <span className="truncate text-[12px] text-muted-foreground">{row.email}</span>}
-            {row.reconnect && <span className="text-[11px] text-muted-foreground"><Trans>Da ricollegare</Trans></span>}
-            <span className="flex-1" />
-            {renaming?.key === row.key ? (
-              <span className="flex items-center gap-1.5">
-                <input
-                  autoFocus
-                  className="w-32 rounded-lg bg-card px-2 py-1 text-xs outline-none"
-                  value={renaming.value}
-                  onChange={(e) => setRenaming({ key: row.key, value: e.target.value })}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && renaming.value.trim() && !busy) {
+    <div className="flex flex-col gap-block" data-testid="app-accounts">
+      <FlatList>
+        {rows.map((row) => (
+          <div key={row.key} data-testid={`app-account-${row.key}`}>
+            <FlatRow
+              title={row.alias}
+              subtitle={row.reconnect
+                ? <>{row.email ? <>{row.email}{' · '}</> : null}<Trans>Da ricollegare</Trans></>
+                : row.email}
+              trailing={renaming?.key === row.key ? (
+                <>
+                  <input
+                    autoFocus
+                    className={nameField}
+                    value={renaming.value}
+                    onChange={(e) => setRenaming({ key: row.key, value: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && renaming.value.trim() && !busy) {
+                        void run(() => api.composioGatewayRenameAccount(app.slug, row.key, renaming.value))
+                        setRenaming(null)
+                      }
+                      if (e.key === 'Escape') setRenaming(null)
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    disabled={busy || !renaming.value.trim()}
+                    onClick={() => {
                       void run(() => api.composioGatewayRenameAccount(app.slug, row.key, renaming.value))
                       setRenaming(null)
-                    }
-                    if (e.key === 'Escape') setRenaming(null)
-                  }}
-                />
-                <button
-                  className="rounded-full bg-foreground px-2.5 py-1 text-[11px] font-medium text-background transition hover:opacity-90 disabled:opacity-50"
-                  disabled={busy || !renaming.value.trim()}
-                  onClick={() => {
-                    void run(() => api.composioGatewayRenameAccount(app.slug, row.key, renaming.value))
-                    setRenaming(null)
-                  }}
-                >
-                  <Trans>Salva</Trans>
-                </button>
-                <button className="rounded-full px-2 py-1 text-[11px] text-muted-foreground transition hover:text-foreground" onClick={() => setRenaming(null)}>
-                  <Trans>Annulla</Trans>
-                </button>
-              </span>
-            ) : removing === row.key ? (
-              <span className="flex items-center gap-1.5">
-                <button
-                  className="rounded-full px-2.5 py-1 text-[11px] text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
-                  disabled={busy}
-                  onClick={() => {
-                    void run(() => api.composioGatewayRemoveAccount(app.slug, row.key))
-                    setRemoving(null)
-                  }}
-                >
-                  <Trans>Togli davvero</Trans>
-                </button>
-                <button className="rounded-full px-2 py-1 text-[11px] text-muted-foreground transition hover:text-foreground" onClick={() => setRemoving(null)}>
-                  <Trans>Annulla</Trans>
-                </button>
-              </span>
-            ) : (
-              <span className="flex items-center gap-2 text-[11px]">
-                <button className="text-muted-foreground transition hover:text-foreground" disabled={busy} onClick={() => setRenaming({ key: row.key, value: row.alias })}>
-                  <Trans>Rinomina</Trans>
-                </button>
-                <button className="text-destructive transition hover:opacity-70" disabled={busy} onClick={() => setRemoving(row.key)}>
-                  <Trans>Togli</Trans>
-                </button>
-              </span>
-            )}
+                    }}
+                  >
+                    <Trans>Salva</Trans>
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setRenaming(null)}>
+                    <Trans>Annulla</Trans>
+                  </Button>
+                </>
+              ) : removing === row.key ? (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={togli}
+                    disabled={busy}
+                    onClick={() => {
+                      void run(() => api.composioGatewayRemoveAccount(app.slug, row.key))
+                      setRemoving(null)
+                    }}
+                  >
+                    <Trans>Togli davvero</Trans>
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setRemoving(null)}>
+                    <Trans>Annulla</Trans>
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRenaming({ key: row.key, value: row.alias })}>
+                    <Trans>Rinomina</Trans>
+                  </Button>
+                  <Button variant="ghost" size="sm" className={togli} disabled={busy} onClick={() => setRemoving(row.key)}>
+                    <Trans>Togli</Trans>
+                  </Button>
+                </>
+              )}
+            />
           </div>
-        </div>
-      ))}
-      {/* CA2: «Aggiungi un altro account» — nome facoltativo, login come oggi */}
-      <div className="rounded-xl bg-muted/40 px-3 py-2">
+        ))}
+        {/* CA2: «Aggiungi un altro account» — nome facoltativo, login come oggi.
+            La riga è un bottone: 40 px (riga di solo testo), con l'icona al
+            posto del «+» scritto a mano */}
         {adding ? (
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-2 py-row-pad">
             <input
               autoFocus
-              className="w-40 rounded-lg bg-card px-2 py-1 text-xs outline-none"
+              className={nameField}
               placeholder={t`lavoro, personale…`}
               value={addAlias}
               onChange={(e) => setAddAlias(e.target.value)}
@@ -876,8 +970,9 @@ export function GatewayAccountsSection({ app, appName, onChanged }: {
                 if (e.key === 'Escape') { setAdding(false); setAddAlias('') }
               }}
             />
-            <button
-              className="rounded-full bg-foreground px-2.5 py-1 text-[11px] font-medium text-background transition hover:opacity-90 disabled:opacity-50"
+            {/* i bottoni alla misura del campo (32): la riga sta in piedi, tutta sulla stessa linea */}
+            <Button
+              size="sm"
               disabled={busy}
               onClick={() => {
                 void run(() => api.composioGatewayConnect(app.slug, appName, { another: true, alias: addAlias }))
@@ -886,26 +981,28 @@ export function GatewayAccountsSection({ app, appName, onChanged }: {
               }}
             >
               <Trans>Collega</Trans>
-            </button>
-            <button className="rounded-full px-2 py-1 text-[11px] text-muted-foreground transition hover:text-foreground" onClick={() => { setAdding(false); setAddAlias('') }}>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => { setAdding(false); setAddAlias('') }}>
               <Trans>Annulla</Trans>
-            </button>
+            </Button>
           </div>
         ) : (
           <button
-            className="text-[12px] text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+            type="button"
+            className="flex min-h-row-text w-full cursor-pointer items-center gap-row-gap py-row-pad text-body text-muted-foreground transition hover:text-foreground disabled:opacity-50"
             disabled={busy}
             onClick={() => setAdding(true)}
             data-testid="app-add-account"
           >
-            + <Trans>Aggiungi un altro account</Trans>
+            <span className="grid size-8 shrink-0 place-items-center" aria-hidden="true"><Plus className="size-4" /></span>
+            <Trans>Aggiungi un altro account</Trans>
           </button>
         )}
-      </div>
+      </FlatList>
       {limitCount !== null && (
-        <p className="text-[12px] text-muted-foreground" data-testid="app-account-limit">{accountLimitMessage(limitCount, appName, uiLang())}</p>
+        <p className="text-small text-muted-foreground" data-testid="app-account-limit">{accountLimitMessage(limitCount, appName, uiLang())}</p>
       )}
-      {error && <p className="text-[12px] text-destructive">{error}</p>}
+      {error && <p className="text-small text-destructive">{error}</p>}
     </div>
   )
 }

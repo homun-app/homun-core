@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
-import { renderHtml, setStoreStateForRender, parseHtml, textOf, findAll, dialogPassThroughMock } from './render-helper'
+import { renderHtml, setStoreStateForRender, parseHtml, textOf, findAll, dialogPassThroughMock, type HtmlNode } from './render-helper'
 import { callsOf, stubApiMethod } from './render-helper-install'
 
 vi.mock('../components/ui/dialog', () => dialogPassThroughMock())
@@ -383,4 +383,126 @@ describe('PL1: la pagina Plugin (render vero, api finta)', () => {
     expect(texts).toContain('Collegati · 1')
     expect(callsOf('connectorsInstalled').length).toBeGreaterThanOrEqual(0)
   })
+})
+
+// ---- Fase design (DS4): «Collegati» è la tabella unica (DataTable), larga wide ----
+// Prima era una <table> scritta qui, con le sue regole: intestazioni in
+// MAIUSCOLETTO, testo che andava a capo («Tutti i / bot», «tramite / Composio»),
+// righe e misure sue. Ora: intestazioni text-caption grigie in tono normale,
+// righe da 52 che si aprono, NIENTE A CAPO (troncate, col valore intero nel
+// suggerimento), e — sul solo segmento «Collegati» — la colonna larga 1120.
+describe('DS4 (fase design): «Collegati» è la tabella unica, e lì la pagina è larga wide', () => {
+  const has = (node: HtmlNode, cls: string): boolean => (node.attrs.class ?? '').split(/\s+/).includes(cls)
+  // un render solo per tutti i test del gruppo: è pesante (carica il catalogo delle app)
+  let rendered: Promise<HtmlNode> | null = null
+  const renderConnected = (): Promise<HtmlNode> => {
+    rendered ??= (async (): Promise<HtmlNode> => {
+      const { PluginPanel } = await import('../components/PluginPanel')
+      const { useStore } = await import('../store')
+      stubApiMethod('connectorsInstalled', () => ({ servers: [], plugins: [] }))
+      stubApiMethod('skillsLibrary', () => ({ library: [], plugins: [] }))
+      stubApiMethod('mcpList', () => [])
+      setStoreStateForRender(useStore, {
+        pluginOpen: true,
+        connectors: [{
+          id: 'notion', name: 'Notion', logo: 'notion.svg', mcpUrl: 'https://mcp.notion.com/mcp',
+          clientRegistration: 'dynamic', docsUrl: '', notes: '',
+          state: { status: 'connected', disabledTools: [], instructions: '' }, tools: []
+        }],
+        composio: null,
+        composioGateway: { active: true, connected: [{ slug: 'trello', name: 'Trello', status: 'ACTIVE', accountId: 'x', accounts: [{ accountId: 'a1', alias: 'fabio', email: 'fabio@studio.example', status: 'ACTIVE' }] }], pending: null },
+        agents: [{ id: 'a-1', name: 'Competitoor', description: '', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 }]
+      })
+      const out = renderHtml(createElement(PluginPanel, {
+        initial: {
+          installed: { servers: [{ id: 'srv-mm', name: 'Mattermost', transport: 'stdio', command: 'npx', args: ['@donach/mattermost-mcp'], enabled: true, enabledFor: ['*'], stateStatus: 'error', serverSlug: 'mattermost' }], plugins: [] },
+          usage: [
+            { tool: 'mcp__mattermost__post_message', last: Date.now() - 3 * 24 * 3600 * 1000, week: 4 },
+            { tool: 'composio__trello__TRELLO_CREATE_CARD', last: Date.now() - 26 * 3600 * 1000, week: 31 }
+          ],
+          perms: { default: 'needs_approval', rules: [
+            { tool: 'mcp__mattermost__post_message', pattern: '*', mode: 'blocked' },
+            { tool: 'mcp__mattermost__read_channel', pattern: '*', mode: 'always_allow' }
+          ] },
+          skills: [],
+          seg: 'connected'
+        }
+      } as never))
+      // lo store del file è condiviso: si ripulisce per i test dopo
+      setStoreStateForRender(useStore, { connectors: [], composio: null, composioGateway: null })
+      return parseHtml(out)
+    })()
+    return rendered
+  }
+
+  it('sette intestazioni in tono normale (text-caption grigie: niente maiuscoletto); le righe sono da 52, si aprono (tasto e clic) e portano il loro testid; il logo è da 32 nella prima cella', async () => {
+    const root = await renderConnected()
+    const table = findAll(root, (n) => n.attrs['data-testid'] === 'plugin-connected-table')[0]!
+    const th = findAll(table, (n) => n.tag === 'th')
+    expect(th.map((x) => textOf(x))).toEqual(['Collegamento', 'Strada', 'Account', 'Stato', 'Permessi', 'Bot', 'Ultimo uso'])
+    for (const x of th) {
+      expect(has(x, 'text-caption')).toBe(true)
+      expect(has(x, 'text-muted-foreground')).toBe(true)
+      expect(has(x, 'whitespace-nowrap')).toBe(true)
+      expect(x.attrs.class ?? '').not.toContain('uppercase')
+    }
+    const rows = findAll(table, (n) => (n.attrs['data-testid'] ?? '').startsWith('plugin-connected-row-'))
+    expect(rows.map((r) => r.attrs['data-testid']).sort()).toEqual(['plugin-connected-row-app:notion', 'plugin-connected-row-app:trello', 'plugin-connected-row-server:srv-mm'])
+    for (const r of rows) {
+      expect(r.tag).toBe('tr')
+      expect(has(r, 'h-row')).toBe(true)
+      // apribile da tastiera: il tasto c'è solo alle righe che si aprono
+      expect(r.attrs.tabindex).toBe('0')
+      // la prima cella: lo slot del logo (la casa da 32) col logo o l'iniziale dentro
+      const slot = r.children[0]!.children[0]!.children[0]!
+      expect(has(slot, 'size-8')).toBe(true)
+      expect(has(slot.children[0]!, 'size-8')).toBe(true)
+      expect(has(slot.children[0]!, 'rounded-control')).toBe(true)
+    }
+    // i valori di prima, tutti: comando, permessi in breve, ultimo uso, l'account onesto
+    const texts = findAll(table, () => true).map((n) => textOf(n)).join('\n')
+    for (const valore of ['npx @donach/mattermost-mcp', '1 sempre · 1 blocca', '31 questa settimana', 'fabio', 'Tutti i bot', 'mai', 'non parte']) expect(texts).toContain(valore)
+  }, 20_000)
+
+  it('niente a capo: il badge della strada è una pillola su una riga (se non entra si tronca LEI); ogni cella tronca, e il valore intero sta nel suggerimento', async () => {
+    const root = await renderConnected()
+    const table = findAll(root, (n) => n.attrs['data-testid'] === 'plugin-connected-table')[0]!
+    const pills = findAll(table, (n) => has(n, 'rounded-full') && has(n, 'text-caption'))
+    expect(pills.map((p) => textOf(p)).sort()).toEqual(['MCP diretto di Notion', 'sul Mac', 'tramite Composio'])
+    for (const p of pills) {
+      for (const cls of ['truncate', 'max-w-full', 'px-2', 'py-0.5']) expect(has(p, cls)).toBe(true)
+      // il testo intero al passaggio, anche quando la pillola si tronca
+      expect(p.attrs.title).toBe(textOf(p))
+    }
+    const cells = findAll(table, (n) => n.tag === 'td')
+    expect(cells).toHaveLength(21)
+    for (const c of cells) expect(findAll(c, (x) => has(x, 'truncate')).length).toBeGreaterThanOrEqual(1)
+    // il valore intero al passaggio: le celle di testo lo portano nel title quando è una stringa
+    const command = findAll(table, (n) => textOf(n) === 'npx @donach/mattermost-mcp')[0]!
+    expect(command.attrs.title).toBe('npx @donach/mattermost-mcp')
+    // chi va bene è grigio, chi non va è rosso (PP4: un solo segnale di stato)
+    const stato = findAll(table, (n) => textOf(n) === 'non parte' && n.attrs.title === 'non parte')[0]!
+    expect(has(stato, 'text-destructive')).toBe(true)
+    expect(stato.attrs.title).toBe('non parte')
+  }, 20_000)
+
+  it('la tabella al minimo è 940 px — due colonne che crescono (160 ciascuna) e cinque fisse (620) —: ci sta in una finestra di 1280 con la barra com’è di default; sotto scorre DENTRO la tabella', async () => {
+    const root = await renderConnected()
+    const table = findAll(root, (n) => n.attrs['data-testid'] === 'plugin-connected-table')[0]!
+    expect(table.attrs.class ?? '').toContain('overflow-x-auto')
+    expect(table.children[0]!.tag).toBe('table')
+    expect(table.children[0]!.attrs.style).toBe('min-width:940px')
+  }, 20_000)
+
+  it('solo su «Collegati» il contenuto è largo wide (1120): testata, descrizione, barra degli strumenti e corpo cambiano insieme', async () => {
+    const root = await renderConnected()
+    const page = findAll(root, (n) => n.attrs['data-testid'] === 'plugin-page')[0]!
+    const columns = findAll(page, (n) => 'data-page-content' in n.attrs)
+    expect(columns.length).toBeGreaterThanOrEqual(4)
+    for (const c of columns) expect(c.attrs.style).toBe('max-width:var(--w-wide)')
+    // e la tabella sta dentro il segmento, dopo i filtri
+    const segment = findAll(root, (n) => n.attrs['data-testid'] === 'plugin-connected')[0]!
+    expect(findAll(segment, (n) => n.attrs['data-testid'] === 'plugin-connected-filters')).toHaveLength(1)
+    expect(findAll(segment, (n) => n.attrs['data-testid'] === 'plugin-connected-table')).toHaveLength(1)
+  }, 20_000)
 })

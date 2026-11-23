@@ -1,10 +1,19 @@
 // PP1 (fase plugin-pulita): la pagina Plugin scorre, e la scheda pure.
-// jsdom non c'è e non fa layout: qui si verifica il CONTRATTO di PluginShell
-// — il corpo che scorre (overflow-y-auto) dentro una catena di genitori flex
-// che hanno tutti min-h-0 — e che lista, viste e scheda montino PluginShell
-// (niente `absolute inset-0` scritto a mano in PluginPanel / PluginCard). La
-// prova vera, misurata sul DOM vivo a 1200×800 e a 900×600, è la sonda
-// (scripts/fase-plugin-pulita-probe.mjs).
+// jsdom non c'è e non fa layout: qui si verifica il CONTRATTO di scorribilità
+// — il corpo che scorre (overflow-y-auto) figlio diretto della radice
+// inchiodata (absolute inset-0) — e che lista, viste e scheda montino IL
+// guscio (niente `absolute inset-0` scritto a mano in PluginPanel /
+// PluginCard). La prova vera, misurata sul DOM vivo a 1200×800 e a 900×600, è
+// la sonda (scripts/fase-plugin-pulita-probe.mjs).
+//
+// Fase design (DS4): il guscio è PageShell (components/ui/page-shell) —
+// PluginShell non c'è più, e questo file ne tiene il posto. Cambia il
+// contratto in due punti, e sono i due di DS2: il corpo che scorre è figlio
+// DIRETTO della radice (prima c'era una colonna in mezzo: teneva la barra di
+// scorrimento lontana dal bordo), e dentro il corpo il contenuto è centrato
+// alla larghezza scelta (data-page-content: page, wide solo su «Collegati»).
+// Il contratto del guscio in sé sta in ui-page-shell.test.ts: qui si guarda
+// che la pagina lo usi, vista per vista.
 import './render-helper-install'
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -20,89 +29,89 @@ const PANEL = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx'
 const CARD = readFileSync(fileURLToPath(new URL('../components/PluginCard.tsx', import.meta.url)), 'utf8')
 
 const has = (node: HtmlNode, cls: string): boolean => (node.attrs.class ?? '').split(/\s+/).includes(cls)
-const slot = (node: HtmlNode): string => `<${node.tag} data-plugin-shell="${node.attrs['data-plugin-shell'] ?? ''}">`
+const slot = (node: HtmlNode): string => `<${node.tag} data-page-shell="${node.attrs['data-page-shell'] ?? ''}">`
+const isSlot = (name: string) => (n: HtmlNode): boolean => n.attrs['data-page-shell'] === name
+const isContent = (n: HtmlNode): boolean => 'data-page-content' in n.attrs
 
 /**
  * PURA: i problemi del contratto di scorribilità in un HTML reso. La radice
- * (il testid) è inchiodata al contenitore (absolute inset-0); da lì fino al
- * corpo che scorre ogni nodo è flex flex-col, e tutti tranne la radice hanno
- * min-h-0 e flex-1 — senza i quali la colonna cresce quanto il contenuto e
- * l'overflow del corpo non scorre mai (la causa di PP1).
+ * (il testid) è inchiodata al contenitore (absolute inset-0, colonna flex); il
+ * corpo che scorre è suo FIGLIO DIRETTO — la barra di scorrimento sta sul
+ * bordo dell'area — ed è lo scorribile che prende lo spazio che resta
+ * (min-h-0 flex-1: senza, la colonna cresce quanto il contenuto e l'overflow
+ * non scorre mai: la causa di PP1). Esattamente UNO per vista: se ce ne fossero
+ * due annidati, la sonda misurerebbe il primo.
  */
 export function shellProblems(html: string, testId: string): string[] {
   const tree = parseHtml(html)
   const roots = findAll(tree, (n) => n.attrs['data-testid'] === testId)
   if (roots.length !== 1) return [`${roots.length} radici con testid ${testId} (attese 1)`]
   const root = roots[0]!
-  const bodies = findAll(root, (n) => n.attrs['data-plugin-shell'] === 'body')
-  if (bodies.length !== 1) return [`${bodies.length} corpi data-plugin-shell="body" dentro ${testId} (attesi 1)`]
+  const bodies = findAll(root, isSlot('scroll'))
+  if (bodies.length !== 1) return [`${bodies.length} corpi data-page-shell="scroll" dentro ${testId} (attesi 1)`]
   const body = bodies[0]!
   const problems: string[] = []
   // il corpo: lo scorribile, che prende lo spazio che resta e non lo chiede
   for (const cls of ['overflow-y-auto', 'scroll-thin', 'min-h-0', 'flex-1']) if (!has(body, cls)) problems.push(`al corpo manca ${cls}`)
-  // la catena dei GENITORI dal corpo alla radice (esclusa): colonne flex che
-  // non crescono col contenuto
-  let node: HtmlNode | null = body.parent
-  while (node && node !== root) {
-    for (const cls of ['flex', 'flex-col', 'min-h-0', 'flex-1']) if (!has(node, cls)) problems.push(`a ${slot(node)} manca ${cls}`)
-    node = node.parent
-  }
-  if (node !== root) problems.push(`la catena dal corpo non arriva alla radice ${testId}`)
+  // il corpo è figlio DIRETTO della radice: nessuna colonna in mezzo
+  if (body.parent !== root) problems.push(`il corpo che scorre non è figlio diretto della radice ${testId} (è dentro ${describeAncestors(body, root)})`)
   for (const cls of ['flex', 'flex-col', 'absolute', 'inset-0']) if (!has(root, cls)) problems.push(`alla radice ${testId} manca ${cls}`)
-  // testata e toolbar non si accartocciano mai
-  for (const part of ['header', 'toolbar']) {
-    for (const n of findAll(root, (x) => x.attrs['data-plugin-shell'] === part)) {
+  // testata, descrizione e barra degli strumenti non si accartocciano mai
+  for (const part of ['header', 'description', 'toolbar']) {
+    for (const n of findAll(root, isSlot(part))) {
       if (!has(n, 'shrink-0')) problems.push(`${part} senza shrink-0`)
+      if (n.parent !== root) problems.push(`${part} non è figlio diretto della radice ${testId}`)
     }
   }
   return problems
 }
 
-/** Il codice di PluginPanel / PluginCard senza i commenti (che possono citare le classi). */
+/** Dall'elemento alla radice (esclusa): i contenitori che ha sopra, il più vicino prima. */
+function describeAncestors(node: HtmlNode, root: HtmlNode): string {
+  const out: string[] = []
+  for (let a = node.parent; a && a !== root; a = a.parent) out.push(`<${a.tag}${a.attrs['data-page-shell'] ? ` data-page-shell="${a.attrs['data-page-shell']}"` : ''}>`)
+  return out.join(' dentro ') || 'niente'
+}
+
+/** Il codice di PluginPanel / PluginCard senza i commenti (che possono citare i pezzi). */
 const code = (text: string): string => text.replace(/^\s*\/\/.*$/gm, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
 
-describe('PP1: PluginShell — il contratto', () => {
-  it('il corpo che scorre sta in una catena di genitori flex con min-h-0, fino alla radice absolute inset-0', async () => {
-    const { PluginShell } = await import('../components/plugin/PluginShell')
-    const html = renderHtml(createElement(PluginShell, {
-      testId: 'shell-prova',
-      header: createElement('h1', null, 'Titolo'),
-      toolbar: createElement('input', { placeholder: 'cerca' }),
-      children: createElement('p', null, 'contenuto lungo')
-    }))
-    expect(shellProblems(html, 'shell-prova')).toEqual([])
-    const tree = parseHtml(html)
-    const texts = findAll(tree, () => true).map((n) => textOf(n)).join('\n')
-    expect(texts).toContain('Titolo')
-    expect(texts).toContain('contenuto lungo')
-  })
-
-  it('senza toolbar vale lo stesso (le viste mcp e skill-new non ne hanno)', async () => {
-    const { PluginShell } = await import('../components/plugin/PluginShell')
-    const html = renderHtml(createElement(PluginShell, { testId: 'shell-prova', header: createElement('h1', null, 'Titolo'), children: 'corpo' }))
-    expect(shellProblems(html, 'shell-prova')).toEqual([])
-  })
-
-  it('il contratto BLOCCA lo schema di prima: la colonna senza min-h-0 flex-1 fa crescere il corpo e non scorre', () => {
-    // com'era PluginPanel a bb84b6b4: la colonna centrale cresce col contenuto
-    const prima = '<div data-testid="pagina" class="no-drag absolute inset-0 z-20 flex flex-col bg-background px-8 py-6">' +
-      '<div data-plugin-shell="colonna" class="mx-auto flex w-full max-w-4xl flex-col gap-3">' +
-      '<div class="flex items-center gap-2">testata</div>' +
-      '<div data-plugin-shell="body" class="min-h-0 flex-1 overflow-y-auto scroll-thin pb-6">corpo</div>' +
+describe('PP1: il contratto di scorribilità', () => {
+  it('il contratto BLOCCA lo schema di prima (PluginShell): il corpo dentro una colonna intermedia tiene la barra di scorrimento lontana dal bordo', () => {
+    // com'era PluginShell: la radice, poi LA COLONNA centrata (mx-auto), e dentro di lei il corpo
+    const prima = '<div data-testid="pagina" class="no-drag absolute inset-0 z-20 flex flex-col bg-background">' +
+      '<div data-page-shell="colonna" class="mx-auto flex min-h-0 w-full flex-col gap-3">' +
+      '<div data-page-shell="header" class="shrink-0"><div data-page-shell="testata">testata</div></div>' +
+      '<div data-page-shell="scroll" class="min-h-0 flex-1 overflow-y-auto scroll-thin">corpo</div>' +
       '</div></div>'
-    expect(shellProblems(prima, 'pagina')).toEqual(['a <div data-plugin-shell="colonna"> manca min-h-0', 'a <div data-plugin-shell="colonna"> manca flex-1'])
+    expect(shellProblems(prima, 'pagina')).toEqual(['il corpo che scorre non è figlio diretto della radice pagina (è dentro <div data-page-shell="colonna">)', 'header non è figlio diretto della radice pagina'])
+  })
+
+  it('e blocca anche il corpo che non scorre (senza overflow-y-auto) o due corpi nella stessa vista', () => {
+    const senzaScroll = '<div data-testid="pagina" class="absolute inset-0 flex flex-col"><div data-page-shell="scroll" class="scroll-thin min-h-0 flex-1">corpo</div></div>'
+    expect(shellProblems(senzaScroll, 'pagina')).toEqual(['al corpo manca overflow-y-auto'])
+    const due = '<div data-testid="pagina" class="absolute inset-0 flex flex-col"><div data-page-shell="scroll" class="scroll-thin min-h-0 flex-1 overflow-y-auto"><div data-page-shell="scroll" class="overflow-y-auto">corpo</div></div></div>'
+    expect(shellProblems(due, 'pagina')).toEqual(['2 corpi data-page-shell="scroll" dentro pagina (attesi 1)'])
   })
 })
 
-describe('PP1: lista, viste e scheda montano PluginShell', () => {
+describe('PP1 → DS4: lista, viste e scheda montano PageShell', () => {
   it('PluginPanel e PluginCard non scrivono più `absolute inset-0` a mano: lo schema vive in un pezzo solo', () => {
     expect(code(PANEL)).not.toContain('absolute inset-0')
     expect(code(CARD)).not.toContain('absolute inset-0')
-    expect(PANEL).toMatch(/import \{ PluginShell \} from '\.\/plugin\/PluginShell'/)
-    expect(CARD).toMatch(/import \{ PluginShell \} from '\.\/plugin\/PluginShell'/)
+    expect(PANEL).toMatch(/import \{ PageShell \} from '\.\/ui\/page-shell'/)
+    expect(CARD).toMatch(/import \{ PageShell \} from '\.\/ui\/page-shell'/)
     // le quattro viste della pagina e la scheda
-    expect((code(PANEL).match(/<PluginShell\b/g) ?? []).length).toBe(4)
-    expect((code(CARD).match(/<PluginShell\b/g) ?? []).length).toBe(1)
+    expect((code(PANEL).match(/<PageShell\b/g) ?? []).length).toBe(4)
+    expect((code(CARD).match(/<PageShell\b/g) ?? []).length).toBe(1)
+    // e la testata è quella di sistema, non una riga scritta qui
+    expect(PANEL).toMatch(/import \{ PageHeader \} from '\.\/ui\/page-header'/)
+    expect(CARD).toMatch(/import \{ PageHeader \} from '\.\/ui\/page-header'/)
+    expect((code(PANEL).match(/<PageHeader\b/g) ?? []).length).toBe(4)
+    expect((code(CARD).match(/<PageHeader\b/g) ?? []).length).toBe(1)
+    // PluginShell non c'è più (DS5): nessuno lo importa (i commenti lo citano: raccontano com'era)
+    expect(code(PANEL)).not.toMatch(/\bPluginShell\b/)
+    expect(code(CARD)).not.toMatch(/\bPluginShell\b/)
   })
 
   const quiet = async (): Promise<void> => {
@@ -121,22 +130,51 @@ describe('PP1: lista, viste e scheda montano PluginShell', () => {
     })
   }
 
-  it('la lista e le tre viste interne (mcp, skill-import, skill-new) hanno il corpo che scorre nella catena giusta', async () => {
+  /** Le larghezze del contenuto di una vista, nell'ordine in cui compaiono (testata, descrizione, barra, corpo). */
+  const widthsOf = (root: HtmlNode, testId: string): Array<string | undefined> =>
+    findAll(findAll(root, (n) => n.attrs['data-testid'] === testId)[0]!, isContent).map((n) => n.attrs.style)
+
+  it('la lista e le tre viste interne (mcp, skill-import, skill-new) hanno il corpo che scorre figlio diretto della radice, la riga dei 52 in cima, e sono larghe quanto la pagina (880)', async () => {
     await quiet()
     const { PluginPanel } = await import('../components/PluginPanel')
-    const views: Array<Record<string, unknown>> = [
-      { seg: 'all' },
-      { view: 'mcp' },
-      { view: 'skill-import', importRows: [{ name: 'lavoro', description: 'Riassume le email', sources: ['claude'], valid: true, existing: false, files: ['a.txt'] }] },
-      { view: 'skill-new' }
+    // quante colonne di contenuto ha la vista: una per ciascuno degli slot fermi (testata, descrizione, barra) più quella del corpo
+    const views: Array<[string, Record<string, unknown>, number]> = [
+      ['all', {}, 4],
+      ['mcp', { view: 'mcp' }, 2],
+      ['skill-import', { view: 'skill-import', importRows: [{ name: 'lavoro', description: 'Riassume le email', sources: ['claude'], valid: true, existing: false, files: ['a.txt'] }] }, 3],
+      ['skill-new', { view: 'skill-new' }, 2]
     ]
-    for (const initial of views) {
+    for (const [name, initial, columns] of views) {
       const html = renderHtml(createElement(PluginPanel, { initial } as never))
-      expect(shellProblems(html, 'plugin-page'), JSON.stringify(initial)).toEqual([])
+      expect(shellProblems(html, 'plugin-page'), name).toEqual([])
+      const root = parseHtml(html)
+      const page = findAll(root, (n) => n.attrs['data-testid'] === 'plugin-page')[0]!
+      // in cima UNA riga, quella dei 52 (la fascia di trascinamento): è la testata di PageHeader
+      const head = findAll(page, (n) => n.attrs['data-col-head'] !== undefined)
+      expect(head, name).toHaveLength(1)
+      expect(has(head[0]!, 'h-col-head'), name).toBe(true)
+      expect(head[0]!.parent!.parent!.parent).toBe(page)
+      // e ogni colonna del contenuto è larga quanto la pagina
+      const widths = widthsOf(root, 'plugin-page')
+      expect(widths, name).toHaveLength(columns)
+      for (const w of widths) expect(w, name).toBe('max-width:var(--w-page)')
     }
   })
 
-  it('la scheda del plugin ha il corpo che scorre nella catena giusta (Rimuovi e le autorizzazioni lunghe si raggiungono)', async () => {
+  it('«Collegati» è l\'unica vista larga wide (1120): cambia la larghezza della colonna, non il guscio — stesso testid, stessa testata, stessa barra', async () => {
+    await quiet()
+    const { PluginPanel } = await import('../components/PluginPanel')
+    const html = renderHtml(createElement(PluginPanel, { initial: { seg: 'connected' } } as never))
+    expect(shellProblems(html, 'plugin-page')).toEqual([])
+    const root = parseHtml(html)
+    const widths = widthsOf(root, 'plugin-page')
+    // testata · descrizione · barra degli strumenti · corpo: tutte e quattro alla larghezza della tabella
+    expect(widths).toHaveLength(4)
+    for (const w of widths) expect(w).toBe('max-width:var(--w-wide)')
+    expect(findAll(root, (n) => n.attrs['data-testid'] === 'plugin-connected-table')).toHaveLength(1)
+  })
+
+  it('la scheda del plugin ha il corpo che scorre figlio diretto della radice (Rimuovi e le autorizzazioni lunghe si raggiungono), la riga dei 52 in cima, e sta sopra la pagina', async () => {
     await quiet()
     const { PluginCard } = await import('../components/PluginCard')
     const server: McpServerInfo = { id: 'srv-1', name: 'ufficio', transport: 'stdio', command: 'node', enabled: true, enabledFor: ['*'] }
@@ -148,10 +186,18 @@ describe('PP1: lista, viste e scheda montano PluginShell', () => {
     } as never))
     expect(shellProblems(html, 'plugin-card')).toEqual([])
     const root = parseHtml(html)
+    const card = findAll(root, (n) => n.attrs['data-testid'] === 'plugin-card')[0]!
+    expect(has(card, 'z-30')).toBe(true)
+    expect(has(card, 'z-20')).toBe(false)
+    expect(findAll(card, (n) => n.attrs['data-col-head'] !== undefined)).toHaveLength(1)
+    for (const w of widthsOf(root, 'plugin-card')) expect(w).toBe('max-width:var(--w-page)')
     // il corpo contiene i tre pannelli: l'ultima azione e «Rimuovi» stanno nello scorribile
-    const body = findAll(root, (n) => n.attrs['data-plugin-shell'] === 'body')[0]!
+    const body = findAll(card, isSlot('scroll'))[0]!
     expect(findAll(body, (n) => n.attrs['data-testid'] === 'plugin-permissions')).toHaveLength(1)
     expect(findAll(body, (n) => n.attrs['data-testid'] === 'plugin-accounts')).toHaveLength(1)
     expect(textOf(body)).toContain('Rimuovi')
+    // le schede interne stanno FERME sopra il corpo, nella barra degli strumenti
+    expect(findAll(body, (n) => n.attrs['data-testid'] === 'plugin-card-tabs')).toHaveLength(0)
+    expect(findAll(card, (n) => n.attrs['data-testid'] === 'plugin-card-tabs')).toHaveLength(1)
   })
 })

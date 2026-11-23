@@ -11,25 +11,59 @@
 // che qui sta in fondo alla pagina dentro «Avanzate».
 // La riga grigia «tipo · strada · origine» e lo stato con l'azione vengono
 // dal modello puro lib/plugins-view: mai dati inventati.
+//
+// Fase design (DS4): la pagina passa al sistema. Cosa cambia, e perché:
+//  - IL GUSCIO è PageShell (PluginShell non c'è più): il corpo che scorre è
+//    largo quanto l'area — la barra di scorrimento sta sul bordo della
+//    finestra, non attaccata alla colonna — e solo DENTRO il contenuto è
+//    centrato alla larghezza scelta. La testata è PageHeader: la riga dei
+//    52 px uguale a quella di ogni colonna, indietro · icona · titolo di
+//    pagina (text-page) · «Aggiungi».
+//  - LE LARGHEZZE sono quelle di DS1: 880 (page) per la pagina e le viste
+//    interne, 1120 (wide) solo sul segmento «Collegati», dove c'è la
+//    tabella. Testata e barra degli strumenti sono le stesse: cambia la
+//    sola colonna (width è una prop dello stesso guscio: niente salto).
+//  - LA BARRA DEGLI STRUMENTI è una riga sola alta 40, come in ogni pagina:
+//    i segmenti a sinistra (la loro sottolineatura corre fino alla ricerca)
+//    e la ricerca a destra. Prima erano due righe scritte qui (una pillola
+//    larga quanto la colonna, poi i segmenti): ogni pagina aveva la sua
+//    testata di altezza diversa.
+//  - «COLLEGATI» è la tabella unica (DataTable): intestazioni text-caption
+//    grigie in tono normale, righe da 52, filetti, e NIENTE A CAPO nelle
+//    celle — il valore intero sta nel suggerimento. Prima: maiuscoletto, e
+//    il testo andava a capo («Tutti i / bot», «tramite / Composio»).
+//  - LE SEZIONI sono Section: il titolo è un'etichetta (text-caption grigio)
+//    e lo scarto fra una sezione e l'altra lo decide la pagina una volta
+//    (gap-section), non ogni sezione per conto suo (mt-8 ovunque).
+//  - LE SCADE non vanno mai a capo: se non entrano scorrono da sole. Il
+//    catalogo delle skill e i filtri di «Collegati» chiedevano flex-wrap, e
+//    a 1280 le categorie finivano su due righe.
+//  - I SEGNI scritti a mano (✦, ✕) sono icone lucide: nell'interfaccia ci
+//    sono solo icone.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
-import { BadgeCheck, ChevronDown, Puzzle, Search, ChevronLeft } from 'lucide-react'
+import { BadgeCheck, ChevronDown, Puzzle, Search, Sparkles, X } from 'lucide-react'
 import { api, useStore, type PluginCardTab, type PluginPoint } from '../store'
 import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, type AppCategoryId } from '../../../shared/app-catalog'
 import type { McpServerInfo, SkillLibraryItem, SkillCatalogEntry } from '../../../shared/types'
 import { appsCatalogModel, type AppsFilter, type InstalledPluginLike, type CatalogRowView } from '../lib/apps-view'
-import { yourPlugins, grayLineOf, stateLabelOf, stradaLabel, connectedTable, daSistemareCount, type PluginSegment, type YourPluginRow, type ConnectedFilter } from '../lib/plugins-view'
+import { yourPlugins, grayLineOf, stateLabelOf, stradaLabel, connectedTable, daSistemareCount, type PluginSegment, type YourPluginRow, type ConnectedFilter, type ConnectedTableRow } from '../lib/plugins-view'
 import type { PermissionsConfig } from '../../../shared/types'
 import { humanizeSkillName } from '../../../shared/skill-md'
 import { Toggle } from './Settings'
 import { AppRow, AppLogo, useConnectFlows, DevelopersContent } from './AppsWindow'
-// PP1 (fase plugin-pulita): l'invaso unico delle viste — la colonna non cresce col contenuto, il corpo scorre
-import { PluginShell } from './plugin/PluginShell'
+// Fase design (DS2): il guscio di OGNI pagina a tutta area e la sua testata — al posto di PluginShell
+import { PageShell } from './ui/page-shell'
+import { PageHeader } from './ui/page-header'
 // PP4 (fase plugin-pulita): righe a filo e schede come testo — meno contenitori, un solo segnale di stato
 import { FlatList, FlatRow } from './ui/flat-list'
 import { UnderlineTabs } from './ui/underline-tabs'
+// Fase design (DS2): la tabella unica, la sezione, il bottone unico
+import { DataTable, Cell, CellStack, type DataTableColumn } from './ui/data-table'
+import { Section } from './ui/section'
+import { Button } from './ui/button'
 // PL2 (fase plugin): la scheda del plugin (tavola 9) — clic su una riga
 import { PluginCard } from './PluginCard'
 import { ManualServers } from './McpWindow'
@@ -37,7 +71,7 @@ import { ManualServers } from './McpWindow'
 import { SkillEditor, PluginDetail, CatalogPreview } from './SkillsWindow'
 import { SKILL_CATEGORIES, searchSkillCatalog, skillCatalogDescription, skillCatalogInstallState, type SkillCategoryId } from '../../../shared/skill-catalog'
 import { humanizeSkillName as humanize } from '../../../shared/skill-md'
-import { logoUrlForName } from '../lib/app-logos'
+import { logoUrlForName, LOGO_CLASS } from '../lib/app-logos'
 
 /** La lingua attiva come 'it' | 'en'. */
 function uiLang(): 'it' | 'en' {
@@ -65,6 +99,85 @@ export interface PluginPanelInitial {
   seg?: PluginSegment
   /** PP2: la scheda aperta fin dal primo render (nei test senza effect; nei prodotti decide pluginAt) */
   card?: { appId?: string; serverId?: string; tab?: PluginCardTab }
+}
+
+/** Le voci del menu «Aggiungi», scritte a mano: il raggio è quello delle celle selezionate (8 px), il testo di riga. */
+const MENU_ITEM = 'rounded-control px-3 py-2 text-left text-body transition hover:bg-muted'
+/** Il filetto che divide i gruppi del menu «Aggiungi». */
+const MENU_DIVIDER = <div className="my-1 h-px bg-border/60" aria-hidden="true" />
+
+/**
+ * Le sette colonne di «Collegati» (tavola 10), per la tabella unica.
+ *
+ * LE LARGHEZZE. Le due colonne col testo lungo e variabile — il nome col
+ * comando, l'ultimo uso — crescono e si dividono lo spazio che resta; le
+ * altre sono fisse e larghe quanto il loro valore più lungo CHE SI VEDE
+ * SPESSO: il badge più lungo («nel computer isolato»), «accesso scaduto»,
+ * «Tutti i bot», «1 sempre · 1 blocca». Ciò che capita più raramente (un
+ * accesso scaduto da Homun detto per intero, l'elenco dei bot, una email)
+ * si tronca, col valore intero nel suggerimento: è la regola della tabella
+ * (niente a capo), non una misura tirata.
+ *
+ * PERCHÉ questi numeri: al minimo la tabella è 940 px (620 fissi + 160 × 2).
+ * Ci sta senza scorrere in una finestra di 1280 con la barra di sinistra
+ * alla sua larghezza di default (264: l'area è 1016, il contenuto 940).
+ * Sotto — e la finestra di default è 1200, o la barra si può allargare —
+ * scorre DENTRO la tabella, mai nella pagina; quel che esce è la coda
+ * dell'ultimo uso, che cresce per ultimo.
+ *
+ * I COLORI: nome e stato sono testo di riga (chi va bene è grigio, chi non
+ * va è rosso: PP4, un solo segnale); account, permessi, bot e ultimo uso
+ * sono dettagli, la riga grigia piccola (text-small).
+ */
+function connectedColumns(lang: 'it' | 'en'): Array<DataTableColumn<ConnectedTableRow>> {
+  return [
+    {
+      id: 'collegamento',
+      grow: true,
+      header: <Trans>Collegamento</Trans>,
+      cell: (r) => (
+        <CellStack
+          leading={<RowLogo row={r.row} name={r.row.name} className="size-8 text-body" />}
+          primary={r.row.name}
+          secondary={r.countLabel ?? undefined}
+        />
+      )
+    },
+    {
+      id: 'strada',
+      width: 160,
+      header: <Trans>Strada</Trans>,
+      cell: (r) => {
+        const label = stradaLabel(r.row.gray.strada, r.row.gray.origin, lang)
+        return (
+          // la pillola non va mai a capo; se fosse più larga della cella si
+          // tronca LEI (resta una pillola) e il suggerimento dice il resto
+          <Cell>
+            <span className={`inline-block max-w-full truncate rounded-full px-2 py-0.5 text-caption ${stradaBadgeClass(r.row.gray.strada)}`} title={label}>{label}</span>
+          </Cell>
+        )
+      }
+    },
+    { id: 'account', width: 96, header: <Trans>Account</Trans>, cell: (r) => <Cell secondary>{r.row.accountLabel || '—'}</Cell> },
+    {
+      id: 'stato',
+      width: 136,
+      header: <Trans>Stato</Trans>,
+      // PP4: lo stato in parole solo quando non va è per le righe; qui c'è la colonna — ma il verde non serve: chi va bene è grigio, chi non va è rosso
+      cell: (r) => {
+        const label = stateLabelOf(r.row.state, lang).label
+        return (
+          <Cell>
+            <span className={r.daSistemare ? 'text-destructive' : 'text-muted-foreground'} title={label}>{label}</span>
+          </Cell>
+        )
+      }
+    },
+    { id: 'permessi', width: 132, header: <Trans>Permessi</Trans>, cell: (r) => <Cell secondary>{permBriefOf(r.perms)}</Cell> },
+    // (fuori dal componente non c'è t: la traduzione passa da i18n._, come in permBriefOf e useBriefOf)
+    { id: 'bot', width: 96, header: <Trans>Bot</Trans>, cell: (r) => <Cell secondary>{r.row.bots.all ? i18n._(msg`Tutti i bot`) : r.row.bots.names.length > 0 ? r.row.bots.names.join(', ') : '—'}</Cell> },
+    { id: 'ultimo-uso', grow: true, header: <Trans>Ultimo uso</Trans>, cell: (r) => <Cell secondary>{useBriefOf(r.usage)}</Cell> }
+  ]
 }
 
 /**
@@ -175,6 +288,13 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
     }),
     [model, composio, composioGateway, installed, skills, agents, query, seg]
   )
+  // le righe di «Collegati» (PL3): le stesse di «I tuoi», coi filtri della tabella
+  const connectedRows = useMemo(
+    () => connectedTable({ rows: yourRows, usage: usage ?? [], perms, filter: connFilter, onlyDaSistemare }),
+    [yourRows, usage, perms, connFilter, onlyDaSistemare]
+  )
+  // le righe del catalogo: con una ricerca o un filtro è UNA griglia, altrimenti l'elenco (Connesse, poi le sezioni)
+  const catalogList = model.grid ?? model.rows
 
   const flows = useConnectFlows(model.rows)
 
@@ -271,91 +391,78 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
     ['skills', t`Skill`],
     ['connected', t`Collegati · ${yourRows.length}`]
   ]
+  // le skill di «I tuoi» (PL5): la libreria e quelle dei plugin
+  const skillRows = useMemo(() => yourRows.filter((r) => r.kind === 'skill'), [yourRows])
+
+  /** «Indietro» delle viste interne: alla lista (lo stesso bottone di PageHeader in ognuna). */
+  const backToList = { onClick: () => setView('list'), label: t`Torna ai plugin` }
 
   // ---- le viste interne: i server MCP (form e import di oggi), l'editor ----
-  // PP1 (fase plugin-pulita): le quattro viste e la scheda stanno tutte in
-  // PluginShell — la colonna non cresce col contenuto e il corpo scorre
+  // Fase design: tutte nello stesso guscio della pagina (PageShell), alla
+  // larghezza di pagina: la riga dei 52 in cima è quella di ogni colonna.
   if (view === 'mcp') {
     return (
-      <PluginShell
+      <PageShell
+        width="page"
         testId="plugin-page"
-        size="md"
-        outerClassName="px-8 py-6"
-        header={(
-          <div className="flex items-center gap-2">
-            <button
-              className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              aria-label={t`Torna ai plugin`}
-              onClick={() => setView('list')}
-            >
-              <ChevronLeft className="size-4" />
-            </button>
-            <h1 className="font-display text-2xl"><Trans>Server MCP</Trans></h1>
-          </div>
-        )}
+        z={20}
+        header={<PageHeader back={backToList} title={<Trans>Server MCP</Trans>} />}
+        contentClassName="pb-6"
       >
         <ManualServers />
-      </PluginShell>
+      </PageShell>
     )
   }
   if (view === 'skill-import') {
     const rows = importRows ?? []
     const picked = rows.filter((r) => !r.existing && r.valid && importPicks[r.name] === true)
     return (
-      <PluginShell
+      <PageShell
+        width="page"
         testId="plugin-page"
-        size="md"
-        outerClassName="px-8 py-6"
-        header={(
-          <div className="flex items-center gap-2">
-            <button
-              className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              aria-label={t`Torna ai plugin`}
-              onClick={() => { setView('list'); setSeg('skills'); setImportRows(null) }}
-            >
-              <ChevronLeft className="size-4" />
-            </button>
-            <h1 className="font-display text-2xl"><Trans>Importa skill</Trans></h1>
-          </div>
-        )}
-        toolbar={(
-          <p className="text-sm text-muted-foreground">
-            <Trans>Le cartelle con SKILL.md delle altre app che trovo sul tuo Mac. Si importano SOLO file di testo: nessuno script viene eseguito.</Trans>
-          </p>
-        )}
+        z={20}
+        header={<PageHeader back={{ onClick: () => { setView('list'); setSeg('skills'); setImportRows(null) }, label: t`Torna ai plugin` }} title={<Trans>Importa skill</Trans>} />}
+        description={<Trans>Le cartelle con SKILL.md delle altre app che trovo sul tuo Mac. Si importano SOLO file di testo: nessuno script viene eseguito.</Trans>}
+        contentClassName="pb-6"
       >
-        <div className="space-y-3" data-testid="plugin-skill-import">
-          {importRows === null && <p className="text-sm text-muted-foreground"><Trans>cerco…</Trans></p>}
+        <div className="flex flex-col gap-block" data-testid="plugin-skill-import">
+          {importRows === null && <p className="text-small text-muted-foreground"><Trans>cerco…</Trans></p>}
           {importRows !== null && rows.length === 0 && (
-            <div className="rounded-2xl bg-muted p-4" data-testid="plugin-skill-import-empty">
-              <p className="text-xs text-muted-foreground"><Trans>Nessuna skill trovata nelle altre app.</Trans></p>
+            <div className="rounded-surface bg-muted p-4" data-testid="plugin-skill-import-empty">
+              <p className="text-small text-muted-foreground"><Trans>Nessuna skill trovata nelle altre app.</Trans></p>
             </div>
           )}
-          {rows.map((r) => (
-            <label
-              key={r.name}
-              className={`flex min-h-11 items-center gap-2.5 rounded-xl bg-muted/60 px-3 ${r.existing || !r.valid ? 'opacity-60' : ''}`}
-              data-testid="plugin-skill-import-row"
-            >
-              <input
-                type="checkbox"
-                className="shrink-0"
-                data-testid="plugin-skill-import-check"
-                checked={importPicks[r.name] === true}
-                disabled={r.existing || !r.valid}
-                onChange={(e) => setImportPicks({ ...importPicks, [r.name]: e.target.checked })}
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm">{r.name}</span>
-                <span className="block truncate text-xs text-muted-foreground">{r.description || '—'}</span>
-              </span>
-              <span className="shrink-0 text-[11px] text-muted-foreground">{r.sources.join(', ')}</span>
-              {r.existing && <span className="shrink-0 text-[11px] text-muted-foreground">{t`già presente`}</span>}
-            </label>
-          ))}
+          {rows.length > 0 && (
+            <FlatList>
+              {rows.map((r) => (
+                // la riga È l'etichetta della casella: un clic ovunque la spunta (min-h-row: 52, come ogni riga con un'icona)
+                <label
+                  key={r.name}
+                  className={`flex min-h-row cursor-pointer items-center gap-row-gap py-row-pad ${r.existing || !r.valid ? 'opacity-60' : ''}`}
+                  data-testid="plugin-skill-import-row"
+                >
+                  <input
+                    type="checkbox"
+                    className="shrink-0 accent-foreground"
+                    data-testid="plugin-skill-import-check"
+                    checked={importPicks[r.name] === true}
+                    disabled={r.existing || !r.valid}
+                    onChange={(e) => setImportPicks({ ...importPicks, [r.name]: e.target.checked })}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-body font-medium">{r.name}</span>
+                    <span className="mt-0.5 block truncate text-small text-muted-foreground">{r.description || '—'}</span>
+                  </span>
+                  <span className="shrink-0 text-caption text-muted-foreground">{r.sources.join(', ')}</span>
+                  {r.existing && <span className="shrink-0 text-caption text-muted-foreground">{t`già presente`}</span>}
+                </label>
+              ))}
+            </FlatList>
+          )}
           {/* la cartella scelta dall'utente */}
-          <button
-            className="w-full rounded-2xl bg-muted px-3 py-2.5 text-sm text-muted-foreground transition hover:text-foreground"
+          <Button
+            variant="secondary"
+            className="w-full"
             data-testid="plugin-skill-import-folder"
             onClick={async () => {
               const dir = await api.skillsImportPickFolder().catch(() => null)
@@ -367,22 +474,21 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
             }}
           >
             <Trans>Scegli una cartella…</Trans>
-          </button>
+          </Button>
           {/* copia oppure usa la cartella originale (sola lettura) */}
-          <div className="space-y-1.5 rounded-2xl bg-muted/60 p-3" data-testid="plugin-skill-import-mode">
-            <label className="flex items-center gap-2 text-[13px]">
-              <input type="radio" name="plugin-skill-import-mode" checked={importMode === 'copy'} onChange={() => setImportMode('copy')} />
+          <div className="flex flex-col gap-2 rounded-surface bg-muted p-4" data-testid="plugin-skill-import-mode">
+            <label className="flex items-center gap-2 text-body">
+              <input type="radio" name="plugin-skill-import-mode" className="shrink-0 accent-foreground" checked={importMode === 'copy'} onChange={() => setImportMode('copy')} />
               <span><Trans>Copia nella libreria di Homun</Trans></span>
             </label>
-            <label className="flex items-center gap-2 text-[13px]">
-              <input type="radio" name="plugin-skill-import-mode" checked={importMode === 'link'} onChange={() => setImportMode('link')} />
-              <span><Trans>Usa la cartella originale</Trans> <span className="text-[11px] text-muted-foreground"><Trans>(sola lettura: cambia con l'originale)</Trans></span></span>
+            <label className="flex items-center gap-2 text-body">
+              <input type="radio" name="plugin-skill-import-mode" className="shrink-0 accent-foreground" checked={importMode === 'link'} onChange={() => setImportMode('link')} />
+              <span><Trans>Usa la cartella originale</Trans> <span className="text-small text-muted-foreground"><Trans>(sola lettura: cambia con l'originale)</Trans></span></span>
             </label>
           </div>
-          <div className="flex items-center gap-2 pt-1">
-            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{t`${picked.length} selezionate`}</span>
-            <button
-              className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+          <div className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-small text-muted-foreground">{t`${picked.length} selezionate`}</span>
+            <Button
               disabled={picked.length === 0}
               data-testid="plugin-skill-import-apply"
               onClick={async () => {
@@ -400,103 +506,77 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
               }}
             >
               {t`Importa ${picked.length}`}
-            </button>
+            </Button>
           </div>
         </div>
-      </PluginShell>
+      </PageShell>
     )
   }
 
   if (view === 'skill-new') {
     return (
-      <PluginShell
+      <PageShell
+        width="page"
         testId="plugin-page"
-        size="md"
-        outerClassName="px-8 py-6"
-        header={(
-          <div className="flex items-center gap-2">
-            <button
-              className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              aria-label={t`Torna ai plugin`}
-              onClick={() => setView('list')}
-            >
-              <ChevronLeft className="size-4" />
-            </button>
-            <h1 className="font-display text-2xl"><Trans>Crea una skill</Trans></h1>
-          </div>
-        )}
+        z={20}
+        header={<PageHeader back={backToList} title={<Trans>Crea una skill</Trans>} />}
+        contentClassName="pb-6"
       >
         <SkillEditor folder={null} onDone={() => { reloadSkills() }} onCancel={() => setView('list')} />
-      </PluginShell>
+      </PageShell>
     )
   }
 
-  // ---- la pagina: testata, ricerca, segmenti, Aggiungi ----
+  // ---- la pagina: testata, descrizione, barra degli strumenti, Aggiungi ----
   return (
     <>
-    <PluginShell
+    <PageShell
+      // larga quanto la tabella SOLO su «Collegati»: negli altri segmenti la colonna è quella di pagina
+      width={seg === 'connected' ? 'wide' : 'page'}
       testId="plugin-page"
-      outerClassName="px-8 py-6"
+      z={20}
       header={(
-        <div className="flex items-center gap-2">
-          <button
-            className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            aria-label={t`Torna alla chat`}
-            onClick={() => { setSkillsFilterAgent(null); setPluginOpen(false) }}
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          <Puzzle className="size-5 text-muted-foreground" aria-hidden="true" />
-          <h1 className="font-display text-2xl"><Trans>Plugin</Trans></h1>
-          <span className="flex-1" />
-          {/* il menu «Aggiungi ▾» con i sei percorsi di oggi — in testata, a
-              destra del titolo: PP4, l'unico bottone PIENO della pagina */}
-          <div className="relative">
-            <button
-              className="flex items-center gap-1.5 rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-              data-testid="plugin-add"
-              aria-expanded={addOpen}
-              onClick={() => setAddOpen((o) => !o)}
-            >
-              <Trans>Aggiungi</Trans> <ChevronDown className="size-3.5" />
-            </button>
-            {/* il menu sta SEMPRE nel DOM (nascosto quando chiuso): le sonde
-                lo aprono col clic, i test lo leggono senza clic */}
-            <div
-              className={`absolute right-0 top-full z-30 mt-1.5 flex w-72 flex-col gap-0.5 rounded-2xl bg-card p-1.5 shadow-soft ${addOpen ? '' : 'hidden'}`}
-              data-testid="plugin-add-menu"
-            >
-                <button
-                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                  onClick={() => { setAddOpen(false); setView('mcp') }}
-                >
+        <PageHeader
+          back={{ onClick: () => { setSkillsFilterAgent(null); setPluginOpen(false) }, label: t`Torna alla chat` }}
+          icon={<Puzzle className="size-5" />}
+          title={<Trans>Plugin</Trans>}
+          actions={(
+            // il menu «Aggiungi ▾» con i sei percorsi di oggi — in testata, a
+            // destra del titolo: PP4, l'unico bottone PIENO della pagina. La
+            // fascia dei 52 trascina la finestra: bottone e menu portano no-drag
+            <div className="no-drag relative">
+              <Button
+                size="sm"
+                className="no-drag"
+                aria-expanded={addOpen}
+                data-testid="plugin-add"
+                onClick={() => setAddOpen((o) => !o)}
+              >
+                <Trans>Aggiungi</Trans> <ChevronDown className="size-4" />
+              </Button>
+              {/* il menu sta SEMPRE nel DOM (nascosto quando chiuso): le sonde
+                  lo aprono col clic, i test lo leggono senza clic */}
+              <div
+                className={`absolute right-0 top-full z-30 mt-1.5 flex w-72 flex-col gap-0.5 rounded-surface bg-card p-1 shadow-soft ${addOpen ? '' : 'hidden'}`}
+                data-testid="plugin-add-menu"
+              >
+                <button className={MENU_ITEM} onClick={() => { setAddOpen(false); setView('mcp') }}>
                   <span className="block"><Trans>Importa da altre app</Trans></span>
-                  <span className="block text-[11px] text-muted-foreground"><Trans>Cursor, Codex, ZCode…</Trans></span>
+                  <span className="block text-small text-muted-foreground"><Trans>Cursor, Codex, ZCode…</Trans></span>
                 </button>
-                <button
-                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                  data-testid="plugin-add-mcp"
-                  onClick={() => { setAddOpen(false); setView('mcp') }}
-                >
+                <button className={MENU_ITEM} data-testid="plugin-add-mcp" onClick={() => { setAddOpen(false); setView('mcp') }}>
                   <Trans>Server MCP personalizzato</Trans>
                 </button>
-                <button
-                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                  data-testid="plugin-add-skill-import"
-                  onClick={() => { setAddOpen(false); setView('skill-import'); void runImportScan() }}
-                >
+                <button className={MENU_ITEM} data-testid="plugin-add-skill-import" onClick={() => { setAddOpen(false); setView('skill-import'); void runImportScan() }}>
                   <span className="block"><Trans>Importa skill</Trans></span>
-                  <span className="block text-[11px] text-muted-foreground"><Trans>Cursor, Codex, ZCode, Claude Code…</Trans></span>
+                  <span className="block text-small text-muted-foreground"><Trans>Cursor, Codex, ZCode, Claude Code…</Trans></span>
                 </button>
-                <div className="my-1 h-px bg-border/60" aria-hidden="true" />
-                <button
-                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                  onClick={() => { setAddOpen(false); setView('skill-new') }}
-                >
+                {MENU_DIVIDER}
+                <button className={MENU_ITEM} onClick={() => { setAddOpen(false); setView('skill-new') }}>
                   <Trans>Crea una skill</Trans>
                 </button>
                 <button
-                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                  className={MENU_ITEM}
                   onClick={() => {
                     setAddOpen(false)
                     setPluginOpen(false)
@@ -506,68 +586,68 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                 >
                   <Trans>Crea con il bot</Trans>
                 </button>
-                <div className="my-1 h-px bg-border/60" aria-hidden="true" />
+                {MENU_DIVIDER}
                 <button
-                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                  className={MENU_ITEM}
                   onClick={() => { setAddOpen(false); setDevelopersOpen(true); document.getElementById('plugin-advanced')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
                 >
                   <Trans>Aggiungi un marketplace</Trans>
                 </button>
               </div>
-          </div>
-        </div>
+            </div>
+          )}
+        />
       )}
+      description={<Trans>Connettori, server MCP e skill: tutto quello che dà capacità ai tuoi bot, in un posto.</Trans>}
       toolbar={(
         <>
-          <p className="text-sm text-muted-foreground">
-            <Trans>Connettori, server MCP e skill: tutto quello che dà capacità ai tuoi bot, in un posto.</Trans>
-          </p>
-
-          {/* la ricerca e i segmenti (tavola 8) — PP4: i segmenti sono testo */}
-          <label className="flex h-10 items-center gap-2.5 rounded-full bg-muted px-4 text-sm text-muted-foreground">
+          {/* i segmenti (tavola 8) — PP4: sono testo. Prendono lo spazio che
+              la ricerca lascia: la loro sottolineatura corre fino a lei, e se
+              non entrano scorrono da sole (mai a capo) */}
+          <div data-testid="plugin-segments" className="min-w-0 flex-1">
+            <UnderlineTabs<PluginSegment> tabs={segments} value={seg} onChange={setSeg} label={t`Visualizza`} />
+          </div>
+          {/* la ricerca: un campo, 36 px come tutti (prima una pillola alta 40) */}
+          <label className="flex h-control w-72 shrink-0 items-center gap-2 rounded-control bg-muted px-4 text-body text-muted-foreground">
             <Search className="size-4 shrink-0" aria-hidden="true" />
             <input
-              className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none"
+              className="min-w-0 flex-1 bg-transparent text-body text-foreground outline-none placeholder:text-muted-foreground"
               data-testid="plugin-search"
               placeholder={t`Cerca tra plugin e skill`}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
-          <div data-testid="plugin-segments">
-            <UnderlineTabs<PluginSegment> tabs={segments} value={seg} onChange={setSeg} label={t`Visualizza`} />
-          </div>
         </>
       )}
+      contentClassName="flex flex-col gap-section pb-6"
     >
-      {/* --- TUTTO: I tuoi · Consigliati · Categorie --- (PP4: righe a filo,
-          titoli di sezione 13px grigi, 32px tra le sezioni) --- */}
+      {/* --- TUTTO: I tuoi · Consigliati · Categorie --- (PP4: righe a filo; fase
+          design: il titolo di sezione è un'etichetta grigia e le sezioni stanno a 32 px) --- */}
       {seg === 'all' && (
         <>
-          <section className="mt-8" data-testid="plugin-yours">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-[13px] text-muted-foreground"><Trans>I tuoi</Trans></h2>
-              <button className="text-[12px] text-muted-foreground transition hover:text-foreground" onClick={() => setSeg('connected')}>
-                <Trans>Vedi i collegati →</Trans>
-              </button>
-            </div>
+          <Section
+            title={<Trans>I tuoi</Trans>}
+            // -mr-3: il testo dell'azione finisce sul bordo destro del contenuto (il bottone ha il suo respiro interno)
+            action={<Button variant="ghost" size="sm" className="-mr-3" onClick={() => setSeg('connected')}><Trans>Vedi i collegati →</Trans></Button>}
+            testId="plugin-yours"
+          >
             {yourRows.length === 0 ? (
-              <p className="py-3 text-sm text-muted-foreground">
+              <p className="text-small text-muted-foreground">
                 <Trans>Nulla di collegato: comincia dai consigliati qui sotto.</Trans>
               </p>
             ) : (
-              <FlatList className="mt-2">
+              <FlatList>
                 {yourRows.map((row) => (
                   <YourRow key={row.key} row={row} lang={lang} onOpen={openRow} onToggleActive={toggleActive} />
                 ))}
               </FlatList>
             )}
-          </section>
+          </Section>
 
           {model.featured.length > 0 && !query && (
-            <section className="mt-8">
-              <h2 className="text-[13px] text-muted-foreground"><Trans>Consigliati per il tuo lavoro</Trans></h2>
-              <FlatList className="mt-2">
+            <Section title={<Trans>Consigliati per il tuo lavoro</Trans>}>
+              <FlatList>
                 {model.featured.map((r) => (
                   <AppRow
                     key={r.app.id}
@@ -581,17 +661,17 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                   />
                 ))}
               </FlatList>
-            </section>
+            </Section>
           )}
 
           {!query && (
-            <section className="mt-8" data-testid="plugin-categories">
-              <h2 className="text-[13px] text-muted-foreground"><Trans>Categorie</Trans></h2>
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+            <Section title={<Trans>Categorie</Trans>} testId="plugin-categories">
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
                 {model.categoriesPresent.map((c) => (
                   <button
                     key={c}
-                    className="text-[13px] text-muted-foreground transition hover:text-foreground"
+                    type="button"
+                    className="text-body text-muted-foreground transition hover:text-foreground"
                     data-testid={`plugin-category-${c}`}
                     onClick={() => { setCategory(c as AppCategoryId); setSeg('connectors') }}
                   >
@@ -599,14 +679,15 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                   </button>
                 ))}
               </div>
-            </section>
+            </Section>
           )}
         </>
       )}
 
       {/* --- CONNETTORI: il catalogo di oggi (righe e flussi riusati) --- */}
       {seg === 'connectors' && (
-        <section className="mt-8" data-testid="plugin-connectors">
+        <Section testId="plugin-connectors">
+          {/* le categorie su UNA riga: se non entrano scorrono da sole (prima andavano a capo: «Posta e / calendario») */}
           <UnderlineTabs<AppsFilter>
             tabs={[['all', t`Tutte`], ...model.categoriesPresent.map((c) => [c, appCategoryLabel(c, lang)] as const)]}
             value={category}
@@ -614,63 +695,67 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
             label={t`Categorie`}
             testId="plugin-connector-filters"
           />
-          <FlatList className="mt-2">
-            {(model.grid ?? model.rows).map((r) => (
-              <AppRow
-                key={r.app.id}
-                row={r}
-                flow={flows.flowOf(r)}
-                failure={flows.failureOf(r)}
-                onConnect={(x) => void flows.connect(x)}
-                onCancel={(x) => void flows.cancel(x)}
-                onConflictResolve={(x) => void flows.onConflictResolve(x)}
-                onOpen={(x) => setCard({ appId: x.app.id })}
-              />
-            ))}
-          </FlatList>
-          {(model.grid ?? model.rows).length === 0 && (
-            <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna app trovata. Prova con un altro nome.</Trans></p>
+          {catalogList.length > 0 ? (
+            <FlatList>
+              {catalogList.map((r) => (
+                <AppRow
+                  key={r.app.id}
+                  row={r}
+                  flow={flows.flowOf(r)}
+                  failure={flows.failureOf(r)}
+                  onConnect={(x) => void flows.connect(x)}
+                  onCancel={(x) => void flows.cancel(x)}
+                  onConflictResolve={(x) => void flows.onConflictResolve(x)}
+                  onOpen={(x) => setCard({ appId: x.app.id })}
+                />
+              ))}
+            </FlatList>
+          ) : (
+            <p className="text-small text-muted-foreground"><Trans>Nessuna app trovata. Prova con un altro nome.</Trans></p>
           )}
-        </section>
+        </Section>
       )}
 
       {/* --- SKILL (PL5): la libreria, le skill dei plugin e il catalogo, in casa --- */}
       {seg === 'skills' && (
-        <section className="mt-8 space-y-4" data-testid="plugin-skills">
+        <Section testId="plugin-skills">
           {skillsFilterAgent && (
-            <button
-              type="button"
-              className="rounded-full bg-muted px-3 py-1 text-[12px] text-muted-foreground"
-              onClick={() => setSkillsFilterAgent(null)}
-            >
-              {agents.find((a) => a.id === skillsFilterAgent)?.name ?? skillsFilterAgent} ✕
-            </button>
+            <div>
+              {/* il filtro per bot che arriva dal pannello: una pillola che si toglie */}
+              <button
+                type="button"
+                className="inline-flex h-control-sm cursor-pointer items-center gap-2 rounded-full bg-muted px-3 text-body text-muted-foreground transition hover:text-foreground"
+                onClick={() => setSkillsFilterAgent(null)}
+              >
+                {agents.find((a) => a.id === skillsFilterAgent)?.name ?? skillsFilterAgent}
+                <X className="size-4" aria-hidden="true" />
+              </button>
+            </div>
           )}
-          {yourRows.filter((r) => r.kind === 'skill').length === 0 && (
-            <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna skill. Creane una, importala, o chiedi a un bot di salvarne una.</Trans></p>
+          {skillRows.length === 0 && (
+            <p className="text-small text-muted-foreground"><Trans>Nessuna skill. Creane una, importala, o chiedi a un bot di salvarne una.</Trans></p>
           )}
-          <FlatList>
-            {yourRows.filter((r) => r.kind === 'skill').map((row) => (
-              <YourRow key={row.key} row={row} lang={lang} onOpen={openRow} onToggleActive={toggleActive} />
-            ))}
-          </FlatList>
+          {skillRows.length > 0 && (
+            <FlatList>
+              {skillRows.map((row) => (
+                <YourRow key={row.key} row={row} lang={lang} onOpen={openRow} onToggleActive={toggleActive} />
+              ))}
+            </FlatList>
+          )}
 
           {/* il catalogo CURATO di oggi (K2), con le sue categorie: la
               ricerca del campo in alto filtra anche questo (T1) */}
-          <div className="space-y-4" data-testid="plugin-skills-catalog">
-            <h3 className="text-[13px] text-muted-foreground"><Trans>Sfoglia</Trans></h3>
+          <Section title={<Trans>Sfoglia</Trans>} testId="plugin-skills-catalog">
             <UnderlineTabs<'all' | SkillCategoryId>
               tabs={[['all', t`Tutte`], ...SKILL_CATEGORIES.map((c) => [c, t`${skillCategoryLabel(c)}`] as const)]}
               value={skillCatFilter}
               onChange={setSkillCatFilter}
               label={t`Categorie delle skill`}
-              className="flex-wrap"
             />
             {(catalogRows.length === 0)
-              ? <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna skill trovata</Trans></p>
+              ? <p className="text-small text-muted-foreground"><Trans>Nessuna skill trovata</Trans></p>
               : SKILL_CATEGORIES.filter((c) => catalogRows.some((e) => e.category === c)).map((c) => (
-                <div key={c}>
-                  <h4 className="pb-1 text-[12px] text-muted-foreground">{t`${skillCategoryLabel(c)}`}</h4>
+                <Section key={c} title={t`${skillCategoryLabel(c)}`}>
                   <FlatList>
                     {catalogRows.filter((e) => e.category === c).map((entry) => {
                       const state = skillCatalogInstallState(entry, skills ?? [])
@@ -679,29 +764,30 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                           key={entry.id}
                           clickable
                           onClick={() => setCatalogId(entry.id)}
-                          leading={<span className="grid size-8 shrink-0 place-items-center rounded-[9px] bg-muted text-sm" aria-hidden="true">✦</span>}
+                          // una voce del catalogo non ha un logo: la piastrella tenue con la sua icona
+                          leading={<span className="grid size-8 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground" aria-hidden="true"><Sparkles className="size-4" /></span>}
                           title={humanize(entry.id)}
                           subtitle={skillCatalogDescription(entry, lang)}
                           trailing={
                             <>
-                              {state !== 'available' && <span className="rounded-full border border-border/50 px-1.5 py-0.5 text-[10px] text-muted-foreground"><Trans>Aggiunta</Trans></span>}
-                              {state === 'update' && <span className="text-[11px] text-amber-600 dark:text-amber-400"><Trans>Aggiornamento disponibile</Trans></span>}
+                              {state !== 'available' && <span className="rounded-full border border-border/50 px-2 py-0.5 text-caption text-muted-foreground"><Trans>Aggiunta</Trans></span>}
+                              {state === 'update' && <span className="text-caption text-waiting"><Trans>Aggiornamento disponibile</Trans></span>}
                             </>
                           }
                         />
                       )
                     })}
                   </FlatList>
-                </div>
+                </Section>
               ))}
-          </div>
-        </section>
+          </Section>
+        </Section>
       )}
 
       {/* --- COLLEGATI (tavola 10): la tabella con le sette colonne --- */}
       {seg === 'connected' && (
-        <section className="mt-8" data-testid="plugin-connected">
-          {/* i filtri: per strada e «Da sistemare · N» — come testo (PP4) */}
+        <Section testId="plugin-connected">
+          {/* i filtri: per strada e «Da sistemare · N» — come testo (PP4), su una riga */}
           <UnderlineTabs<ConnectedFilter | 'da-sistemare'>
             tabs={[
               ['all', t`Tutte le strade`],
@@ -717,98 +803,54 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
               else { setConnFilter(f); setOnlyDaSistemare(false) }
             }}
             label={t`Filtra per strada`}
-            className="flex-wrap"
             testId="plugin-connected-filters"
           />
-          <table className="mt-1 w-full text-left text-[13px]" data-testid="plugin-connected-table">
-            <thead>
-              <tr className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="py-1.5 pr-3 font-medium"><Trans>Collegamento</Trans></th>
-                <th className="py-1.5 pr-3 font-medium"><Trans>Strada</Trans></th>
-                <th className="py-1.5 pr-3 font-medium"><Trans>Account</Trans></th>
-                <th className="py-1.5 pr-3 font-medium"><Trans>Stato</Trans></th>
-                <th className="py-1.5 pr-3 font-medium"><Trans>Permessi</Trans></th>
-                <th className="py-1.5 pr-3 font-medium"><Trans>Bot</Trans></th>
-                <th className="py-1.5 font-medium"><Trans>Ultimo uso</Trans></th>
-              </tr>
-            </thead>
-            <tbody>
-              {connectedTable({ rows: yourRows, usage: usage ?? [], perms, filter: connFilter, onlyDaSistemare }).map((r) => (
-                <tr
-                  key={r.row.key}
-                  className="cursor-pointer border-t border-border/50 transition hover:bg-muted/50"
-                  data-testid={`plugin-connected-row-${r.row.key}`}
-                  onClick={() => openRow(r.row)}
-                >
-                  <td className="py-2 pr-3">
-                    <span className="flex items-center gap-2">
-                      {r.row.kind === 'server' || r.row.kind === 'plugin'
-                        ? (logoUrlForName(r.row.name)
-                          ? <img src={logoUrlForName(r.row.name)!} alt="" className="size-5 shrink-0 rounded-[5px] object-cover dark:bg-white" />
-                          : <span className="grid size-5 shrink-0 place-items-center rounded-[5px] bg-muted text-[10px] font-bold">{r.row.name.slice(0, 1).toUpperCase()}</span>)
-                        : <AppLogo logo={r.row.logo} name={r.row.name} className="size-5 text-[10px]" />}
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium">{r.row.name}</span>
-                        {r.countLabel && <span className="block truncate text-[11px] text-muted-foreground" title={r.countLabel}>{r.countLabel}</span>}
-                      </span>
-                    </span>
-                  </td>
-                  <td className="py-2 pr-3">
-                    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] ${stradaBadgeClass(r.row.gray.strada)}`}>
-                      {stradaLabel(r.row.gray.strada, r.row.gray.origin, lang)}
-                    </span>
-                  </td>
-                  <td className="py-2 pr-3 text-muted-foreground">{r.row.accountLabel || '—'}</td>
-                  {/* PP4: lo stato in parole solo quando non va è per le righe; qui c'è la colonna — ma il verde non serve: chi va bene è grigio, chi non va è rosso */}
-                  <td className={`py-2 pr-3 ${r.daSistemare ? 'text-destructive' : 'text-muted-foreground'}`}>{stateLabelOf(r.row.state, lang).label}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">{permBriefOf(r.perms)}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">
-                    {r.row.bots.all ? t`Tutti i bot` : r.row.bots.names.length > 0 ? r.row.bots.names.join(', ') : '—'}
-                  </td>
-                  <td className="py-2 text-muted-foreground">{useBriefOf(r.usage)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {connectedTable({ rows: yourRows, usage: usage ?? [], perms, filter: connFilter, onlyDaSistemare }).length === 0 && (
-            <p className="py-3 text-sm text-muted-foreground"><Trans>Nessun collegamento con questi filtri.</Trans></p>
+          <DataTable<ConnectedTableRow>
+            columns={connectedColumns(lang)}
+            rows={connectedRows}
+            rowKey={(r) => r.row.key}
+            onRowClick={(r) => openRow(r.row)}
+            rowTestId={(r) => `plugin-connected-row-${r.row.key}`}
+            testId="plugin-connected-table"
+          />
+          {connectedRows.length === 0 && (
+            <p className="text-small text-muted-foreground"><Trans>Nessun collegamento con questi filtri.</Trans></p>
           )}
-          <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             <Trans>Cliccando una riga si apre la sua scheda. «Da sistemare» raccoglie quelli che non partono o hanno l'accesso scaduto, così non restano rotti in silenzio.</Trans>
           </p>
-        </section>
+        </Section>
       )}
 
       {/* --- AVANZATE: gateway, marketplace, registro, chiave (per
           sviluppatori) — A4: CHIUSA di default, una riga che si apre.
           PP4: a filo, come il resto della pagina (niente riquadro) --- */}
-      <section className="mt-8" id="plugin-advanced" data-testid="plugin-advanced">
+      <section id="plugin-advanced" data-testid="plugin-advanced" className="border-t border-border/50 pt-3">
         {developersOpen ? (
           // il contenuto porta già il suo titolo e la sua introduzione
-          <div className="border-t border-border/50 pt-3">
-            <DevelopersContent scrollTo={null} />
-          </div>
+          <DevelopersContent scrollTo={null} />
         ) : (
           <button
             type="button"
-            className="flex w-full items-center justify-between gap-3 border-t border-border/50 py-3 text-left text-[13px] text-muted-foreground transition hover:text-foreground"
+            className="flex w-full cursor-pointer items-center justify-between gap-3 py-2 text-left text-small text-muted-foreground transition hover:text-foreground"
             data-testid="plugin-developers-toggle"
             aria-expanded={false}
             onClick={() => setDevelopersOpen(true)}
           >
             <Trans>Per sviluppatori</Trans>
-            <span className="text-[11px] text-muted-foreground"><Trans>gateway, marketplace, registro, chiave</Trans></span>
+            <span className="text-caption text-muted-foreground"><Trans>gateway, marketplace, registro, chiave</Trans></span>
           </button>
         )}
       </section>
 
       {/* la frase della strada più diretta (tavola 8, in fondo) */}
-      <p className="mt-8 text-center text-[12px] leading-relaxed text-muted-foreground">
+      <p className="text-center text-caption text-muted-foreground">
         <Trans>Prima la strada più diretta. Per ogni servizio Homun usa, in quest'ordine: il server del fornitore, un server verificato nel computer isolato, e Composio solo per i servizi che non ne hanno uno.</Trans>
       </p>
-    </PluginShell>
+    </PageShell>
 
-    {/* PL2: la scheda del plugin (tavola 9) — FUORI dal corpo che scorre: copre la pagina, non scorre con lei */}
+    {/* PL2: la scheda del plugin (tavola 9) — FUORI dal corpo che scorre: copre la pagina, non scorre con lei.
+        Fase design: è un guscio suo (PageShell, z-30 sopra la pagina), FRATELLO di questo — mai dentro */}
       {(cardApp ?? cardServer) && card && (
         <PluginCard
           app={cardApp ? { row: cardApp } : undefined}
@@ -820,9 +862,10 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
           onChanged={() => { void refreshConnectors(); void refreshComposioGateway(); void refreshInstalled(); reloadSkills() }}
         />
       )}
+      {/* i fogli (fase design: la larghezza è quella di lettura, 720 — la misura dei documenti; il raggio quello delle superfici) */}
       {skillDetail !== null && (
         <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={() => setSkillDetail(null)}>
-          <div className="@container max-h-[85vh] w-full max-w-2xl overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="plugin-skill-detail">
+          <div className="@container max-h-[85vh] w-full max-w-reading overflow-y-auto scroll-thin rounded-surface bg-card p-6 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="plugin-skill-detail">
             {/* PL5: la skill di un plugin è in sola lettura (si aggiorna col plugin) */}
             {(pluginSkills ?? []).some((g) => g.skills.some((x) => x.name === skillDetail))
               ? <PluginDetail name={skillDetail} plugins={pluginSkills ?? []} onClose={() => setSkillDetail(null)} />
@@ -832,7 +875,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
       )}
       {catalogEntrySel && (
         <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={() => setCatalogId(null)}>
-          <div className="@container max-h-[85vh] w-full max-w-2xl overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="plugin-skill-catalog-preview">
+          <div className="@container max-h-[85vh] w-full max-w-reading overflow-y-auto scroll-thin rounded-surface bg-card p-6 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="plugin-skill-catalog-preview">
             <CatalogPreview
               entry={catalogEntrySel}
               state={skillCatalogInstallState(catalogEntrySel, skills ?? [])}
@@ -883,6 +926,19 @@ function useBriefOf(usage: { last: number; week: number } | null): string {
 }
 
 /**
+ * Il logo di una riga di plugin, a filo come la riga: il file del repo
+ * cercato PER NOME (server e plugin non ne dichiarano uno: «Mattermost» →
+ * mattermost.svg), altrimenti il logo dichiarato dal catalogo o l'iniziale.
+ * La misura la dà chi lo rende — 32 nelle righe (DS1); il raggio sta in
+ * lib/app-logos. Prima qui c'era un 20 px col raggio scritto a mano.
+ */
+function RowLogo({ row, name, className }: { row: Pick<YourPluginRow, 'kind' | 'name' | 'logo'>; name: string; className: string }): ReactNode {
+  const url = row.kind === 'server' || row.kind === 'plugin' ? logoUrlForName(row.name) : null
+  if (url) return <img src={url} alt="" className={`${LOGO_CLASS} ${className}`} />
+  return <AppLogo logo={row.logo} name={name} className={className} />
+}
+
+/**
  * Una riga di «I tuoi» — A FILO (PP4, FlatRow): logo da 32, nome (verificato
  * se lo è), UNA riga grigia «tipo · strada · origine», e a destra il segnale.
  * V5 (fase stato-vivo): l'interruttore Attivo c'è per i server MCP, i
@@ -909,7 +965,6 @@ export function YourRow({ row, lang, onOpen, onToggleActive }: {
 }): ReactNode {
   const { t } = useLingui()
   const st = stateLabelOf(row.state, lang)
-  const url = row.kind === 'server' || row.kind === 'plugin' ? logoUrlForName(row.name) : null
   const shown = row.kind === 'skill' ? humanizeSkillName(row.name) : row.name
   // V5: chi ha l'interruttore Attivo — i server, i connettori (Composio e
   // diretti col loro server), le skill di LIBRERIA (quelle dei plugin si
@@ -935,15 +990,13 @@ export function YourRow({ row, lang, onOpen, onToggleActive }: {
       clickable
       testId={`plugin-row-${row.key}`}
       onClick={() => onOpen(row)}
-      leading={url
-        ? <img src={url} alt="" className="size-8 shrink-0 rounded-[9px] object-cover dark:bg-white" />
-        : <AppLogo logo={row.logo} name={shown} className="size-8 text-sm" />}
+      leading={<RowLogo row={row} name={shown} className="size-8 text-body" />}
       title={(
         <span className="flex items-center gap-1.5">
           <span className="truncate">{shown}</span>
           {row.verified && (
-            <span className="flex shrink-0 items-center gap-0.5 text-[11px] text-muted-foreground" title={t`verificato`}>
-              <BadgeCheck className="size-3.5" aria-hidden="true" />
+            <span className="flex shrink-0 items-center gap-0.5 text-caption text-muted-foreground" title={t`verificato`}>
+              <BadgeCheck className="size-4" aria-hidden="true" />
               <Trans>verificato</Trans>
             </span>
           )}
@@ -960,7 +1013,7 @@ export function YourRow({ row, lang, onOpen, onToggleActive }: {
         <>
           {row.state !== 'active' && (
             <span
-              className={`text-[13px] ${row.state === 'off-homun' || row.state === 'off-user' ? 'text-muted-foreground' : 'text-destructive'}`}
+              className={`text-small ${row.state === 'off-homun' || row.state === 'off-user' ? 'text-muted-foreground' : 'text-destructive'}`}
               data-testid={`plugin-state-${row.key}`}
             >
               {st.label}

@@ -9,27 +9,38 @@
 // valori mai — e si sostituiscono solo quelli scritti; OAuth ha «Ricollega»
 // sempre, come azione della riga. Lo stato è il reducer PURO di
 // lib/plugin-secret: il valore scritto non resta dopo il salvataggio.
+//
+// Fase design (DS4): ai token. Il titolo «Account» è una sezione come le
+// altre della scheda; le azioni delle righe sono testo (Button ghost) — anche
+// «Ricollega», che prima era l'unica pillola piena della riga: un'azione DENTRO
+// una riga è testo, l'azione che fa andare avanti è solo «Salva» dell'editor;
+// i campi sono alti 36 col raggio dei controlli (erano una pillola corta).
 import { useLingui, Trans } from '@lingui/react/macro'
 import { api } from '../../store'
 import type { McpServerInfo } from '../../../../shared/types'
 // PP4 (fase plugin-pulita): le righe a filo — la scheda non usa più i pezzi delle Impostazioni
 import { FlatList, FlatRow } from '../ui/flat-list'
+import { Section } from '../ui/section'
+import { Button } from '../ui/button'
 import {
   accountKindOf, secretPayloadOf, submitSecret,
   type SecretEditAction, type SecretEditState, type SecretEditResult, type SecretKind, type ServerSecretNames
 } from '../../lib/plugin-secret'
 
-/** L'azione della riga: testo quieto a destra del nome. */
-const QUIET = 'rounded-full px-3 py-1.5 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-40'
-const FIELD = 'w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none disabled:opacity-60'
+/**
+ * Il campo password dell'editor: 36 px (la misura dei campi), il raggio dei
+ * controlli, il testo di riga, sul fondo della scheda (sta sotto la riga, a
+ * filo: il fondo lo separa da lei).
+ */
+const FIELD = 'h-control w-full rounded-control bg-card px-3 text-body outline-none disabled:opacity-60'
 
 /** L'esito del salvataggio come testo (la riga lo colora: bene, male, neutro). */
 function ResultText({ result }: { result: SecretEditResult }): React.ReactNode {
-  if (result.outcome === 'ok') return <span className="text-chart-2" data-testid="plugin-secret-result"><Trans>collegato</Trans></span>
+  if (result.outcome === 'ok') return <span className="text-small text-chart-2" data-testid="plugin-secret-result"><Trans>collegato</Trans></span>
   if (result.outcome === 'fail' || result.outcome === 'error') {
-    return <span className="text-destructive" data-testid="plugin-secret-result">{result.reason}</span>
+    return <span className="text-small text-destructive" data-testid="plugin-secret-result">{result.reason}</span>
   }
-  return <span data-testid="plugin-secret-result"><Trans>salvato</Trans></span>
+  return <span className="text-small" data-testid="plugin-secret-result"><Trans>salvato</Trans></span>
 }
 
 /**
@@ -49,10 +60,10 @@ function SecretFields({ kind, names, state, onAction, onSave }: {
   const canSave = !state.saving && Object.keys(secretPayloadOf(kind, state.values)).length > 0
   // i campi stanno SOTTO la riga, nella sua stessa voce di lista (nessun filetto in mezzo)
   return (
-    <div className="w-full space-y-1.5 pb-3">
+    <div className="flex w-full flex-col gap-2 pb-3">
       {names.map((name) => (
         <label key={name} className="block">
-          {kind !== 'bearer' && <span className="mb-0.5 block font-mono text-[12px] text-muted-foreground">{name}</span>}
+          {kind !== 'bearer' && <span className="mb-1 block font-mono text-small text-muted-foreground">{name}</span>}
           <input
             type="password"
             autoComplete="new-password"
@@ -71,19 +82,17 @@ function SecretFields({ kind, names, state, onAction, onSave }: {
           />
         </label>
       ))}
-      <div className="flex items-center gap-2 pt-1">
-        <button
-          type="button"
-          className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+      <div className="flex items-center gap-2">
+        <Button
           data-testid={`plugin-${kind === 'bearer' ? 'token' : kind}-save`}
           disabled={!canSave}
           onClick={onSave}
         >
           <Trans>Salva</Trans>
-        </button>
-        <button type="button" className={QUIET} data-testid={`plugin-${kind === 'bearer' ? 'token' : kind}-cancel`} disabled={state.saving} onClick={() => onAction({ type: 'cancel' })}>
+        </Button>
+        <Button variant="ghost" data-testid={`plugin-${kind === 'bearer' ? 'token' : kind}-cancel`} disabled={state.saving} onClick={() => onAction({ type: 'cancel' })}>
           <Trans>Annulla</Trans>
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -118,30 +127,24 @@ export function ServerAccountRow({ server, names, state, onAction, onChanged }: 
           : t`nessun account`
   const result = state.result !== null && state.result.kind !== 'env' ? state.result : null
   return (
-    <div data-testid="plugin-account-rows">
-      <h3 className="text-[13px] text-muted-foreground"><Trans>Account</Trans></h3>
-      <FlatList className="mt-1">
+    <Section title={<Trans>Account</Trans>} testId="plugin-account-rows">
+      <FlatList>
         <div>
           <FlatRow
             title={title}
             subtitle={result !== null ? <ResultText result={result} /> : undefined}
             trailing={reconnect ? (
-              <button
-                type="button"
-                className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-                data-testid="plugin-reconnect"
-                onClick={() => { void api.connectorsReconnectServer(server.id).then(onChanged).catch(() => undefined) }}
-              >
+              <Button variant="ghost" size="sm" data-testid="plugin-reconnect" onClick={() => { void api.connectorsReconnectServer(server.id).then(onChanged).catch(() => undefined) }}>
                 <Trans>Ricollega</Trans>
-              </button>
+              </Button>
             ) : kind === 'bearer' ? (
-              <button type="button" className={QUIET} data-testid="plugin-token-change" onClick={() => onAction({ type: 'open', kind: 'bearer' })}>
+              <Button variant="ghost" size="sm" data-testid="plugin-token-change" onClick={() => onAction({ type: 'open', kind: 'bearer' })}>
                 <Trans>Cambia token</Trans>
-              </button>
+              </Button>
             ) : kind === 'headers' ? (
-              <button type="button" className={QUIET} data-testid="plugin-headers-change" disabled={!names} onClick={() => onAction({ type: 'open', kind: 'headers' })}>
+              <Button variant="ghost" size="sm" data-testid="plugin-headers-change" disabled={!names} onClick={() => onAction({ type: 'open', kind: 'headers' })}>
                 <Trans>Cambia</Trans>
-              </button>
+              </Button>
             ) : undefined}
           />
           {state.kind === 'bearer' && <SecretFields kind="bearer" names={['token']} state={state} onAction={onAction} onSave={save} />}
@@ -154,15 +157,15 @@ export function ServerAccountRow({ server, names, state, onAction, onChanged }: 
               title={t`variabili segrete: ${envNames.length}`}
               subtitle={state.result !== null && state.result.kind === 'env' ? <ResultText result={state.result} /> : undefined}
               trailing={state.kind === 'env' ? undefined : (
-                <button type="button" className={QUIET} data-testid="plugin-env-change" onClick={() => onAction({ type: 'open', kind: 'env' })}>
+                <Button variant="ghost" size="sm" data-testid="plugin-env-change" onClick={() => onAction({ type: 'open', kind: 'env' })}>
                   <Trans>Cambia</Trans>
-                </button>
+                </Button>
               )}
             />
             {state.kind === 'env' && <SecretFields kind="env" names={envNames} state={state} onAction={onAction} onSave={save} />}
           </div>
         )}
       </FlatList>
-    </div>
+    </Section>
   )
 }

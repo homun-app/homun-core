@@ -1,19 +1,25 @@
 // PP4 (fase plugin-pulita): la scheda del plugin — meno muro, come la lista.
-// Testata: indietro · logo 40 · nome + riga grigia (tipo · strada) · a destra
-// l'interruttore SENZA etichetta e un menu ⋯ (Prova la connessione, Ricollega
-// se OAuth, Rimuovi/Scollega con conferma); lo stato in parole solo quando non
-// va. Schede interne come testo (UnderlineTabs). Panoramica senza riquadri, a
-// due colonne quando c'è spazio (etichetta grigia a sinistra: Provenienza /
-// Sicurezza / Dati, valore a destra). Autorizzazioni a filo: intestazione di
-// gruppo con il selettore, azioni come FlatRow. «Bot che lo usano» come
-// FlatList: «Tutti i bot» e un bot per riga. La scheda non usa più
-// SettingsGroup / SettingsRow (restano quelli delle Impostazioni).
+// Testata: indietro · logo 40 · nome · a destra l'interruttore SENZA etichetta
+// e un menu ⋯ (Prova la connessione, Ricollega se OAuth, Rimuovi/Scollega con
+// conferma); sotto la riga, la riga grigia (tipo · strada) e lo stato in
+// parole solo quando non va. Schede interne come testo (UnderlineTabs).
+// Panoramica senza riquadri, a due colonne quando c'è spazio (etichetta grigia
+// a sinistra: Provenienza / Sicurezza / Dati, valore a destra). Autorizzazioni
+// a filo: intestazione di gruppo con il selettore, azioni come FlatRow.
+// «Bot che lo usano» come FlatList: «Tutti i bot» e un bot per riga. La scheda
+// non usa più SettingsGroup / SettingsRow (restano quelli delle Impostazioni).
+//
+// Fase design (DS4): la scheda è un guscio di sistema — in fondo, «la scheda
+// è nel guscio di sistema»: PageShell sopra la pagina, la testata di PageHeader
+// (la riga dei 52 di ogni colonna; la riga grigia e lo stato SOTTO, nella
+// descrizione), i controlli della testata alti 32 e no-drag, le schede interne
+// nella barra degli strumenti.
 import './render-helper-install'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
-import { renderHtml, setStoreStateForRender, parseHtml, textOf, findAll, type HtmlNode } from './render-helper'
+import { renderHtml, setStoreStateForRender, parseHtml, textOf, findAll, hasAncestor, type HtmlNode } from './render-helper'
 import { stubApiMethod, callsOf } from './render-helper-install'
 import type { McpServerInfo, PermissionsConfig } from '../../../shared/types'
 
@@ -99,8 +105,12 @@ describe('PP4: la scheda — testata', () => {
     expect(el('plugin-card-active')!.props['aria-label']).toBe('Attivo')
     expect(byId(root, 'plugin-card-menu-trigger')).toHaveLength(1)
     expect(byId(root, 'plugin-card-menu')).toHaveLength(1)
-    // il logo è da 40px
-    expect(CARD_SRC).toContain('className="size-10 shrink-0 rounded-[11px] object-cover dark:bg-white"')
+    // il logo è da 40px, col raggio dei controlli (non più una pillola). Fase design
+    // (DS4): quel raggio non si scrive più nella scheda (era un rounded-[11px] a
+    // mano) — sta in lib/app-logos, col raggio di ogni logo
+    const logo = findAll(head, (n) => has(n, 'size-10') && has(n, 'rounded-control'))
+    expect(logo.length).toBeGreaterThanOrEqual(1)
+    expect(CARD_SRC).toContain('`${LOGO_CLASS} size-10`')
   })
 
   it("lo stato in parole SOLO quando non va: quando va bene nessuna parola; rotto la parola rossa col perché; spento «spento»", () => {
@@ -308,5 +318,116 @@ describe('PP4: la scheda non usa più SettingsGroup / SettingsRow', () => {
     expect(ROWS_SRC).toMatch(/<FlatRow\b/)
     const row = readFileSync(fileURLToPath(new URL('../components/settings/SettingsRow.tsx', import.meta.url)), 'utf8')
     expect(row).toContain('@[420px]:flex-row')
+  })
+})
+
+describe('DS4 (fase design): la scheda è nel guscio di sistema', () => {
+  /** La riga dei 52 della scheda: quella che PageHeader mette nello slot della testata. */
+  const row = (root: HtmlNode): HtmlNode => findAll(root, (n) => n.attrs['data-col-head'] !== undefined)[0]!
+
+  it('la testata è la riga dei 52 di ogni colonna (fascia di trascinamento, in cima): indietro «Torna ai plugin», il logo 40, il nome come titolo di pagina', () => {
+    const root = render()
+    const card = byId(root, 'plugin-card')[0]!
+    // la scheda sta sopra la pagina
+    expect(has(card, 'z-30')).toBe(true)
+    expect(has(card, 'no-drag')).toBe(true)
+    const heads = findAll(card, (n) => n.attrs['data-col-head'] !== undefined)
+    expect(heads).toHaveLength(1)
+    for (const cls of ['h-col-head', 'drag-region']) expect(has(heads[0]!, cls)).toBe(true)
+    // la riga sta nella testata (plugin-card-head), che sta nello slot della testata del guscio — il primo figlio della scheda: in cima
+    expect(heads[0]!.parent).toBe(byId(root, 'plugin-card-head')[0]!)
+    expect(card.children[0]).toBe(heads[0]!.parent!.parent)
+    expect(card.children[0]!.attrs['data-page-shell']).toBe('header')
+    const back = findAll(row(root), (n) => n.tag === 'button')[0]!
+    expect(back.attrs['aria-label']).toBe('Torna ai plugin')
+    expect(has(back, 'no-drag')).toBe(true)
+    const title = findAll(row(root), (n) => n.tag === 'h1')[0]!
+    expect(has(title, 'text-page')).toBe(true)
+    expect(textOf(title)).toBe('ufficio')
+  })
+
+  it('la riga grigia — e lo stato, il perché, l\'esito della prova — stanno SOTTO la riga dei 52, nella descrizione: la riga resta alta 52 in ogni stato', () => {
+    const ok = render()
+    // a posto: la riga grigia e nient'altro
+    expect(findAll(row(ok), (n) => has(n, 'text-small'))).toHaveLength(0)
+    const gray = byId(ok, 'plugin-card-gray')[0]!
+    // la colonna della descrizione: text-small grigio, alla larghezza del contenuto
+    expect(has(gray.parent!, 'text-small')).toBe(true)
+    expect(has(gray.parent!, 'text-muted-foreground')).toBe(true)
+    expect(hasAncestor(gray, (n) => n.attrs['data-col-head'] !== undefined)).toBe(false)
+    // rotto: la parola rossa e il perché, sotto, mai nella riga
+    const rotto = render({ ...SERVER, stateStatus: 'error', stateError: 'spawn node ENOENT' })
+    const stato = byId(rotto, 'plugin-card-state')[0]!
+    expect(has(stato, 'text-destructive')).toBe(true)
+    expect(hasAncestor(stato, (n) => n.attrs['data-col-head'] !== undefined)).toBe(false)
+    expect(textOf(byId(rotto, 'plugin-card-why')[0]!)).toBe('spawn node ENOENT')
+  })
+
+  it('i controlli della testata sono alti 32 e no-drag: l\'interruttore sta in una casa da 32, il menu ⋯ è un Button solo-icona tondo', () => {
+    const root = render()
+    const trigger = byId(root, 'plugin-card-menu-trigger')[0]!
+    expect(trigger.attrs['data-slot']).toBe('button')
+    expect(trigger.attrs['aria-label']).toBe('Altre azioni')
+    for (const cls of ['w-control-sm', 'h-control-sm', 'rounded-full', 'no-drag']) expect(has(trigger, cls)).toBe(true)
+    expect(has(trigger.children[0]!, 'size-4')).toBe(true)
+    // l'interruttore (24) in una casa alta 32: le azioni stanno tutte sulla stessa riga
+    const toggle = byId(root, 'plugin-card-active')[0]!
+    expect(has(toggle.parent!, 'h-control-sm')).toBe(true)
+    expect(has(toggle.parent!, 'no-drag')).toBe(true)
+  })
+
+  it('«Riaccendi» e «Connetti» sono Button (la seconda non riempie: l\'azione che fa andare avanti, qui, è una sola)', () => {
+    const spento = render({ ...SERVER, enabled: false, firstOkAt: 1 })
+    const riaccendi = byId(spento, 'plugin-card-reenable')[0]!
+    expect(riaccendi.attrs['data-slot']).toBe('button')
+    expect(has(riaccendi, 'bg-foreground')).toBe(true)
+    expect(has(riaccendi, 'h-control-sm')).toBe(true)
+    expect(has(riaccendi, 'no-drag')).toBe(true)
+    // un connettore non collegata: «Connetti» in tono (secondario), con il suo testid
+    capture.els.length = 0
+    const app = { row: { app: { id: 'notion', name: 'Notion', logo: null, via: 'direct', directId: 'notion' }, tagline: null, connected: null } } as never
+    const html = renderHtml(createElement(PluginCard, { app, server: undefined, initial: { tools: [], permissions: PERMS }, onConnect: () => undefined, onClose: () => undefined, onChanged: () => undefined } as never))
+    const root = parseHtml(html)
+    const connetti = byId(root, 'plugin-card-connect-notion')[0]!
+    expect(connetti.attrs['data-slot']).toBe('button')
+    expect(has(connetti, 'bg-muted')).toBe(true)
+    expect(has(connetti, 'bg-foreground')).toBe(false)
+  })
+
+  it('le schede interne stanno nella barra degli strumenti, ferma sopra il corpo: la loro sottolineatura corre per tutta la colonna', () => {
+    const root = render()
+    const list = byId(root, 'plugin-card-tabs')[0]!
+    // la tablist dentro il suo involucro (l'involucro è quello che riceve la larghezza)
+    const involucre = list.parent!
+    expect(has(involucre, 'w-full')).toBe(true)
+    expect(has(involucre, 'border-b')).toBe(true)
+    // e l'involucro sta nello slot della barra degli strumenti, non in quello della testata né nel corpo che scorre
+    expect(hasAncestor(involucre, (n) => n.attrs['data-page-shell'] === 'toolbar')).toBe(true)
+    expect(hasAncestor(involucre, (n) => n.attrs['data-page-shell'] === 'scroll')).toBe(false)
+  })
+
+  it('i titoli di gruppo («Bot che lo usano», «Account») sono sezioni: la stessa etichetta grigia che hanno altrove', () => {
+    const root = render()
+    const accounts = byId(root, 'plugin-accounts')[0]!
+    const labels = findAll(accounts, (n) => n.tag === 'h2').map((n) => textOf(n))
+    expect(labels).toEqual(['Account', 'Bot che lo usano'])
+    for (const h2 of findAll(accounts, (n) => n.tag === 'h2')) {
+      expect(has(h2, 'text-caption')).toBe(true)
+      expect(has(h2, 'font-medium')).toBe(true)
+      expect(has(h2, 'text-muted-foreground')).toBe(true)
+    }
+    // i pannelli sono fratelli nella colonna del contenuto, a 32 px (gap-section)
+    const content = accounts.parent!
+    for (const cls of ['flex', 'flex-col', 'gap-section']) expect(has(content, cls)).toBe(true)
+    expect(content.children.map((n) => n.attrs['data-testid'])).toEqual(['plugin-overview', 'plugin-permissions', 'plugin-accounts'])
+  })
+
+  it('«Rimuovi» in fondo è testo: un Button ghost, rosso anche al passaggio', () => {
+    const root = render()
+    const rimuovi = byId(root, 'plugin-card-remove-bottom')[0]!
+    expect(rimuovi.attrs['data-slot']).toBe('button')
+    expect(has(rimuovi, 'text-destructive')).toBe(true)
+    expect(has(rimuovi, 'hover:text-destructive')).toBe(true)
+    expect(has(rimuovi, 'bg-foreground')).toBe(false)
   })
 })

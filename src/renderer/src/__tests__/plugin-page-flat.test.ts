@@ -7,13 +7,19 @@
 // riga: i bot si nominano solo quando l'accesso è ristretto («Solo X»). La
 // riga grigia resta una sola. Le righe sono a filo (FlatRow), il logo da 32px,
 // i segmenti in testa sono UnderlineTabs, «Aggiungi» resta l'unico pieno,
-// i titoli di sezione 13px grigi e lo spazio tra le sezioni più largo.
+// i titoli di sezione sono grigi e lo spazio tra le sezioni è quello di sistema.
+//
+// Fase design (DS4): la pagina passa al sistema — in fondo, «la pagina è nel
+// guscio di sistema»: PageShell (il corpo che scorre largo quanto l'area) con
+// la testata di PageHeader (la riga dei 52), la barra degli strumenti in una
+// riga sola, le schede che non vanno mai a capo, il menu «Aggiungi» coi token
+// e le icone lucide al posto dei glifi.
 import './render-helper-install'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
-import { renderHtml, setStoreStateForRender, parseHtml, textOf, findAll, type HtmlNode } from './render-helper'
+import { renderHtml, setStoreStateForRender, parseHtml, textOf, findAll, hasAncestor, type HtmlNode } from './render-helper'
 import { stubApiMethod } from './render-helper-install'
 import type { McpServerInfo } from '../../../shared/types'
 import type { YourPluginRow } from '../lib/plugins-view'
@@ -157,11 +163,14 @@ describe('PP4: la lista — righe a filo, un solo pieno, segmenti come testo', (
     expect(tokens.filter((c) => c.startsWith('bg-') || c.startsWith('rounded-'))).toEqual([])
     expect(tokens).toContain('hover:bg-muted/50')
     expect(PANEL_SRC).toMatch(/<FlatRow[\s\S]*?testId=\{`plugin-row-\$\{row\.key\}`\}/)
-    // il logo: nel sorgente 32px (size-8), non più 40 (size-10)
+    // il logo: 32px (size-8), nella casa da 32 di FlatRow. Fase design (DS4):
+    // il raggio non si scrive più in questa riga (era un rounded-[9px] a
+    // mano): sta in lib/app-logos, con quello di ogni altro logo
+    expect(has(r.children[0]!, 'size-8')).toBe(true)
     const rowSrc = PANEL_SRC.slice(PANEL_SRC.indexOf('export function YourRow('))
-    expect(rowSrc).toContain('size-8 shrink-0 rounded-[9px]')
-    expect(rowSrc).not.toContain('size-10 shrink-0 rounded-[11px]')
-    expect(rowSrc).toContain('className="size-8 text-sm"')
+    expect(rowSrc).toContain('<RowLogo row={row} name={shown} className="size-8 text-body" />')
+    expect(rowSrc).not.toMatch(/rounded-\[\d+px\]/)
+    expect(rowSrc).not.toContain('size-10')
   })
 
   it('«I tuoi» è un FlatList: le righe separate da un filetto, senza spazio tra loro', () => {
@@ -190,14 +199,24 @@ describe('PP4: la lista — righe a filo, un solo pieno, segmenti come testo', (
     expect(full.map((n) => n.attrs['data-testid'] ?? n.tag)).toEqual(['plugin-add'])
   })
 
-  it('i titoli di sezione sono 13px grigi, non più 15px medium; tra le sezioni 32px', () => {
+  // fase design (DS4): il titolo di sezione è la sezione di sistema (Section):
+  // un'etichetta grigia a 500 — text-caption, ché 13 px non è una taglia di DS1
+  // — e lo scarto fra le sezioni lo decide la pagina UNA volta (gap-section
+  // sulla colonna del contenuto): prima ogni sezione portava il suo mt-8
+  it('i titoli di sezione sono etichette grigie a 500 (Section, text-caption), non titoli; le sezioni stanno a 32px per decise una volta sola', () => {
     const root = parseHtml(renderHtml(createElement(PluginPanel, {})))
     const yours = byId(root, 'plugin-yours')[0]!
+    expect(yours.tag).toBe('section')
     const h2 = findAll(yours, (n) => n.tag === 'h2')[0]!
-    expect(has(h2, 'text-[13px]')).toBe(true)
+    expect(has(h2, 'text-caption')).toBe(true)
     expect(has(h2, 'text-muted-foreground')).toBe(true)
-    expect(has(h2, 'font-medium')).toBe(false)
-    expect(has(yours, 'mt-8')).toBe(true)
+    expect(has(h2, 'font-medium')).toBe(true)
+    expect(has(h2, 'font-display')).toBe(false)
+    // la sezione non ha margini suoi: lo scarto sta sulla colonna che la contiene
+    expect((yours.attrs.class ?? '')).not.toMatch(/(^|\s)-?mt-/)
+    const columns = findAll(root, (n) => 'data-page-content' in n.attrs && has(n, 'gap-section'))
+    expect(columns).toHaveLength(1)
+    expect(columns[0]!.children).toContain(yours)
     expect(PANEL_SRC).not.toMatch(/<h2 className="text-\[15px\] font-medium">/)
   })
 
@@ -212,6 +231,177 @@ describe('PP4: la lista — righe a filo, un solo pieno, segmenti come testo', (
     expect(r.attrs.class ?? '').not.toMatch(/rounded-\[/)
     // (la piastrella di ripiego porta l'iniziale: la N di Notion)
     expect(textOf(r)).toBe('NNotionSemplifica il lavoro')
-    expect(APPS_SRC.slice(APPS_SRC.indexOf('export function AppRow(')).includes('size-8 text-sm')).toBe(true)
+    // fase design (DS4): l'iniziale della piastrella è testo di riga (text-body, prima text-sm)
+    expect(APPS_SRC.slice(APPS_SRC.indexOf('export function AppRow(')).includes('size-8 text-body')).toBe(true)
+  })
+})
+
+describe('DS4 (fase design): la pagina è nel guscio di sistema', () => {
+  const renderPage = (initial: Record<string, unknown> = {}): HtmlNode => parseHtml(renderHtml(createElement(PluginPanel, { initial } as never)))
+  /** Lo slot del guscio (header, description, toolbar, scroll) e la colonna del contenuto che sta dentro. */
+  const slot = (root: HtmlNode, name: string): HtmlNode => findAll(root, (n) => n.attrs['data-page-shell'] === name)[0]!
+
+  it('la testata: la riga dei 52 (la fascia di trascinamento, uguale in ogni colonna) con indietro «Torna alla chat», Puzzle a 20, il titolo di pagina e «Aggiungi» — un Button pieno a pillola, alto 32, no-drag', () => {
+    const root = renderPage()
+    const page = byId(root, 'plugin-page')[0]!
+    // la riga dei 52 sta nello slot della testata, DENTRO la pagina: il contratto lo tiene PageShell, qui si guarda che la pagina lo usi
+    const heads = findAll(page, (n) => n.attrs['data-col-head'] !== undefined)
+    expect(heads).toHaveLength(1)
+    expect(hasAncestor(heads[0]!, (n) => n.attrs['data-page-shell'] === 'header')).toBe(true)
+    for (const cls of ['h-col-head', 'drag-region']) expect(has(heads[0]!, cls)).toBe(true)
+    const back = findAll(heads[0]!, (n) => n.tag === 'button')[0]!
+    expect(back.attrs['aria-label']).toBe('Torna alla chat')
+    expect(has(back, 'size-control-sm')).toBe(true)
+    expect(has(back, 'no-drag')).toBe(true)
+    const title = findAll(heads[0]!, (n) => n.tag === 'h1')[0]!
+    expect(has(title, 'text-page')).toBe(true)
+    expect(has(title, 'font-display')).toBe(true)
+    expect(textOf(title)).toBe('Plugin')
+    // l'icona di pagina: 20 px (la misura la dà la testata; indietro, accanto, resta a 16)
+    const icon = findAll(heads[0]!, (n) => n.tag === 'svg').find((n) => has(n, 'size-5'))
+    expect(icon).toBeTruthy()
+    expect(icon!.attrs.class).toContain('lucide-puzzle')
+    const add = byId(root, 'plugin-add')[0]!
+    expect(add.attrs['data-slot']).toBe('button')
+    expect(textOf(add)).toBe('Aggiungi')
+    for (const cls of ['bg-foreground', 'rounded-full', 'h-control-sm']) expect(has(add, cls)).toBe(true)
+    // l'azione principale è UNA: nel corpo non c'è altro pieno
+    expect(findAll(page, (n) => has(n, 'bg-foreground') && !has(n, 'bg-foreground/20')).map((n) => n.attrs['data-testid'])).toEqual(['plugin-add'])
+    // la fascia trascina la finestra: l'azione — e il menu che ne scende — sono no-drag
+    expect(hasAncestor(add, (n) => has(n, 'no-drag'))).toBe(true)
+    expect(hasAncestor(byId(root, 'plugin-add-menu')[0]!, (n) => has(n, 'no-drag'))).toBe(true)
+  })
+
+  it('il menu «Aggiungi», scritto a mano, coi token: raggio delle superfici, p-1, voci text-body, le seconde righe text-small grigie, i filetti', () => {
+    const root = renderPage()
+    const menu = byId(root, 'plugin-add-menu')[0]!
+    for (const cls of ['rounded-surface', 'p-1', 'bg-card']) expect(has(menu, cls)).toBe(true)
+    const items = findAll(menu, (n) => n.tag === 'button')
+    expect(items.length).toBe(6)
+    for (const item of items) {
+      expect(has(item, 'text-body')).toBe(true)
+      expect(has(item, 'rounded-control')).toBe(true)
+    }
+    const text = textOf(menu)
+    for (const voce of ['Importa da altre app', 'Server MCP personalizzato', 'Importa skill', 'Crea una skill', 'Crea con il bot', 'Aggiungi un marketplace']) expect(text).toContain(voce)
+    // le due voci con la seconda riga: grigia, text-small
+    const second = findAll(menu, (n) => has(n, 'text-small'))
+    expect(second.map((n) => textOf(n))).toEqual(['Cursor, Codex, ZCode…', 'Cursor, Codex, ZCode, Claude Code…'])
+    for (const s of second) expect(has(s, 'text-muted-foreground')).toBe(true)
+    // i due filetti fra i tre gruppi
+    expect(findAll(menu, (n) => has(n, 'h-px')).length).toBe(2)
+  })
+
+  it('la descrizione sta sotto la riga dei 52, alla larghezza del contenuto: text-small grigio (non più una riga della barra)', () => {
+    const root = renderPage()
+    const desc = slot(root, 'description')
+    expect(desc).toBeTruthy()
+    const content = desc.children[0]!.children[0]!
+    for (const cls of ['text-small', 'text-muted-foreground']) expect(has(content, cls)).toBe(true)
+    expect(textOf(content)).toMatch(/^Connettori, server MCP e skill/)
+    // e non sta nella riga dei 52
+    expect(hasAncestor(content, (n) => n.attrs['data-col-head'] !== undefined)).toBe(false)
+  })
+
+  it('la barra degli strumenti è UNA riga alta 40 con i segmenti e la ricerca: il campo è un campo (36, raggio dei controlli), non una pillola', () => {
+    const root = renderPage()
+    const toolbar = slot(root, 'toolbar')
+    const column = toolbar.children[0]!.children[0]!
+    expect(column.children).toHaveLength(1)
+    const row = column.children[0]!
+    for (const cls of ['flex', 'min-h-10', 'items-center']) expect(has(row, cls)).toBe(true)
+    expect(byId(row, 'plugin-segments')).toHaveLength(1)
+    const search = byId(row, 'plugin-search')[0]!
+    expect(search.attrs.placeholder).toBe('Cerca tra plugin e skill')
+    for (const cls of ['h-control', 'rounded-control']) expect(has(search.parent!, cls)).toBe(true)
+    expect(has(search.parent!, 'rounded-full')).toBe(false)
+    expect(has(search, 'text-body')).toBe(true)
+  })
+
+  it('le schede non vanno mai a capo: nessuna delle schede della pagina chiede flex-wrap, e le tablist rese sono flex-nowrap', () => {
+    const calls = PANEL_SRC.match(/<UnderlineTabs[\s\S]*?\/>/g) ?? []
+    expect(calls.length).toBeGreaterThanOrEqual(4)
+    for (const call of calls) expect(call).not.toContain('flex-wrap')
+    const root = renderPage({ seg: 'skills' })
+    const lists = findAll(root, (n) => n.attrs.role === 'tablist')
+    expect(lists.length).toBeGreaterThanOrEqual(2)
+    for (const list of lists) {
+      expect(has(list, 'flex-nowrap')).toBe(true)
+      expect((list.attrs.class ?? '')).not.toContain('flex-wrap')
+    }
+  })
+
+  it('nessun glifo al posto di un\'icona: la voce del catalogo e il filtro per bot portano icone lucide da 16 (prima ✦ e ✕ nel testo)', async () => {
+    const { useStore } = await import('../store')
+    setStoreStateForRender(useStore, { skillsFilterAgent: 'a-1' })
+    const skillCatalog = [
+      { id: 'riassunti', source: { repo: 'anthropics/skills', commit: 'a'.repeat(40), path: '' }, license: 'MIT', category: 'writing', description: { it: 'Riassume', en: 'Summarizes' }, files: { exclude: [] }, reviewed: true }
+    ]
+    const root = renderPage({ seg: 'skills', skillCatalog })
+    const segment = byId(root, 'plugin-skills')[0]!
+    // il filtro per bot: una pillola col nome e la X di lucide
+    const filter = findAll(segment, (n) => n.tag === 'button' && textOf(n) === 'Competitoor')[0]!
+    expect(filter).toBeTruthy()
+    expect(has(filter.children[0]!, 'size-4')).toBe(true)
+    expect(filter.children[0]!.attrs.class).toContain('lucide-x')
+    // la voce del catalogo: la piastrella da 32 con l'icona
+    const entry = findAll(byId(root, 'plugin-skills-catalog')[0]!, (n) => textOf(n) === 'Riassunti')[0]!
+    expect(entry).toBeTruthy()
+    const tile = findAll(entry.parent!.parent!, (n) => has(n, 'rounded-control') && has(n, 'size-8'))[0]!
+    expect(tile).toBeTruthy()
+    expect(has(tile.children[0]!, 'size-4')).toBe(true)
+    expect(tile.children[0]!.attrs.class).toContain('lucide-sparkles')
+    // nel codice della pagina non restano i due glifi (i commenti li citano: raccontano cosa c'era)
+    expect(PANEL_SRC.replace(/^\s*\/\/.*$/gm, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '')).not.toMatch(/[✦✕]/)
+  })
+
+  it('il logo di ripiego è l\'iniziale: niente emoji al posto di un logo (DS1: nell\'interfaccia solo icone)', async () => {
+    const { AppLogo } = await import('../components/AppsWindow')
+    const html = renderHtml(createElement(AppLogo, { logo: '🧩', name: 'Zed' }))
+    expect(textOf(parseHtml(html))).toBe('Z')
+    expect(html).not.toContain('🧩')
+    // e il raggio del logo non è scritto nel pezzo: viene da lib/app-logos
+    expect(APPS_SRC).toContain('${LOGO_CLASS} ${className}')
+    expect(APPS_SRC).toContain('${LOGO_TILE_CLASS} ${className}')
+  })
+})
+
+describe('DS4 (fase design): gli account di un\'app Composio sono righe a filo, come il resto della scheda', () => {
+  it('un account per riga — l\'alias, l\'email in grigio, «Da ricollegare» per chi non è attivo — con «Rinomina» e «Togli» come testo; sotto, la riga che aggiunge un account', async () => {
+    const { GatewayAccountsSection } = await import('../components/AppsWindow')
+    const app = {
+      slug: 'gmail', name: 'Gmail', status: 'ACTIVE', accountId: 'a1',
+      accounts: [
+        { accountId: 'a1', alias: 'fabio', email: 'fabio@studio.example', status: 'ACTIVE' },
+        { accountId: 'a2', alias: 'lavoro', status: 'RECONNECT' }
+      ]
+    } as never
+    const root = parseHtml(renderHtml(createElement(GatewayAccountsSection, { app, appName: 'Gmail', onChanged: () => undefined } as never)))
+    const section = byId(root, 'app-accounts')[0]!
+    // a filo: un elenco (filetti), niente riquadri tenui intorno agli account
+    expect(findAll(section, (n) => has(n, 'divide-y'))).toHaveLength(1)
+    expect(findAll(section, (n) => has(n, 'bg-muted/60'))).toHaveLength(0)
+    const first = byId(root, 'app-account-a1')[0]!.children[0]!
+    // riga di solo testo (40): con alias ed email è più alta, ma il minimo è quello di sistema
+    expect(has(first, 'min-h-row-text')).toBe(true)
+    expect(has(first, 'py-row-pad')).toBe(true)
+    expect(textOf(first)).toContain('fabio@studio.example')
+    expect(textOf(first)).not.toContain('Da ricollegare')
+    expect(textOf(byId(root, 'app-account-a2')[0]!.children[0]!)).toContain('Da ricollegare')
+    // le azioni della riga sono testo: Button ghost, nessun pieno nella sezione
+    const actions = findAll(first, (n) => n.tag === 'button')
+    expect(actions.map((a) => textOf(a))).toEqual(['Rinomina', 'Togli'])
+    for (const a of actions) {
+      expect(a.attrs['data-slot']).toBe('button')
+      expect(has(a, 'bg-foreground')).toBe(false)
+    }
+    expect(has(actions[1]!, 'text-destructive')).toBe(true)
+    // la riga che aggiunge: un bottone alto 40 (riga di solo testo), con l'icona al posto del «+» scritto nel testo
+    const add = byId(root, 'app-add-account')[0]!
+    expect(add.tag).toBe('button')
+    expect(has(add, 'min-h-row-text')).toBe(true)
+    expect(textOf(add)).toBe('Aggiungi un altro account')
+    expect(add.children[0]!.children[0]!.attrs.class).toContain('lucide-plus')
+    expect(has(add.children[0]!.children[0]!, 'size-4')).toBe(true)
   })
 })

@@ -7,11 +7,20 @@
 // bottone «Apri l'installazione». Il componente è CONDIVISO: lo usa il
 // passo Computer della guida e la scheda del motore nelle Impostazioni
 // (OB3). Le righe le decide la funzione pura boxSetupRows (lib).
+//
+// Fase design (DS4): ai token, senza toccare la lista — è condivisa con la
+// guida e le Impostazioni, e i suoi segni di stato (✓ fatto, – saltata, !
+// errore, · da fare) sono un alfabeto suo che il testo sotto spiega. Le
+// misure: le righe restano alte 44 (min-h-11: il valore della scala — prima
+// era scritto in pixel), il dettaglio sotto l'etichetta è text-caption (prima
+// 11,5 px e 11 px: taglie che il sistema non ha), il titolo di riga pesa 500
+// (600 è dei titoli) e «Annulla» è un Button ghost.
 import { useLingui } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import type { BoxSetupState, BuildProgress } from '../../../shared/types'
 import { boxSetupRows, boxSetupCancellable, type BoxSetupRow } from '../lib/box-setup-rows'
+import { Button } from './ui/button'
 
 /**
  * OBD3: il dettaglio della riga dell'immagine in PAROLE del catalogo — solo
@@ -87,11 +96,11 @@ export function BoxSetupProgress({ state, onOpenInstaller, onCancel }: {
               key={row.id}
               type="button"
               data-testid="box-setup-open-installer"
-              className="flex min-h-[44px] items-center justify-between gap-3 rounded-[14px] bg-card px-4 py-2.5 text-left text-[15px] font-semibold shadow-[0_0_0_2px_var(--foreground)] transition hover:opacity-90"
+              className="flex min-h-11 items-center justify-between gap-3 rounded-surface bg-card px-4 py-2 text-left text-body font-medium shadow-[0_0_0_2px_var(--foreground)] transition hover:opacity-90"
               onClick={() => onOpenInstaller?.()}
             >
               {label}
-              <span className="text-xs font-medium text-muted-foreground">{i18n.t(msg`Apri l'installazione`)}</span>
+              <span className="text-small font-medium text-muted-foreground">{i18n.t(msg`Apri l'installazione`)}</span>
             </button>
           )
         }
@@ -106,21 +115,21 @@ export function BoxSetupProgress({ state, onOpenInstaller, onCancel }: {
             key={row.id}
             data-testid={`box-setup-row-${row.id}`}
             data-status={row.status}
-            className={`flex min-h-[44px] items-center gap-3 rounded-[14px] px-4 py-2.5 ${done || skipped ? 'bg-card/55' : running ? 'bg-card' : 'bg-card/35'} ${error ? 'shadow-[0_0_0_1.5px_var(--destructive)]' : ''}`}
+            className={`flex min-h-11 items-center gap-3 rounded-surface px-4 py-2 ${done || skipped ? 'bg-card/55' : running ? 'bg-card' : 'bg-card/35'} ${error ? 'shadow-[0_0_0_1.5px_var(--destructive)]' : ''}`}
           >
             {/* il segno dello stato: ✓ fatto, spinner in corso, punto da fare, – saltata, ! errore */}
             <span
               aria-hidden
-              className={`grid size-6 shrink-0 place-items-center rounded-full text-xs font-bold ${
+              className={`grid size-6 shrink-0 place-items-center rounded-full text-caption font-semibold ${
                 done ? 'bg-chart-2/15 text-chart-2' : error ? 'bg-destructive/15 text-destructive' : running ? 'bg-foreground/10 text-foreground' : 'bg-muted text-muted-foreground'
               }`}
             >
               {done ? '✓' : error ? '!' : running ? <span className="block size-2 animate-spin rounded-full border-2 border-current border-t-transparent" /> : skipped ? '–' : '·'}
             </span>
             <span className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className={`text-[14.5px] ${done || skipped ? 'text-muted-foreground' : 'font-medium'}`}>{label}</span>
+              <span className={`text-body ${done || skipped ? 'text-muted-foreground' : 'font-medium'}`}>{label}</span>
               {skipped && (
-                <span className="text-[11.5px] text-muted-foreground" data-testid={`box-setup-skip-text-${row.id}`}>{i18n.t(ROW_SKIP_TEXT[row.id]!)}</span>
+                <span className="text-caption text-muted-foreground" data-testid={`box-setup-skip-text-${row.id}`}>{i18n.t(ROW_SKIP_TEXT[row.id]!)}</span>
               )}
               {running && row.id === 'download' && pct !== null && (
                 <span className="block h-1.5 w-full overflow-hidden rounded-full bg-foreground/10" aria-hidden>
@@ -128,12 +137,12 @@ export function BoxSetupProgress({ state, onOpenInstaller, onCancel }: {
                 </span>
               )}
               {running && row.id === 'download' && row.bytes != null && row.total != null && (
-                <span className="text-[11.5px] text-muted-foreground" data-testid="box-setup-download-bytes">{pct}%</span>
+                <span className="text-caption text-muted-foreground" data-testid="box-setup-download-bytes">{pct}%</span>
               )}
               {running && row.id === 'image' && (
                 <>
                   {/* OBD3: il dettaglio del build in parole — attività e numeri, mai comandi */}
-                  <span className="text-[11.5px] text-muted-foreground" data-testid="box-setup-build-detail">
+                  <span className="text-caption text-muted-foreground" data-testid="box-setup-build-detail">
                     {buildDetailText(i18n, row.buildPhase)}
                   </span>
                   {/* il download della base ha la BARRA (la stessa della riga del download) */}
@@ -147,7 +156,7 @@ export function BoxSetupProgress({ state, onOpenInstaller, onCancel }: {
                   )}
                   {/* sotto, in piccolo: il tempo dall'inizio della fase immagine */}
                   {row.phaseStartedAt !== null && (
-                    <span className="text-[11.5px] text-muted-foreground">{elapsedText(i18n, row.phaseStartedAt)}</span>
+                    <span className="text-caption text-muted-foreground">{elapsedText(i18n, row.phaseStartedAt)}</span>
                   )}
                 </>
               )}
@@ -156,14 +165,9 @@ export function BoxSetupProgress({ state, onOpenInstaller, onCancel }: {
         )
       })}
       {boxSetupCancellable(state.phase) && onCancel && (
-        <button
-          type="button"
-          data-testid="box-setup-cancel"
-          className="mt-1 self-start rounded-lg px-1.5 py-2 text-[13px] font-semibold text-muted-foreground transition hover:text-foreground"
-          onClick={() => onCancel()}
-        >
+        <Button variant="ghost" className="mt-1 self-start" data-testid="box-setup-cancel" onClick={() => onCancel()}>
           {i18n.t(msg`Annulla`)}
-        </button>
+        </Button>
       )}
     </div>
   )
