@@ -27,8 +27,8 @@ export function PageHeader({ title, icon, logo, back, actions, description, test
   icon?: ReactNode
   /** il logo dell'app (40 px), nelle testate di scheda: al posto dell'icona */
   logo?: ReactNode
-  /** il bottone indietro; `label` è il suo nome accessibile (lo passa chi chiama) */
-  back?: { onClick(): void; label: string }
+  /** il bottone indietro; `label` è il suo nome accessibile (lo passa chi chiama), `testId` il suo testid (quello che le sonde cercano) */
+  back?: { onClick(): void; label: string; testId?: string }
   /** le azioni a destra: controlli che portano ciascuno no-drag */
   actions?: ReactNode
   /** sotto la riga dei 52: text-small grigio, alla larghezza del contenuto */
@@ -51,6 +51,7 @@ export function PageHeader({ title, icon, logo, back, actions, description, test
               <button
                 type="button"
                 aria-label={back.label}
+                {...(back.testId ? { 'data-testid': back.testId } : {})}
                 className="no-drag grid size-control-sm shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
                 onClick={back.onClick}
               >

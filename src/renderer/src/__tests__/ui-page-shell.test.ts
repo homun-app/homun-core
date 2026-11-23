@@ -291,6 +291,15 @@ describe('DS2: PageHeader — indietro · icona · titolo · azioni, sotto la de
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 
+  it('indietro porta il testid che gli dà chi chiama (le sonde lo cercano: page-close, approvals-center-close…)', async () => {
+    const root = await renderHeader({ title: 'Documento', back: { onClick: () => undefined, label: 'Torna alla libreria', testId: 'page-close' } })
+    const button = first(root, (n) => n.tag === 'button')
+    expect(button.attrs['data-testid']).toBe('page-close')
+    expect(button.attrs['aria-label']).toBe('Torna alla libreria')
+    const senza = await renderHeader({ title: 'Plugin', back: { onClick: () => undefined, label: 'Indietro' } })
+    expect(first(senza, (n) => n.tag === 'button').attrs['data-testid']).toBeUndefined()
+  })
+
   it('il titolo: h1 in font-display, 600, text-page, che tronca; se è una stringa porta anche title (il nome intero al passaggio), se è un nodo no', async () => {
     const asString = await renderHeader({ title: 'Server MCP' })
     const h1 = first(asString, (n) => n.tag === 'h1')
