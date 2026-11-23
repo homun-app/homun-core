@@ -6,7 +6,7 @@
 // shared/permissions-tools) — nessun modello nuovo — e gli strumenti
 // dell'insieme fisso (invii, pagamenti) mostrano il lucchetto e non offrono
 // «Consenti sempre». MAI dati inventati: un campo che non c'è non si mostra.
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useReducer, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { Lock, ChevronLeft } from 'lucide-react'
 import { api, useStore } from '../store'
@@ -26,6 +26,9 @@ import { mcpToolPresentation } from '../../../shared/tool-names'
 import { logoUrlForName } from '../lib/app-logos'
 // PP1 (fase plugin-pulita): l'invaso unico — «Rimuovi» e le autorizzazioni lunghe si raggiungono scorrendo
 import { PluginShell } from './plugin/PluginShell'
+// PP2 (fase plugin-pulita): il segreto si cambia dove vive il server — le righe «Account» e «variabili segrete»
+import { ServerAccountRow } from './plugin/ServerSecretRows'
+import { SECRET_EDIT_INITIAL, secretEditReducer, type SecretEditState, type ServerSecretNames } from '../lib/plugin-secret'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
 import { Toggle } from './Settings'
@@ -49,6 +52,10 @@ interface CardTool {
 export interface PluginCardInitial {
   tools?: Array<{ name: string; description: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } }>
   permissions?: PermissionsConfig
+  /** PP2: i NOMI dei segreti dei server (mcp:secret-names), per id */
+  secretNames?: Record<string, ServerSecretNames>
+  /** PP2: lo stato di partenza dell'editor del segreto (per rendere il campo aperto nei test) */
+  secretEdit?: SecretEditState
 }
 
 export function PluginCard({ app, server, initial, directEnabledFor, onConnect, onClose, onChanged }: {
@@ -74,6 +81,9 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
   const [tools, setTools] = useState<CardTool[] | null>(initial?.tools ? toolsOf(initial.tools, server) : null)
   const [perms, setPerms] = useState<PermissionsConfig | null>(initial?.permissions ?? null)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  // PP2: l'editor del segreto (reducer puro: il valore non resta dopo il salvataggio) e i NOMI dei segreti salvati
+  const [secretEdit, dispatchSecret] = useReducer(secretEditReducer, initial?.secretEdit ?? SECRET_EDIT_INITIAL)
+  const [secretNames, setSecretNames] = useState<Record<string, ServerSecretNames> | null>(initial?.secretNames ?? null)
 
   const isServer = server !== undefined
   const name = isServer ? server.name : app!.row.app.name
@@ -101,6 +111,18 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // PP2: i NOMI dei segreti (mai i valori) arrivano dal daemon; se non arrivano la riga si affida alla config
+  const reloadSecretNames = (): void => {
+    void api.mcpSecretNames()
+      .then((list) => setSecretNames(Object.fromEntries(list.map((n) => [n.id, n]))))
+      .catch(() => setSecretNames({}))
+  }
+  useEffect(() => {
+    if (initial?.secretNames) return
+    reloadSecretNames()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [server?.id])
 
   const groups = useMemo(() => groupTools(tools ?? []), [tools])
 
@@ -314,25 +336,27 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
 
       {/* --- ACCOUNT E BOT --- */}
       <div className="space-y-4" hidden={tab !== 'accounts'} data-testid="plugin-accounts">
-          {/* gli account collegati: onesti, mai inventati */}
-          <SettingsGroup label={<Trans>Account</Trans>}>
-            {isServer ? (
-              <SettingsRow
-                title={
-                  server.auth?.kind === 'bearer' || server.auth?.kind === 'headers' ? t`token aziendale`
-                    : server.auth?.kind === 'oauth' ? t`con il tuo account`
-                    : t`nessun account`
-                }
-                control={<span className="text-[13px] text-muted-foreground">{state.label}</span>}
-              />
-            ) : gatewayApp ? (
-              <div />
-            ) : keyApp ? (
-              <SettingsRow title={t`con la chiave di progetto`} control={<span className="text-[13px] text-muted-foreground">{state.label}</span>} />
-            ) : (
-              <SettingsRow title={t`con il tuo account`} control={<span className="text-[13px] text-muted-foreground">{state.label}</span>} />
-            )}
-          </SettingsGroup>
+          {/* gli account collegati: onesti, mai inventati. Un SERVER ha le sue
+              righe — il segreto si cambia qui (PP2) */}
+          {isServer ? (
+            <ServerAccountRow
+              server={server}
+              names={secretNames?.[server.id] ?? null}
+              state={secretEdit}
+              onAction={dispatchSecret}
+              onChanged={() => { onChanged(); reloadSecretNames() }}
+            />
+          ) : (
+            <SettingsGroup label={<Trans>Account</Trans>}>
+              {gatewayApp ? (
+                <div />
+              ) : keyApp ? (
+                <SettingsRow title={t`con la chiave di progetto`} control={<span className="text-[13px] text-muted-foreground">{state.label}</span>} />
+              ) : (
+                <SettingsRow title={t`con il tuo account`} control={<span className="text-[13px] text-muted-foreground">{state.label}</span>} />
+              )}
+            </SettingsGroup>
+          )}
           {!isServer && gatewayApp && (
             <GatewayAccountsSection app={gatewayApp} appName={name} onChanged={onChanged} />
           )}
@@ -351,16 +375,9 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
             <p className="text-[13px] text-muted-foreground"><Trans>per bot:</Trans> <Trans>Tutti i bot</Trans></p>
           )}
 
-          {/* Ricollega / Rimuovi */}
+          {/* Rimuovi in fondo (PP1: ora si raggiunge scorrendo). «Ricollega» sta
+              nella riga Account (PP2), sempre visibile per OAuth */}
           <div className="flex items-center justify-end gap-2 pt-1">
-            {isServer && server.needsReauth && (
-              <button
-                className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-                onClick={() => { void api.connectorsReconnectServer(server.id).then(() => onChanged()) }}
-              >
-                <Trans>Ricollega</Trans>
-              </button>
-            )}
             {confirmRemove ? (
               <button
                 className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"

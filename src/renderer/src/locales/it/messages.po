@@ -723,6 +723,7 @@ msgstr "Accesso: con il tuo account (si apre il browser)"
 msgid "Accesso: con un token"
 msgstr "Accesso: con un token"
 
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Account"
@@ -1011,6 +1012,7 @@ msgstr "ancora nessun passo"
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
@@ -1548,6 +1550,10 @@ msgstr "calendar_event: offsetMinutes mancante (minuti prima dell’evento)"
 msgid "cambia"
 msgstr "cambia"
 
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
+msgid "Cambia"
+msgstr "Cambia"
+
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Cambia aspetto"
@@ -1560,6 +1566,10 @@ msgstr "Cambia il modello di questo bot"
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Cambia in Modelli ›"
 msgstr "Cambia in Modelli ›"
+
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
+msgid "Cambia token"
+msgstr "Cambia token"
 
 #. placeholder {0}: fill.fields.map(fieldText).join(', ')
 #: src/renderer/src/components/LibraryCards.tsx
@@ -1985,6 +1995,10 @@ msgstr "Collegamento di {name} annullato."
 msgid "Collegati · {0}"
 msgstr "Collegati · {0}"
 
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
+msgid "collegato"
+msgstr "collegato"
+
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Collegato"
@@ -2149,6 +2163,7 @@ msgstr "Computer dei bot: immagine"
 msgid "Computer del bot"
 msgstr "Computer del bot"
 
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
 #: src/renderer/src/components/PluginCard.tsx
 msgid "con il tuo account"
 msgstr "con il tuo account"
@@ -4493,6 +4508,15 @@ msgstr "Interrompi task"
 msgid "interrotto"
 msgstr "interrotto"
 
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
+msgid "intestazioni"
+msgstr "intestazioni"
+
+#. placeholder {0}: headerNames.length
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
+msgid "intestazioni: {0}"
+msgstr "intestazioni: {0}"
+
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/DraftCard.tsx
@@ -5426,7 +5450,7 @@ msgstr "Nel team «{tool}» lo decidi sempre tu: quest’azione chiede sempre la
 msgid "cron.weekend"
 msgstr "nel weekend"
 
-#: src/renderer/src/components/PluginCard.tsx
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
 msgid "nessun account"
 msgstr "nessun account"
 
@@ -5926,6 +5950,18 @@ msgstr "Nuova routine"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Nuovo"
 msgstr "Nuovo"
+
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
+msgid "Nuovo token"
+msgstr "Nuovo token"
+
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
+msgid "Nuovo token — sostituisce quello salvato"
+msgstr "Nuovo token — sostituisce quello salvato"
+
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
+msgid "Nuovo valore — sostituisce quello salvato"
+msgstr "Nuovo valore — sostituisce quello salvato"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "OAuth"
@@ -6872,7 +6908,7 @@ msgid "Richieste"
 msgstr "Richieste"
 
 #: src/renderer/src/components/AppsWindow.tsx
-#: src/renderer/src/components/PluginCard.tsx
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Ricollega"
@@ -7129,6 +7165,7 @@ msgstr "Salta per ora"
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -7157,6 +7194,10 @@ msgstr "salva nella Libreria…"
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "salvata"
 msgstr "salvata"
+
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
+msgid "salvato"
+msgstr "salvato"
 
 #: src/renderer/src/components/McpWindow.tsx
 msgid "salvato cifrato — scrivi per sostituire"
@@ -8081,7 +8122,7 @@ msgstr "Togli la variabile"
 msgid "Toglie container da /usr/local. Ti chiederà la password del Mac. I computer dei bot vengono rimossi."
 msgstr "Toglie container da /usr/local. Ti chiederà la password del Mac. I computer dei bot vengono rimossi."
 
-#: src/renderer/src/components/PluginCard.tsx
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
 msgid "token aziendale"
 msgstr "token aziendale"
 
@@ -8554,6 +8595,11 @@ msgstr "Variabili"
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Variabili d'ambiente"
 msgstr "Variabili d'ambiente"
+
+#. placeholder {0}: envNames.length
+#: src/renderer/src/components/plugin/ServerSecretRows.tsx
+msgid "variabili segrete: {0}"
+msgstr "variabili segrete: {0}"
 
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "vede (immagini)"

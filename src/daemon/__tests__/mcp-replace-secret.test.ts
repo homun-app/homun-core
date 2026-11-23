@@ -340,6 +340,43 @@ describe('PP2 — trovato scrivendo questi test: mcp:save non faceva arrivare au
   })
 })
 
+describe('PP2 — mcp:secret-names: i NOMI dei segreti, mai i valori', () => {
+  const names = () => api['mcp:secret-names']!([]) as Promise<Array<{ id: string; bearer: boolean; headers: string[]; env: string[] }>>
+
+  it("per ogni server con un segreto: dove c'è un token, i nomi delle intestazioni e delle variabili; chi non ne ha non compare", async () => {
+    await save([{ id: 'srv-n', name: 'n', transport: 'http', url: `http://127.0.0.1:${httpPort}/mcp`, enabled: false, enabledFor: ['*'] }, { bearerToken: BUONO }])
+    setSetting('mcp.servers', [
+      { id: 'srv-n', name: 'n', transport: 'http', url: `http://127.0.0.1:${httpPort}/mcp`, enabled: false, enabledFor: ['*'], auth: { kind: 'bearer' as const } },
+      { id: 'srv-h2', name: 'h2', transport: 'http', url: `http://127.0.0.1:${httpPort}/mcp`, enabled: false, enabledFor: ['*'], auth: { kind: 'headers' as const } },
+      { id: 'srv-e2', name: 'e2', transport: 'stdio', command: process.execPath, args: ['x'], enabled: false, enabledFor: ['*'] },
+      { id: 'srv-zero', name: 'zero', transport: 'http', url: `http://127.0.0.1:${httpPort}/mcp`, enabled: false, enabledFor: ['*'] }
+    ])
+    await sealed.write('srv-h2', SECRET_KIND.headers, { 'X-A': 'valore-segreto-a', 'X-Vuota': '' })
+    await sealed.write('srv-e2', SECRET_KIND.env, { TOKEN: 'valore-segreto-b', API: 'valore-segreto-c' })
+    const out = await names()
+    expect(out).toEqual([
+      { id: 'srv-n', bearer: true, headers: [], env: [] },
+      { id: 'srv-h2', bearer: false, headers: ['X-A'], env: [] },
+      { id: 'srv-e2', bearer: false, headers: [], env: ['TOKEN', 'API'] }
+    ])
+    // mai un valore nella risposta
+    const text = JSON.stringify(out)
+    for (const valore of [BUONO, 'valore-segreto-a', 'valore-segreto-b', 'valore-segreto-c']) expect(text).not.toContain(valore)
+  })
+
+  it("senza la chiave l'errore arriva INTERO: un elenco vuoto mentirebbe (la Cassaforte lo dice)", async () => {
+    setSetting('mcp.servers', [{ id: 'srv-k', name: 'k', transport: 'http', url: `http://127.0.0.1:${httpPort}/mcp`, enabled: false, enabledFor: ['*'] }])
+    await sealed.write('srv-k', SECRET_KIND.bearer, BUONO)
+    setMasterKeyStorage({ isEncryptionAvailable: () => false, encryptString: () => { throw new Error('non cifra') }, decryptString: () => { throw new Error('non decifra') } })
+    try {
+      const err = await names().catch((e: unknown) => e)
+      expect(isMasterKeyUnavailableError(err)).toBe(true)
+    } finally {
+      setMasterKeyStorage(safeStorageBackendForEnv(null, { SANDBOT_TEST_FAKE_SAFESTORAGE: join(dir, 'fake-safestorage.json') }))
+    }
+  })
+})
+
 describe('PP2 — la funzione condivisa da mcp:save e mcp:replace-secret', () => {
   it('i due gestori passano da planServerSecret e applyServerSecretPlan: nel codice di api.ts nessuna scritture a mano nello store', () => {
     const save = API.slice(API.indexOf("'mcp:save'"), API.indexOf("'mcp:delete'"))

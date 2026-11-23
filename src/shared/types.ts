@@ -1366,6 +1366,12 @@ export interface SandbotApi {
    * il suo esito (null se non parte: server spento, o ancora senza valori).
    */
   mcpReplaceSecret(id: string, secret: McpServerSecret): Promise<{ ok: boolean; test: { ok: boolean; tools?: string[]; error?: string } | null }>
+  /**
+   * PP2 (fase plugin-pulita): i NOMI dei segreti salvati di ogni server che
+   * ne ha almeno uno (mai i valori): dove c'è un token, come si chiamano le
+   * intestazioni e le variabili segrete.
+   */
+  mcpSecretNames(): Promise<Array<{ id: string; bearer: boolean; headers: string[]; env: string[] }>>
   /** PL2 (fase plugin): gli strumenti di un server MCP per la scheda Autorizzazioni */
   mcpTools(id: string): Promise<Array<{ name: string; description: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } }>>
   /** PL3 (fase plugin): l'uso degli strumenti per la tabella «Collegati» (indice, non transcript) */

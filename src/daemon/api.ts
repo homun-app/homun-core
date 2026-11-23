@@ -1677,6 +1677,36 @@ export function buildApiMethods(
     // PL2 (fase plugin): gli strumenti completi di un server (annotazioni
     // comprese) per la scheda «Autorizzazioni»
     'mcp:tools': ([id]) => mcp().then((x) => x.toolsOfServer(id as string)),
+    // PP2 (fase plugin-pulita): i NOMI dei segreti di ogni server, mai i
+    // valori — quali intestazioni e quali variabili sono salvate, e dove c'è
+    // un token. Lo chiedono la riga «Account» della scheda (un campo per
+    // nome) e la Cassaforte «Dei plugin» («intestazioni: 2»). I valori
+    // cifrati si aprono qui e restano qui. Se la chiave manca l'errore
+    // arriva intero (MasterKeyUnavailableError): un elenco vuoto mentirebbe.
+    'mcp:secret-names': async () => {
+      const x = await mcp()
+      const storeMod = await import('../main/connectors/sealed-store')
+      const { getConnectorsKey } = await import('./keychain')
+      const sealed = storeMod.createConnectorsSecretStore({
+        getKey: () => getConnectorsKey(),
+        getSetting: store.getSetting,
+        setSetting: store.setSetting
+      })
+      const names = await Promise.all(x.listServers().map(async (s) => {
+        const [bearer, headers, env] = await Promise.all([
+          sealed.read<string>(s.id, SECRET_KIND.bearer),
+          sealed.read<Record<string, string>>(s.id, SECRET_KIND.headers),
+          sealed.read<Record<string, string>>(s.id, SECRET_KIND.env)
+        ])
+        return {
+          id: s.id,
+          bearer: Boolean(bearer),
+          headers: Object.keys(headers ?? {}).filter((k) => headers?.[k]),
+          env: Object.keys(env ?? {}).filter((k) => env?.[k])
+        }
+      }))
+      return names.filter((n) => n.bearer || n.headers.length > 0 || n.env.length > 0)
+    },
     // PL3 (fase plugin): l'aggregato INDICIZZATO dell'uso degli strumenti
     // (ultimo uso + settimana) per la tabella «Collegati»
     'plugins:usage': () => toolUseSummaries(db(), Date.now() - 7 * 24 * 3600 * 1000),
