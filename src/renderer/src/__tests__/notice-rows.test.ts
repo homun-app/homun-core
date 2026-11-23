@@ -74,3 +74,73 @@ describe('RV4: la stessa notice consecutiva si mostra UNA volta', () => {
     expect(groupRepeatedNotices([])).toEqual([])
   })
 })
+
+// ---- B2 (fase b20-bug): l'avviso che torna a ogni turno automatico ----
+// Il caso visto dall'utente: in chat quattro coppie di fila «Avvio automatico»
+// + «risposta vuota». Gli avvisi NON sono adiacenti (in mezzo c'è l'apertura
+// di ogni turno): qui si raccolgono lo stesso — una riga sola col conteggio,
+// con UNA riga di apertura davanti.
+describe('B2: lo stesso avviso dopo ogni apertura automatica si raccoglie in una riga sola', () => {
+  const empty = (id: number, why: string = 'reasoning') =>
+    e(id, { content: 'Risposta vuota.', meta: { ui: { id: 'notice.modelEmpty', values: { why } } } })
+  const wake = (id: number, initiator = 'SHELL_DONE') =>
+    e(id, { kind: 'message', role: 'user', content: '<comando_finito>…', meta: { initiator } })
+
+  it('quattro coppie di fila (apertura + avviso) → UNA apertura (lead) e UN avviso, repeat 4', () => {
+    const out = groupRepeatedNotices([wake(1), empty(2), wake(3), empty(4), wake(5), empty(6), wake(7), empty(8)])
+    expect(out).toHaveLength(1)
+    expect(out[0]!.entry.id).toBe(2)
+    expect(out[0]!.repeat).toBe(4)
+    expect(out[0]!.lead?.id).toBe(1)
+  })
+
+  it('una coppia sola resta com’è: apertura e avviso, repeat 1, nessun lead', () => {
+    const out = groupRepeatedNotices([wake(1), empty(2)])
+    expect(out).toEqual([{ entry: expect.objectContaining({ id: 1 }), repeat: 1 }, { entry: expect.objectContaining({ id: 2 }), repeat: 1 }])
+    expect(out[1]!.lead).toBeUndefined()
+  })
+
+  it('il motivo cambia (why diverso) → sono due avvisi diversi: nessun raggruppamento', () => {
+    const out = groupRepeatedNotices([wake(1), empty(2, 'reasoning'), wake(3), empty(4, 'noOutput')])
+    expect(out.map((g) => [g.entry.id, g.repeat])).toEqual([[1, 1], [2, 1], [3, 1], [4, 1]])
+  })
+
+  it('valgono TUTTE le aperture automatiche (routine, risvegli, [sistema], riprovo) — non il messaggio dell’utente', () => {
+    const auto = groupRepeatedNotices([
+      e(1, { kind: 'message', role: 'user', content: 'r', meta: { initiator: 'ROUTINE', routineTitle: 'Novità' } }),
+      empty(2),
+      e(3, { kind: 'message', role: 'user', content: 'r', meta: { initiator: 'CONNECTOR_INSTALLED' } }),
+      empty(4),
+      e(5, { kind: 'message', role: 'user', content: 'r', meta: { retryOf: 2 } }),
+      empty(6)
+    ])
+    expect(auto).toHaveLength(1)
+    expect(auto[0]!.repeat).toBe(3)
+    expect(auto[0]!.lead?.id).toBe(1)
+    // un messaggio dell'utente (senza initiator) in mezzo spezza: non è un'apertura automatica
+    const human = groupRepeatedNotices([empty(1), e(2, { kind: 'message', role: 'user', content: 'e invece?', meta: null }), empty(3)])
+    expect(human.map((g) => [g.entry.id, g.repeat])).toEqual([[1, 1], [2, 1], [3, 1]])
+  })
+
+  it('una risposta del bot in mezzo spezza (l’avviso dopo è un altro avviso)', () => {
+    const reply = e(3, { kind: 'send-message', role: 'assistant', content: 'ecco', meta: { message: { type: 'text' } } })
+    const out = groupRepeatedNotices([wake(1), empty(2), wake(4), reply, empty(5)])
+    expect(out.map((g) => g.entry.id)).toEqual([1, 2, 4, 3, 5])
+    expect(out.every((g) => g.repeat === 1)).toBe(true)
+  })
+
+  it('più aperture di fila fra un avviso e l’altro: una riga sola davanti, quella che precedeva il PRIMO avviso', () => {
+    const out = groupRepeatedNotices([wake(1), empty(2), wake(3), wake(4), empty(5)])
+    expect(out).toHaveLength(1)
+    expect(out[0]!.entry.id).toBe(2)
+    expect(out[0]).toMatchObject({ repeat: 2, lead: expect.objectContaining({ id: 1 }) })
+  })
+
+  it('davanti al primo avviso non c’è un’apertura automatica (una bolla dell’utente): l’avviso si raccoglie, senza lead', () => {
+    const human = e(1, { kind: 'message', role: 'user', content: 'le novità?', meta: null })
+    const out = groupRepeatedNotices([human, empty(2), wake(3), empty(4)])
+    expect(out).toHaveLength(2)
+    expect(out[1]!.repeat).toBe(2)
+    expect(out[1]!.lead).toBeUndefined()
+  })
+})

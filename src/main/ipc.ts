@@ -95,6 +95,8 @@ export const DAEMON_RPC_CHANNELS = [
   'approvals:resolve', 'approvals:resolve-latest', 'approvals:pending-all', 'approvals:log',
   // D2 (fase deleghe): lo stato dei job delle deleghe accodate e l'Annulla
   'delegations:status', 'delegations:cancel',
+  // B2 (fase b20-bug): il «Riprova» dell'avviso di risposta vuota
+  'turn:retry',
   // fase 8: regole di auto-review proposte dal bot (salvataggio SOLO al click)
   'autoreview:rule-decision',
   'providers:list', 'providers:save', 'providers:delete', 'providers:discover', 'providers:test', 'models:list',

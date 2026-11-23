@@ -7,13 +7,13 @@
 // riga d'attività (activityPhrase) e col popover dei passaggi; dopo il turno
 // li rimette solo la voce di debug di Impostazioni › Generali. U1 (fase
 // prima-release): sotto il messaggio resta il solo «Copia» con la spunta.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Paperclip, PanelRight, ArrowUp, Square, Copy, Check, Brain } from 'lucide-react'
+import { Paperclip, PanelRight, ArrowUp, Square, Copy, Check, Brain, ScrollText } from 'lucide-react'
 import { api, useStore, useResolvedModel } from '../store'
 // fase 17c (C2): il testo di notice/eventi/system dal meta.ui (lingua attiva)
 import { uiTextOf, uiTextOfTools } from '../lib/ui-text'
@@ -620,8 +620,14 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
             */}
             {/* RV4: la stessa notice consecutiva senza altro in mezzo si mostra
                 UNA volta, col contatore discreto — le altre entry passano tali */}
+            {/* B2 (fase b20-bug): l'avviso che torna uguale dopo ogni apertura
+                automatica si raccoglie in una riga sola col conteggio, con UNA
+                riga di apertura davanti (lead) */}
             {groupRepeatedNotices(entries.filter((e) => !e.meta?.taskId && !e.meta?.groupId)).map((g) => (
-              <EntryRow key={g.entry.id} entry={g.entry} repeat={g.repeat} showReasoning={showReasoning} debugSteps={debugSteps} />
+              <Fragment key={g.entry.id}>
+                {g.lead && <EntryRow entry={g.lead} showReasoning={showReasoning} debugSteps={debugSteps} />}
+                <EntryRow entry={g.entry} repeat={g.repeat} showReasoning={showReasoning} debugSteps={debugSteps} />
+              </Fragment>
             ))}
             {/* fase risposta (R6): la risposta in diretta, bolla provvisoria */}
             <LiveReplyBubble agentId={agent.id} />
@@ -850,7 +856,8 @@ function BotToBotRow({ name, content, testid }: { name: string; content: string;
 function OpeningDetailsRow({ text }: { text: string }) {
   return (
     <details className="rounded-[14px] bg-muted/40 px-3 py-1.5" data-testid="chat-opening-details">
-      <summary className="cursor-pointer select-none text-center text-xs text-muted-foreground">
+      <summary className="flex cursor-pointer select-none items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
+        <ScrollText className="size-3.5 shrink-0" aria-hidden="true" />
         <Trans>Istruzioni del turno</Trans>
       </summary>
       <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">{text}</pre>
@@ -931,8 +938,10 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
       if (opening.kind === 'system') {
         return (
           <details className="rounded-[14px] bg-muted/40 px-3 py-1.5">
-            <summary className="cursor-pointer select-none text-center text-xs text-muted-foreground">
-              {opening.icon} {i18n.t(opening.label)}
+            {/* B2 (fase b20-bug): l'icona è lucide (mai emoji) */}
+            <summary className="flex cursor-pointer select-none items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
+              <opening.icon className="size-3.5 shrink-0" aria-hidden="true" />
+              {i18n.t(opening.label)}
             </summary>
             <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
               {modelEnvelopeDisplay(uiTextOf(entry))}
@@ -1110,6 +1119,9 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
  * chat (lo stesso del foglio «Impostazioni del bot») quando c'è almeno un
  * provider attivo; senza provider resta Impostazioni › Modelli, dove prima
  * va aggiunto un provider. La notice ripetuta porta un contatore discreto.
+ * B2 (fase b20-bug): l'avviso della risposta vuota ha «Riprova» — lo stesso
+ * turno, un'altra volta (turn:retry legge dal meta dell'avviso ciò che il
+ * loop ha salvato); l'avviso ripetuto dice «· N volte».
  */
 function NoticeRow({ entry, repeat = 1 }: { entry: TranscriptEntry; repeat?: number }) {
   const { t } = useLingui()
@@ -1130,7 +1142,12 @@ function NoticeRow({ entry, repeat = 1 }: { entry: TranscriptEntry; repeat?: num
   const accessibility = uiId === 'notice.computerAccessibility'
   // fase 16b correzioni (P6): anche l'avviso «configura prima un provider e
   // un modello» ha la via d'uscita — stesso bottone «Scegli un modello»
-  const withAction = accessibility || uiId === 'notice.modelError' || uiId === 'notice.modelNotResponding' || uiId === 'notice.configureProviderFirst'
+  // B2: la risposta vuota — «Riprova» (solo se l'avviso porta ciò che serve: le
+  // entry salvate prima della fase non ce l'hanno, e il bottone non si mostra)
+  const retryPayload = (entry.meta as { retry?: unknown } | null)?.retry
+  const emptyReply = uiId === 'notice.modelEmpty' && typeof retryPayload === 'object' && retryPayload !== null
+  const withAction =
+    accessibility || uiId === 'notice.modelError' || uiId === 'notice.modelNotResponding' || uiId === 'notice.configureProviderFirst' || emptyReply
   const fallback = uiId === 'notice.modelFallback' || uiId === 'notice.modelFallbackRoute' || uiId === 'notice.modelRouteCooled'
   if (memoryQuarantined) {
     const memoryId = String((entry.meta as { memoryId?: unknown } | undefined)?.memoryId ?? '')
@@ -1203,6 +1220,17 @@ function NoticeRow({ entry, repeat = 1 }: { entry: TranscriptEntry; repeat?: num
           >
             <Trans>Apri Accessibilità</Trans>
           </button>
+        ) : emptyReply ? (
+          <button
+            className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
+            data-testid="notice-retry"
+            onClick={() => {
+              // B2: lo stesso turno, un'altra volta (un secondo clic non accoda un doppione: lo decide il daemon)
+              void api.turnRetry(entry.agentId, entry.id).catch(() => undefined)
+            }}
+          >
+            <Trans>Riprova</Trans>
+          </button>
         ) : (
           <button
             className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
@@ -1223,9 +1251,14 @@ function NoticeRow({ entry, repeat = 1 }: { entry: TranscriptEntry; repeat?: num
   )
 }
 
-/** Il contatore discreto delle notice ripetute: «×N» (RV4). */
+/** Il contatore delle notice ripetute: «· N volte» (RV4 era «×N»; B2 (fase b20-bug): in parole, dopo un punto medio). */
 function RepeatMark({ repeat }: { repeat: number }) {
-  return <span className="ml-1 text-muted-foreground/80">×{repeat}</span>
+  if (repeat <= 1) return null
+  return (
+    <span className="whitespace-nowrap text-muted-foreground/80">
+      {' '}<Plural value={repeat} one="· 1 volta" other="· # volte" />
+    </span>
+  )
 }
 
 /** «Ho pubblicato il riepilogo nella squadra «X»» — cliccabile verso la squadra. */

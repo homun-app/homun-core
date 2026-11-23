@@ -502,6 +502,10 @@ msgstr "{name} is typing"
 msgid "{name}? Mi piace. E che faccia ho?"
 msgstr "{name}? I like it. And what do I look like?"
 
+#: src/renderer/src/components/Chat.tsx
+msgid "{repeat, plural, one {· 1 volta} other {· # volte}}"
+msgstr "{repeat, plural, one {· 1 time} other {· # times}}"
+
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "{s} s"
 msgstr "{s} s"
@@ -4052,11 +4056,6 @@ msgstr "The model is unavailable (provider rate limit): the round is suspended. 
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
-msgid "notice.modelEmpty"
-msgstr "The model produced no answer (empty)."
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
 msgid "notice.modelNotResponding"
 msgstr "The model is not responding ({why}): turn interrupted."
 
@@ -7058,6 +7057,7 @@ msgstr "Restore"
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotScreen.tsx
+#: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/ComputerActivity.tsx
 #: src/renderer/src/components/ComputerFiles.tsx
 #: src/renderer/src/components/ComputerPanel.tsx
@@ -7070,6 +7070,10 @@ msgstr "Restore"
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Riprova"
 msgstr "Retry"
+
+#: src/renderer/src/lib/opening-rows.ts
+msgid "Riprovo"
+msgstr "Retrying"
 
 #. placeholder {0}: i + 1
 #: src/renderer/src/components/settings/ModelsPage.tsx
@@ -7084,6 +7088,11 @@ msgstr "{0} answers"
 #: src/renderer/src/components/Chat.tsx
 msgid "risposta di ripiego"
 msgstr "fallback answer"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notice.modelEmpty"
+msgstr "Empty answer{why, select, reasoning {: the model returned reasoning only} noOutput {: 0 output tokens} other {}}"
 
 #: src/renderer/src/components/Chat.tsx
 msgid "risultato"

@@ -173,7 +173,7 @@ import { ensureLocalTurnProvider } from '../../daemon/local-model'
 // di chat vengono rifiutati PRIMA di permessi e card, senza il valore
 import { hasExternalEvento, argGuardVerdict, redactGuardedArgs, userChatTextsOf } from './arg-guard'
 import { builtinGroupOf } from './core-tools'
-import type { Approval, ProviderConfig, SandbotEvent, SendMessagePayload, TurnEnd, ReadingPageMeta, TranscriptEntry } from '../../shared/types'
+import type { Approval, ProviderConfig, SandbotEvent, SendMessagePayload, TurnEnd, ReadingPageMeta, TranscriptEntry, TurnRetry } from '../../shared/types'
 // fase 12: sottoagenti — policy pura del figlio, store del registro, formatters
 import {
   subagentToolDenyReason, subagentBriefError, subagentClosure, autoCloseSummary,
@@ -387,6 +387,71 @@ export const RECOVERY_NUDGE =
  */
 export const RECOVERY_NO_TOOLS_RESULT =
   'Not executed: this recovery call has no tools. Write your answer to the user as plain text.'
+
+/**
+ * B2 (fase b20-bug): il sollecito dell'UNICO tentativo quando un turno che
+ * NON è della chat diretta dell'utente (un risveglio di sistema, il messaggio
+ * di un altro bot) finisce con una risposta vuota. Prima il recupero di R5
+ * esisteva solo nei turni dell'utente: un risveglio col modello muto faceva
+ * UNA chiamata e finiva con l'avviso. Come R5: SENZA strumenti, il testo della
+ * risposta è la risposta — un turno automatico non ne apre un altro.
+ */
+export const EMPTY_REPLY_NUDGE = 'Your reply was empty: write your answer now, as plain text.'
+
+/** B2: perché la risposta è vuota, quando lo si sa (il codice della notice; '' = non si sa). */
+export type EmptyReplyWhy = '' | 'reasoning' | 'noOutput'
+
+/**
+ * B2 (puro): il motivo di una risposta vuota. Si conosce in due casi — il
+ * modello ha ragionato senza scrivere la risposta, oppure non ha emesso
+ * nessun token in uscita; negli altri l'avviso non inventa un motivo.
+ */
+export function emptyReplyWhy(call: { reasoning?: string; outputTokens?: number | null }): EmptyReplyWhy {
+  if (call.reasoning?.trim()) return 'reasoning'
+  if (call.outputTokens === 0) return 'noOutput'
+  return ''
+}
+
+/**
+ * B2 (puro): ciò che serve a «Riprova» per ripetere ESATTAMENTE questo turno
+ * — lo stesso testo e la stessa origine (chi l'ha aperto, le sue bandiere).
+ * Null dove un nuovo turno non ha senso: i turni di gruppo e dei figli hanno
+ * il loro protocollo (pass, wake_parent) e non si rilanciano da qui.
+ */
+export function turnRetryPayload(opts: RunTurnOptions, userText: string, images?: string[]): TurnRetry | null {
+  if (opts.groupTurn !== undefined || opts.subagent !== undefined) return null
+  const flags = {
+    ...(opts.automatic ? { automatic: true } : {}),
+    ...(opts.untrusted ? { untrusted: true } : {}),
+    ...(opts.contaminated ? { contaminated: true } : {})
+  }
+  if (opts.taskId !== undefined) return { kind: 'task-run', payload: { taskId: opts.taskId, brief: userText, ...flags } }
+  const am = opts.agentMessage
+  return {
+    kind: 'user-message',
+    payload: {
+      text: userText,
+      ...(images?.length ? { images } : {}),
+      ...(opts.respondedTo !== undefined ? { respondedTo: opts.respondedTo } : {}),
+      ...(opts.initiator ? { initiator: opts.initiator } : {}),
+      ...(am
+        ? {
+            fromAgentId: am.fromAgentId,
+            fromAgentName: am.fromAgentName,
+            hop: am.hop,
+            ...(am.threadId ? { threadId: am.threadId } : {}),
+            ...(am.autoReply ? { autoReply: true } : {}),
+            ...(am.messageType ? { messageType: am.messageType } : {}),
+            ...(am.userRequested ? { userRequested: true } : {})
+          }
+        : {}),
+      ...flags,
+      ...(opts.extraMeta ? { extraMeta: opts.extraMeta } : {}),
+      ...(opts.readingPage ? { readingPage: opts.readingPage } : {}),
+      ...(opts.squadId !== undefined ? { squadId: opts.squadId } : {})
+    }
+  }
+}
 
 /**
  * Fase 17b correzioni (B4): i result fissi di ask_user e wake_parent, esportati
@@ -1378,6 +1443,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // fase risposta (R5): l'UNICA chiamata di recupero di un turno privato con
   // risposta vuota è già partita (la seconda volta vale il ripiego)
   let recoveryDone = false
+  // B2 (fase b20-bug): della chiamata appena finita — il ragionamento e l'uso
+  // (dicono PERCHÉ una risposta vuota è vuota: «solo ragionamento», «0 token»)
+  let lastCallReasoning = ''
+  let lastCallOutputTokens: number | null | undefined
   // verifica: il recupero che inventa uno strumento ha UN giro in più
   let recoveryRetried = false
   // fase 12 (punti 2-3): il lotto del turno del padre (una sola spawn batch per
@@ -2541,6 +2610,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       if (replyTurn) emit({ type: 'activity', agentId, activity: null })
 
       let acc = ''
+      // B2 (fase b20-bug): il ragionamento di QUESTA chiamata (motivo della risposta vuota)
+      let callReasoning = ''
       let final: { text: string; toolCalls: ToolCall[]; finishReason: string }
       let finalToolCalls: ToolCall[] = []
       let finalFinish = 'stop'
@@ -2565,6 +2636,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             }
           }
           if (ch.reasoningDelta) {
+            callReasoning += ch.reasoningDelta
             emit({ type: 'delta', agentId, entryId: entry.id, text: ch.reasoningDelta, reasoning: true })
           }
           if (ch.toolCalls) finalToolCalls = ch.toolCalls
@@ -2572,6 +2644,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (ch.usage) finalUsage = ch.usage
         }
         final = { text: acc, toolCalls: finalToolCalls, finishReason: finalFinish }
+        lastCallReasoning = callReasoning
+        lastCallOutputTokens = finalUsage?.output
         // fase 18b (H2.3): una chiamata riuscita toglie il raffreddamento
         markHealthy(activeRoute)
         // fase 18a (E4): uso registrato della chiamata — la riga va al modello
@@ -2753,20 +2827,24 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             finished = true
             break
           }
-          // risposta vuota per l'utente: in chat privata UNA chiamata di
-          // recupero SENZA strumenti (R5) col sollecito riscritto; il suo
-          // testo sarà la risposta al giro dopo
-          if (privateHumanTurn && !recoveryDone && !userSawSomething()) {
+          // risposta vuota: UNA chiamata di recupero SENZA strumenti col
+          // sollecito; il suo testo sarà la risposta al giro dopo. R5: in chat
+          // privata; B2 (fase b20-bug): anche in OGNI altro turno il cui testo
+          // finale è la risposta (risvegli di sistema, messaggi di un altro
+          // bot) — prima lì nessun tentativo, l'avviso subito
+          if (!recoveryDone && !userSawSomething()) {
             recoveryDone = true
             turnTools = []
             if (liveReplyTurn) emit({ type: 'live-reply', agentId, entryId: entry.id, text: '' })
             // U4: un messaggio costruito dal loop senza entry: l'ora di adesso
-            messages.push({ role: 'user', content: withSentStamp(RECOVERY_NUDGE, Date.now(), sentZone) })
+            messages.push({ role: 'user', content: withSentStamp(privateHumanTurn ? RECOVERY_NUDGE : EMPTY_REPLY_NUDGE, Date.now(), sentZone) })
             continue
           }
           // il recupero c'è già stato e anche stavolta niente: il ripiego di
-          // oggi, col testo libero dell'ultima risposta non vuota
-          if (recoveryDone && lastFreeText.trim()) {
+          // oggi, col testo libero dell'ultima risposta non vuota — SOLO in
+          // chat privata (B2: in un turno automatico testo scritto a metà
+          // lavoro non è una risposta; resta l'avviso)
+          if (privateHumanTurn && recoveryDone && lastFreeText.trim()) {
             const fallback = lastFreeText.trim()
             add({
               agentId, kind: 'send-message', role: 'assistant', content: fallback,
@@ -2784,8 +2862,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             finished = true
             break
           }
-          // modello muto (o dove il recupero non è previsto): come oggi
-          add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelEmpty)) })
+          // il modello è muto anche dopo il tentativo: UN avviso, col motivo
+          // se si conosce, con ciò che serve a «Riprova» (B2)
+          const retry = turnRetryPayload(opts, userText, images)
+          const why = emptyReplyWhy({ reasoning: lastCallReasoning, outputTokens: lastCallOutputTokens })
+          add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelEmpty, { why }), retry ? { retry } : {}) })
           emitLastEntry(agentId, emit)
           endTurn(agentId, 'STOPPED', emit, opts.taskId, 'model-error')
           setStatus(agentId, 'idle', emit)
@@ -2820,7 +2901,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             })
             continue
           }
-          add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelEmpty)) })
+          // B2: l'avviso col motivo se si conosce (senza «Riprova»: il protocollo è loro)
+          const groupWhy = emptyReplyWhy({ reasoning: lastCallReasoning, outputTokens: lastCallOutputTokens })
+          add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelEmpty, { why: groupWhy })) })
           emitLastEntry(agentId, emit)
           // fase 12 (punto 3): flash a volte risponde vuoto — la chiusura del
           // figlio non dipende dal modello: sollecito e chiusura automatica

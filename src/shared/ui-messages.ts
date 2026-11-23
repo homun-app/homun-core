@@ -72,7 +72,16 @@ export const UI = {
   }),
   modelNotResponding: msg({ id: 'notice.modelNotResponding', message: 'Il modello non risponde ({why}): turno interrotto.' }),
   modelError: msg({ id: 'notice.modelError', message: 'Errore dal modello: {message}' }),
-  modelEmpty: msg({ id: 'notice.modelEmpty', message: 'Il modello non ha prodotto risposta (vuota).' }),
+  // B2 (fase b20-bug): la riga è corta («Risposta vuota») e porta il MOTIVO
+  // quando lo si conosce (select sul codice scritto dal loop: reasoning =
+  // solo ragionamento, noOutput = 0 token in uscita); il conteggio delle
+  // volte («· N volte») lo aggiunge la vista dopo un punto medio: per questo
+  // la riga non finisce con il punto. Le entry vecchie, senza il valore,
+  // mostrano «Risposta vuota»
+  modelEmpty: msg({
+    id: 'notice.modelEmpty',
+    message: 'Risposta vuota{why, select, reasoning {: il modello ha restituito solo ragionamento} noOutput {: 0 token in uscita} other {}}'
+  }),
   toolLoop: msg({ id: 'notice.toolLoop', message: 'Turno interrotto: la stessa identica chiamata si ripete (loop).' }),
   // fase chat-limiti (CL7): la memoria nata da contenuto esterno aspetta la
   // conferma dell'utente — lo dice l'APP sotto il turno, col bottone che

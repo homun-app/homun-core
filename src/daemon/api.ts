@@ -2755,6 +2755,16 @@ export function buildApiMethods(
       cancelJob(db(), Number(jobId))
       return { ok: true }
     },
+    // B2 (fase b20-bug): il «Riprova» dell'avviso di risposta vuota — lo
+    // stesso turno, un'altra volta (turn-retry.ts); poi il worker lo prende
+    'turn:retry': async ([agentId, entryId]) => {
+      const aid = String(agentId ?? '')
+      const entry = store.getEntries(aid).find((e) => e.id === Number(entryId))
+      const { retryTurn } = await import('./turn-retry')
+      const r = retryTurn(db(), aid, entry)
+      if (r.ok) worker.poke()
+      return r
+    },
     /**
      * M4: «Consenti sempre le letture di <server>» dalla card di un tool MCP
      * con readOnlyHint true — grant `mcp__<server>__*` scope 'readOnly',

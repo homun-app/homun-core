@@ -107,7 +107,7 @@ describe('RV4: «Scegli un modello» apre il selettore del BOT della chat', () =
 })
 
 describe('RV4: la notice ripetuta si mostra UNA volta (con contatore discreto)', () => {
-  it('due notice identiche CONSECUTIVE → una riga sola, con «×2»', () => {
+  it('due notice identiche CONSECUTIVE → una riga sola, con «· 2 volte» (B2: era «×2»)', () => {
     const { tree, html } = renderChat({ entries: [notice(1), notice(2)] as never })
     const text = 'Configura prima un provider e un modello'
     const rows = findAll(tree, (n) => textOf(n).includes(text))
@@ -115,7 +115,7 @@ describe('RV4: la notice ripetuta si mostra UNA volta (con contatore discreto)',
     expect(rows.filter((r) => r.tag !== '#root').length).toBeGreaterThan(0)
     const occurrences = html.split(text).length - 1
     expect(occurrences, 'il testo della notice compare UNA volta').toBe(1)
-    expect(html).toContain('×2')
+    expect(html).toContain('2 volte')
   })
 
   it('due notice identiche con ALTRO in mezzo → due righe (niente raggruppamento forzato)', () => {
@@ -128,6 +128,6 @@ describe('RV4: la notice ripetuta si mostra UNA volta (con contatore discreto)',
     })
     const text = 'Configura prima un provider e un modello'
     expect(html.split(text).length - 1).toBe(2)
-    expect(html).not.toContain('×2')
+    expect(html).not.toContain('volte')
   })
 })

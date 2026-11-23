@@ -74,6 +74,8 @@ const api: SandbotApi = {
   // D2 (fase deleghe): lo stato dei job delle deleghe accodate e l'Annulla
   delegationsStatus: (jobIds) => ipcRenderer.invoke('delegations:status', jobIds),
   delegationsCancel: (jobId) => ipcRenderer.invoke('delegations:cancel', jobId),
+  // B2 (fase b20-bug): «Riprova» dopo una risposta vuota — lo stesso turno, un'altra volta
+  turnRetry: (agentId, entryId) => ipcRenderer.invoke('turn:retry', agentId, entryId),
   // fase 8 (§3bis L5): decisione dell'utente sulla regola proposta dal bot
   autoreviewRuleDecision: (agentId, entryId, action) =>
     ipcRenderer.invoke('autoreview:rule-decision', agentId, entryId, action),

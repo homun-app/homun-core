@@ -463,6 +463,24 @@ export interface TranscriptEntry {
 }
 
 /**
+ * B2 (fase b20-bug): il «Riprova» di un avviso di risposta vuota — il job da
+ * riaccodare per ripetere ESATTAMENTO il turno finito vuoto (lo stesso testo
+ * e la stessa origine). Lo scrive il loop nel meta.retry dell'avviso; lo legge
+ * l'RPC turn:retry.
+ */
+export interface TurnRetry {
+  kind: 'user-message' | 'task-run'
+  payload: Record<string, unknown>
+}
+
+/** B2: l'esito del «Riprova» (notRetryable = l'entry non è un avviso di risposta vuota; alreadyQueued = già in coda o in corso; notEnqueued = rifiutato dalla coda). */
+export interface TurnRetryResult {
+  ok: boolean
+  jobId?: number
+  error?: 'notRetryable' | 'alreadyQueued' | 'notEnqueued'
+}
+
+/**
  * Fase 17c (C1): un testo della UI salvato o prodotto dal daemon/main, come
  * codice stabile + valori (lo stato dell'arte di Slack/Discord e ICU: chi
  * mostra il testo lo traduce col catalogo, così la storia cambia lingua con
@@ -1050,6 +1068,8 @@ export interface SandbotApi {
   delegationsStatus(jobIds: number[]): Promise<Record<string, 'queued' | 'delivered' | 'gone'>>
   /** D2: l'Annulla della riga «in coda» */
   delegationsCancel(jobId: number): Promise<{ ok: boolean }>
+  /** B2 (fase b20-bug): «Riprova» dell'avviso di risposta vuota (entryId = l'avviso): riaccoda lo stesso turno. */
+  turnRetry(agentId: string, entryId: number): Promise<TurnRetryResult>
   // provider e modelli
   /** fase 16c (C1): MAI la chiave — apiKey sempre '', hasKey e keyHint al posto */
   listProviders(): Promise<ProviderPublic[]>
