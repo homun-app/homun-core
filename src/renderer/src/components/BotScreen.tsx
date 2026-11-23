@@ -6,6 +6,14 @@
 // Stati visibili: connessione, connesso, «Il bot non ha uno schermo aperto»
 // (con Apri), errore (con Riprova); se entro 15 s non arriva `connect` si
 // mostra l'errore, non un riquadro nero.
+//
+// Fase design (DS4, con la barra di sinistra): il pannello ai token di DS1 —
+// cambia soltanto COME SI VEDE. Il titolo del blocco è text-body 500 e lo
+// stato sotto un metadato (text-caption grigio); i comandi passano dal pezzo
+// Button (da 32, text-body, col raggio dei controlli); «Chiudi» è un'icona
+// lucide e non più il carattere «✕»; i campi sono alti 36. Resta scritto a
+// mano UN solo bottone, «Ho finito»: ha il colore del bot, e Button non ha
+// una variante per lui — prende però le classi del pezzo (buttonVariants).
 import { useEffect, useRef, useState } from 'react'
 // U8 correzione #2 (dalla sonda fase-prima-release): noVNC si importa
 // DINAMICAMENTE, come già PipView e ScreenThumb — l'import STATICO nel
@@ -13,10 +21,11 @@ import { useEffect, useRef, useState } from 'react'
 // chiudeva subito), mentre le viste con l'import dinamico funzionavano
 
 import { useLingui, Trans } from '@lingui/react/macro'
-import { PictureInPicture2 } from 'lucide-react'
+import { PictureInPicture2, X } from 'lucide-react'
 import { api, useStore } from '../store'
 import { useBotInfo } from '../bot/use-bot'
 import { ipcErrorMessage } from '../lib/ipc-error'
+import { Button, buttonVariants } from './ui/button'
 import type RFB from '@novnc/novnc'
 import type { ScreenStatus } from '../../../shared/types'
 
@@ -171,20 +180,23 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
 
   return (
     <section
-      className={inPanel ? 'flex h-full flex-col overflow-y-auto scroll-thin' : 'mx-5 mt-3 flex flex-col overflow-hidden rounded-xl border bg-card shadow-soft'}
+      className={inPanel ? 'flex h-full flex-col overflow-y-auto scroll-thin' : 'mx-5 mt-3 flex flex-col overflow-hidden rounded-surface border bg-card shadow-soft'}
       style={inPanel ? { borderColor: mode === 'control' && phase === 'connected' ? color : undefined } : undefined}
     >
       <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
         <div className="min-w-0">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {/* fase design (DS4): «Schermo del bot» è il TITOLO del blocco, non
+              un sopratitolo (prima: 10 px in maiuscoletto, e i maiuscoletti
+              non esistono più). Lo stato sotto di lui è un metadato */}
+          <p className="truncate text-body font-medium">
             <Trans>Schermo del bot</Trans>
           </p>
           {mode === 'control' && phase === 'connected' ? (
-            <p className="truncate text-xs font-medium" style={{ color }}>
+            <p className="truncate text-caption font-medium" style={{ color }}>
               <Trans>Stai controllando lo schermo di {agent?.name ?? ''}</Trans>
             </p>
           ) : (
-            <p className="truncate text-xs text-muted-foreground">
+            <p className="truncate text-caption text-muted-foreground">
               {phase === 'connected' || phase === 'connecting'
                 ? t`Sola lettura — il bot non vede il tuo cursore`
                 : t`Vista dal vivo del computer del bot`}
@@ -196,25 +208,29 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
               spento: la PiP allora dice che non c'è il browser) — tranne quando
               lo schermo è già nella finestra a parte */}
           {!pipForMe && (
-            <button
-              className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
+            <Button
+              variant="secondary"
+              size="sm"
               data-testid="bot-screen-detach"
               title={t`Stacca in una finestra`}
               onClick={() => { void api.pipOpen(agentId).catch(() => undefined) }}
             >
-              <span className="flex items-center gap-1.5">
-                <PictureInPicture2 className="size-3.5" aria-hidden="true" />
-                <Trans>Stacca</Trans>
-              </span>
-            </button>
+              <PictureInPicture2 className="size-4" aria-hidden="true" />
+              <Trans>Stacca</Trans>
+            </Button>
           )}
           {/* U9 (fase prima-release): in controllo «Ho finito» sta QUI, nel
               posto di «Prendi il controllo», col colore del bot — col piede
-              fuori vista non c'era più modo di chiudere */}
+              fuori vista non c'era più modo di chiudere. Fase design (DS4): è
+              un bottone del pezzo (primary: l'azione principale, da 32) col
+              colore del bot al posto del fondo, scritto in stile in linea
+              perché vince sulla classe. Rettangolare come gli altri comandi
+              della testata (shape «control»): qui è una riga di comandi, non
+              l'azione di una pagina */}
           {mode === 'control' && (
             <button
-              className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-background transition hover:opacity-90"
               data-testid="bot-screen-done"
+              className={buttonVariants({ size: 'sm', shape: 'control' })}
               style={{ background: color }}
               title={t`Chiude il controllo e torna alla vista`}
               onClick={() => { void release() }}
@@ -224,49 +240,46 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
           )}
           {phase === 'connected' && mode === 'view' && (
             busy ? (
-              <button
-                className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
+              <Button
+                variant="secondary"
+                size="sm"
                 title={t`Interrompe il turno del bot e apre il controllo`}
                 onClick={() => {
                   void api.interrupt(agentId).catch(() => undefined).finally(() => void open('control'))
                 }}
               >
                 <Trans>Ferma e prendi il controllo</Trans>
-              </button>
+              </Button>
             ) : (
-              <button
-                className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
-                onClick={() => void open('control')}
-              >
+              <Button variant="secondary" size="sm" onClick={() => void open('control')}>
                 <Trans>Prendi il controllo</Trans>
-              </button>
+              </Button>
             )
           )}
           {!inPanel && (
-            <button
-              className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground"
-              title={t`Chiudi`}
-              onClick={() => { destroy(); onClose?.() }}
-            >
-              ✕
-            </button>
+            // fase design (DS4): un'icona lucide in un bottone tondo da 32 — il
+            // ghost solo-icona di Button — al posto del carattere «✕»
+            <Button variant="ghost" size="sm" icon title={t`Chiudi`} onClick={() => { destroy(); onClose?.() }}>
+              <X className="size-4" />
+            </Button>
           )}
         </div>
       </header>
 
       {/* il canvas di noVNC vive qui — SPARISCE mentre lo schermo è nella PiP */}
       {pipForMe ? (
-        <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center gap-3 bg-black/40 px-6 text-center">
-          <p className="text-sm text-muted-foreground">
+        <div className="flex min-h-80 flex-1 flex-col items-center justify-center gap-3 bg-black/40 px-6 text-center">
+          <p className="text-body text-muted-foreground">
             <Trans>Lo schermo è in una finestra a parte</Trans>
           </p>
-          <button
-            className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
+          <Button
+            variant="secondary"
+            size="sm"
             data-testid="bot-screen-restore"
             onClick={() => { void api.pipClose().catch(() => undefined) }}
           >
             <Trans>Riporta qui</Trans>
-          </button>
+          </Button>
         </div>
       ) : (
         <div ref={holder} className="min-h-0 flex-1 bg-black/90" />
@@ -275,7 +288,7 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
       {mode === 'control' && phase === 'connected' && (
         <footer className="space-y-2 border-t border-border px-4 py-3">
           <input
-            className="w-full rounded-lg bg-muted px-3 py-1.5 text-sm outline-none placeholder:text-muted-foreground"
+            className="h-control w-full rounded-control bg-muted px-3 text-body outline-none placeholder:text-muted-foreground"
             placeholder={t`Nota per il bot (facoltativa): cosa hai fatto…`}
             value={note}
             onChange={(e) => setNote(e.target.value)}
@@ -284,34 +297,28 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
       )}
 
       {(phase === 'opening' || phase === 'connecting') && (
-        <p className="border-t border-border px-4 py-3 text-center text-xs text-muted-foreground">
+        <p className="border-t border-border px-4 py-3 text-center text-caption text-muted-foreground">
           <Trans>Connessione allo schermo…</Trans>
         </p>
       )}
       {noScreen && (
         <div className="border-t border-border px-4 py-6 text-center">
-          <p className="text-sm text-muted-foreground"><Trans>Il bot non ha uno schermo aperto.</Trans></p>
-          <button
-            className="mt-3 rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
-            onClick={() => void open('view')}
-          >
+          <p className="text-body text-muted-foreground"><Trans>Il bot non ha uno schermo aperto.</Trans></p>
+          <Button variant="secondary" size="sm" className="mt-3" onClick={() => void open('view')}>
             <Trans>Apri</Trans>
-          </button>
+          </Button>
         </div>
       )}
       {phase === 'error' && status?.browser !== 'stopped' && (
         <div className="border-t border-border px-4 py-6 text-center">
-          <p className="text-sm text-destructive/90">{error || t`Errore di connessione.`}</p>
-          <button
-            className="mt-3 rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
-            onClick={() => void open(mode)}
-          >
+          <p className="text-body text-destructive/90">{error || t`Errore di connessione.`}</p>
+          <Button variant="secondary" size="sm" className="mt-3" onClick={() => void open(mode)}>
             <Trans>Riprova</Trans>
-          </button>
+          </Button>
         </div>
       )}
       {phase === 'connected' && status?.takeoverPending && (
-        <p className="border-t border-border px-4 py-2 text-center text-xs text-muted-foreground">
+        <p className="border-t border-border px-4 py-2 text-center text-caption text-muted-foreground">
           <Trans>Il bot ti sta chiedendo di intervenire sul suo schermo.</Trans>
         </p>
       )}
