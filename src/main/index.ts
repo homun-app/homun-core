@@ -20,7 +20,7 @@ import { initMainLanguage, applyStartupLanguage } from './i18n'
 import { DaemonClient } from './daemon-client'
 import { setDaemonSpawnContext } from './daemon-context'
 import { userDataDir } from './paths'
-import { isDaemonMode, registersProtocolClient, resolveDataDirArgv } from './mode'
+import { daemonSessionDataDir, isDaemonMode, registersProtocolClient, resolveDataDirArgv } from './mode'
 import { runDaemonRuntime } from '../daemon/runtime'
 import { APP_BUILD_ID } from './build-id'
 import { createRendererHandler, realFs, RENDERER_CSP } from './protocol'
@@ -74,6 +74,11 @@ protocol.registerSchemesAsPrivileged([
 
 if (isDaemonMode(process.argv)) {
   // ---- modalità daemon (A1): stesso eseguibile, nessuna finestra ----
+  // P3.1 (fase primo-avvio): i dati di Chromium del daemon in una cartella
+  // sua DENTRO userData — PRIMA di whenReady. UI e daemon non aprono più gli
+  // stessi file (cache, Local Storage, i LOCK di LevelDB); userData e i dati
+  // di Homun restano dove sono. Il daemon non legge niente dal profilo della UI.
+  app.setPath('sessionData', daemonSessionDataDir(app.getPath('userData')))
   // P1: ogni riga [sandbotd] con l'orario ISO — PRIMA di qualunque riga
   installDaemonLogTimestamps()
   // U6: anche il daemon scrive la sua riga di boot nello stesso registro

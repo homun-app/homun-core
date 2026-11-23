@@ -3,6 +3,7 @@
 // lanciato con --homun-daemon — così il fuse RunAsNode può essere spento
 // nella build pubblicata (A4) senza perdere il daemon. Funzioni PURE:
 // nessun import di Electron, testabili in vitest.
+import { join } from 'node:path'
 export const DAEMON_FLAG = '--homun-daemon'
 
 /** True se la riga di comando chiede la modalità daemon (niente finestre). */
@@ -18,6 +19,21 @@ export function isDaemonMode(argv: string[]): boolean {
  */
 export function registersProtocolClient(env: NodeJS.ProcessEnv = process.env): boolean {
   return !env.SANDBOT_TEST_USER_DATA
+}
+
+/** Il nome della cartella di Chromium del daemon, DENTRO userData. */
+export const DAEMON_SESSION_DIR = 'daemon-session'
+
+/**
+ * P3.1 (fase primo-avvio): la cartella dei dati di Chromium del daemon
+ * (sessionData: cache, Local Storage, i LOCK di LevelDB). UI e daemon sono
+ * due processi Chromium dello stesso eseguibile e fino a qui aprivano gli
+ * STESSI file in userData. Electron ≥ 20 stacca i dati di Chromium da
+ * userData con app.setPath('sessionData', …) prima di whenReady; la cartella
+ * resta DENTRO userData — che non si sposta, e con lui i dati di Homun.
+ */
+export function daemonSessionDataDir(userData: string): string {
+  return join(userData, DAEMON_SESSION_DIR)
 }
 
 /** Directory dati esplicita (--data <dir>): resta accettata per i test. */
