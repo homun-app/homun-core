@@ -150,7 +150,8 @@ describe('PP4: la lista — righe a filo, un solo pieno, segmenti come testo', (
   it('la riga è un FlatRow a filo (nessun fondo, nessun riquadro) con il logo da 32px', () => {
     const { root } = renderRow(row('active'))
     const r = rowOf(root, row('active'))
-    expect(has(r, 'py-3')).toBe(true)
+    // fase design (DS2): il respiro della riga è il token di DS1 (py-row-pad, 12px) — prima era scritto a mano (py-3)
+    expect(has(r, 'py-row-pad')).toBe(true)
     // nessun fondo né riquadro: l'unico bg- è l'hover tenue della riga cliccabile
     const tokens = (r.attrs.class ?? '').split(/\s+/)
     expect(tokens.filter((c) => c.startsWith('bg-') || c.startsWith('rounded-'))).toEqual([])
@@ -206,7 +207,8 @@ describe('PP4: la lista — righe a filo, un solo pieno, segmenti come testo', (
     const html = renderHtml(createElement(AppRow, { row: base, flow: null, onConnect: () => undefined, onCancel: () => undefined, onConflictResolve: () => undefined, onOpen: () => undefined } as never))
     const root = parseHtml(html)
     const r = byId(root, 'app-row-notion')[0]!
-    expect(has(r, 'py-3')).toBe(true)
+    // fase design (DS2): come tutte le FlatRow, il respiro dei token (py-row-pad)
+    expect(has(r, 'py-row-pad')).toBe(true)
     expect(r.attrs.class ?? '').not.toMatch(/rounded-\[/)
     // (la piastrella di ripiego porta l'iniziale: la N di Notion)
     expect(textOf(r)).toBe('NNotionSemplifica il lavoro')

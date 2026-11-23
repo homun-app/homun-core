@@ -198,7 +198,8 @@ describe('PP4: Autorizzazioni a filo', () => {
     const tools = findAll(read, (n) => (n.attrs['data-testid'] ?? '').startsWith('plugin-tool-') && !(n.attrs['data-testid'] ?? '').startsWith('plugin-tool-select-'))
     expect(tools.map((t) => t.attrs['data-testid'])).toEqual(['plugin-tool-search_emails', 'plugin-tool-read_email'])
     for (const tool of tools) {
-      expect(has(tool, 'py-3')).toBe(true)
+      // fase design (DS2): FlatRow ha il respiro dei token di DS1 (py-row-pad) — prima py-3, a mano
+      expect(has(tool, 'py-row-pad')).toBe(true)
       expect(bgTokens(tool)).toEqual([])
       expect(findAll(tool, (n) => n.tag === 'select')).toHaveLength(1)
     }

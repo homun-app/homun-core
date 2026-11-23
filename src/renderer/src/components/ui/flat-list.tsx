@@ -1,11 +1,22 @@
 // PP4 (fase plugin-pulita): le righe A FILO — il pezzo riusabile con cui la
 // pagina Plugin e la sua scheda smettono di essere «un muro di contenitori».
 // Nessun fondo, nessun riquadro: le righe si seguono separate da un filetto,
-// con respiro verticale (~12px), e l'hover tenue c'è SOLO dove si può cliccare.
+// con respiro verticale, e l'hover tenue c'è SOLO dove si può cliccare.
 // Slot: leading (icona o logo), title, subtitle? (la riga grigia), trailing?
 // (l'azione o l'interruttore, a destra). Solo token già usati dall'app
 // (border, muted, muted-foreground, foreground): chiaro e scuro. La 0.3.2 lo
 // userà nel resto dell'app; SettingsGroup / SettingsRow non si toccano.
+//
+// Fase design (DS2): le misure sono quelle di DS1, che stanno in un posto
+// solo (styles.css). Prima erano scritte a mano (15px, 13px, py-3, gap-3) e
+// la guardia non le lascia più scrivere. Dalla spec: «riga di elenco: altezza
+// minima 52 px (con icona/logo) o 40 px (solo testo), padding verticale
+// 12 px, 12 px tra icona e testo»; pesi «500 etichette e titoli di riga».
+// PERCHÉ lo slot da 32 (grid size-8) intorno al leading: può essere un'icona
+// (size-4) o un logo (size-8) — dentro la stessa casa il testo parte sempre
+// dalla stessa ascissa, e la riga non cambia aspetto secondo ciò che le
+// passa il chiamante. Lo slot c'è SOLO con il leading, ed è il leading a
+// decidere se la riga è da 52 (min-h-row) o da 40 (min-h-row-text).
 import type { ReactNode } from 'react'
 import { cn } from '../../lib/utils'
 
@@ -39,17 +50,29 @@ export function FlatRow({ leading, title, subtitle, trailing, onClick, clickable
   testId?: string
   className?: string
 }): ReactNode {
+  const conLeading = leading !== undefined
   const body = (
     <>
-      {leading !== undefined && <span className="shrink-0">{leading}</span>}
+      {conLeading && <span className="grid size-8 shrink-0 place-items-center">{leading}</span>}
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15px]">{title}</span>
-        {subtitle !== undefined && <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">{subtitle}</span>}
+        {/* Stringhe fisse, NON cn(): il cn di questa base (18d09f22) è il
+            twMerge di fabbrica, che scambia le dimensioni di DS1 (text-small,
+            text-caption…) per COLORI e, davanti a un text-muted-foreground,
+            le toglierebbe — la riga grigia perderebbe la sua taglia.
+            (626750e2 gliela insegna.) Qui non c'è nulla da fondere: si
+            scrivono e basta, e vanno bene con entrambi i cn. */}
+        <span className="block truncate text-body font-medium">{title}</span>
+        {subtitle !== undefined && <span className="mt-0.5 block truncate text-small text-muted-foreground">{subtitle}</span>}
       </span>
       {trailing !== undefined && <span className="flex min-w-0 shrink-0 items-center justify-end gap-2">{trailing}</span>}
     </>
   )
-  const cls = cn('flex w-full items-center gap-3 py-3 text-left', (clickable || onClick) && 'cursor-pointer transition hover:bg-muted/50', className)
+  const cls = cn(
+    'flex w-full items-center gap-row-gap py-row-pad',
+    conLeading ? 'min-h-row' : 'min-h-row-text',
+    (clickable || onClick) && 'cursor-pointer transition hover:bg-muted/50',
+    className
+  )
   const extra = testId ? { 'data-testid': testId } : {}
   if (clickable || onClick) {
     return (
