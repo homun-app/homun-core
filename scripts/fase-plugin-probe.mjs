@@ -529,6 +529,12 @@ try {
     return null
   })(), 8_000, 'interruttore spento')
   check('V5: il clic SPEGNE: enabled false e disabledReason \'user\' (la parola dell\'utente)', offNow !== null, JSON.stringify(offNow)?.slice(0, 120))
+  // fase plugin-pulita: il secondo clic si fa quando la RIGA ha ridisegnato
+  // l'interruttore spento (come chi guarda la riga) — il comando parte dal
+  // valore che la riga mostra; cliccare prima, appena il daemon ha scritto,
+  // ripeteva «spegni» e la corsa era rossa per una gara, non per l'app
+  const uiOff = await waitDom(cdp, `document.querySelector('[data-testid="plugin-active-server:srv-plugin"]')?.getAttribute('aria-checked') === 'false'`, 5_000)
+  log('V5: la riga mostra l\'interruttore', await switchState(), 'prima del secondo clic')
   await clickTestid(cdp, 'plugin-active-server:srv-plugin')
   const onAgain = await withTimeout((async () => {
     for (let i = 0; i < 25; i++) {
@@ -539,7 +545,7 @@ try {
     }
     return null
   })(), 10_000, 'interruttore riacceso')
-  check('V5: il clic RIACCENDE (e il test U5 parte da mcp:save: il finto risponde)', onAgain !== null && (await switchState()) === 'true', JSON.stringify(onAgain)?.slice(0, 120))
+  check('V5: il clic RIACCENDE (e il test U5 parte da mcp:save: il finto risponde)', uiOff && onAgain !== null && (await switchState()) === 'true', JSON.stringify(onAgain)?.slice(0, 120))
 
   // ---- 10. V6: la scheda offer_enable_plugin, il clic e la RIPRESA ----
   // un secondo server MCP FINTO ma SPENTO (l\'utente l\'aveva spento): il
