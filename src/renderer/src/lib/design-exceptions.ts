@@ -46,9 +46,17 @@ export const DESIGN_EXCEPTIONS: readonly DesignException[] = [
 ]
 
 /**
+ * I file GIÀ migrati al sistema (relativi a src/renderer/src): la guardia li
+ * guarda anche se stanno dentro un'area non ancora migrata. A ogni commit di
+ * DS4 ci entrano i file della sua pagina; a fine DS4 l'elenco è superfluo
+ * (nessuna area è più in attesa) e le aree provvisorie sono zero.
+ */
+export const MIGRATED: readonly string[] = []
+
+/**
  * Aree del renderer NON ancora migrate al sistema (relative a
- * src/renderer/src, con la barra finale): la guardia le salta. PROVVISORIO
- * fino a fine DS4.
+ * src/renderer/src, con la barra finale): la guardia le salta, tranne i file
+ * dichiarati migrati (MIGRATED). PROVVISORIO fino a fine DS4.
  */
 export const MIGRATION_PENDING: readonly string[] = [
   'components/',

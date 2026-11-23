@@ -25,7 +25,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DESIGN_EXCEPTIONS, MIGRATION_PENDING, type DesignRule } from '../lib/design-exceptions'
+import { DESIGN_EXCEPTIONS, MIGRATED, MIGRATION_PENDING, type DesignRule } from '../lib/design-exceptions'
 import { CSS_PATH, SRC, iconViolations, isClassList, rel, scan, sourceFiles, stringsOf, violationsOfString } from './design-scan'
 
 const CSS = readFileSync(CSS_PATH, 'utf8')
@@ -96,6 +96,11 @@ describe('DS6: la guardia sul sorgente del renderer', () => {
   it('ogni area «non ancora migrata» esiste davvero (nessuna voce morta nell’elenco provvisorio)', () => {
     const files = sourceFiles(SRC).map(rel)
     const dead = MIGRATION_PENDING.filter((prefix) => !files.some((f) => f.startsWith(prefix)))
+    expect(dead).toEqual([])
+  })
+  it('ogni file dichiarato migrato esiste davvero (la guardia lo guarda: un nome sbagliato sarebbe un buco)', () => {
+    const files = sourceFiles(SRC).map(rel)
+    const dead = MIGRATED.filter((m) => !files.some((f) => f === m || f.startsWith(`${m}/`)))
     expect(dead).toEqual([])
   })
 })

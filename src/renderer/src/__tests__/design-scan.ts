@@ -26,7 +26,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from '@babel/parser'
-import { DESIGN_EXCEPTIONS, MIGRATION_PENDING, type DesignRule } from '../lib/design-exceptions'
+import { DESIGN_EXCEPTIONS, MIGRATED, MIGRATION_PENDING, type DesignRule } from '../lib/design-exceptions'
 
 export const SRC = fileURLToPath(new URL('..', import.meta.url)) // src/renderer/src
 export const CSS_PATH = join(SRC, 'styles.css')
@@ -185,7 +185,9 @@ export function sourceFiles(dir: string, out: string[] = []): string[] {
 }
 
 export const rel = (p: string): string => relative(SRC, p).split(sep).join('/')
-const isPending = (p: string): boolean => MIGRATION_PENDING.some((prefix) => rel(p).startsWith(prefix))
+/** Un file dichiarato migrato (o dentro una cartella dichiarata migrata). */
+export const isMigrated = (p: string): boolean => { const r = rel(p); return MIGRATED.some((m) => r === m || r.startsWith(`${m}/`)) }
+const isPending = (p: string): boolean => !isMigrated(p) && MIGRATION_PENDING.some((prefix) => rel(p).startsWith(prefix))
 
 /**
  * Tutto ciò che la guardia vede, per file. `pending: true` guarda anche le
