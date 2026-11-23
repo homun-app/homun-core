@@ -22,7 +22,10 @@ import { ActivityPanel } from './components/ActivityPanel'
 import { PluginPanel } from './components/PluginPanel'
 import { api } from './store'
 // fase 16b correzioni 2 (Q1): il layout a tre colonne è UNA funzione pura
-import { layoutFor, TRAFFIC_LIGHT_INSET } from './layout'
+import { layoutFor } from './layout'
+// fase design (DS3): la cornice della finestra — dove stanno i semafori (SIDEBAR_HEAD_PAD) e quanto è alta la riga in cima alle colonne
+import { SIDEBAR_HEAD_PAD } from '../../shared/window-frame'
+import { X } from 'lucide-react'
 // OAC1 (fase guida): la finestra mostra la guida quando è APERTA (guideOpen),
 // non quando «serve» — e col needed senza stato resta in caricamento
 import { guideWindowState } from './lib/guide-window'
@@ -42,12 +45,14 @@ const RESIZE_DEBOUNCE_MS = 100
 // fase rilascio (A8): la riga UNA VOLTA del passaggio da Homun 2 — le
 // conversazioni e i bot di Homun 2 NON vengono importati; la cartella si può
 // aprire nel Finder. Niente si legge e niente si tocca là dentro.
-// FASE RILASCIO — CORREZIONI (K4): la riga sta nella zona del titolo, dove
-// i semafori di macOS coprono l'inizio — lascia libero il loro spazio
-// (TRAFFIC_LIGHT_INSET, la stessa costante della testata della Sidebar), è
-// una fascia di trascinamento (i bottoni no), il percorso completo diventa
-// «nella cartella di Homun 2» (il percorso lo apre già «Mostra nel Finder»)
-// e a finestra stretta sta su UNA riga, troncata, col testo intero nel title.
+// FASE RILASCIO — CORREZIONI (K4): il percorso completo diventa «nella
+// cartella di Homun 2» (il percorso lo apre già «Mostra nel Finder») e a
+// finestra stretta sta su UNA riga, troncata, col testo intero nel title.
+// Fase design (DS3): la riga NON sta più sopra le colonne — le spostava
+// tutte in giù di un'altezza sua, e i semafori (che restano dove li mette
+// macOS) finivano fuori dalla riga delle icone. Ora è una scheda sospesa in
+// alto a destra dell'area principale, sotto la testata: la cornice non si
+// muove. I bottoni portano no-drag e il testo text-small.
 function LegacyHomun2Notice() {
   const { t } = useLingui()
   const [dir, setDir] = useState<string | null>(null)
@@ -58,29 +63,30 @@ function LegacyHomun2Notice() {
   const text = t`Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac nella cartella di Homun 2.`
   return (
     <div
-      className="drag-region flex items-center justify-between gap-3 border-b bg-muted py-2 pr-4 text-xs text-muted-foreground"
-      style={{ paddingLeft: TRAFFIC_LIGHT_INSET }}
+      className="absolute right-4 top-16 z-30 flex max-w-page items-center gap-3 rounded-surface border bg-card p-3 pr-2 text-small text-muted-foreground shadow-soft"
+      data-testid="legacy-homun2-notice"
     >
-      <p className="min-w-0 flex-1 truncate" title={text}>
+      <p className="min-w-0 flex-1" title={text}>
         {text}
       </p>
-      <span className="flex shrink-0 items-center gap-2">
+      <span className="flex shrink-0 items-center gap-1">
         <button
-          className="no-drag rounded-full bg-foreground px-3 py-1 text-[11px] text-background"
+          className="no-drag h-control-sm shrink-0 rounded-full bg-foreground px-3 font-medium text-background transition hover:opacity-90"
           title={dir}
           onClick={() => void api.revealInFinder(dir)}
         >
           <Trans>Mostra nel Finder</Trans>
         </button>
         <button
-          className="no-drag rounded-full px-2 py-1 text-[11px] hover:text-foreground"
+          className="no-drag grid size-control-sm shrink-0 place-items-center rounded-full transition hover:bg-muted hover:text-foreground"
           title={t`Non mostrare più`}
+          aria-label={t`Non mostrare più`}
           onClick={() => {
             setDir(null)
             void api.legacyHomun2Dismiss()
           }}
         >
-          ✕
+          <X className="size-4" />
         </button>
       </span>
     </div>
@@ -218,14 +224,18 @@ export function App() {
   if (guideView === 'guide') return <GuideView />
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-      <LegacyHomun2Notice />
       <div className="relative flex min-h-0 flex-1">
       {/* U2 (fase prima-release): il bottone della barra, FISSO accanto ai
-          semafori nella STESSA posizione da larga e da stretta (sopra le
-          colonne: da rotaia la barra è 76 px e il bottone non ci starebbe) */}
-      <div className="absolute left-0 top-0 z-30" style={{ paddingLeft: TRAFFIC_LIGHT_INSET, paddingTop: 12 }}>
-        <SidebarToggleButton layout={layout} />
-      </div>
+          semafori nella STESSA posizione da larga e da stretta. Fase design
+          (DS3): a barra aperta sta DENTRO la sua testata (è la prima icona,
+          quella che la sonda misura sulla riga dei semafori); da rotaia la
+          barra è 76 px e non ci starebbe: resta qui, sopra le colonne, alle
+          stesse coordinate */}
+      {layout.sidebar === 'rail' && (
+        <div className="absolute left-0 top-0 z-30 flex h-col-head items-center" style={{ paddingLeft: SIDEBAR_HEAD_PAD }}>
+          <SidebarToggleButton layout={layout} />
+        </div>
+      )}
       <Sidebar layout={layout} />
       <div className="relative flex min-w-0 flex-1">
         {openGroupId === null ? <Chat layout={layout} /> : <TeamChat />}
@@ -241,6 +251,8 @@ export function App() {
         {pluginOpen && <PluginPanel />}
         <LibraryPanel />
         <ActivityPanel />
+        {/* la riga UNA VOLTA del passaggio da Homun 2: sospesa in alto a destra dell'area principale */}
+        <LegacyHomun2Notice />
       </div>
       <RightPanel layout={layout} />
       {settingsOpen && <Settings />}

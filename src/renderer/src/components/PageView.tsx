@@ -134,11 +134,12 @@ export function PageView({ initial }: { initial?: PageViewInitial } = {}) {
 
   return (
     <div data-testid="page-view" className="no-drag absolute inset-0 z-20 flex flex-col bg-background">
-      {/* la fascia alta: trascina la finestra; ✕, pillola del titolo, Esporta */}
-      <div className="drag-region absolute inset-x-0 top-0 z-10 flex h-[60px] flex-col">
-        <div className="mt-3 flex h-9 items-center gap-3 px-4">
+      {/* la fascia alta: trascina la finestra; ✕, pillola del titolo, Esporta.
+          Fase design (DS3): alta 52 come la testata di OGNI colonna (h-col-head, letta dalla sonda), i controlli da 32 */}
+      <div data-col-head="pagina" className="drag-region absolute inset-x-0 top-0 z-10 flex h-col-head">
+        <div className="flex h-full items-center gap-3 px-4">
           <button
-            className="no-drag grid size-9 shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
+            className="no-drag grid size-control-sm shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
             aria-label={info.from === 'library' ? t`Torna alla libreria` : t`Torna alla chat`}
             title={info.from === 'library' ? t`Torna alla libreria` : t`Torna alla chat`}
             data-testid="page-close"
@@ -147,13 +148,13 @@ export function PageView({ initial }: { initial?: PageViewInitial } = {}) {
             <X className="size-4" />
           </button>
           <span className="flex min-w-0 flex-1 justify-center">
-            <span className="max-w-full truncate rounded-full bg-card/95 px-4 py-1.5 text-[15px] font-medium shadow-soft" data-testid="page-title-pill">
+            <span className="max-w-full truncate rounded-full bg-card/95 px-4 py-1.5 text-body font-medium shadow-soft" data-testid="page-title-pill">
               {title}
             </span>
           </span>
           <DropdownMenu>
             <DropdownMenuTrigger
-              className="no-drag flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-muted/60 px-3 text-sm text-muted-foreground transition hover:text-foreground"
+              className="no-drag flex h-control-sm shrink-0 items-center gap-2 rounded-full bg-muted/60 px-3 text-body text-muted-foreground transition hover:text-foreground"
               aria-label={t`Esporta`}
               data-testid="page-export"
             >

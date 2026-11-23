@@ -25,7 +25,9 @@ import {
 // P6 (fase uso-permessi): il segno di stato condiviso con le card della chat
 import { StateSign, rowStateName } from './StateSign'
 // fase 16b correzioni 2 (Q1): il massimo del trascinamento e i limiti della barra
-import { sidebarMaxFor, SIDEBAR_MIN, AUTO_RAIL_BELOW, TRAFFIC_LIGHT_INSET, type LayoutResult } from '../layout'
+import { sidebarMaxFor, SIDEBAR_MIN, AUTO_RAIL_BELOW, type LayoutResult } from '../layout'
+// fase design (DS3): la cornice — lo spazio dei semafori (SIDEBAR_HEAD_PAD) e l'altezza della riga in cima alla colonna (h-col-head)
+import { SIDEBAR_HEAD_PAD } from '../../../shared/window-frame'
 import { avatarOf } from '../../../shared/avatar'
 import type { Agent } from '../../../shared/types'
 import { Bot } from '../bot/Bot'
@@ -63,7 +65,7 @@ export function SidebarToggleButton({ layout }: { layout: LayoutResult }) {
   return (
     <button
       data-testid="sidebar-toggle"
-      className="no-drag grid size-9 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+      className="no-drag grid size-control-sm place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
       aria-label={label}
       aria-expanded={!collapsed}
       title={label}
@@ -878,8 +880,11 @@ function CollapsedColumn({
   return (
     <>
       {/* fase 16b correzioni 2 (Q3): in rotaia i semafori occupano la cima —
-          la fascia di trascinamento finisce dove inizia la prima voce */}
-      <div className="drag-region h-12 shrink-0" aria-hidden="true" />
+          la fascia di trascinamento finisce dove inizia la prima voce. Fase
+          design (DS3): è la riga di 52 di OGNI colonna; qui dentro non ci
+          stanno icone (il bottone della barra resta sopra le colonne, da
+          fuori: la rotaia è 76 px) */}
+      <div data-col-head="barra" className="drag-region h-col-head shrink-0" aria-hidden="true" />
       <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto scroll-thin px-2 pt-2">
         {/* le voci fisse come icone, nell'ordine della barra larga — il «+»
             apre SUBITO il dialogo «Nuovo» (B2 fase beta.4) */}
@@ -1119,16 +1124,19 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
         />
       ) : (
         <>
-          {/* fase 16b correzioni 2 (Q3): Cerca e Crea sulla riga comune (y
-              12–48, centro 30) dentro la fascia di trascinamento di 60 px;
-              allineati a destra — a sinistra restano i semafori di macOS.
-              K4 (fase rilascio — correzioni): il loro spazio è la STESSA
-              costante (TRAFFIC_LIGHT_INSET) che lascia libero la riga del
-              rinnovo in cima alla finestra. Ricerca: resta nel punto di oggi. */}
-          <div className="drag-region h-[60px] shrink-0">
-            <div className="mt-3 flex h-9 items-center justify-end gap-2 px-3" style={{ paddingLeft: TRAFFIC_LIGHT_INSET }}>
+          {/* fase 16b correzioni 2 (Q3): Cerca e Crea sulla riga in cima; fase
+              design (DS3): la testata è la riga di 52 di OGNI colonna, la
+              fascia di trascinamento, e sul suo centro stanno i semafori di
+              macOS: il bottone della barra è la PRIMA icona, a 12 px dai
+              semafori (SIDEBAR_HEAD_PAD: la stessa costante che legge il
+              main); Cerca e Crea restano allineati a destra. Le icone stanno
+              in bottoni da 32 (size-control-sm) */}
+          <div data-col-head="barra" className="drag-region flex h-col-head shrink-0 items-center gap-2 px-3" style={{ paddingLeft: SIDEBAR_HEAD_PAD }}>
+            <SidebarToggleButton layout={layout} />
+            <span className="flex-1" aria-hidden="true" />
+            <div className="flex items-center gap-2">
               <button
-                className={`no-drag grid size-8 place-items-center rounded-lg transition ${searchOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
+                className={`no-drag grid size-control-sm place-items-center rounded-full transition ${searchOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
                 aria-label={t`Cerca`}
                 title={t`Cerca`}
                 onClick={() => {
@@ -1141,7 +1149,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
               {/* B2 (fase beta.4): il «+» apre SUBITO il dialogo «Nuovo» (come
                   la voce Nuovo della barra, che la tavola 6 mette in cima) */}
               <button
-                className="no-drag grid size-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+                className="no-drag grid size-control-sm place-items-center rounded-full text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
                 aria-label={t`Crea`}
                 title={t`Crea`}
                 onClick={() => setNewBotOpen(true)}

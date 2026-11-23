@@ -20,7 +20,8 @@ import type { BotFamily, BotColor } from '../../../shared/types'
 import { guideNameOf, GUIDE_NAME_MAX } from '../lib/guide-identity'
 import type { UiLanguageSetting } from '../../../shared/ui-language'
 import { SUPPORTED_UI_LANGUAGES } from '../../../shared/ui-language'
-import { TRAFFIC_LIGHT_INSET } from '../layout'
+// fase design (DS3): lo spazio dei semafori di macOS, la stessa costante del main
+import { SIDEBAR_HEAD_PAD } from '../../../shared/window-frame'
 import { approvalsChoices } from '../lib/guide-steps'
 import { guideMood, guideBubble, guideBubbleKey, EMPTY_GUIDE_FACTS, type GuideFacts, type GuideUiStep } from '../lib/guide-scene'
 import { boxSetupActive } from '../lib/box-setup-rows'
@@ -92,7 +93,7 @@ function SceneColumn({ phrase, bubbleKey, mood, avatar, displayName, width, masc
     // finestra stretta: la mascotte va sopra, con la nuvoletta accanto
     return (
       <div className="relative flex shrink-0 items-end justify-center gap-5 px-6 pt-12" data-testid="guide-scene">
-        <div className="drag-region absolute inset-x-0 top-0 h-11" style={{ paddingLeft: TRAFFIC_LIGHT_INSET }} aria-hidden />
+        <div data-col-head="guida" className="drag-region absolute inset-x-0 top-0 h-col-head" style={{ paddingLeft: SIDEBAR_HEAD_PAD }} aria-hidden />
         <div className="flex flex-col items-center">{mascot}{shadow}</div>
         <div className="flex min-w-0 flex-1 justify-start pb-8">
           <div className="max-w-[420px] text-[17px] [&_span]:text-[17px]">{bubble}</div>
@@ -103,8 +104,8 @@ function SceneColumn({ phrase, bubbleKey, mood, avatar, displayName, width, masc
   }
   return (
     <div className="relative flex shrink-0 flex-col items-center justify-center" style={{ width }} data-testid="guide-scene">
-      {/* spazio ai semafori di macOS: fascia di trascinamento */}
-      <div className="drag-region absolute inset-x-0 top-0 h-11" style={{ paddingLeft: TRAFFIC_LIGHT_INSET }} aria-hidden />
+      {/* spazio ai semafori di macOS: fascia di trascinamento — la riga di 52 di OGNI colonna (DS3) */}
+      <div data-col-head="guida" className="drag-region absolute inset-x-0 top-0 h-col-head" style={{ paddingLeft: SIDEBAR_HEAD_PAD }} aria-hidden />
       <div className="absolute left-16 right-16 top-[62px] flex justify-center">{bubble}</div>
       <div className="mt-[70px]">{mascot}</div>
       {shadow}

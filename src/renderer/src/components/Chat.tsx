@@ -527,22 +527,23 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
         className="pointer-events-none absolute inset-y-0 left-0"
         style={{ right: layout?.panel === 'overlay' ? layout.panelWidth : 0 }}
       />
-      {/* fase 16b correzioni 2 (Q3): la fascia alta di 60 px — trascina la
-          finestra — con UNA riga di controlli (y 12–48, centro 30): pillola
-          del bot al centro e bottone del pannello a destra. La pillola tronca
-          il nome quando la chat è al minimo (Q4).
+      {/* fase 16b correzioni 2 (Q3): la fascia alta — trascina la finestra —
+          con UNA riga di controlli: pillola del bot al centro e bottone del
+          pannello a destra. Fase design (DS3): alta 52 come la testata di
+          OGNI colonna (h-col-head, letta dalla sonda), i controlli da 32
+          (size-control-sm). La pillola tronca il nome quando la chat è al minimo (Q4).
           G3 (fase 0.3.1001 grafica): la pillola è un BOTTONE che apre/chiude
           il pannello destro (no-drag; lo spazio attorno resta fascia di
           trascinamento). G2: a pannello APERTO il bottone PanelRight sparisce
           — resta la ✕ del pannello — ma il posto w-9 resta occupato, così la
           pillola al centro non salta di posizione */}
-      <div className="drag-region absolute inset-x-0 top-0 z-10 flex h-[60px] flex-col">
-        <div className="mt-3 flex h-9 items-center gap-3 px-4">
-          <span className="w-9 shrink-0" aria-hidden="true" />
+      <div data-col-head="chat" className="drag-region absolute inset-x-0 top-0 z-10 flex h-col-head">
+        <div className="flex h-full min-w-0 items-center gap-3 px-4">
+          <span className="w-8 shrink-0" aria-hidden="true" />
           <span className="flex min-w-0 flex-1 justify-center">
             <button
               type="button"
-              className="no-drag flex min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-full bg-card/95 py-1.5 pl-1.5 pr-4 text-left shadow-soft transition hover:bg-card"
+              className="no-drag flex h-control-sm min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-full bg-card/95 pl-1.5 pr-4 text-left shadow-soft transition hover:bg-card"
               aria-expanded={rightPanel}
               aria-label={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
               title={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
@@ -553,11 +554,11 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
             </button>
           </span>
           {rightPanel ? (
-            <span className="w-9 shrink-0" aria-hidden="true" />
+            <span className="w-8 shrink-0" aria-hidden="true" />
           ) : (
             <button
               ref={panelBtnRef}
-              className="no-drag grid size-9 shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
+              className="no-drag grid size-control-sm shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
               aria-label={t`Mostra il pannello del bot`}
               title={t`Mostra il pannello del bot`}
               onClick={() => setRightPanel(true)}

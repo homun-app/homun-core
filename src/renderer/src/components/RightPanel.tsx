@@ -46,7 +46,7 @@ function PanelClose({ onClose }: { onClose(): void }) {
   const { i18n } = useLingui()
   return (
     <button
-      className="no-drag grid size-9 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
+      className="no-drag grid size-control-sm place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
       aria-label={i18n.t(msg`Chiudi il pannello`)}
       title={i18n.t(msg`Chiudi il pannello`)}
       onClick={onClose}
@@ -56,11 +56,11 @@ function PanelClose({ onClose }: { onClose(): void }) {
   )
 }
 
-/** La fascia alta del pannello: trascinamento della finestra + ✕ a y 12 (Q3). */
+/** La fascia alta del pannello: trascinamento della finestra + la ✕ (Q3). Fase design (DS3): alta 52 come la testata di OGNI colonna (h-col-head), la ✕ in un bottone da 32. */
 function PanelTopBand({ onClose }: { onClose(): void }) {
   return (
-    <div className="drag-region absolute inset-x-0 top-0 z-10 flex h-[60px] flex-col">
-      <div className="mt-3 flex h-9 items-center justify-end px-4">
+    <div data-col-head="pannello" className="drag-region absolute inset-x-0 top-0 z-10 flex h-col-head">
+      <div className="flex h-full items-center justify-end px-4">
         <PanelClose onClose={onClose} />
       </div>
     </div>

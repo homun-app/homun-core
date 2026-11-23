@@ -44,6 +44,8 @@ import { createMainWindowManager } from './main-window'
 // W2 (fase avvio-finestra): lo stato del caricamento mentre il daemon si avvia
 import { BootStatusTracker } from './boot-status'
 import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
+// fase design (DS3): dove stanno i semafori di macOS (le stesse costanti che legge il renderer per le testate)
+import { TRAFFIC_LIGHT_POSITION } from '../shared/window-frame'
 import { safeStorageBackendForEnv } from '../daemon/master-keys'
 // U6 (fase mcp-ui): il registro del ciclo di vita e la decisione del
 // second-instance mentre l'app sta uscendo (relaunch)
@@ -357,6 +359,10 @@ function createPipHandle(options: Record<string, unknown>, url: string): PipWind
         minWidth: 900,
         minHeight: 600,
         titleBarStyle: 'hiddenInset',
+        // fase design (DS3): dove stanno i semafori — al centro della riga di
+        // 52 px in cima a ogni colonna (le costanti in shared/window-frame.ts,
+        // le stesse che legge il renderer per le testate)
+        trafficLightPosition: TRAFFIC_LIGHT_POSITION,
         backgroundColor: '#0b0d10',
         // P3.2 (fase primo-avvio): nasce NASCOSTA — la mostra la politica di
         // mostra (ready-to-show, o il ripiego), e la porta davanti

@@ -302,20 +302,21 @@ export function TeamChat() {
           aperta (dalla Libreria, dalle card della timeline e da «Prodotto
           dalla squadra») — lo stesso componente della chat uno-a-uno */}
       <PageView />
-      {/* fase 16b correzioni 2 (Q3): la fascia alta di 60 px come nella chat —
-          pillola della squadra (nome + chi risponde, che tronca) sulla riga
-          comune y 12–48 e bottone del pannello a destra.
+      {/* fase 16b correzioni 2 (Q3): la fascia alta come nella chat — pillola
+          della squadra (nome + chi risponde, che tronca) sulla riga in cima
+          e bottone del pannello a destra. Fase design (DS3): alta 52 come la
+          testata di OGNI colonna (h-col-head, letta dalla sonda), i controlli da 32 (size-control-sm).
           G3 (fase 0.3.1001 grafica): la pillola è un BOTTONE che apre/chiude
           il pannello dei membri (no-drag; attorno resta il trascinamento).
           G2: a pannello APERTO il bottone PanelRight sparisce — resta la ✕ —
           ma il posto w-9 resta occupato, così la pillola non salta */}
-      <div className="drag-region absolute inset-x-0 top-0 z-10 flex h-[60px] flex-col">
-        <div className="mt-3 flex h-9 items-center gap-3 px-4">
-          <span className="w-9 shrink-0" aria-hidden="true" />
+      <div data-col-head="chat" className="drag-region absolute inset-x-0 top-0 z-10 flex h-col-head">
+        <div className="flex h-full min-w-0 items-center gap-3 px-4">
+          <span className="w-8 shrink-0" aria-hidden="true" />
           <span className="flex min-w-0 flex-1 justify-center">
             <button
               type="button"
-              className="no-drag flex min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-full bg-card/95 py-1.5 pl-4 pr-4 text-left shadow-soft transition hover:bg-card"
+              className="no-drag flex h-control-sm min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-full bg-card/95 px-4 text-left shadow-soft transition hover:bg-card"
               aria-expanded={rightPanel}
               aria-label={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
               title={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
@@ -330,11 +331,11 @@ export function TeamChat() {
             </button>
           </span>
           {rightPanel ? (
-            <span className="w-9 shrink-0" aria-hidden="true" />
+            <span className="w-8 shrink-0" aria-hidden="true" />
           ) : (
             <button
               ref={panelBtnRef}
-              className="no-drag grid size-9 shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
+              className="no-drag grid size-control-sm shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
               aria-label={t`Mostra il pannello dei membri`}
               title={t`Mostra il pannello dei membri`}
               onClick={() => setRightPanel(true)}

@@ -1,4 +1,6 @@
 // Fase 16b — correzioni 2 (Q1): il layout a tre colonne come FUNZIONE PURA.
+// (Lo spazio dei semafori di macOS — K4, fase rilascio — da fase design (DS3)
+// sta in shared/window-frame.ts: SIDEBAR_HEAD_PAD, la stessa costante del main.)
 // Lo schema delle app desktop (Slack, Linear, Claude desktop): la colonna
 // centrale non scende mai sotto CHAT_MIN; prima cede il pannello (si stringe
 // sulla scheda Computer fino a PANEL_WIDE_MIN, poi galleggia in overlay sopra
@@ -14,14 +16,6 @@ export const AUTO_RAIL_BELOW = 1000
 /** Limiti del trascinamento della barra (come oggi: 220–420). */
 export const SIDEBAR_MIN = 220
 export const SIDEBAR_MAX = 420
-
-/**
- * Fase rilascio — correzioni (K4): lo spazio orizzontale che i semafori di
- * macOS occupano sulla cima della finestra (titleBarStyle hiddenInset). La
- * riga «Homun è stato rinnovato» e la testata della Sidebar lo lasciano
- * libero: è la STESSA costante, così i semafori non coprono mai nulla.
- */
-export const TRAFFIC_LIGHT_INSET = 80
 
 /**
  * La scheda del pannello destro. Fase pagine (G3): il pannello ha due schede,
