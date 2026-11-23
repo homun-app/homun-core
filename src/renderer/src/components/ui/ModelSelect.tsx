@@ -197,13 +197,13 @@ export function ModelSelect({
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label={ariaLabel ?? t`Provider e modello`}
-        className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full bg-muted px-3 text-sm outline-none transition hover:bg-muted/70 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full bg-muted px-3 text-body outline-none transition hover:bg-muted/70 focus-visible:ring-[3px] focus-visible:ring-ring/50"
         onClick={() => setOpen((v) => !v)}
       >
         <span className="min-w-0 flex-1 truncate text-left">
           {closedLabel}
           {chosenProviderName && (
-            <span className="ml-1.5 text-xs text-muted-foreground">{chosenProviderName}</span>
+            <span className="ml-1.5 text-caption text-muted-foreground">{chosenProviderName}</span>
           )}
         </span>
         <ChevronDown className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -234,7 +234,7 @@ export function ModelSelect({
       )}
 
       {open && (
-        <div className="absolute left-0 top-11 z-30 flex max-h-80 w-[min(26rem,calc(100vw-96px))] flex-col overflow-hidden rounded-2xl bg-card p-1.5 shadow-soft">
+        <div className="absolute left-0 top-10 z-30 flex max-h-80 w-[min(26rem,calc(100vw-96px))] flex-col overflow-hidden rounded-surface bg-card p-1.5 shadow-soft">
           {/* la ricerca, in cima, col fuoco automatico */}
           <div className="mb-1 flex h-9 shrink-0 items-center gap-2 rounded-full bg-muted px-3">
             <Search className="size-4 shrink-0 text-muted-foreground" />
@@ -246,7 +246,7 @@ export function ModelSelect({
               aria-controls={listId}
               aria-autocomplete="list"
               aria-activedescendant={filtered[hi] ? `${listId}-${hi}` : undefined}
-              className="w-full bg-transparent text-sm outline-none"
+              className="w-full bg-transparent text-body outline-none"
               placeholder={t`Cerca un modello o un provider`}
               value={query}
               onChange={(e) => { setQuery(e.target.value); setHi(0) }}
@@ -261,7 +261,7 @@ export function ModelSelect({
               <button
                 role="option"
                 aria-selected={!value || !value.model}
-                className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-accent"
+                className="flex w-full cursor-pointer items-center gap-2 rounded-control px-2 py-2 text-left text-body hover:bg-accent"
                 onClick={() => { onChange(null); setOpen(false) }}
               >
                 <span className="min-w-0 flex-1 truncate">
@@ -274,7 +274,7 @@ export function ModelSelect({
               <button
                 role="option"
                 aria-selected={!value}
-                className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-accent"
+                className="flex w-full cursor-pointer items-center gap-2 rounded-control px-2 py-2 text-left text-body hover:bg-accent"
                 onClick={() => { onChange(null); setOpen(false) }}
               >
                 <span className="min-w-0 flex-1 truncate">{t`Nessuno`}</span>
@@ -289,11 +289,11 @@ export function ModelSelect({
               if (st?.state === 'error' && groupEntries.length === 0) {
                 return (
                   <div key={p.id} className="px-2 py-2">
-                    <p className="text-[13px] font-medium">{p.name}</p>
-                    <p className="mt-0.5 flex items-center gap-2 text-[13px]">
+                    <p className="text-small font-medium">{p.name}</p>
+                    <p className="mt-0.5 flex items-center gap-2 text-small">
                       <span className="text-destructive">{t`Non risponde`}</span>
                       <button
-                        className="rounded-full bg-muted px-2.5 py-1 text-xs transition hover:bg-accent"
+                        className="rounded-full bg-muted px-3 py-1 text-caption transition hover:bg-accent"
                         onClick={() => { setModelsBy((prev) => ({ ...prev, [p.id]: { state: 'loading' } })); void api.listModels(p.id).then((ms) => setModelsBy((prev) => ({ ...prev, [p.id]: { state: 'ok', models: ms } }))).catch(() => setModelsBy((prev) => ({ ...prev, [p.id]: { state: 'error' } }))) }}
                       >
                         <Trans>Riprova</Trans>
@@ -304,7 +304,7 @@ export function ModelSelect({
               }
               if (st?.state === 'loading' && groupEntries.length === 0) {
                 return (
-                  <div key={p.id} className="px-2 py-2 text-[13px]">
+                  <div key={p.id} className="px-2 py-2 text-small">
                     <span className="font-medium">{p.name}</span>{' '}
                     <span className="text-muted-foreground">…</span>
                   </div>
@@ -313,7 +313,7 @@ export function ModelSelect({
               if (groupEntries.length === 0) return null
               return (
                 <div key={p.id}>
-                  <p className="px-2 pb-0.5 pt-2 text-[13px] font-medium text-muted-foreground">{p.name}</p>
+                  <p className="px-2 pb-0.5 pt-2 text-small font-medium text-muted-foreground">{p.name}</p>
                   {groupEntries.map((e) => {
                     // l'indice globale dentro `filtered` per aria-activedescendant
                     const abs = filtered.indexOf(e)
@@ -324,7 +324,7 @@ export function ModelSelect({
                         id={`${listId}-${abs}`}
                         role="option"
                         aria-selected={selected}
-                        className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm ${abs === hi ? 'bg-accent' : ''} ${selected ? 'font-medium' : ''}`}
+                        className={`flex w-full cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-left text-body ${abs === hi ? 'bg-accent' : ''} ${selected ? 'font-medium' : ''}`}
                         onMouseEnter={() => setHi(abs)}
                         onMouseDown={(ev) => { ev.preventDefault(); commit(e) }}
                         onClick={() => commit(e)}
@@ -332,10 +332,10 @@ export function ModelSelect({
                         <span className="min-w-0 flex-1 truncate">{e.model.label ?? e.model.id}</span>
                         {/* I1.2: le capacità come icone col title */}
                         {e.model.vision === true && (
-                          <span title={t`vede (immagini)`} className="shrink-0 text-muted-foreground"><Eye className="size-3.5" /></span>
+                          <span title={t`vede (immagini)`} className="shrink-0 text-muted-foreground"><Eye className="size-4" /></span>
                         )}
                         {e.model.thinkingLevels.length > 0 && (
-                          <span title={t`ragiona`} className="shrink-0 text-muted-foreground"><Lightbulb className="size-3.5" /></span>
+                          <span title={t`ragiona`} className="shrink-0 text-muted-foreground"><Lightbulb className="size-4" /></span>
                         )}
                         {selected && <Check className="size-4 shrink-0" />}
                       </button>
@@ -345,18 +345,18 @@ export function ModelSelect({
               )
             })}
             {filtered.length === 0 && active.length > 0 && (
-              <p className="px-2 py-2 text-[13px] text-muted-foreground"><Trans>Nessun modello trovato.</Trans></p>
+              <p className="px-2 py-2 text-small text-muted-foreground"><Trans>Nessun modello trovato.</Trans></p>
             )}
 
             {/* separatore, poi i provider da collegare (I1.2) */}
             {toConnect.length > 0 && (
               <div className="mt-1 border-t border-border/40 pt-1">
                 {toConnect.map(({ kind }) => (
-                  <div key={kind} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
+                  <div key={kind} className="flex items-center gap-2 rounded-control px-2 py-1.5">
                     <ProviderMark kind={kind} name={KIND_LABELS[kind] ?? kind} size="sm" />
-                    <span className="min-w-0 flex-1 truncate text-sm">{KIND_LABELS[kind] ?? kind}</span>
+                    <span className="min-w-0 flex-1 truncate text-body">{KIND_LABELS[kind] ?? kind}</span>
                     <button
-                      className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs transition hover:bg-accent"
+                      className="shrink-0 rounded-full bg-muted px-3 py-1 text-caption transition hover:bg-accent"
                       onClick={() => setConnectKind(kind)}
                     >
                       <Trans>Collega</Trans>

@@ -36,7 +36,7 @@ export const FAMILY_NAMES: Record<BotFamily, MessageDescriptor> = {
   pixel: msg`Pixel`
 }
 
-const btn = 'rounded-xl px-4 py-2 text-sm transition hover:opacity-90'
+const btn = 'rounded-surface px-4 py-2 text-body transition hover:opacity-90'
 
 /** La griglia famiglia+colore condivisa dai due dialoghi. */
 function AvatarPicker({
@@ -59,7 +59,7 @@ function AvatarPicker({
             key={f}
             onClick={() => onFamily(f)}
             aria-label={i18n.t(FAMILY_NAMES[f])}
-            className={`grid place-items-center gap-1 rounded-2xl border p-2 text-[11px] transition ${
+            className={`grid place-items-center gap-1 rounded-surface border p-2 text-caption transition ${
               family === f ? 'border-foreground' : 'border-border hover:border-muted-foreground'
             }`}
           >
@@ -155,7 +155,7 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[92vh] max-w-xl overflow-y-auto scroll-thin">
         <DialogHeader>
-          <DialogTitle className="font-display text-2xl"><Trans>Nuovo</Trans></DialogTitle>
+          <DialogTitle className="font-display text-page"><Trans>Nuovo</Trans></DialogTitle>
         </DialogHeader>
 
         {/* la mascotte grande sospesa: niente riquadro, solo l'ombra ovale */}
@@ -169,7 +169,7 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
           {BOT_FAMILIES.map((f) => (
             <button
               key={f}
-              className={`h-8 rounded-full px-3 text-[13px] transition outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background ${family === f ? 'bg-foreground text-background' : 'bg-muted text-foreground hover:bg-accent'}`}
+              className={`h-8 rounded-full px-3 text-small transition outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background ${family === f ? 'bg-foreground text-background' : 'bg-muted text-foreground hover:bg-accent'}`}
               onClick={() => setFamily(f)}
             >
               {i18n.t(FAMILY_NAMES[f])}
@@ -188,24 +188,24 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
           ))}
         </div>
         <div className="space-y-1">
-          <label htmlFor="sandbot-new-bot-name" className="block text-[13px] text-muted-foreground"><Trans>Nome</Trans></label>
+          <label htmlFor="sandbot-new-bot-name" className="block text-small text-muted-foreground"><Trans>Nome</Trans></label>
           <input
             id="sandbot-new-bot-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t`Dai un nome al tuo bot`}
-            className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base outline-none placeholder:text-muted-foreground"
+            className="w-full rounded-surface border border-border bg-background px-3 py-2 text-reading outline-none placeholder:text-muted-foreground"
           />
-          <p className="pt-0.5 text-xs text-muted-foreground">
+          <p className="pt-0.5 text-caption text-muted-foreground">
             <Trans>Appena creato si presenta lui: ti chiede a cosa serve e impara dal tuo lavoro.</Trans>
           </p>
         </div>
 
-        {err && <p className="text-xs text-destructive">{err}</p>}
+        {err && <p className="text-caption text-destructive">{err}</p>}
         <DialogFooter className="items-center sm:justify-between">
           <button
             type="button"
-            className="text-xs text-muted-foreground underline-offset-2 transition hover:underline"
+            className="text-caption text-muted-foreground underline-offset-2 transition hover:underline"
             onClick={() => setShowTemplates((v) => !v)}
           >
             <Trans>Parti da un modello</Trans>
@@ -234,13 +234,13 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
                   key={tpl.id}
                   disabled={busy}
                   title={`${pickLang(tpl.name, uiLang())} — ${pickLang(tpl.description, uiLang())}`}
-                  className={`flex w-full items-center gap-2 rounded-[14px] px-3 py-2 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-foreground ${busy ? 'opacity-40' : 'bg-muted/60 hover:bg-muted'}`}
+                  className={`flex w-full items-center gap-2 rounded-surface px-3 py-2 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-foreground ${busy ? 'opacity-40' : 'bg-muted/60 hover:bg-muted'}`}
                   onClick={() => void createFromTemplate(tpl)}
                 >
-                  <span className="shrink-0 text-base">{tpl.avatar}</span>
+                  <span className="shrink-0 text-reading">{tpl.avatar}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold">{pickLang(tpl.name, uiLang())}</span>
-                    <span className="block truncate text-[13px] text-muted-foreground">{pickLang(tpl.description, uiLang())}</span>
+                    <span className="block truncate text-body font-semibold">{pickLang(tpl.name, uiLang())}</span>
+                    <span className="block truncate text-small text-muted-foreground">{pickLang(tpl.description, uiLang())}</span>
                   </span>
                   <Check className="size-4 shrink-0 text-foreground opacity-0" aria-hidden="true" />
                 </button>
@@ -248,7 +248,7 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
             </div>
             {templates.length > 4 && !showAllTemplates && (
               <button
-                className="mx-auto block rounded-full bg-muted px-3 py-1 text-xs transition hover:bg-accent"
+                className="mx-auto block rounded-full bg-muted px-3 py-1 text-caption transition hover:bg-accent"
                 onClick={() => setShowAllTemplates(true)}
               >
                 <Trans>Altri {templates.length - 4} ▾</Trans>
@@ -271,9 +271,9 @@ export function ChangeAvatarDialog({ agentId, current, onClose }: { agentId: str
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle className="font-display text-2xl"><Trans>Cambia aspetto</Trans></DialogTitle>
+          <DialogTitle className="font-display text-page"><Trans>Cambia aspetto</Trans></DialogTitle>
         </DialogHeader>
-        <div className="grid place-items-center rounded-3xl bg-muted p-5">
+        <div className="grid place-items-center rounded-surface bg-muted p-5">
           <Bot family={family} color={color} state="happy" size={130} />
         </div>
         <AvatarPicker family={family} color={color} onFamily={setFamily} onColor={setColor} />

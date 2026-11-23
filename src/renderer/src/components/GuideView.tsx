@@ -78,14 +78,15 @@ function SceneColumn({ phrase, bubbleKey, mood, avatar, displayName, width, masc
     />
   )
   const bubble = (
-    <div key={bubbleKey} className="guide-bubble-pop relative max-w-[420px] rounded-[22px] bg-card px-[22px] py-[18px] text-[19px] leading-[1.4] shadow-soft">
+    <div key={bubbleKey} className="guide-bubble-pop relative max-w-md rounded-surface bg-card px-6 py-4 text-title shadow-soft">
       <span className="font-display font-medium">{phrase}</span>
       {/* la punta della nuvoletta, verso la mascotte: in basso quando la
           nuvoletta sta SOPRA (affiancata), a sinistra quando sta a DESTRA
           della mascotte (layout impilato, GC4) */}
       <span
         aria-hidden
-        className={`absolute h-[18px] w-[18px] rotate-45 rounded-[3px] bg-card ${stacked ? 'left-[-9px] top-1/2 -translate-y-1/2' : 'bottom-[-9px] left-1/2 -translate-x-1/2'}`}
+        // la punta: un quadrato da 16 ruotato (fase design: le misure dalla scala — prima 18 con uno sporgimento di 9, scritti a mano)
+          className={`absolute size-4 rotate-45 rounded-control bg-card ${stacked ? '-left-2 top-1/2 -translate-y-1/2' : '-bottom-2 left-1/2 -translate-x-1/2'}`}
       />
     </div>
   )
@@ -96,7 +97,7 @@ function SceneColumn({ phrase, bubbleKey, mood, avatar, displayName, width, masc
         <div data-col-head="guida" className="drag-region absolute inset-x-0 top-0 h-col-head" style={{ paddingLeft: SIDEBAR_HEAD_PAD }} aria-hidden />
         <div className="flex flex-col items-center">{mascot}{shadow}</div>
         <div className="flex min-w-0 flex-1 justify-start pb-8">
-          <div className="max-w-[420px] text-[17px] [&_span]:text-[17px]">{bubble}</div>
+          <div className="max-w-md text-reading [&_span]:text-reading">{bubble}</div>
         </div>
         <p className="sr-only">{displayName}</p>
       </div>
@@ -107,9 +108,9 @@ function SceneColumn({ phrase, bubbleKey, mood, avatar, displayName, width, masc
       {/* spazio ai semafori di macOS: fascia di trascinamento — la riga di 52 di OGNI colonna (DS3) */}
       <div data-col-head="guida" className="drag-region absolute inset-x-0 top-0 h-col-head" style={{ paddingLeft: SIDEBAR_HEAD_PAD }} aria-hidden />
       <div className="absolute left-16 right-16 top-[62px] flex justify-center">{bubble}</div>
-      <div className="mt-[70px]">{mascot}</div>
+      <div className="mt-16">{mascot}</div>
       {shadow}
-      <p className="mt-[18px] font-display text-[22px] font-semibold">{displayName}</p>
+      <p className="mt-4 font-display text-title font-semibold">{displayName}</p>
     </div>
   )
 }
@@ -131,7 +132,7 @@ function StepDots({ current, reachedEnd, withComputer }: { current: GuideUiStep;
   }
   const idx = UI_STEPS.indexOf(current)
   return (
-    <div className="flex items-center gap-2.5" data-testid="guide-rail" aria-label={t`Avanzamento`}>
+    <div className="flex items-center gap-3" data-testid="guide-rail" aria-label={t`Avanzamento`}>
       {visible.map((s, i) => {
         const cur = i === Math.min(idx, 2) && !reachedEnd
         const done = i < idx || reachedEnd
@@ -139,9 +140,9 @@ function StepDots({ current, reachedEnd, withComputer }: { current: GuideUiStep;
           <span key={s} className="flex items-center gap-2">
             <span
               aria-hidden
-              className={`h-2 rounded-full transition-all ${cur ? 'w-[22px]' : 'w-2'} ${cur || done ? 'bg-foreground' : 'bg-border'}`}
+              className={`h-2 rounded-full transition-all ${cur ? 'w-6' : 'w-2'} ${cur || done ? 'bg-foreground' : 'bg-border'}`}
             />
-            <span className={`text-[13px] ${cur ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground'}`}>
+            <span className={`text-small ${cur ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground'}`}>
               {labels[s]}
             </span>
           </span>
@@ -154,7 +155,7 @@ function StepDots({ current, reachedEnd, withComputer }: { current: GuideUiStep;
 /** Il guscio di un passo: entra con la piccola animazione della scena. */
 function StepPanel({ stepKey, children, testId }: { stepKey: string; children: React.ReactNode; testId: string }) {
   return (
-    <div key={stepKey} className="guide-stepin flex w-full max-w-xl flex-col gap-7 text-left" data-testid={testId}>
+    <div key={stepKey} className="guide-stepin flex w-full max-w-xl flex-col gap-8 text-left" data-testid={testId}>
       {children}
     </div>
   )
@@ -189,17 +190,17 @@ function WelcomeStep({ name, onName, family, color, onPickFamily, onPickColor, o
   }
   return (
     <StepPanel stepKey="welcome" testId="guide-step-welcome">
-      <div className="flex flex-col gap-3.5">
-        <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Diamo una faccia al tuo bot`}</h1>
-        <p className="m-0 text-base leading-[1.6] text-muted-foreground">
+      <div className="flex flex-col gap-4">
+        <h1 className="m-0 font-display text-page font-semibold">{t`Diamo una faccia al tuo bot`}</h1>
+        <p className="m-0 text-reading text-muted-foreground">
           {t`È il tuo punto di contatto in Homun: ti risponde, lavora per te e coordina gli altri bot. Puoi cambiarlo quando vuoi.`}
         </p>
       </div>
-      <label className="flex flex-col gap-2 text-sm font-semibold">
+      <label className="flex flex-col gap-2 text-body font-semibold">
         {t`Come si chiama?`}
         <input
           data-testid="guide-name-input"
-          className="rounded-[14px] bg-card px-4 py-3.5 text-lg font-medium text-foreground outline-none"
+          className="rounded-surface bg-card px-4 py-3 text-title font-medium text-foreground outline-none"
           placeholder={t`Bot`}
           maxLength={GUIDE_NAME_MAX}
           value={name}
@@ -207,9 +208,9 @@ function WelcomeStep({ name, onName, family, color, onPickFamily, onPickColor, o
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onConfirm() } }}
         />
       </label>
-      <div className="flex flex-col gap-3.5">
-        <span className="text-sm font-semibold">{t`Che aspetto ha?`}</span>
-        <div className="grid grid-cols-5 gap-3.5">
+      <div className="flex flex-col gap-4">
+        <span className="text-body font-semibold">{t`Che aspetto ha?`}</span>
+        <div className="grid grid-cols-5 gap-4">
           {BOT_FAMILIES.map((f) => (
             <button
               key={f}
@@ -217,15 +218,15 @@ function WelcomeStep({ name, onName, family, color, onPickFamily, onPickColor, o
               data-testid={`guide-family-${f}`}
               aria-pressed={family === f}
               aria-label={familyLabels[f]}
-              className={`flex min-h-[44px] flex-col items-center gap-1.5 rounded-2xl px-1.5 pb-2.5 pt-3 transition ${family === f ? 'bg-card shadow-[0_0_0_2px_var(--foreground)]' : 'hover:bg-accent/60'}`}
+              className={`flex min-h-[44px] flex-col items-center gap-1.5 rounded-surface px-1.5 pb-2 pt-3 transition ${family === f ? 'bg-card shadow-[0_0_0_2px_var(--foreground)]' : 'hover:bg-accent/60'}`}
               onClick={() => onPickFamily(f)}
             >
               <Bot family={f} color={color} state="idle" size={62} track={false} />
-              <span className="text-xs">{familyLabels[f]}</span>
+              <span className="text-caption">{familyLabels[f]}</span>
             </button>
           ))}
         </div>
-        <div className="mt-2.5 flex gap-1.5">
+        <div className="mt-2 flex gap-1.5">
           {BOT_COLORS.map((c) => (
             <button
               key={c}
@@ -287,9 +288,9 @@ function ApprovalsStep({ modelReady, chosen, onChoose }: {
   const choices = approvalsChoices(modelReady)
   return (
     <StepPanel stepKey="approvals" testId="guide-step-approvals">
-      <div className="flex flex-col gap-3.5">
-        <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Quanto posso fare da solo?`}</h1>
-        <p className="m-0 text-base leading-[1.6] text-muted-foreground">
+      <div className="flex flex-col gap-4">
+        <h1 className="m-0 font-display text-page font-semibold">{t`Quanto posso fare da solo?`}</h1>
+        <p className="m-0 text-reading text-muted-foreground">
           {t`Lo cambi quando vuoi da Impostazioni › Approvazioni.`}
         </p>
       </div>
@@ -303,17 +304,17 @@ function ApprovalsStep({ modelReady, chosen, onChoose }: {
               data-testid={`guide-approvals-${c.id}`}
               aria-pressed={chosen === c.id}
               disabled={!enabled}
-              className={`flex min-h-[44px] flex-col gap-1.5 rounded-[20px] px-6 py-[22px] text-left transition ${chosen === c.id ? 'bg-card shadow-[0_0_0_2px_var(--foreground)]' : 'bg-card/55 hover:bg-card dark:bg-card'} ${enabled ? '' : 'cursor-not-allowed opacity-55'}`}
+              className={`flex min-h-[44px] flex-col gap-1.5 rounded-surface px-6 py-5 text-left transition ${chosen === c.id ? 'bg-card shadow-[0_0_0_2px_var(--foreground)]' : 'bg-card/55 hover:bg-card dark:bg-card'} ${enabled ? '' : 'cursor-not-allowed opacity-55'}`}
               onClick={() => { if (enabled) onChoose(c.id) }}
             >
-              <span className="font-display text-xl font-semibold">{c.title}</span>
-              <span className="text-sm leading-[1.45] text-muted-foreground">{c.desc}</span>
-              <span className="mt-1.5 flex flex-col gap-1 text-[13.5px] leading-[1.4]">
+              <span className="font-display text-title font-semibold">{c.title}</span>
+              <span className="text-body text-muted-foreground">{c.desc}</span>
+              <span className="mt-1.5 flex flex-col gap-1 text-small">
                 <span><b className="text-guide-good">{t`Da solo`}</b> · {c.alone}</span>
                 <span><b>{t`Ti chiedo`}</b> · {c.ask}</span>
               </span>
               {!enabled && (
-                <span className="text-[12.5px] text-destructive">{t`Serve un modello: torna indietro e collegane uno`}</span>
+                <span className="text-small text-destructive">{t`Serve un modello: torna indietro e collegane uno`}</span>
               )}
             </button>
           )
@@ -370,19 +371,19 @@ function ReadyStep({ modelReady, chosen, computer }: { modelReady: boolean; chos
   ]
   return (
     <StepPanel stepKey="ready" testId="guide-step-ready">
-      <h1 className="m-0 font-display text-[44px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Tutto pronto.`}</h1>
-      <div className="flex flex-col gap-2.5">
+      <h1 className="m-0 font-display text-page font-semibold">{t`Tutto pronto.`}</h1>
+      <div className="flex flex-col gap-3">
         {rows.map((r) => (
-          <div key={r.test} data-testid={r.test} className="flex items-center gap-3 rounded-[14px] bg-card px-4 py-3.5">
+          <div key={r.test} data-testid={r.test} className="flex items-center gap-3 rounded-surface bg-card px-4 py-3">
             <span
               aria-hidden
-              className={`grid size-[30px] place-items-center rounded-full text-sm font-bold ${r.ok ? 'bg-chart-2/15 text-chart-2' : 'bg-muted text-muted-foreground'}`}
+              className={`grid size-[30px] place-items-center rounded-full text-body font-semibold ${r.ok ? 'bg-chart-2/15 text-chart-2' : 'bg-muted text-muted-foreground'}`}
             >
               {r.ok ? '✓' : '–'}
             </span>
             <span className="flex flex-col">
-              <span className="text-[13px] text-muted-foreground">{r.k}</span>
-              <span className="max-w-full truncate text-[15.5px] font-semibold">{r.v}</span>
+              <span className="text-small text-muted-foreground">{r.k}</span>
+              <span className="max-w-full truncate text-body font-semibold">{r.v}</span>
             </span>
           </div>
         ))}
@@ -640,10 +641,10 @@ export function GuideView() {
         {/* in alto: l'avanzamento a puntini e la lingua */}
         <div className="flex h-8 shrink-0 items-center justify-between gap-3">
           <StepDots current={uiStep} reachedEnd={uiStep === 'ready'} withComputer={sequence.includes('computer')} />
-          <label className="flex shrink-0 items-center gap-2 text-[13px] text-muted-foreground">
+          <label className="flex shrink-0 items-center gap-2 text-small text-muted-foreground">
             <Trans>Lingua</Trans>
             <select
-              className="min-h-[44px] rounded-full bg-card px-3 py-1.5 text-[13px] text-foreground outline-none"
+              className="min-h-[44px] rounded-full bg-card px-3 py-1.5 text-small text-foreground outline-none"
               aria-label={t`Lingua`}
               data-testid="guide-language-select"
               value={uiLanguage}
@@ -691,8 +692,8 @@ export function GuideView() {
           {daemonStep === 'computer' && <GuideComputerStep />}
           {daemonStep === 'memory' && (
             <StepPanel stepKey="memory" testId="guide-step-memory">
-              <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Prossimamente`}</h1>
-              <p className="m-0 max-w-md text-base leading-[1.6] text-muted-foreground">
+              <h1 className="m-0 font-display text-page font-semibold">{t`Prossimamente`}</h1>
+              <p className="m-0 max-w-md text-reading text-muted-foreground">
                 {t`Questo passo arriva con un aggiornamento prossimo: per ora puoi proseguire.`}
               </p>
             </StepPanel>
@@ -704,7 +705,7 @@ export function GuideView() {
           {canBack ? (
             <button
               type="button"
-              className="rounded-lg px-1.5 py-3 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+              className="rounded-control px-1.5 py-3 text-body font-semibold text-muted-foreground transition hover:text-foreground"
               onClick={onBack}
               data-testid="guide-back"
             >
@@ -718,7 +719,7 @@ export function GuideView() {
               <button
                 type="button"
                 data-testid="guide-skip"
-                className="rounded-lg px-3.5 py-3 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+                className="rounded-control px-4 py-3 text-body font-semibold text-muted-foreground transition hover:text-foreground"
                 onClick={onSkip}
               >
                 <Trans>Salta per ora</Trans>
@@ -729,7 +730,7 @@ export function GuideView() {
               ref={continueRef}
               data-testid="guide-continue"
               disabled={nextDisabled}
-              className="rounded-full bg-foreground px-[30px] py-[14px] text-base font-semibold text-background transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
+              className="rounded-full bg-foreground px-8 py-3 text-reading font-semibold text-background transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
               onClick={onContinue}
             >
               {nextLabel}

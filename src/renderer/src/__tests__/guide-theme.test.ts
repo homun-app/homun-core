@@ -113,7 +113,8 @@ describe('G7: bersagli ≥ 44 px e mai informazione solo dal colore', () => {
     // le piastrelle delle facce e le schede dei permessi
     expect(guideSrc).toContain('min-h-[44px]')
     // la select della lingua, i bottoni di ritorno, le pillole dei modelli
-    expect(guideSrc).toMatch(/guide-language-select[\s\S]{0,300}min-h-\[44px\]|h-11/)
+    // (la misura sta nel className, PRIMA del testid: la vecchia espressione passava per l'«h-11» della fascia di trascinamento, che con DS3 è la riga di 52)
+    expect(guideSrc).toMatch(/min-h-\[44px\][^>]{0,300}data-testid="guide-language-select"/)
     expect(modelSrc).toContain('min-h-[44px]')
     // GC2: le pillole dei modelli condividono pillCls (min-h-[44px] dentro)
     expect(modelSrc).toMatch(/const pillCls = 'max-w-full min-h-\[44px\]/)

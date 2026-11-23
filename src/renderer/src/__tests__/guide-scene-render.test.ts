@@ -92,11 +92,12 @@ describe('G2: la scena della guida — mascotte Bot, nuvoletta, niente emoji', (
     // affiancata (≥ 900): la nuvoletta sta SOPRA la mascotte, punta in giù
     const wide = parseHtml(renderGuide(status({ step: 'welcome', done: [], skipped: [], startedAt: 1 })))
     const wideTail = findAll(wide, (n) => (n.attrs['class'] ?? '').includes('rotate-45'))[0]!
-    expect(wideTail.attrs['class']).toContain('bottom-[-9px]')
+    // fase design: la punta è un quadrato da 16 (size-4) che sporge di 8 (prima 18 e 9, scritti a mano)
+    expect(wideTail.attrs['class']).toContain('-bottom-2')
     // impilata (< 900): la nuvoletta sta a DESTRA della mascotte, punta a sinistra
     const stacked = parseHtml(renderGuide(status({ step: 'welcome', done: [], skipped: [], startedAt: 1 }), 820))
     const stackedTail = findAll(stacked, (n) => (n.attrs['class'] ?? '').includes('rotate-45'))[0]!
-    expect(stackedTail.attrs['class']).toContain('left-[-9px]')
+    expect(stackedTail.attrs['class']).toContain('-left-2')
     expect(stackedTail.attrs['class']).toContain('top-1/2')
   })
 

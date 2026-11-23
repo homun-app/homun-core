@@ -47,16 +47,16 @@ export function GuideComputerStep() {
   const gb = planKnown ? Math.ceil(boxSetupPlanBytes(plan) / 1e9) : 0
 
   return (
-    <div key="computer" className="guide-stepin flex w-full max-w-xl flex-col gap-7 text-left" data-testid="guide-step-computer">
-      <div className="flex flex-col gap-3.5">
-        <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{i18n.t(msg`Il computer del bot`)}</h1>
-        <p className="m-0 text-base leading-[1.6] text-muted-foreground">
+    <div key="computer" className="guide-stepin flex w-full max-w-xl flex-col gap-8 text-left" data-testid="guide-step-computer">
+      <div className="flex flex-col gap-4">
+        <h1 className="m-0 font-display text-page font-semibold">{i18n.t(msg`Il computer del bot`)}</h1>
+        <p className="m-0 text-reading text-muted-foreground">
           {i18n.t(msg`Un computer tutto suo, dentro il tuo Mac: lavora lì senza toccare i tuoi file, e tu decidi cosa può vedere.`)}
         </p>
       </div>
 
       {!running && phase !== 'ready' && (
-        <div className="flex flex-col gap-3.5 rounded-[20px] bg-card/55 p-[18px]">
+        <div className="flex flex-col gap-4 rounded-surface bg-card/55 p-5">
           {/* OBR4: con l'errore il bottone NON c'è — «Prepara il computer» e
               «Riprova» farebbero la stessa cosa: resta solo «Riprova», nel
               riquadro dell'errore qui sotto; il consenso resta, in testo */}
@@ -64,7 +64,7 @@ export function GuideComputerStep() {
             <button
               type="button"
               data-testid="guide-computer-prepare"
-              className="min-h-[44px] self-start rounded-full bg-foreground px-[26px] py-[13px] text-base font-semibold text-background transition hover:opacity-90"
+              className="min-h-[44px] self-start rounded-full bg-foreground px-6 py-3 text-reading font-semibold text-background transition hover:opacity-90"
               onClick={() => { void boxSetupStart() }}
             >
               {i18n.t(msg`Prepara il computer`)}
@@ -72,7 +72,7 @@ export function GuideComputerStep() {
           )}
           {/* il consenso: SOLO i passi del piano, IN PAROLE (il piano è della
               partenza: non può promettere quello che non farà) */}
-          <ul className="m-0 flex list-none flex-col gap-1.5 pl-0 text-[13.5px] leading-[1.5] text-muted-foreground" data-testid="guide-computer-consent">
+          <ul className="m-0 flex list-none flex-col gap-1.5 pl-0 text-small text-muted-foreground" data-testid="guide-computer-consent">
             {inPlan('download') && (
               <li>{i18n.t(msg`scarico da GitHub lo strumento container di Apple (170 MB, firmato da Apple)`)}</li>
             )}
@@ -101,12 +101,12 @@ export function GuideComputerStep() {
       )}
 
       {phase === 'error' && state?.error && (
-        <div className="flex flex-col gap-3 rounded-[14px] bg-destructive/10 p-4" data-testid="guide-computer-error">
-          <p className="m-0 text-sm text-destructive">{state.error.message}</p>
+        <div className="flex flex-col gap-3 rounded-surface bg-destructive/10 p-4" data-testid="guide-computer-error">
+          <p className="m-0 text-body text-destructive">{state.error.message}</p>
           <button
             type="button"
             data-testid="guide-computer-retry"
-            className="min-h-[44px] self-start rounded-full bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:opacity-90"
+            className="min-h-[44px] self-start rounded-full bg-foreground px-5 py-2 text-body font-semibold text-background transition hover:opacity-90"
             onClick={() => { void boxSetupRetry() }}
           >
             {i18n.t(msg`Riprova`)}
@@ -118,7 +118,7 @@ export function GuideComputerStep() {
         <button
           type="button"
           data-testid="guide-computer-retry"
-          className="min-h-[44px] self-start rounded-full bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:opacity-90"
+          className="min-h-[44px] self-start rounded-full bg-foreground px-5 py-2 text-body font-semibold text-background transition hover:opacity-90"
           onClick={() => { void boxSetupRetry() }}
         >
           <Trans>Riprova</Trans>

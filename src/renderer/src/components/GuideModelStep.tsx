@@ -59,23 +59,23 @@ function ProviderCard({ id, label, desc, badge, logoKind, icon, onPick }: {
       type="button"
       data-testid={`guide-provider-${id}`}
       onClick={onPick}
-      className="flex min-h-[124px] flex-col items-start gap-2.5 rounded-[18px] bg-card/55 p-4 text-left transition hover:-translate-y-px hover:bg-card dark:bg-card/80"
+      className="flex min-h-[124px] flex-col items-start gap-3 rounded-surface bg-card/55 p-4 text-left transition hover:-translate-y-px hover:bg-card dark:bg-card/80"
     >
       <span className="flex w-full items-center justify-between gap-2">
         {icon ? (
           // la stessa piastrella dei loghi, con l'icona lucide (mai una lettera)
-          <span className="grid size-11 shrink-0 place-items-center rounded-[12px] bg-card text-foreground" aria-hidden>
+          <span className="grid size-11 shrink-0 place-items-center rounded-surface bg-card text-foreground" aria-hidden>
             {icon}
           </span>
         ) : (
           <ProviderMark kind={logoKind as ProviderKind} name={label} />
         )}
         {badge && (
-          <span className="rounded-full bg-guide-good/15 px-2 py-0.5 text-[11px] font-semibold text-guide-good">{badge}</span>
+          <span className="rounded-full bg-guide-good/15 px-2 py-0.5 text-caption font-semibold text-guide-good">{badge}</span>
         )}
       </span>
-      <span className="text-[15px] font-semibold leading-tight">{label}</span>
-      <span className="text-[12.5px] leading-[1.35] text-muted-foreground">{desc}</span>
+      <span className="text-body font-semibold">{label}</span>
+      <span className="text-small text-muted-foreground">{desc}</span>
     </button>
   )
 }
@@ -97,7 +97,7 @@ export function GuideModelPills({ kind, models, selected, onSelect, pickerLabel 
   pickerLabel: string
 }) {
   const pills = guideModelPills(kind, models, selected)
-  const pillCls = 'max-w-full min-h-[44px] truncate rounded-full px-3.5 py-2 text-[13.5px] font-semibold transition'
+  const pillCls = 'max-w-full min-h-[44px] truncate rounded-full px-4 py-2 text-small font-semibold transition'
   return (
     <>
       {pills.map((m) => (
@@ -332,54 +332,54 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
     return (
       <div key={panel} className="guide-stepin flex w-full max-w-xl flex-col gap-5 text-left" data-testid="guide-step-model">
         <div>
-          <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Collega un modello`}</h1>
-          <p className="m-0 mt-3.5 text-base leading-[1.6] text-muted-foreground">
+          <h1 className="m-0 font-display text-page font-semibold">{t`Collega un modello`}</h1>
+          <p className="m-0 mt-3 text-reading text-muted-foreground">
             {t`È quello che fa pensare il tuo bot. Si prova subito, prima di salvare.`}
           </p>
         </div>
         <button
           type="button"
           data-testid="guide-back-providers"
-          className="min-h-[44px] self-start rounded-lg px-1.5 py-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+          className="min-h-[44px] self-start rounded-control px-1.5 py-2 text-body font-semibold text-muted-foreground transition hover:text-foreground"
           onClick={() => { setPanel(kind === 'xai' || kind === 'mistral' || kind === 'deepseek' || kind === 'groq' || kind === 'zai' || kind === 'openai-compatible' ? 'others' : 'grid'); setup.reset(); setSelectedModel(null) }}
         >
           ← <Trans>Altri provider</Trans>
         </button>
-        <div className="flex flex-col gap-3 rounded-[18px] bg-card p-[18px]">
+        <div className="flex flex-col gap-3 rounded-surface bg-card p-5">
           {needsAddress && (
             <>
               {/* U6: il Nome — precompilato con l'host dell'indirizzo, modificabile */}
-              <label className="flex flex-col gap-2 text-sm font-semibold">
+              <label className="flex flex-col gap-2 text-body font-semibold">
                 {t`Il nome del servizio`}
                 <input
                   data-testid="guide-name-input"
-                  className="rounded-[12px] bg-background px-3.5 py-3 text-base font-medium text-foreground outline-none"
+                  className="rounded-surface bg-background px-4 py-3 text-reading font-medium text-foreground outline-none"
                   placeholder={setup.suggestedName || t`es. Il mio gateway`}
                   value={setup.name}
                   onChange={(e) => setup.setName(e.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-2 text-sm font-semibold">
+              <label className="flex flex-col gap-2 text-body font-semibold">
                 {t`L'indirizzo del servizio`}
                 <input
                   data-testid="guide-baseurl-input"
-                  className="rounded-[12px] bg-background px-3.5 py-3 text-base font-medium text-foreground outline-none"
+                  className="rounded-surface bg-background px-4 py-3 text-reading font-medium text-foreground outline-none"
                   placeholder={t`Indirizzo (es. http://127.0.0.1:8000/v1)`}
                   value={setup.baseUrl}
                   onChange={(e) => setup.setBaseUrl(e.target.value)}
                 />
                 {/* U6: l'URL che la prova chiama DAVVERO — si vede se manca /v1, niente correzioni silenziose */}
-                <span className="text-xs font-normal text-muted-foreground" data-testid="guide-probe-url">
+                <span className="text-caption font-normal text-muted-foreground" data-testid="guide-probe-url">
                   <Trans>La prova chiama {openAiCompatBase({ baseUrl: setup.baseUrl || 'http://…' }) + '/models'}</Trans>
                 </span>
               </label>
             </>
           )}
-          <label className="flex flex-col gap-2 text-sm font-semibold">
+          <label className="flex flex-col gap-2 text-body font-semibold">
             <span className="flex items-center justify-between gap-3">
               {needsAddress ? t`La chiave (facoltativa)` : t`La chiave di ${providerLabel}`}
               {keyUrl && (
-                <a href={keyUrl} target="_blank" rel="noreferrer" className="text-[13px] font-medium text-primary hover:underline">
+                <a href={keyUrl} target="_blank" rel="noreferrer" className="text-small font-medium text-primary hover:underline">
                   <Trans>Dove la trovo?</Trans>
                 </a>
               )}
@@ -389,7 +389,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
                 data-testid="guide-key-input"
                 type="password"
                 autoComplete="off"
-                className="min-w-0 flex-1 rounded-[12px] bg-background px-3.5 py-3 text-base font-medium text-foreground outline-none"
+                className="min-w-0 flex-1 rounded-surface bg-background px-4 py-3 text-reading font-medium text-foreground outline-none"
                 placeholder={needsAddress ? t`lasciala vuota se il server non la chiede` : t`Incolla qui la chiave`}
                 value={setup.apiKey}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setup.probeNow() } }}
@@ -398,7 +398,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
               <button
                 type="button"
                 data-testid="guide-key-probe"
-                className="shrink-0 rounded-[12px] bg-foreground px-[18px] text-sm font-semibold text-background transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
+                className="shrink-0 rounded-surface bg-foreground px-5 text-body font-semibold text-background transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
                 disabled={probeButtonDisabled({ probing: setup.probe.probing, apiKey: setup.apiKey, baseUrl: needsAddress ? setup.effectiveBaseUrl : setup.apiKey, needsAddress })}
                 onClick={() => setup.probeNow()}
               >
@@ -407,8 +407,8 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
             </span>
           </label>
           {setup.probe.ok === true && (
-            <div className="guide-stepin flex flex-col gap-2.5">
-              <p className="m-0 rounded-[10px] bg-guide-good/15 px-3 py-2.5 text-sm text-guide-good" data-testid="guide-probe-ok">
+            <div className="guide-stepin flex flex-col gap-3">
+              <p className="m-0 rounded-surface bg-guide-good/15 px-3 py-2 text-body text-guide-good" data-testid="guide-probe-ok">
                 <Trans>Funziona. La chiave resta nel Portachiavi del Mac.</Trans>
               </p>
               {/* GC2: le pillole (max 4, consigliato per primo) + «Altri modelli…» */}
@@ -424,7 +424,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
                 <button
                   type="button"
                   data-testid="guide-model-other"
-                  className={`min-h-[36px] rounded-full px-3.5 text-[13px] font-medium transition ${manualModelOpen || selectedModel === null ? 'bg-muted text-foreground' : 'bg-muted/50 text-muted-foreground hover:text-foreground'}`}
+                  className={`min-h-[36px] rounded-full px-4 text-small font-medium transition ${manualModelOpen || selectedModel === null ? 'bg-muted text-foreground' : 'bg-muted/50 text-muted-foreground hover:text-foreground'}`}
                   onClick={() => setManualModelOpen((v) => !v)}
                 >
                   <Trans>Altro…</Trans>
@@ -432,11 +432,11 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
               </div>
               {(manualModelOpen || setup.probe.models.length === 0) && (
                 /* U6: /models manca o è vuoto, o l'utente vuole scrivere a mano */
-                <label className="flex flex-col gap-2 text-sm font-semibold">
+                <label className="flex flex-col gap-2 text-body font-semibold">
                   {setup.probe.models.length === 0 ? t`Il servizio non elenca i modelli: scrivi il nome del modello` : t`Il nome del modello`}
                   <input
                     data-testid="guide-manual-model"
-                    className="rounded-[12px] bg-background px-3.5 py-3 text-base font-medium text-foreground outline-none"
+                    className="rounded-surface bg-background px-4 py-3 text-reading font-medium text-foreground outline-none"
                     placeholder={t`es. llama-3.2-3b-instruct`}
                     value={selectedModel ?? ''}
                     onChange={(e) => setSelectedModel(e.target.value.trim() || null)}
@@ -446,7 +446,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
             </div>
           )}
           {setup.probe.ok === false && (
-            <p className="guide-stepin m-0 rounded-[10px] bg-destructive/10 px-3 py-2.5 text-sm text-destructive" data-testid="guide-probe-error">
+            <p className="guide-stepin m-0 rounded-surface bg-destructive/10 px-3 py-2 text-body text-destructive" data-testid="guide-probe-error">
               {probeErrorText}
             </p>
           )}
@@ -460,23 +460,23 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
     return (
       <div key="ollama" className="guide-stepin flex w-full max-w-xl flex-col gap-5 text-left" data-testid="guide-step-model">
         <div>
-          <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Collega un modello`}</h1>
-          <p className="m-0 mt-3.5 text-base leading-[1.6] text-muted-foreground">
+          <h1 className="m-0 font-display text-page font-semibold">{t`Collega un modello`}</h1>
+          <p className="m-0 mt-3 text-reading text-muted-foreground">
             {t`È quello che fa pensare il tuo bot. Si prova subito, prima di salvare.`}
           </p>
         </div>
         <button
           type="button"
           data-testid="guide-back-providers"
-          className="min-h-[44px] self-start rounded-lg px-1.5 py-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+          className="min-h-[44px] self-start rounded-control px-1.5 py-2 text-body font-semibold text-muted-foreground transition hover:text-foreground"
           onClick={() => { setPanel('grid'); setOllamaModels(null); setOllamaModel(null) }}
         >
           ← <Trans>Altri provider</Trans>
         </button>
-        <div className="flex flex-col gap-2 rounded-[18px] bg-card p-[18px]">
-          <span className="text-sm font-semibold">{t`Ho trovato questi modelli sul tuo Mac`}</span>
-          {ollamaModels === null && <p className="m-0 text-sm text-muted-foreground">{t`Cerco…`}</p>}
-          {ollamaModels?.length === 0 && <p className="m-0 text-sm text-muted-foreground">{t`Nessun modello: aprilo e ricrea uno di questi modelli, poi riprova.`}</p>}
+        <div className="flex flex-col gap-2 rounded-surface bg-card p-5">
+          <span className="text-body font-semibold">{t`Ho trovato questi modelli sul tuo Mac`}</span>
+          {ollamaModels === null && <p className="m-0 text-body text-muted-foreground">{t`Cerco…`}</p>}
+          {ollamaModels?.length === 0 && <p className="m-0 text-body text-muted-foreground">{t`Nessun modello: aprilo e ricrea uno di questi modelli, poi riprova.`}</p>}
           {ollamaModels?.map((m) => {
             const withTools = m.tools !== false
             const firstWithTools = ollamaModels.find((x) => x.tools !== false)?.id
@@ -487,11 +487,11 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
                 data-testid={`guide-ollama-${m.id}`}
                 disabled={!withTools}
                 aria-pressed={ollamaModel === m.id}
-                className={`flex min-h-[44px] items-center justify-between gap-3 rounded-[12px] px-3.5 py-2.5 text-left transition ${ollamaModel === m.id ? 'bg-background shadow-[inset_0_0_0_2px_var(--foreground)]' : 'hover:bg-background/60'} ${withTools ? '' : 'cursor-not-allowed opacity-45'}`}
+                className={`flex min-h-[44px] items-center justify-between gap-3 rounded-surface px-4 py-2 text-left transition ${ollamaModel === m.id ? 'bg-background shadow-[inset_0_0_0_2px_var(--foreground)]' : 'hover:bg-background/60'} ${withTools ? '' : 'cursor-not-allowed opacity-45'}`}
                 onClick={() => setOllamaModel(m.id)}
               >
                 <span className="min-w-0 truncate font-semibold">{m.id}</span>
-                <span className="shrink-0 text-[12.5px] text-muted-foreground">
+                <span className="shrink-0 text-small text-muted-foreground">
                   {withTools ? (m.id === firstWithTools ? t`usa i tool · consigliato` : t`usa i tool`) : t`non usa i tool: non adatto`}
                 </span>
               </button>
@@ -508,27 +508,27 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
     return (
       <div key="local" className="guide-stepin flex w-full max-w-xl flex-col gap-5 text-left" data-testid="guide-step-model">
         <div>
-          <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Collega un modello`}</h1>
-          <p className="m-0 mt-3.5 text-base leading-[1.6] text-muted-foreground">
+          <h1 className="m-0 font-display text-page font-semibold">{t`Collega un modello`}</h1>
+          <p className="m-0 mt-3 text-reading text-muted-foreground">
             {t`È quello che fa pensare il tuo bot. Si prova subito, prima di salvare.`}
           </p>
         </div>
         <button
           type="button"
           data-testid="guide-back-providers"
-          className="min-h-[44px] self-start rounded-lg px-1.5 py-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+          className="min-h-[44px] self-start rounded-control px-1.5 py-2 text-body font-semibold text-muted-foreground transition hover:text-foreground"
           onClick={() => setPanel('grid')}
         >
           ← <Trans>Altri provider</Trans>
         </button>
-        <div className="flex flex-col gap-3 rounded-[18px] bg-card p-[18px]" data-testid="guide-local-panel">
-          <p className="m-0 text-sm leading-[1.5]">
+        <div className="flex flex-col gap-3 rounded-surface bg-card p-5" data-testid="guide-local-panel">
+          <p className="m-0 text-body">
             <Trans>Scarico un modello adatto a questo Mac ({localSizeGb ?? '—'} GB). Gira tutto qui: niente costi, ma è più lento dei modelli cloud.</Trans>
           </p>
           <div className="h-2.5 overflow-hidden rounded-full bg-background">
             <div className="h-full rounded-full bg-foreground transition-[width]" style={{ width: `${pct}%` }} />
           </div>
-          <span className="flex items-center justify-between gap-3 text-[13px] text-muted-foreground">
+          <span className="flex items-center justify-between gap-3 text-small text-muted-foreground">
             <span data-testid="guide-local-label">
               {localState === 'ready' ? t`Scaricato e provato.` : localState === 'downloading' ? `${t`Scarico…`} ${pct}%` : t`Pronto a scaricare.`}
             </span>
@@ -536,7 +536,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
               <button
                 type="button"
                 data-testid="guide-local-cancel"
-                className="min-h-[44px] rounded-[12px] bg-foreground px-4 py-2 text-sm font-semibold text-background transition hover:opacity-90"
+                className="min-h-[44px] rounded-surface bg-foreground px-4 py-2 text-body font-semibold text-background transition hover:opacity-90"
                 onClick={() => { void api.localModelCancel().catch(() => undefined) }}
               >
                 <Trans>Annulla</Trans>
@@ -545,16 +545,16 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
               <button
                 type="button"
                 data-testid="guide-local-install"
-                className="min-h-[44px] rounded-[12px] bg-foreground px-4 py-2 text-sm font-semibold text-background transition hover:opacity-90"
+                className="min-h-[44px] rounded-surface bg-foreground px-4 py-2 text-body font-semibold text-background transition hover:opacity-90"
                 onClick={() => { void localInstall() }}
               >
                 <Trans>Scarica</Trans>
               </button>
             ) : null}
           </span>
-          {localInstallError && <p className="m-0 text-sm text-destructive">{t`Non posso ora: controlla lo spazio e riprova.`}</p>}
+          {localInstallError && <p className="m-0 text-body text-destructive">{t`Non posso ora: controlla lo spazio e riprova.`}</p>}
           {localDownloadError !== null && (
-            <p className="m-0 text-sm text-destructive" data-testid="guide-local-download-error">
+            <p className="m-0 text-body text-destructive" data-testid="guide-local-download-error">
               {t`Il download del modello non è riuscito.`} {localDownloadError}
             </p>
           )}
@@ -568,20 +568,20 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
     return (
       <div key="others" className="guide-stepin flex w-full max-w-xl flex-col gap-5 text-left" data-testid="guide-step-model">
         <div>
-          <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Collega un modello`}</h1>
-          <p className="m-0 mt-3.5 text-base leading-[1.6] text-muted-foreground">
+          <h1 className="m-0 font-display text-page font-semibold">{t`Collega un modello`}</h1>
+          <p className="m-0 mt-3 text-reading text-muted-foreground">
             {t`È quello che fa pensare il tuo bot. Si prova subito, prima di salvare.`}
           </p>
         </div>
         <button
           type="button"
           data-testid="guide-back-providers"
-          className="min-h-[44px] self-start rounded-lg px-1.5 py-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+          className="min-h-[44px] self-start rounded-control px-1.5 py-2 text-body font-semibold text-muted-foreground transition hover:text-foreground"
           onClick={() => setPanel('grid')}
         >
           ← <Trans>Altri provider</Trans>
         </button>
-        <div className="overflow-hidden rounded-2xl bg-card/60">
+        <div className="overflow-hidden rounded-surface bg-card/60">
           {GUIDE_OTHER_KINDS.map((k) => (
             <button
               key={k}
@@ -591,8 +591,8 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
               onClick={() => setPanel(k)}
             >
               <ProviderMark kind={k} name={KIND_LABELS[k] ?? k} size="sm" />
-              <span className="flex-1 text-sm">{KIND_LABELS[k] ?? k}</span>
-              {k === 'openai-compatible' && <span className="text-[13px] text-muted-foreground">{t`chiede anche l'indirizzo`}</span>}
+              <span className="flex-1 text-body">{KIND_LABELS[k] ?? k}</span>
+              {k === 'openai-compatible' && <span className="text-small text-muted-foreground">{t`chiede anche l'indirizzo`}</span>}
             </button>
           ))}
         </div>
@@ -610,14 +610,14 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
     local: { label: t`Integrato`, desc: t`Gira tutto qui, senza costi.`, icon: <Cpu className="size-5" /> }
   }
   return (
-    <div key="grid" className="guide-stepin flex w-full max-w-xl flex-col gap-7 text-left" data-testid="guide-step-model">
+    <div key="grid" className="guide-stepin flex w-full max-w-xl flex-col gap-8 text-left" data-testid="guide-step-model">
       <div>
-        <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Collega un modello`}</h1>
-        <p className="m-0 mt-3.5 text-base leading-[1.6] text-muted-foreground">
+        <h1 className="m-0 font-display text-page font-semibold">{t`Collega un modello`}</h1>
+        <p className="m-0 mt-3 text-reading text-muted-foreground">
           {t`È quello che fa pensare il tuo bot. Si prova subito, prima di salvare.`}
         </p>
       </div>
-      <div className="grid grid-cols-3 gap-3.5">
+      <div className="grid grid-cols-3 gap-4">
         {cards.map((c) => (
           <ProviderCard
             key={c}

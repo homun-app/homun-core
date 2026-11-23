@@ -323,17 +323,17 @@ function BootSplash() {
         </g>
       </svg>
       <div className="flex flex-col items-center gap-2">
-        <p className="font-display text-xl">Homun</p>
-        <p className="text-xs text-muted-foreground" data-testid="boot-splash-line">
+        <p className="font-display text-title">Homun</p>
+        <p className="text-caption text-muted-foreground" data-testid="boot-splash-line">
           {view.line === 'updating'
             ? <Trans>Aggiorno il motore alla versione nuova…</Trans>
             : <Trans>Sto avviando il motore di Homun…</Trans>}
         </p>
         {view.slow && (
           <div className="flex flex-col items-center gap-2 pt-1">
-            <p className="text-xs text-muted-foreground"><Trans>Ci sta mettendo più del solito</Trans></p>
+            <p className="text-caption text-muted-foreground"><Trans>Ci sta mettendo più del solito</Trans></p>
             <button
-              className="rounded-full bg-foreground px-3 py-1 text-[11px] text-background"
+              className="rounded-full bg-foreground px-3 py-1 text-caption text-background"
               data-testid="boot-splash-retry"
               onClick={onRetry}
             >

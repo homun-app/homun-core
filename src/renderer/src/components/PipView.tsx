@@ -115,25 +115,25 @@ export function PipView({ agentId }: { agentId: string }) {
       >
         <div className="flex min-w-0 items-center gap-1.5">
           {info ? <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={16} label={undefined} /> : null}
-          <span className="truncate text-xs font-medium">{info?.agent.name ?? ''}</span>
+          <span className="truncate text-caption font-medium">{info?.agent.name ?? ''}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <button
             type="button"
             data-testid="pip-bring-back"
-            className="flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-medium text-white/90 transition hover:bg-white/20"
+            className="flex items-center gap-1 rounded-control px-2 py-0.5 text-caption font-medium text-white/90 transition hover:bg-white/20"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             title={t`Riporta in Homun`}
             onClick={() => { void api.pipFocusMain(agentId).catch(() => undefined) }}
           >
-            <CornerUpLeft className="size-3.5" aria-hidden="true" />
+            <CornerUpLeft className="size-4" aria-hidden="true" />
             <Trans>Riporta in Homun</Trans>
           </button>
           <button
             type="button"
             data-testid="pip-close"
             aria-label={t`Chiudi`}
-            className="grid size-6 place-items-center rounded-lg text-white/90 transition hover:bg-white/20"
+            className="grid size-6 place-items-center rounded-control text-white/90 transition hover:bg-white/20"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             title={t`Chiudi`}
             onClick={() => { void api.pipClose().catch(() => undefined) }}
@@ -152,7 +152,7 @@ export function PipView({ agentId }: { agentId: string }) {
             ) : (
               <div className="h-16 w-16" aria-hidden="true" />
             )}
-            <p className="text-sm text-muted-foreground">
+            <p className="text-body text-muted-foreground">
               <Trans>Il bot non ha il browser aperto</Trans>
             </p>
           </div>

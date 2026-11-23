@@ -14,7 +14,7 @@ import { useStore } from '../store'
 import type { GroupAutonomy, GroupInfo } from '../../../shared/types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 
-const btn = 'rounded-full px-4 py-2 text-sm transition'
+const btn = 'rounded-full px-4 py-2 text-body transition'
 
 /** Le tre voci del disegno, nell'ordine (i testi via descriptor, it/en). */
 export const AUTONOMY_CHOICES: ReadonlyArray<{
@@ -95,20 +95,20 @@ export function TeamAutonomySheet({ group, onClose }: { group: GroupInfo; onClos
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl" data-testid="team-autonomy">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 font-display text-2xl">
+          <DialogTitle className="flex items-center gap-2 font-display text-page">
             <ShieldCheck className="size-5 text-muted-foreground" />
             <Trans>Autonomia del team</Trans>
           </DialogTitle>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-body text-muted-foreground">
             <Trans>{group.name} · vale per tutti i bot del team, finché il team esiste</Trans>
           </p>
         </DialogHeader>
         <fieldset className="space-y-2">
-          <legend className="mb-1 text-xs font-semibold text-muted-foreground"><Trans>Quanto fa da sola</Trans></legend>
+          <legend className="mb-1 text-caption font-semibold text-muted-foreground"><Trans>Quanto fa da sola</Trans></legend>
           {AUTONOMY_CHOICES.map((c) => (
             <label
               key={c.value}
-              className={`flex cursor-pointer items-start gap-3 rounded-[14px] px-3 py-2.5 transition ${value === c.value ? 'bg-muted' : 'hover:bg-muted/60'}`}
+              className={`flex cursor-pointer items-start gap-3 rounded-surface px-3 py-2 transition ${value === c.value ? 'bg-muted' : 'hover:bg-muted/60'}`}
             >
               <input
                 type="radio"
@@ -118,31 +118,31 @@ export function TeamAutonomySheet({ group, onClose }: { group: GroupInfo; onClos
                 onChange={() => setValue(c.value)}
               />
               <span className="min-w-0">
-                <span className="text-sm font-medium">
+                <span className="text-body font-medium">
                   {i18n.t(c.title)}
-                  {c.recommended ? <span className="ml-2 rounded-full bg-foreground/10 px-2 py-0.5 text-[11px] font-normal text-muted-foreground"><Trans>consigliata</Trans></span> : null}
+                  {c.recommended ? <span className="ml-2 rounded-full bg-foreground/10 px-2 py-0.5 text-caption font-normal text-muted-foreground"><Trans>consigliata</Trans></span> : null}
                 </span>
-                <span className="mt-0.5 block text-[13px] leading-snug text-muted-foreground">{i18n.t(c.description)}</span>
+                <span className="mt-0.5 block text-small text-muted-foreground">{i18n.t(c.description)}</span>
               </span>
             </label>
           ))}
         </fieldset>
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-[16px] bg-muted/60 p-3.5">
-            <p className="text-sm font-semibold"><Trans>Fa da sola</Trans></p>
-            <ul className="mt-1.5 space-y-1 text-[13px] leading-snug text-foreground/80">
+          <div className="rounded-surface bg-muted/60 p-4">
+            <p className="text-body font-semibold"><Trans>Fa da sola</Trans></p>
+            <ul className="mt-1.5 space-y-1 text-small text-foreground/80">
               {FA_DA_SOLA.map((r, i) => <li key={i} className="flex gap-2"><span aria-hidden className="text-muted-foreground">✓</span>{i18n.t(r)}</li>)}
             </ul>
           </div>
-          <div className="rounded-[16px] bg-muted/60 p-3.5">
-            <p className="text-sm font-semibold"><Trans>Chiede sempre a te</Trans></p>
-            <ul className="mt-1.5 space-y-1 text-[13px] leading-snug text-foreground/80">
+          <div className="rounded-surface bg-muted/60 p-4">
+            <p className="text-body font-semibold"><Trans>Chiede sempre a te</Trans></p>
+            <ul className="mt-1.5 space-y-1 text-small text-foreground/80">
               {CHIEDE_SEMPRE.map((r, i) => <li key={i} className="flex gap-2"><span aria-hidden className="text-muted-foreground">•</span>{i18n.t(r)}</li>)}
             </ul>
-            <p className="mt-2 text-[11px] text-muted-foreground"><Trans>Questa colonna non si può svuotare.</Trans></p>
+            <p className="mt-2 text-caption text-muted-foreground"><Trans>Questa colonna non si può svuotare.</Trans></p>
           </div>
         </div>
-        <p className="text-[12px] leading-relaxed text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           <Trans>Decidono regole fisse e, se scelto, un revisore che vede solo la tua richiesta e l'azione. Il coordinatore non approva al posto tuo: legge le pagine del web, e una pagina ostile potrebbe convincerlo.</Trans>
         </p>
         <DialogFooter>

@@ -133,8 +133,8 @@ export function ModelPicker({ models, value, onChange, placeholder, disabled, cl
         className={
           size === 'md'
             ? // M8: gemello della <select> comune (ui/select) — h-9, text-sm
-              'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:opacity-50'
-            : 'w-full rounded-lg bg-muted px-2 py-1.5 text-xs outline-none disabled:opacity-40'
+              'h-9 w-full rounded-control border border-input bg-transparent px-3 py-1 text-body shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:opacity-50'
+            : 'w-full rounded-control bg-muted px-2 py-1.5 text-caption outline-none disabled:opacity-40'
         }
         disabled={disabled}
         placeholder={placeholder}
@@ -165,10 +165,10 @@ export function ModelPicker({ models, value, onChange, placeholder, disabled, cl
         <ul
           id={listId}
           role="listbox"
-          className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto scroll-thin rounded-lg border border-border bg-card p-1 shadow-soft"
+          className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto scroll-thin rounded-control border border-border bg-card p-1 shadow-soft"
         >
           {filtered.length === 0 && (
-            <li className="px-2 py-1.5 text-xs text-muted-foreground">
+            <li className="px-2 py-1.5 text-caption text-muted-foreground">
               <Trans>nessun modello in elenco: scrivi l'id e premi Invio</Trans>
             </li>
           )}
@@ -178,18 +178,18 @@ export function ModelPicker({ models, value, onChange, placeholder, disabled, cl
               id={`${listId}-${i}`}
               role="option"
               aria-selected={m.id === value}
-              className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs ${i === hi ? 'bg-accent' : ''} ${m.id === value ? 'font-medium' : ''}`}
+              className={`flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-caption ${i === hi ? 'bg-accent' : ''} ${m.id === value ? 'font-medium' : ''}`}
               onMouseEnter={() => setHi(i)}
               onMouseDown={(e) => { e.preventDefault(); commit(m.id) }}
             >
               <span className="min-w-0 flex-1 truncate font-mono">{m.id}</span>
               {m.contextWindow !== undefined && (
-                <span className="shrink-0 text-[10px] text-muted-foreground">{fmtContext(m.contextWindow)}</span>
+                <span className="shrink-0 text-caption text-muted-foreground">{fmtContext(m.contextWindow)}</span>
               )}
-              {m.vision === true && <span className="shrink-0 text-[10px] text-muted-foreground">{t`visione`}</span>}
-              {m.thinkingLevels.length > 0 && <span className="shrink-0 text-[10px] text-muted-foreground">{t`ragionamento`}</span>}
-              {m.tools === false && <span className="shrink-0 text-[10px] text-destructive">{t`niente tool`}</span>}
-              <span className="shrink-0 text-[10px] text-muted-foreground">{priceOf(m)}</span>
+              {m.vision === true && <span className="shrink-0 text-caption text-muted-foreground">{t`visione`}</span>}
+              {m.thinkingLevels.length > 0 && <span className="shrink-0 text-caption text-muted-foreground">{t`ragionamento`}</span>}
+              {m.tools === false && <span className="shrink-0 text-caption text-destructive">{t`niente tool`}</span>}
+              <span className="shrink-0 text-caption text-muted-foreground">{priceOf(m)}</span>
             </li>
           ))}
         </ul>
