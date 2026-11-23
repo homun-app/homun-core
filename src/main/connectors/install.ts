@@ -572,7 +572,7 @@ export async function installMcpServer(
       cfg.needsAuth = { kind: 'env', keys: missing }
       deps.saveServers([...deps.listServers().filter((x) => x.id !== cfg.id), cfg])
       deps.onChange()
-      return { ok: true, message: `${cfg.name} added: the user completes the setup in the App window (the variables ${missing.join(', ')}). Do not ask for variables in chat; wait for the system message.` }
+      return { ok: true, message: `${cfg.name} added: the user completes the setup in its card in the Plugins page (the variables ${missing.join(', ')}). Do not ask for variables in chat; wait for the system message.` }
     }
     deps.onChange()
     try {
@@ -600,7 +600,7 @@ export async function installMcpServer(
     if (missing.length) {
       cfg.needsAuth = { kind: 'env', keys: missing }
       deps.onChange()
-      return { ok: true, message: `${cfg.name} added: the user completes the setup in the App window (the variables ${missing.join(', ')}). Do not ask for variables in chat; wait for the system message.` }
+      return { ok: true, message: `${cfg.name} added: the user completes the setup in its card in the Plugins page (the variables ${missing.join(', ')}). Do not ask for variables in chat; wait for the system message.` }
     }
     deps.onChange()
     try {
@@ -672,7 +672,7 @@ async function finishRemoteInstall(cfg: McpServerConfig, deps: InstallDeps): Pro
       // P7: anche questo esito fallito lascia il server SPENTO (si riaccende
       // quando l'utente completa l'accesso dalla finestra «Server MCP»)
       disableFailedServer(cfg, deps)
-      return { ok: false, error: `Server ${cfg.name} registered: sign-in with your account is needed (OAuth). Open the Homun window and restart the connection from Settings.` }
+      return { ok: false, error: `Server ${cfg.name} registered: sign-in with your account is needed (OAuth). Open the Homun window and restart the connection from the server's card in the Plugins page.` }
     }
     try {
       const authorize = deps.authorize ?? authorizeWithLoopback

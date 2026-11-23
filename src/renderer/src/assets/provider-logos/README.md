@@ -10,7 +10,7 @@ loghi delle app). Lo script lo lanciamo noi a mano: **l'app non scarica mai
 niente da sola**, e finché un file manca la riga del provider usa l'iniziale.
 
 Nel tema scuro il marchio sta su una piastrella chiara (`dark:bg-white`), come
-i loghi delle app nella finestra «App e skill».
+i loghi delle app nella pagina Plugin.
 
 ## U5 (fase prima-release): Anthropic e OpenAI sono curati a mano
 

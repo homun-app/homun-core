@@ -265,6 +265,13 @@ describe('installMcpServer (regole 1-3)', () => {
     const r = await installMcpServer(card.card, 'agent_alice', deps)
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.message).toContain('NOTION_TOKENS_DIR')
+    // B6 (fase b20-bug): al modello si dice DOVE l'utente completa la
+    // configurazione — la scheda del plugin nella pagina Plugin (la finestra
+    // «App» non c'è più)
+    if (r.ok) {
+      expect(r.message).toContain('in its card in the Plugins page')
+      expect(r.message).not.toContain('App window')
+    }
     const cfg = deps.listServers()[0]!
     expect(cfg.transport).toBe('stdio')
     expect(cfg.box).toEqual({
