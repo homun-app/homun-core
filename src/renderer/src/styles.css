@@ -52,9 +52,88 @@
  * Fase 16b correzioni 2 (Q2): la soglia container-query del campo di scrittura
  * — sotto i 560 px di contenitore «Ragiona: …» diventa un bottone tondo con
  * l'icona (varianti @max-pill sul <footer> dichiarato @container).
+ *
+ * FASE DESIGN (DS1): I TOKEN DEL SISTEMA. Le regole visive stanno qui, in un
+ * posto solo: il resto del renderer LE USA e non le riscrive (lo impone la
+ * guardia __tests__/design-guard.test.ts). Il test design-tokens verifica il
+ * CSS compilato da Tailwind.
+ *
+ * TIPOGRAFIA — sei dimensioni, ognuna con la sua interlinea:
+ *   text-caption   12/16  metadati, orari, badge, intestazioni di tabella, contatori
+ *   text-small     13/18  seconde righe grigie, descrizioni, celle secondarie, aiuti sotto i campi
+ *   text-body      14/20  IL DEFAULT dell'interfaccia (sta sul body): righe, bottoni, campi, menu, celle
+ *   text-reading   16/26  i messaggi della chat e il testo dei documenti
+ *   text-title     20/28  titoli di dialoghi, schede, pannelli; titoli di sezione grandi
+ *   text-page      28/34  il titolo di pagina (con font-display)
+ * Figtree per tutto; Bricolage Grotesque (font-display) SOLO per il titolo di
+ * pagina e i titoli dei documenti. Pesi: 400 testo, 500 etichette e titoli di
+ * riga, 600 titoli. Nessun maiuscoletto. La radice (html) resta a 16 px: la
+ * scala delle spaziature di Tailwind è in rem (multipli di 4 px).
+ *
+ * SPAZIATURA — la scala di Tailwind: 0.5 1 1.5 2 3 4 5 6 8 10 12 16. Le
+ * distanze con un nome (--spacing-*: valgono per OGNI utility — p-, gap-, h-,
+ * min-h-, mt-…):
+ *   page-margin 32 (page-margin-narrow 24 sotto i 900 px di area)   il margine laterale della pagina
+ *   section 32 · section-head 12 · block 16                            fra sezioni · dal titolo di sezione al contenuto · fra blocchi
+ *   row 52 (row-text 40) · row-pad 12 · row-gap 12                     riga di elenco: altezza minima (con logo / solo testo), respiro verticale, icona→testo
+ *   control 36 · control-sm 32                                        controlli: default (bottoni, campi, ricerca) / piccoli (toolbar, menu)
+ *
+ * RAGGI — tre: rounded-control 8 (bottoni rettangolari, campi, menu, celle
+ * selezionate), rounded-surface 14 (schede, bolle della chat, popover,
+ * dialoghi), rounded-full (pillole, interruttori, avatar).
+ *
+ * LARGHEZZE DEL CONTENUTO — tre: --w-reading 720 (chat, documenti),
+ * --w-page 880 (liste, impostazioni, pagine di plugin), --w-wide 1120
+ * (tabelle: Collegati, Uso e costi, Attività); anche come max-w-reading/page/wide.
+ * Sotto quella larghezza il contenuto occupa l'area meno i margini.
+ *
+ * ICONE — 16 px nel testo e nei bottoni (size-4), 20 px nelle testate
+ * (size-5); loghi delle app 32 px nelle righe (size-8), 40 px nelle testate di
+ * scheda (size-10). Solo lucide: nessuna emoji nell'interfaccia (guardia).
+ *
+ * (I token --radius-sm…4xl di fabbrica restano finché le pagine non sono
+ * migrate a DS4: poi escono.)
  */
 @theme {
   --container-pill: 35rem;
+}
+/* static: le variabili escono sempre nel CSS, anche dove si leggono con var(…) fuori dalle utility */
+@theme static {
+  /* tipografia */
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-small: 13px;
+  --text-small--line-height: 18px;
+  --text-body: 14px;
+  --text-body--line-height: 20px;
+  --text-reading: 16px;
+  --text-reading--line-height: 26px;
+  --text-title: 20px;
+  --text-title--line-height: 28px;
+  --text-page: 28px;
+  --text-page--line-height: 34px;
+  /* distanze con un nome */
+  --spacing-page-margin: 32px;
+  --spacing-page-margin-narrow: 24px;
+  --spacing-section: 32px;
+  --spacing-section-head: 12px;
+  --spacing-block: 16px;
+  --spacing-row: 52px;
+  --spacing-row-text: 40px;
+  --spacing-row-pad: 12px;
+  --spacing-row-gap: 12px;
+  --spacing-control: 36px;
+  --spacing-control-sm: 32px;
+  /* raggi */
+  --radius-control: 8px;
+  --radius-surface: 14px;
+  /* larghezze del contenuto */
+  --w-reading: 720px;
+  --w-page: 880px;
+  --w-wide: 1120px;
+  --container-reading: var(--w-reading);
+  --container-page: var(--w-page);
+  --container-wide: var(--w-wide);
 }
 
 /*
@@ -255,10 +334,15 @@
     border-color: var(--color-border);
   }
 
+  /* fase design (DS1): il default dell'interfaccia è text-body (14/20) — chi
+     non dichiara una dimensione è testo di riga; la radice resta a 16 px (la
+     scala delle spaziature è in rem) */
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
     overflow: hidden;
   }
 
