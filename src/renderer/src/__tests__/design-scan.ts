@@ -132,11 +132,14 @@ export function sourceFiles(dir: string, out: string[] = []): string[] {
 export const rel = (p: string): string => relative(SRC, p).split(sep).join('/')
 const isPending = (p: string): boolean => MIGRATION_PENDING.some((prefix) => rel(p).startsWith(prefix))
 
-/** Tutto ciò che la guardia vede, per file. */
-export function scan(): Array<{ file: string; rule: DesignRule; token: string; text: string }> {
+/**
+ * Tutto ciò che la guardia vede, per file. `pending: true` guarda anche le
+ * aree non ancora migrate: serve a chi le sta migrando (la guardia vera no).
+ */
+export function scan({ pending = false }: { pending?: boolean } = {}): Array<{ file: string; rule: DesignRule; token: string; text: string }> {
   const out: Array<{ file: string; rule: DesignRule; token: string; text: string }> = []
   for (const file of sourceFiles(SRC)) {
-    if (isPending(file)) continue
+    if (!pending && isPending(file)) continue
     const source = readFileSync(file, 'utf8')
     const exempt = (rule: DesignRule, token: string): string => {
       let t = token

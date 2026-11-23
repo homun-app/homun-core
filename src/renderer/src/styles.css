@@ -77,6 +77,7 @@
  *   section 32 · section-head 12 · block 16                            fra sezioni · dal titolo di sezione al contenuto · fra blocchi
  *   row 52 (row-text 40) · row-pad 12 · row-gap 12                     riga di elenco: altezza minima (con logo / solo testo), respiro verticale, icona→testo
  *   control 36 · control-sm 32                                        controlli: default (bottoni, campi, ricerca) / piccoli (toolbar, menu)
+ *   col-head 52                                                        la riga in cima a OGNI colonna: la fascia di trascinamento (DS3)
  *
  * RAGGI — tre: rounded-control 8 (bottoni rettangolari, campi, menu, celle
  * selezionate), rounded-surface 14 (schede, bolle della chat, popover,
@@ -124,6 +125,7 @@
   --spacing-row-gap: 12px;
   --spacing-control: 36px;
   --spacing-control-sm: 32px;
+  --spacing-col-head: 52px;
   /* raggi */
   --radius-control: 8px;
   --radius-surface: 14px;

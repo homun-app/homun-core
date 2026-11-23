@@ -7,7 +7,8 @@
 //                 Figtree per tutto, Bricolage Grotesque (font-display) per i titoli;
 //   spaziatura  — la scala di Tailwind; con un NOME: margine della pagina (32, 24 stretta),
 //                 tra sezioni 32, titolo→contenuto 12, tra blocchi 16, riga 52 (40 solo testo),
-//                 respiro della riga 12, icona→testo 12, controlli 36 e 32;
+//                 respiro della riga 12, icona→testo 12, controlli 36 e 32,
+//                 la riga in cima a ogni colonna 52;
 //   raggi       — tre: control 8, surface 14, full;
 //   larghezze   — reading 720, page 880, wide 1120.
 import { describe, expect, it } from 'vitest'
@@ -37,7 +38,8 @@ export const NAMED_SPACING: Readonly<Record<string, number>> = {
   'row-pad': 12,
   'row-gap': 12,
   control: 36,
-  'control-sm': 32
+  'control-sm': 32,
+  'col-head': 52
 }
 /** I tre raggi (px). */
 export const RADII: Readonly<Record<string, number>> = { control: 8, surface: 14 }
