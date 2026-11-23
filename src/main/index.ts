@@ -13,6 +13,7 @@
 // del browser sono tutti negati salvo la scrittura degli appunti.
 import { app, BrowserWindow, protocol, safeStorage, screen, session, shell } from 'electron'
 import { existsSync, appendFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
 import { setDataDir, dataDir } from './store/db'
@@ -20,7 +21,7 @@ import { initMainLanguage, applyStartupLanguage } from './i18n'
 import { DaemonClient } from './daemon-client'
 import { setDaemonSpawnContext } from './daemon-context'
 import { userDataDir } from './paths'
-import { daemonSessionDataDir, isDaemonMode, registersProtocolClient, resolveDataDirArgv } from './mode'
+import { createActivateForwarder, daemonSessionDataDir, isDaemonMode, registersProtocolClient, resolveDataDirArgv, uiRelaunchSpec } from './mode'
 import { runDaemonRuntime } from '../daemon/runtime'
 import { APP_BUILD_ID } from './build-id'
 import { createRendererHandler, realFs, RENDERER_CSP } from './protocol'
@@ -91,6 +92,27 @@ if (isDaemonMode(process.argv)) {
   const daemonLog = createLifecycleLog(mainLogDir(() => app.getPath('logs')))
   daemonLog.line('boot', { pid: process.pid, version: app.getVersion(), mode: 'daemon' })
   app.setActivationPolicy('accessory')
+  // P3.6 (fase primo-avvio): UI e daemon sono due processi dello stesso
+  // bundle e macOS tiene UNA attivazione per quell'app. Quando il sistema
+  // considera attivo il daemon (un'app senza finestre: gli capita quando nasce
+  // sotto una UI che non era attiva), l'icona del Dock è SUA — e il clic
+  // arrivava qui, ignorato. Lo si inoltra: si rilancia la UI. Se gira già, la
+  // nuova istanza non prende il lock e le consegna il via (second-instance →
+  // showMainWindow, che la porta davanti); se non gira, parte e basta.
+  const launchUi = (): void => {
+    try {
+      const spec = uiRelaunchSpec({ execPath: process.execPath, isPackaged: app.isPackaged, appPath: app.getAppPath(), env: process.env })
+      const child = spawn(spec.command, spec.args, { detached: true, stdio: 'ignore' })
+      child.unref()
+    } catch (e) {
+      daemonLog.line('daemon-activate-failed', { reason: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  const forwardActivate = createActivateForwarder(launchUi)
+  app.on('activate', () => {
+    daemonLog.line('daemon-activate')
+    forwardActivate()
+  })
   app.whenReady().then(() => {
     const argDir = resolveDataDirArgv(process.argv) ?? process.env.SANDBOT_DATA_DIR
     setDataDir(argDir ?? join(app.getPath('userData'), 'data'))

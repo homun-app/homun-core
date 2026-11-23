@@ -97,3 +97,33 @@ export function daemonSpawnSpec(o: DaemonSpawnInput): { command: string; args: s
     env
   }
 }
+
+/** Quanto deve passare fra due «rilancia la UI» del daemon (un doppio clic sul Dock). */
+export const ACTIVATE_FORWARD_GAP_MS = 1_000
+
+/**
+ * P3.6 (fase primo-avvio): come il daemon RILANCIA la UI — l'inverso di
+ * daemonSpawnSpec. Nell'app impacchettata lo stesso eseguibile SENZA
+ * argomenti (è la UI); in sviluppo Electron col percorso dell'app. Mai il
+ * flag del daemon. Se la UI gira già, la nuova istanza non prende il lock e
+ * consegna il via alla prima (second-instance → showMainWindow).
+ */
+export function uiRelaunchSpec(o: DaemonSpawnInput): { command: string; args: string[] } {
+  return { command: o.execPath, args: o.isPackaged ? [] : [o.appPath] }
+}
+
+/**
+ * P3.6 (fase primo-avvio): l'activate del daemon diventa «rilancia la UI»,
+ * una volta per ACTIVATE_FORWARD_GAP_MS (un doppio clic sul Dock non apre
+ * due UI). Torna la funzione da chiamare a ogni activate: true se ha rilanciato.
+ */
+export function createActivateForwarder(launch: () => void, now: () => number = () => Date.now(), gapMs = ACTIVATE_FORWARD_GAP_MS): () => boolean {
+  let last = Number.NEGATIVE_INFINITY
+  return () => {
+    const at = now()
+    if (at - last < gapMs) return false
+    last = at
+    launch()
+    return true
+  }
+}
