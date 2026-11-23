@@ -25,6 +25,8 @@ import type { PermissionsConfig } from '../../../shared/types'
 import { humanizeSkillName } from '../../../shared/skill-md'
 import { Toggle } from './Settings'
 import { AppRow, AppLogo, FilterPill, useConnectFlows, DevelopersContent } from './AppsWindow'
+// PP1 (fase plugin-pulita): l'invaso unico delle viste — la colonna non cresce col contenuto, il corpo scorre
+import { PluginShell } from './plugin/PluginShell'
 // PL2 (fase plugin): la scheda del plugin (tavola 9) — clic su una riga
 import { PluginCard } from './PluginCard'
 import { ManualServers } from './McpWindow'
@@ -263,10 +265,15 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
   ]
 
   // ---- le viste interne: i server MCP (form e import di oggi), l'editor ----
+  // PP1 (fase plugin-pulita): le quattro viste e la scheda stanno tutte in
+  // PluginShell — la colonna non cresce col contenuto e il corpo scorre
   if (view === 'mcp') {
     return (
-      <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background px-8 py-6" data-testid="plugin-page">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+      <PluginShell
+        testId="plugin-page"
+        size="md"
+        outerClassName="px-8 py-6"
+        header={(
           <div className="flex items-center gap-2">
             <button
               className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
@@ -277,19 +284,21 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
             </button>
             <h1 className="font-display text-2xl"><Trans>Server MCP</Trans></h1>
           </div>
-          <div className="min-h-0 flex-1">
-            <ManualServers />
-          </div>
-        </div>
-      </div>
+        )}
+      >
+        <ManualServers />
+      </PluginShell>
     )
   }
   if (view === 'skill-import') {
     const rows = importRows ?? []
     const picked = rows.filter((r) => !r.existing && r.valid && importPicks[r.name] === true)
     return (
-      <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background px-8 py-6" data-testid="plugin-page">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+      <PluginShell
+        testId="plugin-page"
+        size="md"
+        outerClassName="px-8 py-6"
+        header={(
           <div className="flex items-center gap-2">
             <button
               className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
@@ -300,96 +309,103 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
             </button>
             <h1 className="font-display text-2xl"><Trans>Importa skill</Trans></h1>
           </div>
+        )}
+        toolbar={(
           <p className="text-sm text-muted-foreground">
             <Trans>Le cartelle con SKILL.md delle altre app che trovo sul tuo Mac. Si importano SOLO file di testo: nessuno script viene eseguito.</Trans>
           </p>
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto scroll-thin pb-6" data-testid="plugin-skill-import">
-            {importRows === null && <p className="text-sm text-muted-foreground"><Trans>cerco…</Trans></p>}
-            {importRows !== null && rows.length === 0 && (
-              <div className="rounded-2xl bg-muted p-4" data-testid="plugin-skill-import-empty">
-                <p className="text-xs text-muted-foreground"><Trans>Nessuna skill trovata nelle altre app.</Trans></p>
-              </div>
-            )}
-            {rows.map((r) => (
-              <label
-                key={r.name}
-                className={`flex min-h-11 items-center gap-2.5 rounded-xl bg-muted/60 px-3 ${r.existing || !r.valid ? 'opacity-60' : ''}`}
-                data-testid="plugin-skill-import-row"
-              >
-                <input
-                  type="checkbox"
-                  className="shrink-0"
-                  data-testid="plugin-skill-import-check"
-                  checked={importPicks[r.name] === true}
-                  disabled={r.existing || !r.valid}
-                  onChange={(e) => setImportPicks({ ...importPicks, [r.name]: e.target.checked })}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm">{r.name}</span>
-                  <span className="block truncate text-xs text-muted-foreground">{r.description || '—'}</span>
-                </span>
-                <span className="shrink-0 text-[11px] text-muted-foreground">{r.sources.join(', ')}</span>
-                {r.existing && <span className="shrink-0 text-[11px] text-muted-foreground">{t`già presente`}</span>}
-              </label>
-            ))}
-            {/* la cartella scelta dall'utente */}
+        )}
+      >
+        <div className="space-y-3" data-testid="plugin-skill-import">
+          {importRows === null && <p className="text-sm text-muted-foreground"><Trans>cerco…</Trans></p>}
+          {importRows !== null && rows.length === 0 && (
+            <div className="rounded-2xl bg-muted p-4" data-testid="plugin-skill-import-empty">
+              <p className="text-xs text-muted-foreground"><Trans>Nessuna skill trovata nelle altre app.</Trans></p>
+            </div>
+          )}
+          {rows.map((r) => (
+            <label
+              key={r.name}
+              className={`flex min-h-11 items-center gap-2.5 rounded-xl bg-muted/60 px-3 ${r.existing || !r.valid ? 'opacity-60' : ''}`}
+              data-testid="plugin-skill-import-row"
+            >
+              <input
+                type="checkbox"
+                className="shrink-0"
+                data-testid="plugin-skill-import-check"
+                checked={importPicks[r.name] === true}
+                disabled={r.existing || !r.valid}
+                onChange={(e) => setImportPicks({ ...importPicks, [r.name]: e.target.checked })}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm">{r.name}</span>
+                <span className="block truncate text-xs text-muted-foreground">{r.description || '—'}</span>
+              </span>
+              <span className="shrink-0 text-[11px] text-muted-foreground">{r.sources.join(', ')}</span>
+              {r.existing && <span className="shrink-0 text-[11px] text-muted-foreground">{t`già presente`}</span>}
+            </label>
+          ))}
+          {/* la cartella scelta dall'utente */}
+          <button
+            className="w-full rounded-2xl bg-muted px-3 py-2.5 text-sm text-muted-foreground transition hover:text-foreground"
+            data-testid="plugin-skill-import-folder"
+            onClick={async () => {
+              const dir = await api.skillsImportPickFolder().catch(() => null)
+              if (!dir) return
+              const next = [...importDirs, { source: 'folder', dir }]
+              setImportDirs(next)
+              const scan = await api.skillsImportScan(next).catch(() => ({ rows: [] as never[] }))
+              setImportRows(scan.rows)
+            }}
+          >
+            <Trans>Scegli una cartella…</Trans>
+          </button>
+          {/* copia oppure usa la cartella originale (sola lettura) */}
+          <div className="space-y-1.5 rounded-2xl bg-muted/60 p-3" data-testid="plugin-skill-import-mode">
+            <label className="flex items-center gap-2 text-[13px]">
+              <input type="radio" name="plugin-skill-import-mode" checked={importMode === 'copy'} onChange={() => setImportMode('copy')} />
+              <span><Trans>Copia nella libreria di Homun</Trans></span>
+            </label>
+            <label className="flex items-center gap-2 text-[13px]">
+              <input type="radio" name="plugin-skill-import-mode" checked={importMode === 'link'} onChange={() => setImportMode('link')} />
+              <span><Trans>Usa la cartella originale</Trans> <span className="text-[11px] text-muted-foreground"><Trans>(sola lettura: cambia con l'originale)</Trans></span></span>
+            </label>
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{t`${picked.length} selezionate`}</span>
             <button
-              className="w-full rounded-2xl bg-muted px-3 py-2.5 text-sm text-muted-foreground transition hover:text-foreground"
-              data-testid="plugin-skill-import-folder"
+              className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+              disabled={picked.length === 0}
+              data-testid="plugin-skill-import-apply"
               onClick={async () => {
-                const dir = await api.skillsImportPickFolder().catch(() => null)
-                if (!dir) return
-                const next = [...importDirs, { source: 'folder', dir }]
-                setImportDirs(next)
-                const scan = await api.skillsImportScan(next).catch(() => ({ rows: [] as never[] }))
-                setImportRows(scan.rows)
+                const out = await api.skillsImportApply({
+                  picks: picked.map((r) => ({ sources: r.sources, name: r.name })),
+                  mode: importMode,
+                  ...(importDirs.length ? { extraDirs: importDirs } : {})
+                }).catch(() => [])
+                void out
+                setImportRows(null)
+                setImportDirs([])
+                reloadSkills()
+                setView('list')
+                setSeg('skills')
               }}
             >
-              <Trans>Scegli una cartella…</Trans>
+              {t`Importa ${picked.length}`}
             </button>
-            {/* copia oppure usa la cartella originale (sola lettura) */}
-            <div className="space-y-1.5 rounded-2xl bg-muted/60 p-3" data-testid="plugin-skill-import-mode">
-              <label className="flex items-center gap-2 text-[13px]">
-                <input type="radio" name="plugin-skill-import-mode" checked={importMode === 'copy'} onChange={() => setImportMode('copy')} />
-                <span><Trans>Copia nella libreria di Homun</Trans></span>
-              </label>
-              <label className="flex items-center gap-2 text-[13px]">
-                <input type="radio" name="plugin-skill-import-mode" checked={importMode === 'link'} onChange={() => setImportMode('link')} />
-                <span><Trans>Usa la cartella originale</Trans> <span className="text-[11px] text-muted-foreground"><Trans>(sola lettura: cambia con l'originale)</Trans></span></span>
-              </label>
-            </div>
-            <div className="flex items-center gap-2 pt-1">
-              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{t`${picked.length} selezionate`}</span>
-              <button
-                className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
-                disabled={picked.length === 0}
-                data-testid="plugin-skill-import-apply"
-                onClick={async () => {
-                  const out = await api.skillsImportApply({
-                    picks: picked.map((r) => ({ sources: r.sources, name: r.name })),
-                    mode: importMode,
-                    ...(importDirs.length ? { extraDirs: importDirs } : {})
-                  }).catch(() => [])
-                  void out
-                  setImportRows(null)
-                  setImportDirs([])
-                  reloadSkills()
-                  setView('list')
-                  setSeg('skills')
-                }}
-              >
-                {t`Importa ${picked.length}`}
-              </button>
-            </div>
           </div>
         </div>
-      </div>
+      </PluginShell>
     )
   }
+
   if (view === 'skill-new') {
     return (
-      <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background px-8 py-6" data-testid="plugin-page">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+      <PluginShell
+        testId="plugin-page"
+        size="md"
+        outerClassName="px-8 py-6"
+        header={(
           <div className="flex items-center gap-2">
             <button
               className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
@@ -400,18 +416,20 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
             </button>
             <h1 className="font-display text-2xl"><Trans>Crea una skill</Trans></h1>
           </div>
-          <div className="min-h-0 flex-1">
-            <SkillEditor folder={null} onDone={() => { reloadSkills() }} onCancel={() => setView('list')} />
-          </div>
-        </div>
-      </div>
+        )}
+      >
+        <SkillEditor folder={null} onDone={() => { reloadSkills() }} onCancel={() => setView('list')} />
+      </PluginShell>
     )
   }
 
   // ---- la pagina: testata, ricerca, segmenti, Aggiungi ----
   return (
-    <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background px-8 py-6" data-testid="plugin-page">
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
+    <>
+    <PluginShell
+      testId="plugin-page"
+      outerClassName="px-8 py-6"
+      header={(
         <div className="flex items-center gap-2">
           <button
             className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
@@ -423,167 +441,126 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
           <Puzzle className="size-5 text-muted-foreground" aria-hidden="true" />
           <h1 className="font-display text-2xl"><Trans>Plugin</Trans></h1>
         </div>
-        <p className="text-sm text-muted-foreground">
-          <Trans>Connettori, server MCP e skill: tutto quello che dà capacità ai tuoi bot, in un posto.</Trans>
-        </p>
+      )}
+      toolbar={(
+        <>
+          <p className="text-sm text-muted-foreground">
+            <Trans>Connettori, server MCP e skill: tutto quello che dà capacità ai tuoi bot, in un posto.</Trans>
+          </p>
 
-        {/* la ricerca e i segmenti (tavola 8) */}
-        <label className="flex h-10 items-center gap-2.5 rounded-full bg-muted px-4 text-sm text-muted-foreground">
-          <Search className="size-4 shrink-0" aria-hidden="true" />
-          <input
-            className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none"
-            data-testid="plugin-search"
-            placeholder={t`Cerca tra plugin e skill`}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
-        <div className="flex flex-wrap items-center gap-1.5" data-testid="plugin-segments">
-          {segments.map(([s, label]) => (
-            <FilterPill key={s} active={seg === s} onClick={() => setSeg(s)}>{label}</FilterPill>
-          ))}
-          <span className="flex-1" />
-          {/* il menu «Aggiungi ▾» con i sei percorsi di oggi */}
-          <div className="relative">
-            <button
-              className="flex items-center gap-1.5 rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-              data-testid="plugin-add"
-              aria-expanded={addOpen}
-              onClick={() => setAddOpen((o) => !o)}
-            >
-              <Trans>Aggiungi</Trans> <ChevronDown className="size-3.5" />
-            </button>
-            {/* il menu sta SEMPRE nel DOM (nascosto quando chiuso): le sonde
-                lo aprono col clic, i test lo leggono senza clic */}
-            <div
-              className={`absolute right-0 top-full z-30 mt-1.5 flex w-72 flex-col gap-0.5 rounded-2xl bg-card p-1.5 shadow-soft ${addOpen ? '' : 'hidden'}`}
-              data-testid="plugin-add-menu"
-            >
-                <button
-                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                  onClick={() => { setAddOpen(false); setView('mcp') }}
-                >
-                  <span className="block"><Trans>Importa da altre app</Trans></span>
-                  <span className="block text-[11px] text-muted-foreground"><Trans>Cursor, Codex, ZCode…</Trans></span>
-                </button>
-                <button
-                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                  data-testid="plugin-add-mcp"
-                  onClick={() => { setAddOpen(false); setView('mcp') }}
-                >
-                  <Trans>Server MCP personalizzato</Trans>
-                </button>
-                <button
-                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                  data-testid="plugin-add-skill-import"
-                  onClick={() => { setAddOpen(false); setView('skill-import'); void runImportScan() }}
-                >
-                  <span className="block"><Trans>Importa skill</Trans></span>
-                  <span className="block text-[11px] text-muted-foreground"><Trans>Cursor, Codex, ZCode, Claude Code…</Trans></span>
-                </button>
-                <div className="my-1 h-px bg-border/60" aria-hidden="true" />
-                <button
-                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                  onClick={() => { setAddOpen(false); setView('skill-new') }}
-                >
-                  <Trans>Crea una skill</Trans>
-                </button>
-                <button
-                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                  onClick={() => {
-                    setAddOpen(false)
-                    setPluginOpen(false)
-                    // la richiesta precompilata nella chat (il meccanismo G4)
-                    setComposerPrefill(t`Crea una skill che `)
-                  }}
-                >
-                  <Trans>Crea con il bot</Trans>
-                </button>
-                <div className="my-1 h-px bg-border/60" aria-hidden="true" />
-                <button
-                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                  onClick={() => { setAddOpen(false); setDevelopersOpen(true); document.getElementById('plugin-advanced')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
-                >
-                  <Trans>Aggiungi un marketplace</Trans>
-                </button>
-              </div>
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto scroll-thin pb-6">
-          {/* --- TUTTO: I tuoi · Consigliati · Categorie --- */}
-          {seg === 'all' && (
-            <>
-              <section className="mt-2" data-testid="plugin-yours">
-                <div className="flex items-baseline justify-between">
-                  <h2 className="text-[15px] font-medium"><Trans>I tuoi</Trans></h2>
-                  <button className="text-[12px] text-muted-foreground transition hover:text-foreground" onClick={() => setSeg('connected')}>
-                    <Trans>Vedi i collegati →</Trans>
+          {/* la ricerca e i segmenti (tavola 8) */}
+          <label className="flex h-10 items-center gap-2.5 rounded-full bg-muted px-4 text-sm text-muted-foreground">
+            <Search className="size-4 shrink-0" aria-hidden="true" />
+            <input
+              className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none"
+              data-testid="plugin-search"
+              placeholder={t`Cerca tra plugin e skill`}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="plugin-segments">
+            {segments.map(([s, label]) => (
+              <FilterPill key={s} active={seg === s} onClick={() => setSeg(s)}>{label}</FilterPill>
+            ))}
+            <span className="flex-1" />
+            {/* il menu «Aggiungi ▾» con i sei percorsi di oggi */}
+            <div className="relative">
+              <button
+                className="flex items-center gap-1.5 rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+                data-testid="plugin-add"
+                aria-expanded={addOpen}
+                onClick={() => setAddOpen((o) => !o)}
+              >
+                <Trans>Aggiungi</Trans> <ChevronDown className="size-3.5" />
+              </button>
+              {/* il menu sta SEMPRE nel DOM (nascosto quando chiuso): le sonde
+                  lo aprono col clic, i test lo leggono senza clic */}
+              <div
+                className={`absolute right-0 top-full z-30 mt-1.5 flex w-72 flex-col gap-0.5 rounded-2xl bg-card p-1.5 shadow-soft ${addOpen ? '' : 'hidden'}`}
+                data-testid="plugin-add-menu"
+              >
+                  <button
+                    className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                    onClick={() => { setAddOpen(false); setView('mcp') }}
+                  >
+                    <span className="block"><Trans>Importa da altre app</Trans></span>
+                    <span className="block text-[11px] text-muted-foreground"><Trans>Cursor, Codex, ZCode…</Trans></span>
+                  </button>
+                  <button
+                    className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                    data-testid="plugin-add-mcp"
+                    onClick={() => { setAddOpen(false); setView('mcp') }}
+                  >
+                    <Trans>Server MCP personalizzato</Trans>
+                  </button>
+                  <button
+                    className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                    data-testid="plugin-add-skill-import"
+                    onClick={() => { setAddOpen(false); setView('skill-import'); void runImportScan() }}
+                  >
+                    <span className="block"><Trans>Importa skill</Trans></span>
+                    <span className="block text-[11px] text-muted-foreground"><Trans>Cursor, Codex, ZCode, Claude Code…</Trans></span>
+                  </button>
+                  <div className="my-1 h-px bg-border/60" aria-hidden="true" />
+                  <button
+                    className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                    onClick={() => { setAddOpen(false); setView('skill-new') }}
+                  >
+                    <Trans>Crea una skill</Trans>
+                  </button>
+                  <button
+                    className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                    onClick={() => {
+                      setAddOpen(false)
+                      setPluginOpen(false)
+                      // la richiesta precompilata nella chat (il meccanismo G4)
+                      setComposerPrefill(t`Crea una skill che `)
+                    }}
+                  >
+                    <Trans>Crea con il bot</Trans>
+                  </button>
+                  <div className="my-1 h-px bg-border/60" aria-hidden="true" />
+                  <button
+                    className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                    onClick={() => { setAddOpen(false); setDevelopersOpen(true); document.getElementById('plugin-advanced')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
+                  >
+                    <Trans>Aggiungi un marketplace</Trans>
                   </button>
                 </div>
-                {yourRows.length === 0 ? (
-                  <p className="py-3 text-sm text-muted-foreground">
-                    <Trans>Nulla di collegato: comincia dai consigliati qui sotto.</Trans>
-                  </p>
-                ) : (
-                  <div className="mt-2 space-y-1.5">
-                    {yourRows.map((row) => (
-                      <YourRow key={row.key} row={row} lang={lang} onOpen={() => openRow(row)} onToggleActive={toggleActive} />
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              {model.featured.length > 0 && !query && (
-                <section className="mt-6">
-                  <h2 className="text-[15px] font-medium"><Trans>Consigliati per il tuo lavoro</Trans></h2>
-                  <div className={`mt-2 ${rowGrid}`}>
-                    {model.featured.map((r) => (
-                      <AppRow
-                        key={r.app.id}
-                        row={r}
-                        flow={flows.flowOf(r)}
-                        onConnect={(x) => void flows.connect(x)}
-                        onCancel={(x) => void flows.cancel(x)}
-                        onConflictResolve={(x) => void flows.onConflictResolve(x)}
-                        onOpen={(x) => setCard({ appId: x.app.id })}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {!query && (
-                <section className="mt-6" data-testid="plugin-categories">
-                  <h2 className="text-[15px] font-medium"><Trans>Categorie</Trans></h2>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {model.categoriesPresent.map((c) => (
-                      <button
-                        key={c}
-                        className="rounded-full bg-muted px-3 py-1.5 text-[12px] text-muted-foreground transition hover:text-foreground"
-                        data-testid={`plugin-category-${c}`}
-                        onClick={() => { setCategory(c as AppCategoryId); setSeg('connectors') }}
-                      >
-                        {appCategoryLabel(c, lang)}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              )}
-            </>
-          )}
-
-          {/* --- CONNETTORI: il catalogo di oggi (righe e flussi riusati) --- */}
-          {seg === 'connectors' && (
-            <section className="mt-2" data-testid="plugin-connectors">
-              <div className="flex flex-wrap items-center gap-1.5" data-testid="plugin-connector-filters">
-                <FilterPill active={category === 'all'} onClick={() => setCategory('all')}><Trans>Tutte</Trans></FilterPill>
-                {model.categoriesPresent.map((c) => (
-                  <FilterPill key={c} active={category === c} onClick={() => setCategory(c)}>{appCategoryLabel(c, lang)}</FilterPill>
+            </div>
+          </div>
+        </>
+      )}
+    >
+      {/* --- TUTTO: I tuoi · Consigliati · Categorie --- */}
+      {seg === 'all' && (
+        <>
+          <section className="mt-2" data-testid="plugin-yours">
+            <div className="flex items-baseline justify-between">
+              <h2 className="text-[15px] font-medium"><Trans>I tuoi</Trans></h2>
+              <button className="text-[12px] text-muted-foreground transition hover:text-foreground" onClick={() => setSeg('connected')}>
+                <Trans>Vedi i collegati →</Trans>
+              </button>
+            </div>
+            {yourRows.length === 0 ? (
+              <p className="py-3 text-sm text-muted-foreground">
+                <Trans>Nulla di collegato: comincia dai consigliati qui sotto.</Trans>
+              </p>
+            ) : (
+              <div className="mt-2 space-y-1.5">
+                {yourRows.map((row) => (
+                  <YourRow key={row.key} row={row} lang={lang} onOpen={() => openRow(row)} onToggleActive={toggleActive} />
                 ))}
               </div>
-              <div className={`mt-3 ${rowGrid}`}>
-                {(model.grid ?? model.rows).map((r) => (
+            )}
+          </section>
+
+          {model.featured.length > 0 && !query && (
+            <section className="mt-6">
+              <h2 className="text-[15px] font-medium"><Trans>Consigliati per il tuo lavoro</Trans></h2>
+              <div className={`mt-2 ${rowGrid}`}>
+                {model.featured.map((r) => (
                   <AppRow
                     key={r.app.id}
                     row={r}
@@ -595,184 +572,228 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                   />
                 ))}
               </div>
-              {(model.grid ?? model.rows).length === 0 && (
-                <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna app trovata. Prova con un altro nome.</Trans></p>
-              )}
             </section>
           )}
 
-          {/* --- SKILL (PL5): la libreria, le skill dei plugin e il catalogo, in casa --- */}
-          {seg === 'skills' && (
-            <section className="mt-2 space-y-1.5" data-testid="plugin-skills">
-              {skillsFilterAgent && (
-                <button
-                  type="button"
-                  className="rounded-full bg-muted px-3 py-1 text-[12px] text-muted-foreground"
-                  onClick={() => setSkillsFilterAgent(null)}
-                >
-                  {agents.find((a) => a.id === skillsFilterAgent)?.name ?? skillsFilterAgent} ✕
-                </button>
-              )}
-              {yourRows.filter((r) => r.kind === 'skill').length === 0 && (
-                <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna skill. Creane una, importala, o chiedi a un bot di salvarne una.</Trans></p>
-              )}
-              {yourRows.filter((r) => r.kind === 'skill').map((row) => (
-                <YourRow key={row.key} row={row} lang={lang} onOpen={() => openRow(row)} onToggleActive={toggleActive} />
-              ))}
-
-              {/* il catalogo CURATO di oggi (K2), con le sue categorie: la
-                  ricerca del campo in alto filtra anche questo (T1) */}
-              <div className="mt-6 space-y-2" data-testid="plugin-skills-catalog">
-                <h3 className="text-[14px] font-medium text-muted-foreground"><Trans>Sfoglia</Trans></h3>
-                <div className="flex flex-wrap items-center gap-1.5">
+          {!query && (
+            <section className="mt-6" data-testid="plugin-categories">
+              <h2 className="text-[15px] font-medium"><Trans>Categorie</Trans></h2>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {model.categoriesPresent.map((c) => (
                   <button
-                    type="button"
-                    className={`rounded-full px-3 py-1 text-[12px] transition ${skillCatFilter === 'all' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
-                    onClick={() => setSkillCatFilter('all')}
+                    key={c}
+                    className="rounded-full bg-muted px-3 py-1.5 text-[12px] text-muted-foreground transition hover:text-foreground"
+                    data-testid={`plugin-category-${c}`}
+                    onClick={() => { setCategory(c as AppCategoryId); setSeg('connectors') }}
                   >
-                    <Trans>Tutte</Trans>
+                    {appCategoryLabel(c, lang)}
                   </button>
-                  {SKILL_CATEGORIES.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      className={`rounded-full px-3 py-1 text-[12px] transition ${skillCatFilter === c ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
-                      onClick={() => setSkillCatFilter(skillCatFilter === c ? 'all' : c)}
-                    >
-                      {t`${skillCategoryLabel(c)}`}
-                    </button>
-                  ))}
-                </div>
-                {(catalogRows.length === 0)
-                  ? <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna skill trovata</Trans></p>
-                  : SKILL_CATEGORIES.filter((c) => catalogRows.some((e) => e.category === c)).map((c) => (
-                    <div key={c} className="space-y-1.5">
-                      <h4 className="pt-2 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">{t`${skillCategoryLabel(c)}`}</h4>
-                      {catalogRows.filter((e) => e.category === c).map((entry) => {
-                        const state = skillCatalogInstallState(entry, skills ?? [])
-                        return (
-                          <button
-                            key={entry.id}
-                            type="button"
-                            className="flex w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left transition hover:bg-muted/60"
-                            onClick={() => setCatalogId(entry.id)}
-                          >
-                            <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
-                            <span className="min-w-0 flex-1">
-                              <span className="flex items-center gap-1.5">
-                                <span className="truncate text-[15px]">{humanize(entry.id)}</span>
-                                {state !== 'available' && <span className="shrink-0 rounded-full bg-foreground px-1.5 py-0.5 text-[10px] text-background"><Trans>Aggiunta</Trans></span>}
-                                {state === 'update' && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400"><Trans>Aggiornamento disponibile</Trans></span>}
-                              </span>
-                              <span className="block truncate text-[13px] text-muted-foreground">{skillCatalogDescription(entry, lang)}</span>
-                            </span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  ))}
-              </div>
-            </section>
-          )}
-
-          {/* --- COLLEGATI (tavola 10): la tabella con le sette colonne --- */}
-          {seg === 'connected' && (
-            <section className="mt-2" data-testid="plugin-connected">
-              {/* i filtri: per strada e «Da sistemare · N» */}
-              <div className="flex flex-wrap items-center gap-1.5" data-testid="plugin-connected-filters">
-                {([['all', t`Tutte le strade`], ['direct', t`MCP diretto`], ['composio', t`Composio`], ['mac', t`Sul Mac`], ['box', t`Nel computer isolato`]] as Array<[ConnectedFilter, string]>).map(([f, label]) => (
-                  <FilterPill key={f} active={connFilter === f && !onlyDaSistemare} onClick={() => { setConnFilter(f); setOnlyDaSistemare(false) }}>{label}</FilterPill>
                 ))}
-                <FilterPill active={onlyDaSistemare} onClick={() => setOnlyDaSistemare((v) => !v)}>
-                  {t`Da sistemare · ${daSistemareCount(yourRows)}`}
-                </FilterPill>
               </div>
-              <table className="mt-3 w-full text-left text-[13px]" data-testid="plugin-connected-table">
-                <thead>
-                  <tr className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                    <th className="py-1.5 pr-3 font-medium"><Trans>Collegamento</Trans></th>
-                    <th className="py-1.5 pr-3 font-medium"><Trans>Strada</Trans></th>
-                    <th className="py-1.5 pr-3 font-medium"><Trans>Account</Trans></th>
-                    <th className="py-1.5 pr-3 font-medium"><Trans>Stato</Trans></th>
-                    <th className="py-1.5 pr-3 font-medium"><Trans>Permessi</Trans></th>
-                    <th className="py-1.5 pr-3 font-medium"><Trans>Bot</Trans></th>
-                    <th className="py-1.5 font-medium"><Trans>Ultimo uso</Trans></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {connectedTable({ rows: yourRows, usage: usage ?? [], perms, filter: connFilter, onlyDaSistemare }).map((r) => (
-                    <tr
-                      key={r.row.key}
-                      className="cursor-pointer border-t border-border/50 transition hover:bg-muted/50"
-                      data-testid={`plugin-connected-row-${r.row.key}`}
-                      onClick={() => openRow(r.row)}
-                    >
-                      <td className="py-2 pr-3">
-                        <span className="flex items-center gap-2">
-                          {r.row.kind === 'server' || r.row.kind === 'plugin'
-                            ? (logoUrlForName(r.row.name)
-                              ? <img src={logoUrlForName(r.row.name)!} alt="" className="size-5 shrink-0 rounded-[5px] object-cover dark:bg-white" />
-                              : <span className="grid size-5 shrink-0 place-items-center rounded-[5px] bg-muted text-[10px] font-bold">{r.row.name.slice(0, 1).toUpperCase()}</span>)
-                            : <AppLogo logo={r.row.logo} name={r.row.name} className="size-5 text-[10px]" />}
-                          <span className="min-w-0">
-                            <span className="block truncate font-medium">{r.row.name}</span>
-                            {r.countLabel && <span className="block truncate text-[11px] text-muted-foreground" title={r.countLabel}>{r.countLabel}</span>}
-                          </span>
-                        </span>
-                      </td>
-                      <td className="py-2 pr-3">
-                        <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] ${stradaBadgeClass(r.row.gray.strada)}`}>
-                          {stradaLabel(r.row.gray.strada, r.row.gray.origin, lang)}
-                        </span>
-                      </td>
-                      <td className="py-2 pr-3 text-muted-foreground">{r.row.accountLabel || '—'}</td>
-                      <td className={`py-2 pr-3 ${r.daSistemare ? 'text-destructive' : 'text-chart-2'}`}>{stateLabelOf(r.row.state, lang).label}</td>
-                      <td className="py-2 pr-3 text-muted-foreground">{permBriefOf(r.perms)}</td>
-                      <td className="py-2 pr-3 text-muted-foreground">
-                        {r.row.bots.all ? t`Tutti i bot` : r.row.bots.names.length > 0 ? r.row.bots.names.join(', ') : '—'}
-                      </td>
-                      <td className="py-2 text-muted-foreground">{useBriefOf(r.usage)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {connectedTable({ rows: yourRows, usage: usage ?? [], perms, filter: connFilter, onlyDaSistemare }).length === 0 && (
-                <p className="py-3 text-sm text-muted-foreground"><Trans>Nessun collegamento con questi filtri.</Trans></p>
-              )}
-              <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
-                <Trans>Cliccando una riga si apre la sua scheda. «Da sistemare» raccoglie quelli che non partono o hanno l'accesso scaduto, così non restano rotti in silenzio.</Trans>
-              </p>
             </section>
           )}
+        </>
+      )}
 
-          {/* --- AVANZATE: gateway, marketplace, registro, chiave (per
-              sviluppatori) — A4: CHIUSA di default, una riga che si apre --- */}
-          <section className="mt-8" id="plugin-advanced" data-testid="plugin-advanced">
-            {developersOpen ? (
-              <div className="rounded-3xl bg-muted/40 p-5">
-                <DevelopersContent scrollTo={null} />
-              </div>
-            ) : (
+      {/* --- CONNETTORI: il catalogo di oggi (righe e flussi riusati) --- */}
+      {seg === 'connectors' && (
+        <section className="mt-2" data-testid="plugin-connectors">
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="plugin-connector-filters">
+            <FilterPill active={category === 'all'} onClick={() => setCategory('all')}><Trans>Tutte</Trans></FilterPill>
+            {model.categoriesPresent.map((c) => (
+              <FilterPill key={c} active={category === c} onClick={() => setCategory(c)}>{appCategoryLabel(c, lang)}</FilterPill>
+            ))}
+          </div>
+          <div className={`mt-3 ${rowGrid}`}>
+            {(model.grid ?? model.rows).map((r) => (
+              <AppRow
+                key={r.app.id}
+                row={r}
+                flow={flows.flowOf(r)}
+                onConnect={(x) => void flows.connect(x)}
+                onCancel={(x) => void flows.cancel(x)}
+                onConflictResolve={(x) => void flows.onConflictResolve(x)}
+                onOpen={(x) => setCard({ appId: x.app.id })}
+              />
+            ))}
+          </div>
+          {(model.grid ?? model.rows).length === 0 && (
+            <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna app trovata. Prova con un altro nome.</Trans></p>
+          )}
+        </section>
+      )}
+
+      {/* --- SKILL (PL5): la libreria, le skill dei plugin e il catalogo, in casa --- */}
+      {seg === 'skills' && (
+        <section className="mt-2 space-y-1.5" data-testid="plugin-skills">
+          {skillsFilterAgent && (
+            <button
+              type="button"
+              className="rounded-full bg-muted px-3 py-1 text-[12px] text-muted-foreground"
+              onClick={() => setSkillsFilterAgent(null)}
+            >
+              {agents.find((a) => a.id === skillsFilterAgent)?.name ?? skillsFilterAgent} ✕
+            </button>
+          )}
+          {yourRows.filter((r) => r.kind === 'skill').length === 0 && (
+            <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna skill. Creane una, importala, o chiedi a un bot di salvarne una.</Trans></p>
+          )}
+          {yourRows.filter((r) => r.kind === 'skill').map((row) => (
+            <YourRow key={row.key} row={row} lang={lang} onOpen={() => openRow(row)} onToggleActive={toggleActive} />
+          ))}
+
+          {/* il catalogo CURATO di oggi (K2), con le sue categorie: la
+              ricerca del campo in alto filtra anche questo (T1) */}
+          <div className="mt-6 space-y-2" data-testid="plugin-skills-catalog">
+            <h3 className="text-[14px] font-medium text-muted-foreground"><Trans>Sfoglia</Trans></h3>
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
-                className="flex w-full items-center justify-between gap-3 rounded-2xl bg-muted/40 px-4 py-2.5 text-left text-[13px] text-muted-foreground transition hover:text-foreground"
-                data-testid="plugin-developers-toggle"
-                aria-expanded={false}
-                onClick={() => setDevelopersOpen(true)}
+                type="button"
+                className={`rounded-full px-3 py-1 text-[12px] transition ${skillCatFilter === 'all' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
+                onClick={() => setSkillCatFilter('all')}
               >
-                <Trans>Per sviluppatori</Trans>
-                <span className="text-[11px] text-muted-foreground"><Trans>gateway, marketplace, registro, chiave</Trans></span>
+                <Trans>Tutte</Trans>
               </button>
-            )}
-          </section>
+              {SKILL_CATEGORIES.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={`rounded-full px-3 py-1 text-[12px] transition ${skillCatFilter === c ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
+                  onClick={() => setSkillCatFilter(skillCatFilter === c ? 'all' : c)}
+                >
+                  {t`${skillCategoryLabel(c)}`}
+                </button>
+              ))}
+            </div>
+            {(catalogRows.length === 0)
+              ? <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna skill trovata</Trans></p>
+              : SKILL_CATEGORIES.filter((c) => catalogRows.some((e) => e.category === c)).map((c) => (
+                <div key={c} className="space-y-1.5">
+                  <h4 className="pt-2 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">{t`${skillCategoryLabel(c)}`}</h4>
+                  {catalogRows.filter((e) => e.category === c).map((entry) => {
+                    const state = skillCatalogInstallState(entry, skills ?? [])
+                    return (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        className="flex w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left transition hover:bg-muted/60"
+                        onClick={() => setCatalogId(entry.id)}
+                      >
+                        <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1.5">
+                            <span className="truncate text-[15px]">{humanize(entry.id)}</span>
+                            {state !== 'available' && <span className="shrink-0 rounded-full bg-foreground px-1.5 py-0.5 text-[10px] text-background"><Trans>Aggiunta</Trans></span>}
+                            {state === 'update' && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400"><Trans>Aggiornamento disponibile</Trans></span>}
+                          </span>
+                          <span className="block truncate text-[13px] text-muted-foreground">{skillCatalogDescription(entry, lang)}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ))}
+          </div>
+        </section>
+      )}
 
-          {/* la frase della strada più diretta (tavola 8, in fondo) */}
-          <p className="mt-6 text-center text-[12px] leading-relaxed text-muted-foreground">
-            <Trans>Prima la strada più diretta. Per ogni servizio Homun usa, in quest'ordine: il server del fornitore, un server verificato nel computer isolato, e Composio solo per i servizi che non ne hanno uno.</Trans>
+      {/* --- COLLEGATI (tavola 10): la tabella con le sette colonne --- */}
+      {seg === 'connected' && (
+        <section className="mt-2" data-testid="plugin-connected">
+          {/* i filtri: per strada e «Da sistemare · N» */}
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="plugin-connected-filters">
+            {([['all', t`Tutte le strade`], ['direct', t`MCP diretto`], ['composio', t`Composio`], ['mac', t`Sul Mac`], ['box', t`Nel computer isolato`]] as Array<[ConnectedFilter, string]>).map(([f, label]) => (
+              <FilterPill key={f} active={connFilter === f && !onlyDaSistemare} onClick={() => { setConnFilter(f); setOnlyDaSistemare(false) }}>{label}</FilterPill>
+            ))}
+            <FilterPill active={onlyDaSistemare} onClick={() => setOnlyDaSistemare((v) => !v)}>
+              {t`Da sistemare · ${daSistemareCount(yourRows)}`}
+            </FilterPill>
+          </div>
+          <table className="mt-3 w-full text-left text-[13px]" data-testid="plugin-connected-table">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                <th className="py-1.5 pr-3 font-medium"><Trans>Collegamento</Trans></th>
+                <th className="py-1.5 pr-3 font-medium"><Trans>Strada</Trans></th>
+                <th className="py-1.5 pr-3 font-medium"><Trans>Account</Trans></th>
+                <th className="py-1.5 pr-3 font-medium"><Trans>Stato</Trans></th>
+                <th className="py-1.5 pr-3 font-medium"><Trans>Permessi</Trans></th>
+                <th className="py-1.5 pr-3 font-medium"><Trans>Bot</Trans></th>
+                <th className="py-1.5 font-medium"><Trans>Ultimo uso</Trans></th>
+              </tr>
+            </thead>
+            <tbody>
+              {connectedTable({ rows: yourRows, usage: usage ?? [], perms, filter: connFilter, onlyDaSistemare }).map((r) => (
+                <tr
+                  key={r.row.key}
+                  className="cursor-pointer border-t border-border/50 transition hover:bg-muted/50"
+                  data-testid={`plugin-connected-row-${r.row.key}`}
+                  onClick={() => openRow(r.row)}
+                >
+                  <td className="py-2 pr-3">
+                    <span className="flex items-center gap-2">
+                      {r.row.kind === 'server' || r.row.kind === 'plugin'
+                        ? (logoUrlForName(r.row.name)
+                          ? <img src={logoUrlForName(r.row.name)!} alt="" className="size-5 shrink-0 rounded-[5px] object-cover dark:bg-white" />
+                          : <span className="grid size-5 shrink-0 place-items-center rounded-[5px] bg-muted text-[10px] font-bold">{r.row.name.slice(0, 1).toUpperCase()}</span>)
+                        : <AppLogo logo={r.row.logo} name={r.row.name} className="size-5 text-[10px]" />}
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{r.row.name}</span>
+                        {r.countLabel && <span className="block truncate text-[11px] text-muted-foreground" title={r.countLabel}>{r.countLabel}</span>}
+                      </span>
+                    </span>
+                  </td>
+                  <td className="py-2 pr-3">
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] ${stradaBadgeClass(r.row.gray.strada)}`}>
+                      {stradaLabel(r.row.gray.strada, r.row.gray.origin, lang)}
+                    </span>
+                  </td>
+                  <td className="py-2 pr-3 text-muted-foreground">{r.row.accountLabel || '—'}</td>
+                  <td className={`py-2 pr-3 ${r.daSistemare ? 'text-destructive' : 'text-chart-2'}`}>{stateLabelOf(r.row.state, lang).label}</td>
+                  <td className="py-2 pr-3 text-muted-foreground">{permBriefOf(r.perms)}</td>
+                  <td className="py-2 pr-3 text-muted-foreground">
+                    {r.row.bots.all ? t`Tutti i bot` : r.row.bots.names.length > 0 ? r.row.bots.names.join(', ') : '—'}
+                  </td>
+                  <td className="py-2 text-muted-foreground">{useBriefOf(r.usage)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {connectedTable({ rows: yourRows, usage: usage ?? [], perms, filter: connFilter, onlyDaSistemare }).length === 0 && (
+            <p className="py-3 text-sm text-muted-foreground"><Trans>Nessun collegamento con questi filtri.</Trans></p>
+          )}
+          <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
+            <Trans>Cliccando una riga si apre la sua scheda. «Da sistemare» raccoglie quelli che non partono o hanno l'accesso scaduto, così non restano rotti in silenzio.</Trans>
           </p>
-        </div>
-      </div>
+        </section>
+      )}
 
-      {/* PL2: la scheda del plugin (tavola 9) */}
+      {/* --- AVANZATE: gateway, marketplace, registro, chiave (per
+          sviluppatori) — A4: CHIUSA di default, una riga che si apre --- */}
+      <section className="mt-8" id="plugin-advanced" data-testid="plugin-advanced">
+        {developersOpen ? (
+          <div className="rounded-3xl bg-muted/40 p-5">
+            <DevelopersContent scrollTo={null} />
+          </div>
+        ) : (
+          <button
+            className="flex w-full items-center justify-between gap-3 rounded-2xl bg-muted/40 px-4 py-2.5 text-left text-[13px] text-muted-foreground transition hover:text-foreground"
+            data-testid="plugin-developers-toggle"
+            aria-expanded={false}
+            onClick={() => setDevelopersOpen(true)}
+          >
+            <Trans>Per sviluppatori</Trans>
+            <span className="text-[11px] text-muted-foreground"><Trans>gateway, marketplace, registro, chiave</Trans></span>
+          </button>
+        )}
+      </section>
+
+      {/* la frase della strada più diretta (tavola 8, in fondo) */}
+      <p className="mt-6 text-center text-[12px] leading-relaxed text-muted-foreground">
+        <Trans>Prima la strada più diretta. Per ogni servizio Homun usa, in quest'ordine: il server del fornitore, un server verificato nel computer isolato, e Composio solo per i servizi che non ne hanno uno.</Trans>
+      </p>
+    </PluginShell>
+
+    {/* PL2: la scheda del plugin (tavola 9) — FUORI dal corpo che scorre: copre la pagina, non scorre con lei */}
       {(cardApp ?? cardServer) && card && (
         <PluginCard
           app={cardApp ? { row: cardApp } : undefined}
@@ -806,7 +827,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
 

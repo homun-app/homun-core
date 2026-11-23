@@ -24,6 +24,8 @@ import { toolSlugOf } from '../../../main/mcp/slug'
 // interno [MCP:<nome>] (mcpToolPresentation, la funzione unica della UI)
 import { mcpToolPresentation } from '../../../shared/tool-names'
 import { logoUrlForName } from '../lib/app-logos'
+// PP1 (fase plugin-pulita): l'invaso unico — «Rimuovi» e le autorizzazioni lunghe si raggiungono scorrendo
+import { PluginShell } from './plugin/PluginShell'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
 import { Toggle } from './Settings'
@@ -162,9 +164,13 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
   }
 
   return (
-    <div className="no-drag absolute inset-0 z-30 flex flex-col bg-background" data-testid="plugin-card">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-6 py-5">
-        {/* la testata: indietro, logo, nome, stato */}
+    <PluginShell
+      testId="plugin-card"
+      size="md"
+      z={30}
+      columnClassName="px-6 py-5"
+      // la testata: indietro, logo, nome, stato
+      header={(
         <div className="flex items-center gap-3">
           <button
             className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
@@ -213,180 +219,179 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
             </button>
           )}
         </div>
-
-        {/* le schede interne */}
-        <div className="flex items-center gap-1.5 border-b pb-2" data-testid="plugin-card-tabs">
-          {([
-            ['overview', t`Panoramica`],
-            ['permissions', t`Autorizzazioni`],
-            ['accounts', t`Account e bot`]
-          ] as const).map(([id, label]) => (
-            <button
-              key={id}
-              className={`rounded-full px-3 py-1 text-[13px] transition ${tab === id ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-              onClick={() => setTab(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto scroll-thin pb-6">
-          {/* i pannelli stanno TUTTI nel DOM (nascosti quando inattivi): le
-              sonde aprono la scheda col clic, i test leggono senza clic */}
-          {/* --- PANORAMICA --- */}
-          <div hidden={tab !== 'overview'}>
-            <Overview
-              app={app?.row}
-              server={server}
-              directConnector={directConnector}
-              via={!isServer ? app!.row.app.via : undefined}
-              composioSlug={app?.row.app.composioSlug}
-            />
+      )}
+      // le schede interne
+      toolbar={(
+          <div className="flex items-center gap-1.5 border-b pb-2" data-testid="plugin-card-tabs">
+            {([
+              ['overview', t`Panoramica`],
+              ['permissions', t`Autorizzazioni`],
+              ['accounts', t`Account e bot`]
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                className={`rounded-full px-3 py-1 text-[13px] transition ${tab === id ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                onClick={() => setTab(id)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
+      )}
+    >
+      {/* i pannelli stanno TUTTI nel DOM (nascosti quando inattivi): le
+          sonde aprono la scheda col clic, i test leggono senza clic */}
+      {/* --- PANORAMICA --- */}
+      <div hidden={tab !== 'overview'}>
+        <Overview
+          app={app?.row}
+          server={server}
+          directConnector={directConnector}
+          via={!isServer ? app!.row.app.via : undefined}
+          composioSlug={app?.row.app.composioSlug}
+        />
+      </div>
 
-          {/* --- AUTORIZZAZIONI --- */}
-          <div className="space-y-4" hidden={tab !== 'permissions'} data-testid="plugin-permissions">
-              <p className="text-[13px] leading-relaxed text-muted-foreground">
-                <Trans>Scegli cosa i bot possono fare da soli. Le regole valgono per tutti i bot che usano questo plugin.</Trans>
-              </p>
-              {tools === null && <p className="text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>}
-              {tools !== null && tools.length === 0 && (
-                <p className="text-sm text-muted-foreground"><Trans>Nessuno strumento elencato.</Trans></p>
-              )}
-              {(['read', 'write', 'other'] as const).map((g) => {
-                const list = groups[g]
-                if (list.length === 0) return null
-                const label = g === 'read' ? t`Sola lettura` : g === 'write' ? t`Scrittura` : t`Altro`
-                return (
-                  <section key={g} data-testid={`plugin-group-${g}`}>
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-[14px] font-medium">
-                        {label} <span className="text-muted-foreground">· {list.length}</span>
-                      </h3>
+      {/* --- AUTORIZZAZIONI --- */}
+      <div className="space-y-4" hidden={tab !== 'permissions'} data-testid="plugin-permissions">
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
+            <Trans>Scegli cosa i bot possono fare da soli. Le regole valgono per tutti i bot che usano questo plugin.</Trans>
+          </p>
+          {tools === null && <p className="text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>}
+          {tools !== null && tools.length === 0 && (
+            <p className="text-sm text-muted-foreground"><Trans>Nessuno strumento elencato.</Trans></p>
+          )}
+          {(['read', 'write', 'other'] as const).map((g) => {
+            const list = groups[g]
+            if (list.length === 0) return null
+            const label = g === 'read' ? t`Sola lettura` : g === 'write' ? t`Scrittura` : t`Altro`
+            return (
+              <section key={g} data-testid={`plugin-group-${g}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-[14px] font-medium">
+                    {label} <span className="text-muted-foreground">· {list.length}</span>
+                  </h3>
+                  <GroupSelect
+                    testid={`plugin-group-select-${g}`}
+                    fixed={list.every((x) => x.fixedAsk !== null)}
+                    value={groupValueOf(perms, list)}
+                    onChange={(mode) => setGroupRule(g, mode)}
+                  />
+                </div>
+                <div className="mt-1.5 space-y-1">
+                  {list.map((tool) => (
+                    <div
+                      key={tool.full}
+                      className="flex items-center gap-3 rounded-[14px] bg-muted/50 px-3 py-2"
+                      data-testid={`plugin-tool-${tool.name}`}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5">
+                          <span className="truncate text-[14px]">{tool.name}</span>
+                          {tool.fixedAsk && (
+                            <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label={t`azione dell'insieme fisso: chiede sempre`} />
+                          )}
+                        </span>
+                        {tool.description && <span className="block truncate text-[12px] text-muted-foreground" title={tool.description}>{tool.description}</span>}
+                      </span>
                       <GroupSelect
-                        testid={`plugin-group-select-${g}`}
-                        fixed={list.every((x) => x.fixedAsk !== null)}
-                        value={groupValueOf(perms, list)}
-                        onChange={(mode) => setGroupRule(g, mode)}
+                        testid={`plugin-tool-select-${tool.name}`}
+                        fixed={tool.fixedAsk !== null}
+                        value={perms ? toolRuleOf(perms, tool.full) : 'needs_approval'}
+                        onChange={(mode) => setRule(tool.full, mode)}
                       />
                     </div>
-                    <div className="mt-1.5 space-y-1">
-                      {list.map((tool) => (
-                        <div
-                          key={tool.full}
-                          className="flex items-center gap-3 rounded-[14px] bg-muted/50 px-3 py-2"
-                          data-testid={`plugin-tool-${tool.name}`}
-                        >
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center gap-1.5">
-                              <span className="truncate text-[14px]">{tool.name}</span>
-                              {tool.fixedAsk && (
-                                <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label={t`azione dell'insieme fisso: chiede sempre`} />
-                              )}
-                            </span>
-                            {tool.description && <span className="block truncate text-[12px] text-muted-foreground" title={tool.description}>{tool.description}</span>}
-                          </span>
-                          <GroupSelect
-                            testid={`plugin-tool-select-${tool.name}`}
-                            fixed={tool.fixedAsk !== null}
-                            value={perms ? toolRuleOf(perms, tool.full) : 'needs_approval'}
-                            onChange={(mode) => setRule(tool.full, mode)}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                )
-              })}
-              {/* la frase F8 (vera nel codice: liftContaminatedAllow) */}
-              <p className="text-[12px] leading-relaxed text-muted-foreground">
-                <Trans>Le scelte: Consenti sempre · Chiedi · Blocca. Dopo che un bot ha letto contenuti non fidati, le azioni di scrittura tornano a chiedere anche se le hai consentite.</Trans>
-              </p>
-            </div>
-
-          {/* --- ACCOUNT E BOT --- */}
-          <div className="space-y-4" hidden={tab !== 'accounts'} data-testid="plugin-accounts">
-              {/* gli account collegati: onesti, mai inventati */}
-              <SettingsGroup label={<Trans>Account</Trans>}>
-                {isServer ? (
-                  <SettingsRow
-                    title={
-                      server.auth?.kind === 'bearer' || server.auth?.kind === 'headers' ? t`token aziendale`
-                        : server.auth?.kind === 'oauth' ? t`con il tuo account`
-                        : t`nessun account`
-                    }
-                    control={<span className="text-[13px] text-muted-foreground">{state.label}</span>}
-                  />
-                ) : gatewayApp ? (
-                  <div />
-                ) : keyApp ? (
-                  <SettingsRow title={t`con la chiave di progetto`} control={<span className="text-[13px] text-muted-foreground">{state.label}</span>} />
-                ) : (
-                  <SettingsRow title={t`con il tuo account`} control={<span className="text-[13px] text-muted-foreground">{state.label}</span>} />
-                )}
-              </SettingsGroup>
-              {!isServer && gatewayApp && (
-                <GatewayAccountsSection app={gatewayApp} appName={name} onChanged={onChanged} />
-              )}
-
-              {/* i bot che lo usano: l'interruttore per bot (enabledFor) */}
-              {isServer ? (
-                <ServerBotToggles server={server} onChanged={onChanged} />
-              ) : app!.row.app.via === 'direct' && app!.row.app.directId ? (
-                <BotTogglesForApp
-                  directId={app!.row.app.directId}
-                  enabledFor={directEnabledFor}
-                  agents={agents}
-                  onChanged={onChanged}
-                />
-              ) : (
-                <p className="text-[13px] text-muted-foreground"><Trans>per bot:</Trans> <Trans>Tutti i bot</Trans></p>
-              )}
-
-              {/* Ricollega / Rimuovi */}
-              <div className="flex items-center justify-end gap-2 pt-1">
-                {isServer && server.needsReauth && (
-                  <button
-                    className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-                    onClick={() => { void api.connectorsReconnectServer(server.id).then(() => onChanged()) }}
-                  >
-                    <Trans>Ricollega</Trans>
-                  </button>
-                )}
-                {confirmRemove ? (
-                  <button
-                    className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-                    onClick={async () => {
-                      if (isServer) {
-                        if (server.catalogId || server.source) await api.connectorsUninstallServer(server.id).catch(() => undefined)
-                        else await api.mcpDelete(server.id).catch(() => undefined)
-                      } else if (gatewayApp) {
-                        await api.composioGatewayRemove(app!.row.app.composioSlug!).catch(() => undefined)
-                      } else if (keyApp) {
-                        await api.composioDisconnect(app!.row.app.composioSlug!).catch(() => undefined)
-                      } else if (app!.row.app.directId) {
-                        await api.connectorsDisconnect(app!.row.app.directId).catch(() => undefined)
-                      }
-                      onChanged()
-                      onClose()
-                    }}
-                  >
-                    {isServer ? <Trans>Rimuovi davvero</Trans> : <Trans>Scollega davvero</Trans>}
-                  </button>
-                ) : (
-                  <button
-                    className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-                    onClick={() => setConfirmRemove(true)}
-                  >
-                    {isServer ? <Trans>Rimuovi</Trans> : <Trans>Scollega</Trans>}
-                  </button>
-                )}
-              </div>
-            </div>
+                  ))}
+                </div>
+              </section>
+            )
+          })}
+          {/* la frase F8 (vera nel codice: liftContaminatedAllow) */}
+          <p className="text-[12px] leading-relaxed text-muted-foreground">
+            <Trans>Le scelte: Consenti sempre · Chiedi · Blocca. Dopo che un bot ha letto contenuti non fidati, le azioni di scrittura tornano a chiedere anche se le hai consentite.</Trans>
+          </p>
         </div>
-      </div>
-    </div>
+
+      {/* --- ACCOUNT E BOT --- */}
+      <div className="space-y-4" hidden={tab !== 'accounts'} data-testid="plugin-accounts">
+          {/* gli account collegati: onesti, mai inventati */}
+          <SettingsGroup label={<Trans>Account</Trans>}>
+            {isServer ? (
+              <SettingsRow
+                title={
+                  server.auth?.kind === 'bearer' || server.auth?.kind === 'headers' ? t`token aziendale`
+                    : server.auth?.kind === 'oauth' ? t`con il tuo account`
+                    : t`nessun account`
+                }
+                control={<span className="text-[13px] text-muted-foreground">{state.label}</span>}
+              />
+            ) : gatewayApp ? (
+              <div />
+            ) : keyApp ? (
+              <SettingsRow title={t`con la chiave di progetto`} control={<span className="text-[13px] text-muted-foreground">{state.label}</span>} />
+            ) : (
+              <SettingsRow title={t`con il tuo account`} control={<span className="text-[13px] text-muted-foreground">{state.label}</span>} />
+            )}
+          </SettingsGroup>
+          {!isServer && gatewayApp && (
+            <GatewayAccountsSection app={gatewayApp} appName={name} onChanged={onChanged} />
+          )}
+
+          {/* i bot che lo usano: l'interruttore per bot (enabledFor) */}
+          {isServer ? (
+            <ServerBotToggles server={server} onChanged={onChanged} />
+          ) : app!.row.app.via === 'direct' && app!.row.app.directId ? (
+            <BotTogglesForApp
+              directId={app!.row.app.directId}
+              enabledFor={directEnabledFor}
+              agents={agents}
+              onChanged={onChanged}
+            />
+          ) : (
+            <p className="text-[13px] text-muted-foreground"><Trans>per bot:</Trans> <Trans>Tutti i bot</Trans></p>
+          )}
+
+          {/* Ricollega / Rimuovi */}
+          <div className="flex items-center justify-end gap-2 pt-1">
+            {isServer && server.needsReauth && (
+              <button
+                className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+                onClick={() => { void api.connectorsReconnectServer(server.id).then(() => onChanged()) }}
+              >
+                <Trans>Ricollega</Trans>
+              </button>
+            )}
+            {confirmRemove ? (
+              <button
+                className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+                onClick={async () => {
+                  if (isServer) {
+                    if (server.catalogId || server.source) await api.connectorsUninstallServer(server.id).catch(() => undefined)
+                    else await api.mcpDelete(server.id).catch(() => undefined)
+                  } else if (gatewayApp) {
+                    await api.composioGatewayRemove(app!.row.app.composioSlug!).catch(() => undefined)
+                  } else if (keyApp) {
+                    await api.composioDisconnect(app!.row.app.composioSlug!).catch(() => undefined)
+                  } else if (app!.row.app.directId) {
+                    await api.connectorsDisconnect(app!.row.app.directId).catch(() => undefined)
+                  }
+                  onChanged()
+                  onClose()
+                }}
+              >
+                {isServer ? <Trans>Rimuovi davvero</Trans> : <Trans>Scollega davvero</Trans>}
+              </button>
+            ) : (
+              <button
+                className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+                onClick={() => setConfirmRemove(true)}
+              >
+                {isServer ? <Trans>Rimuovi</Trans> : <Trans>Scollega</Trans>}
+              </button>
+            )}
+          </div>
+        </div>
+    </PluginShell>
   )
 }
 
