@@ -5,6 +5,39 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.19] — 2026-11-23
+
+Homun si apre al primo clic, e la pagina Plugin è più ordinata e arriva
+fino in fondo.
+
+### Correzioni
+
+- **Homun si apre al primo clic.** A volte il clic sul Dock, su Spotlight
+  o sull'app in Applicazioni arrivava al processo in background di Homun,
+  che lo ignorava: l'icona c'era ma la finestra no, e bisognava chiudere e
+  riaprire. Ora il clic arriva sempre alla finestra, che viene davanti. Ogni
+  clic sul Dock non crea più una seconda finestra nascosta.
+- **La finestra compare quando è pronta** e torna su uno schermo visibile
+  se era rimasta fuori. Se la pagina non parte, Homun la ricarica da solo.
+- **La pagina Plugin scorre**, e anche la scheda di ogni plugin: «Rimuovi»,
+  «Per sviluppatori» e le autorizzazioni lunghe si raggiungono.
+- **I server MCP aggiunti a mano con un token lo usano davvero.** Prima il
+  token veniva salvato ma non mandato al server.
+
+### Novità
+
+- **«Cambia token» nella scheda del plugin:** il token, le intestazioni e
+  le variabili segrete di un server si sostituiscono dove vive il server,
+  senza toglierlo e rimetterlo. Dopo il salvataggio la connessione si prova
+  da sola.
+- **In Cassaforte, «Dei plugin»:** l'elenco dei segreti dei plugin (solo
+  i nomi, mai i valori), con il rimando alla scheda per cambiarli.
+- **Una pagina Plugin più pulita:** righe senza riquadri, lo stato
+  mostrato solo quando qualcosa non va, i bot solo quando l'accesso è
+  limitato, schede come testo sottolineato. Nella scheda di ogni plugin il
+  menu «⋯» riunisce prova, ricollega e rimuovi.
+- **«App e skill» lascia le Impostazioni:** tutto sta nella pagina Plugin.
+
 ## [0.3.1001-beta.18] — 2026-11-23
 
 Una casa sola per i Plugin, richieste di permesso che si vedono e si
