@@ -72,7 +72,11 @@ import type { Onboarding } from './onboarding'
 import { answerableOnboardingFocus } from './onboarding-focus'
 import { releaseJobsHeldForModel } from '../main/store/jobs'
 import type { OnboardingStepId } from '../shared/types'
-import type { SandbotEvent, SendMessagePayload, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting, MainModel, ProviderKind, ReadingPageMeta } from '../shared/types'
+import type { SandbotEvent, SendMessagePayload, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting, MainModel, ProviderKind, ReadingPageMeta, AppsConnectResult } from '../shared/types'
+// B3 (fase b20-bug): ogni esito del «Connetti» in un passo arriva alla riga
+import type { AppConnectFailReason, AppConnectFailureInfo } from '../shared/app-connect'
+import { awaitAppStart, connectDetailOf, appStartTimeoutMs, type AppStartOutcome } from '../main/connectors/app-connect-start'
+import type { ComposioGatewayManager } from '../main/connectors/composio-gateway'
 // fase 18b (K3): la lettura /api/show condivisa col check dei tool e col loop
 import { readOllamaCapabilities } from '../main/agent/live-models'
 import { DEFAULT_AUTO_REVIEW, SECRET_KIND } from '../shared/types'
@@ -272,6 +276,13 @@ export function buildApiMethods(
     composio?: import('../main/connectors/composio').ComposioManager
     /** fase Composio OAuth (C5): il gateway delle app dentro il server Composio */
     composioGateway?: import('../main/connectors/composio-gateway').ComposioGatewayManager
+    /**
+     * B3 (fase b20-bug): il tempo massimo (ms) con cui apps:connect aspetta
+     * l'avvio di un'app Composio. Di serie APP_CONNECT_DAEMON_TIMEOUT_MS (o
+     * l'override della sonda, SANDBOT_TEST_APP_CONNECT_TIMEOUT_MS); i test lo
+     * accorciano da qui.
+     */
+    appConnectTimeoutMs?: number
     /** OB1 (fase onboarding-b): la preparazione del computer del bot */
     boxSetup?: import('./box-setup').BoxSetupController
   } = {}
@@ -427,6 +438,50 @@ export function buildApiMethods(
   /** il login di Composio in corso (un secondo clic lo RIUSA, non lo doppia) */
   let composioLoginInFlight: Promise<unknown> | null = null
 
+  // ---- B3 (fase b20-bug): OGNI esito del «Connetti» arriva alla riga ----
+  // Prima apps:connect rispondeva «partito» (started true, phase app) PRIMA di
+  // sapere com'era andata la chiamata a Composio — l'esito di connectApp
+  // finiva in una promessa orfana — e i flussi che continuano in background
+  // (il login di Composio, il connettore diretto) non dicevano a nessuno
+  // quando finivano male: la riga restava «Completa il login…» per sempre.
+  /**
+   * L'esito negativo dell'ULTIMA prova di «Connetti» (una sola): la riga lo
+   * legge da composio-gateway:status mentre un flusso è in corso. Lo scrive
+   * apps:connect quando l'esito è subito noto, e lo pubblicano i flussi in
+   * background quando finiscono male. Una prova nuova (o Annulla) sulla
+   * stessa riga lo toglie.
+   */
+  let appConnectFailure: AppConnectFailureInfo | null = null
+  /** le prove in corso per riga (il connettore DIRETTO): una prova annullata o rifatta non parla più */
+  const appConnectTokens = new Map<string, number>()
+  let appConnectSeq = 0
+
+  /** Pubblica l'esito negativo di una prova: la UI lo rilegge con l'evento. */
+  const publishAppConnectFailure = (appId: string, reason: AppConnectFailReason, error: string, detail?: string): void => {
+    appConnectFailure = { appId, at: Date.now(), reason, error, ...(detail ? { detail } : {}) }
+    emit({ type: 'connectors' })
+  }
+  /** L'esito d'avvio di un'app Composio → ciò che la riga mostra (testo nella lingua dell'interfaccia). */
+  const appStartFailureOf = (appId: string, o: Extract<AppStartOutcome, { ok: false }>): AppConnectFailureInfo => ({
+    appId, at: Date.now(), reason: o.reason, error: uiText(o.message, o.values), ...(o.detail ? { detail: o.detail } : {})
+  })
+  /**
+   * L'avvio di un'app dentro Composio (connectApp: list, add, il link aperto
+   * nel browser) con il tempo massimo del daemon: si aspetta l'ESITO — mai
+   * una promessa orfana. Oltre il tempo risponde «timeout» e connectApp non
+   * apre più il browser (notAfter).
+   */
+  const startComposioApp = (gateway: ComposioGatewayManager, slug: string, name: string): Promise<AppStartOutcome> => {
+    const timeoutMs = opts.appConnectTimeoutMs ?? appStartTimeoutMs()
+    const start = Promise.resolve().then(() => gateway.connectApp(slug, { name, notAfter: Date.now() + timeoutMs }))
+    return awaitAppStart(start, timeoutMs, name)
+  }
+  /** Composio non c'è (nel daemon non c'è il gateway, o la voce del catalogo): lo si dice, niente login che non parte. */
+  const composioUnavailable = (row: { id: string }): AppsConnectResult => {
+    publishAppConnectFailure(row.id, 'connect-failed', uiText(UI.appConnectUnavailable))
+    return { started: false, phase: 'login', reason: 'connect-failed', error: appConnectFailure!.error }
+  }
+
   /**
    * La riga dell'elenco app per id: la stessa fusione PUra di loadAppCatalog,
    * con le curate static «pronte» solo se il client OAuth è davvero salvato.
@@ -448,6 +503,9 @@ export function buildApiMethods(
    * connesso (e l'intenzione è ancora viva e non scaduta) il daemon prosegue
    * DA SOLO con connectApp per l'app scelta. Un secondo clic mentre il login
    * gira non parte un secondo flusso: sostituisce l'intenzione e aspetta.
+   * B3: quando finisce male — il login non riesce, l'intenzione scade, l'app
+   * non parte — l'esito arriva alla riga (publishAppConnectFailure), a meno
+   * che l'utente non l'abbia annullata (l'intenzione non c'è più).
    */
   const runComposioLoginWithIntent = async (): Promise<void> => {
     if (composioLoginInFlight || !connectors) return
@@ -457,20 +515,38 @@ export function buildApiMethods(
     composioLoginInFlight = promise
     try {
       const r = await promise
-      if (r.status === 'connected') await notifyConnectorConnected(entry.id, entry.name, emit, worker)
+      if (r.status === 'connected') await notifyConnectorConnected(entry.id, entry.name, emit, worker).catch(() => undefined)
+      // l'intenzione conta QUI: può essere stata annullata (null) o sostituita
+      // da un clic su un'altra riga mentre il login girava
       const intent = appConnectIntent
-      if (r.status === 'connected' && intent && Date.now() - intent.at <= APP_INTENT_TTL_MS && opts.composioGateway) {
-        appConnectIntent = null
-        await opts.composioGateway.connectApp(intent.slug, { name: intent.name })
+      if (!intent) return
+      appConnectIntent = null
+      if (r.status !== 'connected') {
+        publishAppConnectFailure(intent.appId, 'connect-failed', uiText(UI.appConnectLoginFailed, { name: intent.name }), connectDetailOf(r.message))
         return
       }
-      appConnectIntent = null
+      if (Date.now() - intent.at > APP_INTENT_TTL_MS) {
+        publishAppConnectFailure(intent.appId, 'connect-failed', uiText(UI.appConnectExpired, { name: intent.name }))
+        return
+      }
+      if (!opts.composioGateway) {
+        publishAppConnectFailure(intent.appId, 'connect-failed', uiText(UI.appConnectUnavailable))
+        return
+      }
+      const outcome = await startComposioApp(opts.composioGateway, intent.slug, intent.name)
+      if (!outcome.ok) publishAppConnectFailure(intent.appId, outcome.reason, uiText(outcome.message, outcome.values), outcome.detail)
     } catch {
-      appConnectIntent = null
+      // B3: il login (o l'avvio dell'app) è CADUTO: lo si dice alla riga, se la prova è ancora sua
+      const intent = appConnectIntent
+      if (intent) {
+        appConnectIntent = null
+        publishAppConnectFailure(intent.appId, 'connect-failed', uiText(UI.appConnectLoginFailed, { name: intent.name }))
+      }
     } finally {
       composioLoginInFlight = null
+      // la fine del login è il segnale con cui la UI si aggiorna (anche quando l'intenzione non c'è più)
+      emit({ type: 'connectors' })
     }
-    emit({ type: 'connectors' })
   }
 
   return {
@@ -2114,7 +2190,9 @@ export function buildApiMethods(
     // ---- fase Composio OAuth (C5): le app dentro il server Composio ----
     'composio-gateway:status': () => {
       if (!opts.composioGateway) throw uiError(UI.composioNotActive)
-      return opts.composioGateway.status()
+      // B3: con l'esito dell'ultima prova di «Connetti» — la riga lo legge da
+      // qui mentre un flusso continua in background (login di Composio, diretto)
+      return { ...opts.composioGateway.status(), appConnect: appConnectFailure }
     },
     'composio-gateway:refresh': () => {
       if (!opts.composioGateway) throw uiError(UI.composioNotActive)
@@ -2160,17 +2238,44 @@ export function buildApiMethods(
     // Composio. Se Composio non è ancora «entrato», parte il login e
     // l'intenzione di collegare l'app scelta sta NEL DEMONTE (il renderer può
     // chiudere la finestra): scade dopo 10 minuti ed è UNA sola alla volta —
-    // un secondo clic la sostituisce.
+    // un secondo clic la sostituisce (e la risposta lo dice: `replaces`).
+    // B3 (fase b20-bug): OGNI esito arriva alla riga. Con Composio già entrato
+    // si aspetta l'ESITO DELL'AVVIO (il link aperto nel browser, oppure il
+    // motivo) entro il tempo massimo del daemon; i flussi che continuano in
+    // background pubblicano l'esito su composio-gateway:status. Mai una
+    // promessa orfana, mai una riga in attesa per sempre.
     'apps:connect': async ([appId]) => {
       if (!connectors) throw uiError(UI.rpcConnectorsUnavailable)
-      const row = await resolveAppRow(String(appId ?? ''))
+      const id = String(appId ?? '')
+      const row = await resolveAppRow(id)
       if (!row) return { started: false as const, reason: 'unknown-app' as const }
+      // B3: una prova nuova dimentica l'esito della prova vecchia della stessa riga
+      if (appConnectFailure?.appId === row.id) appConnectFailure = null
       if (row.via === 'direct' && row.directId) {
         const entry = connectors.catalog.find((e) => e.id === row.directId)
         if (!entry) return { started: false as const, reason: 'unknown-app' as const }
-        void connectors.runConnect(entry).then(async (r) => {
-          if (r.status === 'connected') await notifyConnectorConnected(entry.id, entry.name, emit, worker)
-        })
+        // B3: l'esito del flusso diretto arriva alla riga anche quando finisce
+        // male (prima: promessa orfana, «autorizza nel browser…» per sempre);
+        // solo se la prova è ancora questa (non annullata, non rifatta)
+        const token = ++appConnectSeq
+        appConnectTokens.set(row.id, token)
+        void connectors.runConnect(entry).then(
+          async (r) => {
+            const mine = appConnectTokens.get(row.id) === token
+            if (mine) appConnectTokens.delete(row.id)
+            if (r.status === 'connected') {
+              await notifyConnectorConnected(entry.id, entry.name, emit, worker).catch(() => undefined)
+              return
+            }
+            if (!mine) return
+            publishAppConnectFailure(row.id, 'connect-failed', r.message?.trim() || uiText(UI.appConnectGeneric, { name: row.name }))
+          },
+          (e: unknown) => {
+            if (appConnectTokens.get(row.id) !== token) return
+            appConnectTokens.delete(row.id)
+            publishAppConnectFailure(row.id, 'connect-failed', uiText(UI.appConnectGeneric, { name: row.name }), connectDetailOf(String(e)))
+          }
+        )
         return { started: true as const, phase: 'direct' as const }
       }
       const slug = row.composioSlug
@@ -2180,28 +2285,45 @@ export function buildApiMethods(
       if (opts.composio && (await opts.composio.status()).active) {
         return { started: false as const, conflict: 'composio-key' as const }
       }
-      if (opts.composioGateway?.status().active) {
-        void opts.composioGateway.connectApp(slug, { name: row.name })
-        return { started: true as const, phase: 'app' as const }
+      const gateway = opts.composioGateway
+      if (gateway?.status().active) {
+        // B3: si aspetta l'esito dell'avvio (col tempo massimo del daemon) —
+        // prima si rispondeva «partito» e l'esito di connectApp si perdeva
+        const outcome = await startComposioApp(gateway, slug, row.name)
+        if (outcome.ok) return { started: true as const, phase: 'app' as const }
+        appConnectFailure = appStartFailureOf(row.id, outcome)
+        emit({ type: 'connectors' })
+        return {
+          started: false as const, phase: 'app' as const, reason: outcome.reason, error: appConnectFailure.error,
+          ...(outcome.detail ? { detail: outcome.detail } : {})
+        }
       }
       // non ancora entrato: login di Composio ora, l'app appena il login riesce
+      if (!gateway || !connectors.catalog.some((e) => e.id === 'composio')) return composioUnavailable(row)
+      // B3: questo clic sostituisce l'intenzione di un'altra riga: lo si dice
+      // (quella riga torna a «Connetti» invece di restare in attesa per sempre)
+      const replaces = appConnectIntent && appConnectIntent.appId !== row.id ? appConnectIntent.appId : undefined
       appConnectIntent = { appId: row.id, slug, name: row.name, at: Date.now() }
       emit({ type: 'connectors' })
       void runComposioLoginWithIntent()
-      return { started: true as const, phase: 'login' as const }
+      return { started: true as const, phase: 'login' as const, ...(replaces ? { replaces } : {}) }
     },
 
     /** Annulla sempre disponibile durante l'attesa: l'intenzione se ne va, l'attesa dell'app si ferma. */
     'apps:cancel-connect': async ([appId]) => {
       if (!connectors) throw uiError(UI.rpcConnectorsUnavailable)
-      const row = await resolveAppRow(String(appId ?? ''))
+      const id = String(appId ?? '')
+      const row = await resolveAppRow(id)
+      // B3: la prova in corso della riga è annullata — non parla più — e il suo esito vecchio va via
+      appConnectTokens.delete(id)
+      if (appConnectFailure?.appId === id) appConnectFailure = null
       const slug = row?.composioSlug ?? null
-      const mine = appConnectIntent !== null && (appConnectIntent.appId === String(appId ?? '') || appConnectIntent.slug === slug)
+      const mine = appConnectIntent !== null && (appConnectIntent.appId === id || appConnectIntent.slug === slug)
       if (mine) appConnectIntent = null
       if (slug && opts.composioGateway?.status().pending?.slug === slug) opts.composioGateway.cancelWait()
       else if (mine && connectors.stateOf('composio').status !== 'connected') {
         // il login era partito per l'app annullata: si ferma anche quello
-        void connectors.disconnect('composio')
+        void connectors.disconnect('composio').catch(() => undefined)
       }
       emit({ type: 'connectors' })
       return { ok: true }

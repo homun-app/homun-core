@@ -14,6 +14,8 @@ import { api, useStore } from '../store'
 import type { ConnectorInfo, TranscriptEntry } from '../../../shared/types'
 import { logoUrlForSlug } from '../lib/app-logos'
 import { composioRouteFor } from '../lib/connector-route'
+// B3 (fase b20-bug): l'esito che il daemon pubblica per i flussi in background (stessa regola della riga)
+import { appConnectPublishedFailure } from '../lib/app-connect-flow'
 import { CardShell } from './DecidedRow'
 
 export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
@@ -37,6 +39,11 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   // V6 (prova vera): l'utente ha annullato DALLA CARD → torna a «Collega»;
   // il flag distingue l'annullo volontario dall'attesa finita male (Riprova)
   const cancelledHere = useRef(false)
+  // B3 (fase b20-bug): sulla strada di apps:connect il motivo quando non è
+  // partito (dalla risposta, o dall'esito che il daemon pubblica per i flussi
+  // in background) — la card non resta «In attesa del login…» per sempre
+  const [routeError, setRouteError] = useState('')
+  const routeClickedAt = useRef(0)
 
   // Verifica impostazioni: una curata diretta che non può aprire il login
   // (Gmail di Google senza client OAuth) segue la strada della finestra App —
@@ -100,6 +107,12 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
     }
     const pending = composioGateway?.pending
     if (pending?.slug === route.composioSlug && pending.failed) setStatus((s) => (s === 'connecting' ? 'failed' : s))
+    // B3: finito male in background (per esempio il login di Composio) — solo l'esito di QUESTO clic
+    const failed = appConnectPublishedFailure(route.appId, routeClickedAt.current, composioGateway?.appConnect)
+    if (failed) {
+      setRouteError(failed.error)
+      setStatus((s) => (s === 'connecting' ? 'failed' : s))
+    }
   }, [route, composioGateway])
   useEffect(() => {
     if (!route || status !== 'connecting') return
@@ -143,10 +156,16 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
       // la strada della finestra App (login di Composio, poi l'app): il
       // collegamento lo decide apps:connect, come il «Connetti» delle App
       if (route) {
+        routeClickedAt.current = Date.now()
+        setRouteError('')
         const r = await api.appsConnect(route.appId)
-        if (!r.started) setStatus('failed')
-        void refreshConnectors()
-        void refreshComposioGateway()
+        // B3: non partito → il motivo (prima solo «Non riuscito», o peggio l'attesa senza fine)
+        if (!r.started) {
+          setRouteError(r.error ?? '')
+          setStatus('failed')
+        }
+        void refreshConnectors().catch(() => undefined)
+        void refreshComposioGateway().catch(() => undefined)
         return
       }
       await api.connectorsConnect(message.connectorId!)
@@ -239,6 +258,8 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
         <div className="mt-2 space-y-1.5">
           <p className="text-sm text-destructive"><Trans>Non riuscito: chiedi al bot di riprovare il collegamento.</Trans></p>
           {liveError && <p className="text-xs text-muted-foreground">{liveError}</p>}
+          {/* B3: sulla strada di Composio il motivo in parole (per esempio: l'app senza configurazione di accesso) */}
+          {routeError && <p className="text-xs text-muted-foreground" data-testid="connector-card-error">{routeError}</p>}
         </div>
       ) : status === 'connecting' && route ? (
         // la strada della finestra App: anche qui Annulla durante l'attesa

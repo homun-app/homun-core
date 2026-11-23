@@ -9,18 +9,22 @@
 // non sulle righe. Composio è un ACCOUNT, non un'app: in fondo una riga
 // discreta «Account Composio · connesso». Il mercato dei plugin, i gateway, i
 // server manuali e la chiave di progetto stanno nel foglio «Per sviluppatori».
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { api, useStore } from '../store'
 import { i18n } from '../lib/i18n'
 import type { AppsRegistryResult, ComposioGatewayAppInfo, ComposioGatewayStatusInfo } from '../../../shared/types'
 import { botsToggleState, gatewayAccountRows, accountLimitMessage, type CatalogRowView } from '../lib/apps-view'
+// B3 (fase b20-bug): il flusso «Connetti» è PURO (tempo massimo, esiti in riga) — qui solo il cablaggio
+import { createAppConnectFlows, type AppConnectFlows, type AppFlowFailure, type AppFlowKind } from '../lib/app-connect-flow'
 // PP4 (fase plugin-pulita): la riga del catalogo è a filo
 import { FlatRow } from './ui/flat-list'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
 import { Toggle } from './Settings'
 import { catalogLogoUrl } from '../lib/app-logos'
+
+export type { AppFlowFailure, AppFlowKind }
 
 /** La lingua attiva come UiLanguage. */
 function uiLang(): 'it' | 'en' {
@@ -482,23 +486,33 @@ export function FilterPill({ active, onClick, children }: { active: boolean; onC
   )
 }
 
-/** Le fasi visibili della riga durante «Connetti» in un passo (P4). */
-export type AppFlowKind = 'direct' | 'login' | 'app' | 'failed' | 'conflict'
+/**
+ * Le fasi visibili della riga durante «Connetti» in un passo (P4).
+ * B3 (fase b20-bug): anche `starting` (dal clic alla risposta) e `failed` col
+ * motivo — mai una riga muta né in attesa per sempre. Il tipo e la logica
+ * vivono in lib/app-connect-flow (pura).
+ */
 
 /**
  * PL1 (fase plugin): il motore dei flussi «Connetti in un passo» delle app,
  * ESTRATTO da AppsView così la pagina Plugin lo riusa senza riscriverlo —
- * le fasi per riga (direct/login/app/conflict), il polling mentre un flusso
- * è in corsa, la promozione login → app quando il gateway si collega e la
- * chiusura quando la riga diventa collegata. `rows` sono le righe del
- * modello del catalogo (appsCatalogModel().rows), per riconoscere la riga
+ * le fasi per riga (starting/direct/login/app/conflict/failed), il polling
+ * mentre un flusso è in corsa, la promozione login → app quando il gateway si
+ * collega e la chiusura quando la riga diventa collegata. `rows` sono le righe
+ * del modello del catalogo (appsCatalogModel().rows), per riconoscere la riga
  * di un flusso in corsa.
+ * B3 (fase b20-bug): la logica è PURA (lib/app-connect-flow): qui solo il
+ * cablaggio con l'api e lo store. Dal clic la riga è «in avvio»; la risposta
+ * dice se il collegamento è partito oppure perché no (motivo + «Riprova»);
+ * senza risposta entro APP_CONNECT_MAX_MS la riga si sblocca con un avviso.
+ * `maxMs` accorcia quel tempo (i test).
  */
-export function useConnectFlows(rows: CatalogRowView[]): {
-  connecting: Record<string, 'direct' | 'login' | 'app' | 'conflict'>
+export function useConnectFlows(rows: CatalogRowView[], options: { maxMs?: number } = {}): {
   gatewayConnected: boolean
   composioGateway: ComposioGatewayStatusInfo | null
   flowOf(row: CatalogRowView): AppFlowKind | null
+  /** B3: il motivo quando flowOf è 'failed' (null negli altri stati) */
+  failureOf(row: CatalogRowView): AppFlowFailure | null
   connect(row: CatalogRowView): Promise<void>
   cancel(row: CatalogRowView): Promise<void>
   onConflictResolve(row: CatalogRowView): Promise<void>
@@ -509,79 +523,71 @@ export function useConnectFlows(rows: CatalogRowView[]): {
   const refreshComposio = useStore((s) => s.refreshComposio)
   const composioGateway = useStore((s) => s.composioGateway)
   const refreshComposioGateway = useStore((s) => s.refreshComposioGateway)
-  const [connecting, setConnecting] = useState<Record<string, 'direct' | 'login' | 'app' | 'conflict'>>({})
   const gatewayConnected = connectors.find((c) => c.id === 'composio')?.state.status === 'connected'
+  const [, redraw] = useReducer((n: number) => n + 1, 0)
+
+  // niente promesse orfane: una rilettura che rifiuta non è un errore dell'utente
+  const reread = (): void => {
+    void refreshConnectors().catch(() => undefined)
+    void refreshComposioGateway().catch(() => undefined)
+  }
+
+  // B3: il flusso PURO, una volta per montaggio (orologio e timer sono quelli del browser)
+  const flowsRef = useRef<AppConnectFlows | null>(null)
+  if (flowsRef.current === null) {
+    flowsRef.current = createAppConnectFlows({
+      appsConnect: (id) => api.appsConnect(id),
+      appsCancelConnect: (id) => api.appsCancelConnect(id),
+      changed: () => redraw(),
+      refreshed: reread,
+      ...(options.maxMs !== undefined ? { maxMs: options.maxMs } : {})
+    })
+  }
+  const flows = flowsRef.current
+
+  const view = (row: CatalogRowView) => flows.viewOf(row.app.id, {
+    connected: row.connected,
+    ...(row.app.composioSlug ? { composioSlug: row.app.composioSlug } : {}),
+    gatewayConnected,
+    pending: composioGateway?.pending,
+    published: composioGateway?.appConnect
+  })
 
   // mentre un flusso è in corsa (o un collegamento è in attesa) si rilegge lo
   // stato ogni 2 s: gli eventi {type:'connectors'} arrivano, il polling chiude
-  const flowBusy = Object.keys(connecting).length > 0 || Boolean(composioGateway?.pending)
+  const flowBusy = flows.hasPending() || Boolean(composioGateway?.pending)
   useEffect(() => {
     if (!flowBusy) return
     const timer = setInterval(() => {
-      void refreshConnectors()
-      void refreshComposioGateway()
+      void refreshConnectors().catch(() => undefined)
+      void refreshComposioGateway().catch(() => undefined)
     }, 2000)
     return () => clearInterval(timer)
   }, [flowBusy, refreshConnectors, refreshComposioGateway])
 
-  // una riga COLLEGATA chiude il suo flusso; il login riuscito promuove «app»
+  // una riga COLLEGATA chiude il suo flusso (e con lei il polling)
   useEffect(() => {
-    setConnecting((prev) => {
-      let changed = false
-      const next: typeof prev = {}
-      for (const [id, phase] of Object.entries(prev)) {
-        const row = rows.find((r) => r.app.id === id)
-        if (row?.connected === 'connected') { changed = true; continue }
-        if (phase === 'login' && gatewayConnected) { next[id] = 'app'; changed = true; continue }
-        next[id] = phase
-      }
-      return changed ? next : prev
-    })
-  }, [rows, gatewayConnected])
+    if (flows.dropClosed(...rows.filter((r) => r.connected === 'connected').map((r) => r.app.id))) redraw()
+  }, [rows, flows])
 
-  /** La fase visibile di una riga (null = stato fermo: Connetti/Connessa/Ricollega). */
-  const flowOf = (row: CatalogRowView): AppFlowKind | null => {
-    const phase = connecting[row.app.id]
-    if (!phase) return null
-    if (phase === 'conflict') return 'conflict'
-    if (phase === 'direct') return 'direct'
-    const slug = row.app.composioSlug
-    const pending = composioGateway?.pending
-    // solo il collegamento FATTO chiude il flusso: uno stato «da ricollegare»
-    // arrivato a metà flusso non deve spezzare l'attesa visibile all'utente
-    if (row.connected === 'connected') return null
-    if (phase === 'login' && !gatewayConnected) return 'login'
-    if (slug && pending?.slug === slug && pending.failed) return 'failed'
-    return 'app'
-  }
+  // allo smontaggio nessun timer del flusso resta acceso
+  useEffect(() => () => flows.dispose(), [flows])
 
-  const connect = async (row: CatalogRowView): Promise<void> => {
-    const r = await api.appsConnect(row.app.id).catch((): Awaited<ReturnType<typeof api.appsConnect>> => ({ started: false, reason: 'unknown-app' }))
-    if (r.started) setConnecting((p) => ({ ...p, [row.app.id]: r.phase ?? 'direct' }))
-    else if (r.conflict) setConnecting((p) => ({ ...p, [row.app.id]: 'conflict' }))
-    void refreshConnectors()
-    void refreshComposioGateway()
-  }
-  const cancel = async (row: CatalogRowView): Promise<void> => {
-    setConnecting((p) => {
-      const next = { ...p }
-      delete next[row.app.id]
-      return next
-    })
-    await api.appsCancelConnect(row.app.id).catch(() => undefined)
-    void refreshConnectors()
-    void refreshComposioGateway()
-  }
   const onConflictResolve = async (row: CatalogRowView): Promise<void> => {
     await api.composioDisable().catch(() => undefined)
     await refreshComposio()
-    await connect(row)
+    await flows.connect(row)
   }
-  const refresh = (): void => {
-    void refreshConnectors()
-    void refreshComposioGateway()
+  return {
+    gatewayConnected,
+    composioGateway,
+    flowOf: (row) => view(row).kind,
+    failureOf: (row) => view(row).failure,
+    connect: (row) => flows.connect(row),
+    cancel: (row) => flows.cancel(row),
+    onConflictResolve,
+    refresh: reread
   }
-  return { connecting, gatewayConnected, composioGateway, flowOf, connect, cancel, onConflictResolve, refresh }
 }
 
 /**
@@ -593,10 +599,15 @@ export function useConnectFlows(rows: CatalogRowView[]): {
  * PP4 (fase plugin-pulita): la riga è A FILO (FlatRow), il logo da 32px, e
  * quando è collegata non lo dice in parole («Connessa» era un segnale in
  * più: lo stato in parole resta solo quando qualcosa non va).
+ * B3 (fase b20-bug): in avvio lo dice; quando non è partito mostra il motivo
+ * per esteso (sotto la riga) con «Riprova» — mai muta, mai senza uscita. Il
+ * contenitore porta `data-flow` (lo stato) per le sonde.
  */
-export function AppRow({ row, flow, onConnect, onCancel, onConflictResolve, onOpen }: {
+export function AppRow({ row, flow, failure, onConnect, onCancel, onConflictResolve, onOpen }: {
   row: CatalogRowView
   flow: AppFlowKind | null
+  /** B3: il motivo quando `flow` è 'failed' (negli altri stati non si guarda) */
+  failure?: AppFlowFailure | null
   onConnect(row: CatalogRowView): void
   onCancel(row: CatalogRowView): void
   onConflictResolve(row: CatalogRowView): void
@@ -609,8 +620,9 @@ export function AppRow({ row, flow, onConnect, onCancel, onConflictResolve, onOp
     flow === 'login' ? t`Accedi a Composio nel browser…`
     : flow === 'app' ? t`Completa il login di ${row.app.name} nel browser…`
     : row.tagline
+  const failed = flow === 'failed' ? failure ?? null : null
   return (
-    <div>
+    <div data-testid={`app-state-${row.app.id}`} data-flow={flow ?? 'idle'} {...(failed ? { 'data-flow-reason': failed.reason } : {})}>
       <FlatRow
         clickable
         testId={`app-row-${row.app.id}`}
@@ -630,6 +642,11 @@ export function AppRow({ row, flow, onConnect, onCancel, onConflictResolve, onOp
                 <Trans>Connetti</Trans>
               </button>
             )}
+            {flow === 'starting' && (
+              <span className="text-[13px] text-muted-foreground" data-testid={`app-status-${row.app.id}`}>
+                {t`Avvio del collegamento…`}
+              </span>
+            )}
             {flow === 'direct' && <span className="text-[13px] text-muted-foreground">{t`autorizza nel browser…`}</span>}
             {(flow === 'login' || flow === 'app') && (
               <button type="button" className={quiet} data-testid={`app-cancel-${row.app.id}`} onClick={(e) => { stop(e); onCancel(row) }}>
@@ -638,8 +655,14 @@ export function AppRow({ row, flow, onConnect, onCancel, onConflictResolve, onOp
             )}
             {flow === 'failed' && (
               <>
-                <span className="text-[13px] text-destructive"><Trans>Non riuscito</Trans></span>
-                <button type="button" className={quiet} onClick={(e) => { stop(e); onConnect(row) }}>
+                <span className="text-[13px] text-destructive" data-testid={`app-status-${row.app.id}`}>
+                  {failed?.reason === 'not-connectable'
+                    ? <Trans>Non si può collegare</Trans>
+                    : failed?.reason === 'timeout'
+                      ? <Trans>Nessuna risposta</Trans>
+                      : <Trans>Non riuscito</Trans>}
+                </span>
+                <button type="button" className={quiet} data-testid={`app-retry-${row.app.id}`} onClick={(e) => { stop(e); onConnect(row) }}>
                   <Trans>Riprova</Trans>
                 </button>
               </>
@@ -647,6 +670,17 @@ export function AppRow({ row, flow, onConnect, onCancel, onConflictResolve, onOp
           </>
         }
       />
+      {/* B3: il motivo per esteso, sotto la riga (la mezza riga si tronca: un motivo non si taglia) */}
+      {flow === 'failed' && failed && (
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 pb-3 pl-11 text-[13px]" onClick={stop} data-testid={`app-error-${row.app.id}`}>
+          <p className="min-w-0 flex-1 basis-64 text-foreground/80">{failed.text}</p>
+          {failed.detail && (
+            <p className="min-w-0 flex-1 basis-64 truncate text-[12px] text-muted-foreground" title={failed.detail} data-testid={`app-error-detail-${row.app.id}`}>
+              {failed.detail}
+            </p>
+          )}
+        </div>
+      )}
       {flow === 'conflict' && (
         <div className="flex flex-wrap items-center gap-2 pb-3 text-[13px]" onClick={stop} data-testid={`app-conflict-${row.app.id}`}>
           <p className="min-w-0 flex-1">

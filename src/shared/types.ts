@@ -10,6 +10,9 @@ export type { BoxSetupRowId }
 // OBD3 (fase onboarding-b-dettagli): il progresso strutturato del build
 import type { BuildProgress } from '../main/sandbox/build-progress'
 export type { BuildProgress }
+// B3 (fase b20-bug): il contratto del «Connetti» in un passo (tempi e esiti)
+import type { AppConnectFailReason, AppConnectFailureInfo, AppConnectPhase } from './app-connect'
+export type { AppConnectFailReason, AppConnectFailureInfo, AppConnectPhase }
 export type { SkillCatalogEntry } from './skill-catalog'
 
 export type AgentStatus = 'offline' | 'idle' | 'thinking' | 'running' | 'paused-for-approval'
@@ -1455,7 +1458,7 @@ export interface SandbotApi {
    * con l'app scelta) o collegamento dell'app (phase 'app'). Con la chiave di
    * progetto attiva risponde conflict (le due strade non stanno insieme).
    */
-  appsConnect(appId: string): Promise<{ started: boolean; phase?: 'direct' | 'login' | 'app'; conflict?: 'composio-key'; reason?: 'unknown-app' }>
+  appsConnect(appId: string): Promise<AppsConnectResult>
   /** Annulla sempre disponibile durante l'attesa del «Connetti» in un passo */
   appsCancelConnect(appId: string): Promise<{ ok: boolean }>
   marketplaceList(): Promise<Array<{ name: string; source: string; kind: 'github' | 'git'; official: boolean }>>
@@ -2544,6 +2547,33 @@ export interface ComposioGatewayStatusInfo {
   connected: ComposioGatewayAppInfo[]
   /** il collegamento in attesa del login nel browser (Annulla = cancel) */
   pending: { slug: string; name: string; since: number; failed?: boolean } | null
+  /**
+   * B3 (fase b20-bug): l'esito negativo dell'ultima prova di «Connetti» in un
+   * passo (null = nessuno). Sta qui perché la riga rilegge questo stato
+   * mentre un flusso è in corso: i flussi che continuano in background (il
+   * login di Composio, il connettore diretto) dicono da qui come sono finiti.
+   * Un vecchio daemon non lo manda (undefined): vale come nessuno.
+   */
+  appConnect?: AppConnectFailureInfo | null
+}
+
+/**
+ * B3 (fase b20-bug): la risposta di apps:connect — OGNI esito è leggibile.
+ * `started` true: il collegamento è avviato (la pagina di login è aperta nel
+ * browser di sistema) e la riga aspetta. `started` false: non è partito, e
+ * c'è il motivo — `conflict` (la chiave di progetto è attiva), `reason`
+ * 'unknown-app', oppure `reason` e `error` (il motivo in parole, già nella
+ * lingua dell'interfaccia; `detail` è il dettaglio tecnico ripulito, se c'è).
+ */
+export interface AppsConnectResult {
+  started: boolean
+  phase?: AppConnectPhase
+  conflict?: 'composio-key'
+  reason?: 'unknown-app' | AppConnectFailReason
+  error?: string
+  detail?: string
+  /** il clic ha sostituito l'intenzione di quest'altra riga (login di Composio già in corso) */
+  replaces?: string
 }
 
 // ---- fase 15 (S5): stato dei provider di ricerca web (RPC websearch:status) ----

@@ -647,6 +647,25 @@ export const UI = {
   composioDisconnected: msg({ id: 'composio.disconnected', message: '{name} scollegata.' }),
   composioReconnect: msg({ id: 'composio.reconnect', message: '{name} non è più attiva: ricollegalamente per usare di nuovo i suoi strumenti.' }),
   composioCancelled: msg({ id: 'composio.cancelled', message: 'Collegamento di {name} annullato.' }),
+  // ---- B3 (fase b20-bug): «Connetti» in un passo — perché NON è partito ----
+  // Ogni esito del clic lascia la riga in uno stato chiaro: questi sono i
+  // motivi in parole (il daemon li forma nella lingua dell'interfaccia).
+  appConnectNotConnectable: msg({
+    id: 'appConnect.notConnectable',
+    message: 'Composio non gestisce il login di {name}: manca la sua configurazione di accesso sul tuo account Composio.'
+  }),
+  appConnectTimeout: msg({ id: 'appConnect.timeout', message: 'Composio non ha risposto in tempo: {name} non è stata collegata.' }),
+  appConnectBrowser: msg({ id: 'appConnect.browser', message: 'Non sono riuscito ad aprire il browser per il login di {name}.' }),
+  appConnectAccountLimit: msg({
+    id: 'appConnect.accountLimit',
+    message: 'Hai già {count, plural, one {1 account} other {# account}} {name}: togline uno per aggiungerne un altro.'
+  }),
+  appConnectNotActive: msg({ id: 'appConnect.notActive', message: 'Composio non è più collegato: accedi di nuovo a Composio e riprova.' }),
+  appConnectFailed: msg({ id: 'appConnect.failed', message: 'Composio non ha aperto il login di {name}.' }),
+  appConnectLoginFailed: msg({ id: 'appConnect.loginFailed', message: 'Accesso a Composio non riuscito: {name} non è stata collegata.' }),
+  appConnectExpired: msg({ id: 'appConnect.expired', message: 'L’accesso a Composio ha richiesto troppo tempo: riprova a collegare {name}.' }),
+  appConnectGeneric: msg({ id: 'appConnect.generic', message: 'Il collegamento di {name} non è riuscito.' }),
+  appConnectUnavailable: msg({ id: 'appConnect.unavailable', message: 'Composio non è disponibile ora: riprova più tardi.' }),
   installThirdParty: msg({
     id: 'install.thirdParty',
     message: 'Server pubblicato da terzi: può leggere e fare quello che gli permettono i suoi strumenti'

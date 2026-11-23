@@ -714,6 +714,11 @@ msgstr "Acceso"
 msgid "Accesso"
 msgstr "Accesso"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "appConnect.loginFailed"
+msgstr "Accesso a Composio non riuscito: {name} non è stata collegata."
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Accesso rifiutato: il token non è valido."
 msgstr "Accesso rifiutato: il token non è valido."
@@ -1435,6 +1440,10 @@ msgstr "Avvia all’accesso"
 msgid "Avvio automatico"
 msgstr "Avvio automatico"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Avvio del collegamento…"
+msgstr "Avvio del collegamento…"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "avvisa"
 msgstr "avvisa"
@@ -2003,6 +2012,10 @@ msgstr "Collegamento"
 msgid "composio.cancelled"
 msgstr "Collegamento di {name} annullato."
 
+#: src/renderer/src/lib/app-connect-flow.ts
+msgid "Collegamento non riuscito: riprova."
+msgstr "Collegamento non riuscito: riprova."
+
 #. placeholder {0}: yourRows.length
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Collegati · {0}"
@@ -2146,6 +2159,31 @@ msgstr "Composio è un servizio di terzi: i login e le azioni delle app collegat
 #: src/shared/ui-messages.ts
 msgid "composio.notActive"
 msgstr "Composio non è attivo: attivalo con la tua chiave per collegare altre app."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "appConnect.unavailable"
+msgstr "Composio non è disponibile ora: riprova più tardi."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "appConnect.notActive"
+msgstr "Composio non è più collegato: accedi di nuovo a Composio e riprova."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "appConnect.notConnectable"
+msgstr "Composio non gestisce il login di {name}: manca la sua configurazione di accesso sul tuo account Composio."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "appConnect.failed"
+msgstr "Composio non ha aperto il login di {name}."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "appConnect.timeout"
+msgstr "Composio non ha risposto in tempo: {name} non è stata collegata."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3694,6 +3732,11 @@ msgstr "Hai caricato"
 msgid "Hai finito · il bot riprende"
 msgstr "Hai finito · il bot riprende"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "appConnect.accountLimit"
+msgstr "Hai già {count, plural, one {1 account} other {# account}} {name}: togline uno per aggiungerne un altro."
+
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Hai già Ollama: scegli un modello."
 msgstr "Hai già Ollama: scegli un modello."
@@ -3944,6 +3987,11 @@ msgstr "Il cervello dei bot"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "appConnect.generic"
+msgstr "Il collegamento di {name} non è riuscito."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "open.shellDoneLine"
 msgstr "Il comando in background è finito: decidi se proseguire il lavoro, avvisare l’utente con send_to_user o restare in silenzio."
 
@@ -4041,6 +4089,10 @@ msgstr "il giorno {days} del mese ({dows})"
 #: src/shared/ui-messages.ts
 msgid "group.chainClosed"
 msgstr "Il giro si è chiuso: il coordinatore riferisce all’utente."
+
+#: src/renderer/src/lib/app-connect-flow.ts
+msgid "Il login nel browser non è stato completato: riprova e completalo entro 5 minuti."
+msgstr "Il login nel browser non è stato completato: riprova e completalo entro 5 minuti."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4635,6 +4687,11 @@ msgstr "Kernel"
 #: src/shared/ui-messages.ts
 msgid "rpc.keychainUnavailable"
 msgstr "Keychain non disponibile: impossibile conservare la chiave"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "appConnect.expired"
+msgstr "L’accesso a Composio ha richiesto troppo tempo: riprova a collegare {name}."
 
 #. placeholder {0}: message.title
 #: src/renderer/src/components/SubagentCard.tsx
@@ -5637,6 +5694,14 @@ msgstr "Nessuna richiesta di dati tuoi, pagamenti o invii passa senza di te."
 msgid "Nessuna richiesta in attesa."
 msgstr "Nessuna richiesta in attesa."
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Nessuna risposta"
+msgstr "Nessuna risposta"
+
+#: src/renderer/src/lib/app-connect-flow.ts
+msgid "Nessuna risposta entro {seconds} secondi: riprova."
+msgstr "Nessuna risposta entro {seconds} secondi: riprova."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "notice.noRoutinesToResume"
@@ -5949,10 +6014,19 @@ msgstr "non serve la password del Mac"
 msgid "Non si può annullare."
 msgstr "Non si può annullare."
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Non si può collegare"
+msgstr "Non si può collegare"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "dialog.moveToApplications.daemonNotStopped"
 msgstr "Non sono riuscito a fermare il bot in background: un’app in esecuzione non si sostituisce mai. Chiudi Homun e riprova."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "appConnect.browser"
+msgstr "Non sono riuscito ad aprire il browser per il login di {name}."
 
 #. placeholder {0}: sv.runtimeDetail ?? ''
 #: src/renderer/src/components/ConnectorCards13.tsx

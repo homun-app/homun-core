@@ -42,6 +42,8 @@ import { composioToolkitName } from '../../shared/composio-names'
 import {
   manageConnectionsAgentResult, manageConnectionsEntries, parseConnectionsResult, connectionsAccountsOf, accountLimitReachedIn
 } from './tool-batch'
+// B3 (fase b20-bug): la risposta di `add` dice che il login di questo toolkit Composio non lo gestisce
+import { noManagedAuthIn } from './app-connect-start'
 // CA1: lo stato multi-account e le sue funzioni pure (migrazione, alias)
 import {
   assignDefaultAliases, gatewayAppStatusOf, normalizeAlias, normalizeGatewayApps, uniqueAlias,
@@ -147,7 +149,23 @@ export interface ConnectAppOptions {
   another?: boolean
   /** CA1: l'alias dell'account nuovo (normalizzato: minuscolo, senza spazi) */
   alias?: string
+  /**
+   * B3 (fase b20-bug): la scadenza dell'AVVIO (epoch ms). Oltre, il link NON
+   * si apre più nel browser: chi ha chiamato ha già risposto «nessuna
+   * risposta» e una pagina di login che si apre minuti dopo confonderebbe
+   * (l'esito è `reason: 'timeout'`). Si controlla prima di aprire il link e
+   * fra un tentativo di `add` e l'altro.
+   */
+  notAfter?: number
 }
+
+/**
+ * B3: perché connectApp NON è partito. `error` resta il testo di sempre
+ * (gli altri chiamanti non cambiano); `reason` lo dice in codice a chi deve
+ * spiegare la cosa all'utente (apps:connect): Composio non gestisce il login
+ * di questo toolkit, il browser non si è aperto, il tempo dell'avvio è scaduto.
+ */
+export type ConnectAppFailReason = 'not-connectable' | 'browser' | 'timeout'
 
 export type ComposioGatewayManager = ReturnType<typeof createComposioGatewayManager>
 
@@ -549,10 +567,18 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
      * vuole davvero) e l'add porta l'ALIAS normalizzato e univoco; se il
      * server dice che si è al massimo di account, la risposta lo dice in
      * parole povere (`error: 'account-limit'` + quanti se ne hanno).
+     * B3 (fase b20-bug): l'esito dice anche PERCHÉ (`reason`): un toolkit il
+     * cui login Composio non gestisce (`not-connectable`), il browser che non
+     * si apre (`browser`), l'avvio scaduto (`notAfter` → `timeout`). Prima
+     * «nessun link» era un errore come un altro e finiva in una promessa
+     * orfana: la riga restava «Completa il login…» per sempre.
      */
-    async connectApp(slugRaw: string, opts: ConnectAppOptions = {}): Promise<{ ok: boolean; already?: boolean; error?: string; accountCount?: number }> {
+    async connectApp(slugRaw: string, opts: ConnectAppOptions = {}): Promise<{ ok: boolean; already?: boolean; error?: string; reason?: ConnectAppFailReason; accountCount?: number }> {
       const slug = slugRaw.toLowerCase()
       if (!deps.gatewayActive()) return { ok: false, error: 'not-active' }
+      // B3: l'avvio scaduto non apre più niente nel browser
+      const expired = (): boolean => opts.notAfter !== undefined && now() > opts.notAfter
+      const timedOut = (): { ok: false; error: string; reason: 'timeout' } => ({ ok: false, error: 'connection start timed out', reason: 'timeout' })
       const name = composioToolkitName(opts.name ?? slug)
       let existing: GatewayAccount[] = []
       try {
@@ -562,6 +588,7 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
           return { ok: true, already: true }
         }
       } catch { /* list non risponde: si prova l'add come oggi */ }
+      if (expired()) return timedOut()
       // CA1: l'alias richiesto, normalizzato e univoco fra gli account che ci
       // sono già (il suffisso -2, -3… se serve)
       const alias = typeof opts.alias === 'string' && normalizeAlias(opts.alias)
@@ -581,6 +608,12 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
             if (accountLimitReachedIn(output)) {
               return { ok: false, error: 'account-limit', accountCount: existing.length || 5 }
             }
+            // B3: Composio non gestisce il login di questo toolkit (serve la
+            // configurazione di accesso): lo si dice in codice, è un motivo
+            // che si spiega — non «nessun link» come un errore qualunque
+            if (noManagedAuthIn(output)) {
+              return { ok: false, error: 'no Composio-managed auth config for this toolkit', reason: 'not-connectable' }
+            }
             return { ok: false, error: 'no authorization link in the response' }
           }
         } catch (e) {
@@ -597,14 +630,17 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
             return { ok: false, error: 'connection closed while adding the account; open the app again to see its accounts' }
           }
           lastError = e instanceof Error ? e.message : String(e)
+          // B3: scaduto il tempo dell'avvio non si ritenta
+          if (expired()) return timedOut()
           if (attempt < 2) await new Promise((r) => setTimeout(r, deps.retryDelayMs?.() ?? 600))
         }
       }
       if (!link) return { ok: false, error: lastError || 'connection error' }
+      if (expired()) return timedOut()
       try {
         await deps.openExternal(link)
       } catch (e) {
-        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+        return { ok: false, error: e instanceof Error ? e.message : String(e), reason: 'browser' }
       }
       // K3 (ritocchi): il nome dell'attesa è umano anche senza hint
       void waitForApp(slug, name)

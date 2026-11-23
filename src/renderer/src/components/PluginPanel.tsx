@@ -573,6 +573,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                     key={r.app.id}
                     row={r}
                     flow={flows.flowOf(r)}
+                    failure={flows.failureOf(r)}
                     onConnect={(x) => void flows.connect(x)}
                     onCancel={(x) => void flows.cancel(x)}
                     onConflictResolve={(x) => void flows.onConflictResolve(x)}
@@ -619,6 +620,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                 key={r.app.id}
                 row={r}
                 flow={flows.flowOf(r)}
+                failure={flows.failureOf(r)}
                 onConnect={(x) => void flows.connect(x)}
                 onCancel={(x) => void flows.cancel(x)}
                 onConflictResolve={(x) => void flows.onConflictResolve(x)}
