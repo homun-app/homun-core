@@ -466,7 +466,8 @@ try {
     // delle Impostazioni si CHIUDE al cambio di larghezza della finestra (il
     // pannello del bot passa da docked a overlay e i layer si sistemano): si
     // riapre dopo ogni resize, prima delle catture di quel giro
-    const SEZIONI = ['Generali', 'Modelli', 'App e skill', 'Approvazioni', 'Cassaforte', 'Routine', 'Uso e costi']
+    // PP3 (fase plugin-pulita): «App e skill» non c'è più — sta nella pagina Plugin
+    const SEZIONI = ['Generali', 'Modelli', 'Approvazioni', 'Cassaforte', 'Routine', 'Uso e costi']
     for (const width of [1440, 900]) {
       for (const dark of [false, true]) {
         await setDark(r.pageEval, dark)

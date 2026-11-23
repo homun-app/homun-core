@@ -5,13 +5,14 @@
 // e ogni pagina usa gli stessi pezzi di components/settings/: titolo
 // (SettingsPage), gruppo a scheda (SettingsGroup), riga nome/controllo
 // (SettingsRow), «Avanzate» chiuso (SettingsAdvanced). Modelli e Approvazioni
-// vivono nei loro file (I2/I4); la finestra «App» e la sezione «App e skill»
-// restano come sono (I7).
+// vivono nei loro file (I2/I4). PP3 (fase plugin-pulita): la sezione «App e
+// skill» non c'è più — connettori, server MCP e skill stanno nella pagina
+// «Plugin»; chi ne chiede ancora la scheda arriva lì (store: setSettingsTab).
 import { useEffect, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { Blocks, Cpu, Gauge, KeyRound, Repeat, Settings as SettingsIcon, ShieldCheck, X } from 'lucide-react'
+import { Cpu, Gauge, KeyRound, Repeat, Settings as SettingsIcon, ShieldCheck, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { api, useStore } from '../store'
 import { formatDate, formatTime } from '../lib/i18n'
@@ -49,7 +50,6 @@ import { EngineSection } from './settings/EngineSection'
 const SECTIONS: Record<string, { label: MessageDescriptor; icon: LucideIcon }> = {
   generale: { label: msg`Generali`, icon: SettingsIcon },
   modelli: { label: msg`Modelli`, icon: Cpu },
-  app: { label: msg`App e skill`, icon: Blocks },
   approvazioni: { label: msg`Approvazioni`, icon: ShieldCheck },
   vault: { label: msg`Cassaforte`, icon: KeyRound },
   routine: { label: msg`Routine`, icon: Repeat },
@@ -149,8 +149,6 @@ export function Settings() {
             <div className="px-6 py-6">
               {tab === 'generale' && <GeneralTab />}
               {tab === 'modelli' && <ModelsPage />}
-              {/* RV2: embedded — una sola ✕, quella delle Impostazioni */}
-              {tab === 'app' && <AppPluginRedirect />}
               {tab === 'approvazioni' && <ApprovalsPage />}
               {tab === 'vault' && (
                 <SettingsPage title={<Trans>Cassaforte</Trans>}>
@@ -164,27 +162,6 @@ export function Settings() {
         </div>
       </DialogContent>
     </Dialog>
-  )
-}
-
-/** PL7 (fase plugin): la scheda «App e skill» apre la pagina Plugin (una casa sola). */
-function AppPluginRedirect(): React.ReactNode {
-  const { t } = useLingui()
-  const openPlugin = useStore((s) => s.openPlugin)
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  return (
-    <div className="space-y-4 py-6 text-center">
-      <p className="text-sm text-muted-foreground">
-        <Trans>Connettori, server MCP e skill stanno nella pagina «Plugin» della barra.</Trans>
-      </p>
-      <button
-        className="rounded-full bg-foreground px-4 py-1.5 text-sm font-medium text-background transition hover:opacity-90"
-        data-testid="settings-open-plugin"
-        onClick={() => { setSettingsOpen(false); openPlugin() }}
-      >
-        {t`Apri la pagina Plugin`} ›
-      </button>
-    </div>
   )
 }
 

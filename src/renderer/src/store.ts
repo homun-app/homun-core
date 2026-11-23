@@ -1300,6 +1300,15 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   setSettingsTab(v) {
+    // PP3 (fase plugin-pulita): la scheda «App e skill» non c'è più. Chi la
+    // chiede ancora (un rimando vecchio) arriva dove stanno quelle cose — la
+    // pagina Plugin, aperta come dagli altri rimandi — e le Impostazioni si
+    // chiudono; non resta una scheda appesa
+    if (v === 'app') {
+      set({ settingsTab: null, settingsOpen: false })
+      get().openPlugin()
+      return
+    }
     set({ settingsTab: v })
   },
 

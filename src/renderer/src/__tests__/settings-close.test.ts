@@ -1,8 +1,8 @@
 // RV2 (fase beta.2): nelle Impostazioni una SOLA ✕, che resta FERMA. Nella
-// scheda «App e skill» se ne vedevano DUE sovrapposte (quella delle
-// Impostazioni, absolute DENTRO il contenitore che scorre, e quella della
-// testata di AppsView non embedded) e scorrendo la ✕ se ne andava col
-// contenuto. Qui si rende davvero ogni scheda e si conta quel che conta:
+// scheda «App e skill» (tolti da PP3, fase plugin-pulita) se ne vedevano DUE
+// sovrapposte (quella delle Impostazioni, absolute DENTRO il contenitore che
+// scorre, e quella della testata di AppsView non embedded) e scorrendo la ✕
+// se ne andava col contenuto. Qui si rende davvero ogni scheda e si conta quel che conta:
 // esattamente UN bottone con nome accessibile «Chiudi», che non è
 // discendente del contenitore che scorre (vive fuori: resta visibile a
 // qualunque scorrimento, in tutte le schede).
@@ -17,7 +17,7 @@ const { Settings } = await import('../components/Settings')
 const { useStore } = await import('../store')
 
 /** La scheda aperta PRIMO render: come l'effetto di consumo di settingsTab, ma senza il flash iniziale. */
-const TABS = ['generale', 'modelli', 'app', 'approvazioni', 'vault', 'routine', 'uso'] as const
+const TABS = ['generale', 'modelli', 'approvazioni', 'vault', 'routine', 'uso'] as const
 
 function renderTab(tab: string) {
   setStoreStateForRender(useStore, { settingsOpen: true, settingsTab: tab })

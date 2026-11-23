@@ -473,7 +473,8 @@ try {
   })(), 8_000, 'skill importata')
   check('PL6: la skill importata è in pagina con la riga grigia «Skill · importata da Claude Code»', skillRow.includes('importata da Claude Code'), skillRow.slice(0, 140))
 
-  // ---- 8. i rimandi vecchi aprono la pagina: Impostazioni › App e skill ----
+  // ---- 8. i rimandi vecchi: la scheda «App e skill» non c'è più (PP3, fase
+  //         plugin-pulita): chi la chiede ancora arriva alla pagina Plugin ----
   await pageEval(cdp, `
     const btn = [...document.querySelectorAll('[data-testid="plugin-segments"] button')].find((b) => b.textContent.trim() === 'Tutto')
     btn?.click(); return true
@@ -485,14 +486,32 @@ try {
     const item = [...document.querySelectorAll('[role="menuitem"]')].find((e) => e.textContent.trim() === 'Impostazioni')
     item?.click(); return true
   `)
-  await waitDom(cdp, `document.querySelector('[role="dialog"]')`, 5_000)
-  // la scheda App e skill delle Impostazioni
-  const opened = await pageEval(cdp, `
-    const tab = [...document.querySelectorAll('[role="dialog"] button, [role="dialog"] [role="tab"]')].find((b) => /App e skill/.test(b.textContent ?? ''))
-    tab?.click(); return !!tab
+  await waitDom(cdp, `document.querySelector('[role="dialog"] nav button')`, 5_000)
+  const hasAppTab = await pageEval(cdp, `
+    return [...document.querySelectorAll('[role="dialog"] nav button')].some((b) => /App e skill/.test(b.textContent ?? ''))
   `)
-  check('PL7: Impostazioni ha la scheda App e skill', opened)
-  check('PL7: il rimando apre la pagina Plugin (una casa sola)', await clickTestid(cdp, 'settings-open-plugin') && await waitDom(cdp, `document.querySelector('[data-testid="plugin-page"]')`, 5_000))
+  check('PL7: Impostazioni non ha più la scheda App e skill (una casa sola: la pagina Plugin)', hasAppTab === false)
+  // chi la chiede ancora (un chiamante di setSettingsTab) arriva alla pagina
+  // Plugin e le Impostazioni si chiudono: si arriva all'azione dello store
+  // dalla catena degli hook di React del dialogo
+  const asked = await pageEval(cdp, `
+    const el = document.querySelector('[role="dialog"] nav button')
+    if (!el) return 'nessun elemento nel dialogo'
+    const key = Object.keys(el).find((k) => k.startsWith('__reactFiber$'))
+    let fiber = key ? el[key] : null
+    while (fiber) {
+      let hook = fiber.memoizedState
+      let n = 0
+      while (hook && typeof hook === 'object' && 'memoizedState' in hook && n++ < 200) {
+        const v = hook.memoizedState
+        if (typeof v === 'function' && v.name === 'setSettingsTab') { v('app'); return 'chiamata' }
+        hook = hook.next
+      }
+      fiber = fiber.return
+    }
+    return 'azione setSettingsTab non trovata negli hook'
+  `)
+  check('PL7: chi chiede ancora la scheda apre la pagina Plugin e chiude le Impostazioni', asked === 'chiamata' && await waitDom(cdp, `document.querySelector('[data-testid="plugin-page"]')`, 5_000) && await waitDom(cdp, `!document.querySelector('[role="dialog"]')`, 5_000), String(asked))
 
   // ---- 9. V5: l'interruttore Attivo della riga (clic vero sul DOM vivo) ----
   await waitDom(cdp, `document.querySelector('[data-testid="plugin-active-server:srv-plugin"]')`, 8_000)

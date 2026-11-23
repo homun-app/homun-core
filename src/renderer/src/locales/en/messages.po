@@ -1050,10 +1050,6 @@ msgstr "preview"
 msgid "Anteprima"
 msgstr "Preview"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "App e skill"
-msgstr "Apps and skills"
-
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Appena creato si presenta lui: ti chiede a cosa serve e impara dal tuo lavoro."
 msgstr "As soon as it is created it introduces itself: it asks you what it is for and learns from your work."
@@ -1183,10 +1179,6 @@ msgstr "Open the app window to authorize."
 #: src/shared/ui-messages.ts
 msgid "conn.needsAuthOpenWindow"
 msgstr "Open the Homun window to authorize"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Apri la pagina Plugin"
-msgstr "Open the Plugin page"
 
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Apri lo schermo"
@@ -2300,10 +2292,6 @@ msgstr "Connectors"
 #: src/shared/ui-messages.ts
 msgid "rpc.connectorsUnavailable"
 msgstr "connectors not available"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Connettori, server MCP e skill stanno nella pagina «Plugin» della barra."
-msgstr "Connectors, MCP servers and skills live in the «Plugin» page of the sidebar."
 
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Connettori, server MCP e skill: tutto quello che dà capacità ai tuoi bot, in un posto."
