@@ -5,6 +5,10 @@
 // Righe con orario per: avvio (pid, versione), lock ottenuto o no,
 // second-instance (e se l'app sta uscendo), finestra principale creata,
 // mostrata e chiusa, before-quit, will-quit, quit e durata dell'uscita.
+// Fase primo-avvio (P1): le righe nuove portano i ms dall'avvio (sinceBoot) —
+// quelle della finestra le scrive window-lifecycle.ts (caricamento della
+// pagina, primo paint, fotografia a 5 s), le connessioni al daemon il client
+// (daemon-connect-start / connected / connect-failed).
 // MAI dati dell'utente: solo pid, flag, conteggi e durate. Un errore del fs
 // NON si propaga mai (il registro non deve fermare l'app).
 import { appendFileSync, mkdirSync, existsSync, statSync, renameSync, rmSync } from 'node:fs'
@@ -12,6 +16,20 @@ import { join } from 'node:path'
 
 /** Oltre questa dimensione il registro ruota (main.log → main.log.1). */
 export const LIFECYCLE_LOG_MAX_BYTES = 1_000_000
+
+/** I campi di una riga: chiave=valore; quelli undefined NON si scrivono. */
+export type LifecycleFields = Record<string, string | number | boolean | undefined>
+
+/**
+ * Il registro del ciclo di vita. line() scrive una riga; sinceBoot() sono i
+ * millisecondi dall'avvio del main (la nascita del registro: le righe di
+ * fase primo-avvio li portano come ms=…, così si legge quanto ci ha messo la
+ * finestra a comparire).
+ */
+export interface LifecycleLine {
+  line(event: string, fields?: LifecycleFields): void
+  sinceBoot(): number
+}
 
 /** Le dipendenze del fs (iniettabili nei test). */
 export interface LifecycleLogDeps {
@@ -55,9 +73,10 @@ export function mainLogDir(getLogsPath: () => string, env: NodeJS.ProcessEnv = p
 export function createLifecycleLog(
   dir: string,
   deps: Partial<LifecycleLogDeps> = {}
-): { line(event: string, fields?: Record<string, string | number | boolean | undefined>): void } {
+): LifecycleLine {
   const d: LifecycleLogDeps = { ...realDeps, ...deps }
   let rotated = false
+  const bootAt = d.now()
   return {
     line(event, fields = {}) {
       try {
@@ -86,6 +105,7 @@ export function createLifecycleLog(
       } catch {
         // mai: il registro non ferma l'app
       }
-    }
+    },
+    sinceBoot: () => Math.max(0, d.now() - bootAt)
   }
 }

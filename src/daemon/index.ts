@@ -12,6 +12,11 @@
 import { resolveDataDirArgv } from '../main/mode'
 import { runDaemonRuntime } from './runtime'
 import { APP_BUILD_ID } from '../main/build-id'
+// P1 (fase primo-avvio): ogni riga [sandbotd] con l'orario ISO, come main.log
+import { installDaemonLogTimestamps } from './log-timestamp'
+
+// PRIMA di ogni riga del daemon: nessuna arriva senza orario
+installDaemonLogTimestamps()
 
 const dir = resolveDataDirArgv(process.argv) ?? process.env.SANDBOT_DATA_DIR
 if (dir === undefined || dir === null || dir === '') {

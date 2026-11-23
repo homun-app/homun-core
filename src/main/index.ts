@@ -43,6 +43,10 @@ import { safeStorageBackendForEnv } from '../daemon/master-keys'
 // U6 (fase mcp-ui): il registro del ciclo di vita e la decisione del
 // second-instance mentre l'app sta uscendo (relaunch)
 import { createLifecycleLog, mainLogDir } from './lifecycle-log'
+// P1 (fase primo-avvio): il registro della finestra (caricamento, primo paint,
+// fotografia a 5 s) e gli orari nel daemon.log
+import { watchWindow, type DisplayLike, type Rect, type WatchDeps, type WindowWatch } from './window-lifecycle'
+import { installDaemonLogTimestamps } from '../daemon/log-timestamp'
 import { secondInstanceWhileQuitting } from './quit-behavior'
 // U6: il tray si distrugge all'uscita
 import { createTray, refreshTray, destroyTray } from './tray'
@@ -70,6 +74,8 @@ protocol.registerSchemesAsPrivileged([
 
 if (isDaemonMode(process.argv)) {
   // ---- modalità daemon (A1): stesso eseguibile, nessuna finestra ----
+  // P1: ogni riga [sandbotd] con l'orario ISO — PRIMA di qualunque riga
+  installDaemonLogTimestamps()
   // U6: anche il daemon scrive la sua riga di boot nello stesso registro
   const daemonLog = createLifecycleLog(mainLogDir(() => app.getPath('logs')))
   daemonLog.line('boot', { pid: process.pid, version: app.getVersion(), mode: 'daemon' })
@@ -136,6 +142,19 @@ if (isDaemonMode(process.argv)) {
     // sola (showMainWindow: crea se manca, restore+show+focus altrimenti) e
     // getMainWindow che torna SOLO lei, mai la PiP né le altre finestre
     const mainWindows = createMainWindowManager<BrowserWindow>(createWindow)
+    // P1 (fase primo-avvio): il registro di ogni finestra principale (chiave:
+    // la finestra) — il primo paint di una finestra arriva al SUO registro
+    const windowWatchers = new Map<BrowserWindow, WindowWatch>()
+    // P1: i deps veri del registro della finestra — l'app, lo schermo di
+    // Electron e i timer del main
+    const toDisplay = (d: { id: number; workArea: Rect }): DisplayLike => ({ id: d.id, workArea: d.workArea })
+    const windowWatchDeps: WatchDeps = {
+      appHidden: () => app.isHidden(),
+      displays: () => screen.getAllDisplays().map(toDisplay),
+      displayMatching: (b) => toDisplay(screen.getDisplayMatching(b)),
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout)
+    }
     // U6 (fase mcp-ui): la PiP del turno (chiusa esplicitamente all'uscita)
     let pip: PipManager | null = null
 
@@ -144,9 +163,13 @@ if (isDaemonMode(process.argv)) {
     }
 
     function showMainWindow(): BrowserWindow {
+      const current = getMainWindow()
+      // già visibile → show() NON emette l'evento «show» (che scrive la riga e
+      // mette in corsa la fotografia): la riga la scrive da qui il registro
+      // della finestra (U6: la principale mostrata; P1: fotografia a 5 s)
+      const alreadyVisible = current !== undefined && current.isVisible()
       const win = mainWindows.showMainWindow()
-      // U6: la finestra principale mostrata (anche ricreata) nel registro
-      lifecycle.line('window-shown', { pid: process.pid })
+      if (alreadyVisible) windowWatchers.get(win)?.shown({ pid: process.pid })
       return win
     }
 
@@ -240,16 +263,21 @@ function createPipHandle(options: Record<string, unknown>, url: string): PipWind
           webviewTag: false
         }
       })
+      // P1 (fase primo-avvio): la finestra entra nel registro del ciclo di
+      // vita — caricamento della pagina, primo paint, fotografia dopo ogni show
+      const watch = watchWindow(win, lifecycle, windowWatchDeps)
+      windowWatchers.set(win, watch)
       // W1: la chiusura si comunica al manager (che dimentica SOLO la principale)
-      // U6: la riga del registro del ciclo di vita
+      // U6: la riga del registro del ciclo di vita; P1: la finestra ESCE dal registro
       win.on('closed', () => {
         mainWindows.forget(win)
+        windowWatchers.delete(win)
+        watch.dispose()
         lifecycle.line('window-closed')
       })
-      // U6: la finestra principale creata; e OGNI volta che si mostra (il
-      // primo show e i successivi restore/activate) la riga del registro
+      // U6: la finestra principale creata; la riga di ogni mostra (il primo
+      // show e i successivi restore/activate) la scrive il registro della finestra
       lifecycle.line('window-created')
-      win.on('show', () => lifecycle.line('window-shown'))
 
       // A5: niente finestre/popup dal renderer; i link http(s) al browser
       // esterno SOLO dopo il controllo dello schema (mai file:, javascript:,
@@ -318,7 +346,8 @@ function createPipHandle(options: Record<string, unknown>, url: string): PipWind
       void cleanupLegacyLaunchAgent(process.getuid?.()).catch(() => undefined)
 
       // client del daemon: lo avvia se non attivo, inoltra RPC/host API/eventi
-      const client = new DaemonClient()
+      // P1: ogni connessione al daemon finisce nel registro del ciclo di vita
+      const client = new DaemonClient({ log: lifecycle })
       // W2 (fase avvio-finestra): lo stato del caricamento (boot:status /
       // boot:retry, canali LOCALI di registerIpc): la riga «Aggiorno il
       // motore…» quando il daemon si fa sostituire per versione, e «Riprova»
@@ -395,7 +424,10 @@ function createPipHandle(options: Record<string, unknown>, url: string): PipWind
         const all = BrowserWindow.getAllWindows()
         return main ? [main, ...all.filter((w) => w !== main)] : all
       }
-      registerIpc(client, windowsForIpc, pip, boot)
+      registerIpc(client, windowsForIpc, pip, boot, {
+        // P1: il primo paint di una finestra va al SUO registro (renderer-ready)
+        firstPaint: (win) => windowWatchers.get(win)?.firstPaint()
+      })
       // A8: prima di installare un aggiornamento il daemon si ferma BENE.
       // RV1 (fase beta.2): lo STESSO meccanismo dello spostamento in
       // Applicazioni (stopRunningDaemon: la RPC daemon:restart di A2 senza

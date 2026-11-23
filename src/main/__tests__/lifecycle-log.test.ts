@@ -92,3 +92,37 @@ describe('U6: createLifecycleLog — le righe del ciclo di vita', () => {
     expect(() => log.line('boot')).not.toThrow()
   })
 })
+
+// P1 (fase primo-avvio): le righe nuove portano i ms dall'avvio, e una riga
+// resta UNA riga anche quando un valore ha spazi o accapi (per esempio la
+// descrizione di un errore di caricamento o il motivo di una connessione).
+describe('P1: il registro misura il tempo dall\'avvio', () => {
+  it('sinceBoot() è 0 alla nascita e cresce con l\'orologio: le righe nuove portano ms=<dal boot>', () => {
+    let now = Date.parse('2026-11-23T06:57:57.000Z')
+    const { deps, files } = fakeFs()
+    deps.now = () => now
+    const log = createLifecycleLog(DIR, deps)
+    log.line('boot', { pid: 72678, version: '0.3.1001-beta.17', mode: 'ui' })
+    expect(log.sinceBoot()).toBe(0)
+    now += 186
+    log.line('window-created')
+    now += 56
+    log.line('renderer-ready', { ms: log.sinceBoot() })
+    now += 64
+    log.line('daemon-connected', { ms: log.sinceBoot(), took: 300 })
+    expect(files.get(FILE)!.content).toBe(
+      '2026-11-23T06:57:57.000Z boot pid=72678 version=0.3.1001-beta.17 mode=ui\n' +
+      '2026-11-23T06:57:57.186Z window-created\n' +
+      '2026-11-23T06:57:57.242Z renderer-ready ms=242\n' +
+      '2026-11-23T06:57:57.306Z daemon-connected ms=306 took=300\n'
+    )
+  })
+
+  it('un valore con accapi o spazi doppi resta su UNA riga: una riga = un evento', () => {
+    const { deps, files } = fakeFs()
+    const log = createLifecycleLog(DIR, deps)
+    log.line('did-fail-load', { ms: 12, code: -105, desc: 'riga uno\n  riga   due\ttre', origin: 'homun://app/' })
+    const content = files.get(FILE)!.content
+    expect(content).toBe('2026-11-21T07:00:00.000Z did-fail-load ms=12 code=-105 desc=riga uno riga due tre origin=homun://app/\n')
+  })
+})

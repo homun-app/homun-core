@@ -166,7 +166,12 @@ export function registerIpc(
   // W2 (fase avvio-finestra): lo stato del caricamento (riga del BootSplash e «Riprova»)
   boot?: {
     status(): BootStatusInfo
-    retry(): Promise<{ ok: boolean; restarted: boolean }>
+    retry(): Promise<{ ok: true; restarted: boolean }>
+  },
+  // P1 (fase primo-avvio): il registro delle finestre — il primo paint del
+  // renderer va al registro della finestra che l'ha mandato
+  lifecycle?: {
+    firstPaint(win: BrowserWindow): void
   }
 ): void {
   // ---- inoltro RPC al daemon ----
@@ -197,6 +202,14 @@ export function registerIpc(
   // «Riprova» rifà la connessione, riavviando il daemon se non c'è)
   ipcMain.handle('boot:status', () => boot?.status() ?? { connected: client.connected, restartingForUpdate: false })
   ipcMain.handle('boot:retry', () => boot?.retry() ?? Promise.resolve({ ok: true, restarted: false }))
+  // P1 (fase primo-avvio): il PRIMO segnale dal renderer — React ha montato e
+  // il frame è passato. Arriva alla finestra che l'ha mandato (event.sender):
+  // il suo registro scrive renderer-ready, una volta per finestra
+  ipcMain.handle('app:first-paint', (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (win) lifecycle?.firstPaint(win)
+    return { ok: true }
+  })
   // W3 (fase avvio-finestra): il gancio di prova delle sonde — il clic sul
   // Dock non si può simulare altrimenti. SOLO con SANDBOT_TEST_USER_DATA
   // (fuori dalle prove l'handler rifiuta), emette l'activate VERO

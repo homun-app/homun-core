@@ -8,6 +8,8 @@ import { resolveUiLanguage, type UiLanguageSetting } from '../../shared/ui-langu
 import { bootLanguageSetting, laterBootLanguage } from './lib/boot-language'
 import { App } from './App'
 import { PipView } from './components/PipView'
+// P1 (fase primo-avvio): il primo segnale dal renderer al main (renderer-ready nel registro)
+import { FirstPaintSignal } from './components/FirstPaintSignal'
 import './styles.css'
 
 // Fase 17a (L2): l'app si monta SOLO dopo la prima attivazione della lingua
@@ -37,6 +39,8 @@ async function boot(): Promise<void> {
     <React.StrictMode>
       <I18nProvider i18n={i18n}>
         {pipMatch ? <PipView agentId={pipMatch[1]!} /> : <App />}
+        {/* P1: accanto alla finestra vera (App o PiP): il primo paint lo dice al main */}
+        <FirstPaintSignal />
       </I18nProvider>
     </React.StrictMode>
   )

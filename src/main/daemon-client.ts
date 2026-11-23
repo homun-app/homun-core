@@ -20,6 +20,8 @@ import { daemonSpawnSpec, isDaemonCommandLine, isLegacyDaemonCommandLine, daemon
 import { daemonSpawnContext } from './daemon-context'
 import { dataDir } from './store/db'
 import type { SandbotEvent } from '../shared/types'
+// P1 (fase primo-avvio): le connessioni al daemon nel registro del ciclo di vita
+import type { LifecycleLine } from './lifecycle-log'
 
 const RECONNECT_DELAY_MS = 2000
 const SPAWN_TIMEOUT_MS = 15_000
@@ -241,6 +243,12 @@ export interface DaemonClientDeps {
   ensure?: (expected?: DaemonBuild) => Promise<DaemonInfo>
   /** Versione/build attesa del daemon (A2; default: il contesto del main). */
   expectedBuild?: DaemonBuild
+  /**
+   * P1 (fase primo-avvio): il registro del ciclo di vita, dove il client
+   * scrive ogni tentativo di connessione (daemon-connect-start, poi
+   * daemon-connected o daemon-connect-failed col motivo). Senza: niente righe.
+   */
+  log?: LifecycleLine
 }
 
 /**
@@ -266,10 +274,12 @@ export class DaemonClient {
   private readonly makeWs: NonNullable<DaemonClientDeps['makeWs']>
   private readonly ensure: NonNullable<DaemonClientDeps['ensure']>
   private readonly expectedBuild: DaemonBuild
+  private readonly log: LifecycleLine | undefined
 
   constructor(deps: DaemonClientDeps = {}) {
     this.makeWs = deps.makeWs ?? ((opts) => new WsClient(opts))
     this.ensure = deps.ensure ?? ensureDaemonRunning
+    this.log = deps.log
     const ctx = daemonSpawnContext()
     this.expectedBuild = deps.expectedBuild ?? { version: ctx.version, build: ctx.buildId }
   }
@@ -317,11 +327,21 @@ export class DaemonClient {
 
   private async connectWithRetry(): Promise<void> {
     while (!this.stopped) {
+      // P1: ogni tentativo nel registro — quando parte, quando è collegato (e
+      // in quanto) o perché è fallito
+      const attemptAt = Date.now()
+      this.log?.line('daemon-connect-start', { ms: this.log.sinceBoot() })
       try {
         const info = await this.ensure(this.expectedBuild)
         await this.connectOnce(info)
+        this.log?.line('daemon-connected', { ms: this.log.sinceBoot(), took: Date.now() - attemptAt })
         return
       } catch (e) {
+        this.log?.line('daemon-connect-failed', {
+          ms: this.log.sinceBoot(),
+          took: Date.now() - attemptAt,
+          reason: e instanceof Error ? e.message : String(e)
+        })
         console.error('[sandbot] connessione al daemon fallita:', e instanceof Error ? e.message : e)
         await sleep(RECONNECT_DELAY_MS)
       }
