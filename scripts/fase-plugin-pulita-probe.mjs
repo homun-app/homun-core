@@ -462,10 +462,12 @@ const scrollChecks = async (cdp, what, rootSel, lastExpr, lastLabel, { requireOv
   // il corpo SCORRE dentro se ha più contenuto che spazio; è TAGLIATO se sporge dalla finestra (il vizio di prima: cresceva col contenuto e il fondo restava sotto il bordo)
   const overflows = m0.scrollHeight > m0.clientHeight
   const clipped = m0.bottom > m0.innerHeight + 1 || m0.top < 0
+  let scrollTopAfterWheel = 0
   if (requireOverflow) check(`${tag}: il corpo ha più contenuto che spazio (scrollHeight > clientHeight) e sta nella finestra`, overflows && !clipped, fmt(m0))
   if (overflows && !clipped) {
     await wheel(cdp, rootSel, 400)
     const m1 = await waitValue(cdp, `(() => { const m = (${MEASURE_JS(rootSel)}); return m && m.scrollTop > 0 ? m : null })()`, 1_500, 100)
+    scrollTopAfterWheel = m1 ? m1.scrollTop : (await measure(cdp, rootSel))?.scrollTop ?? 0
     const point = await wheelPoint(cdp, rootSel)
     check(`${tag}: dopo la rotella scrollTop > 0`, m1 !== null && m1.scrollTop > 0, `${fmt(m1 ?? await measure(cdp, rootSel))} · rotella a ${point?.x},${point?.y} su: ${m1 ? '' : (point ? await hitAt(cdp, point.x, point.y) : '')}`)
   } else {
@@ -474,6 +476,8 @@ const scrollChecks = async (cdp, what, rootSel, lastExpr, lastLabel, { requireOv
   const m2 = await wheelToBottom(cdp, rootSel)
   const r = await rectOf(cdp, rootSel, lastExpr)
   check(`${tag}: in fondo ${lastLabel} sta dentro la finestra e dentro il corpo (bottom ≤ innerHeight)`, onScreen(r), `${lastLabel} ${r ? `${r.top}–${r.bottom}` : 'non trovato'} · corpo ${m2 ? `${m2.top}–${m2.bottom}` : '-'} · ${fmt(m2)}`)
+  // la MISURA si stampa sempre, anche quando è verde (nel REPORT finiscono i numeri, non un «ok»)
+  log(`misura ${tag}: corpo ${m0.top}–${m0.bottom} in una finestra di ${m0.innerHeight} · scrollHeight ${m0.scrollHeight}, clientHeight ${m0.clientHeight} · dopo la rotella scrollTop ${scrollTopAfterWheel} · in fondo scrollTop ${m2 ? m2.scrollTop : '-'} di ${m2 ? m2.scrollHeight - m2.clientHeight : '-'} · ${lastLabel} ${r ? `${r.top}–${r.bottom} (interno ${onScreen(r) ? 'sì' : 'NO'})` : 'non trovato'}`)
   await resetScroll(cdp, rootSel)
   return { m0, m1: m0, m2, r }
 }
