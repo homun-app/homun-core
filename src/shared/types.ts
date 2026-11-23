@@ -1476,11 +1476,18 @@ export interface SandbotApi {
   /** fase 14 (punto 7e): l'utente ha compilato il modulo sicuro */
   secureInputSubmit(agentId: string, approvalId: string, values: Record<string, string>): Promise<{ ok: boolean }>
   // fase 14 (punti 1-5): la libreria
-  libraryList(query?: string, kind?: string): Promise<LibraryItemInfo[]>
+  /**
+   * B4 (fase b20-bug): il terzo argomento è il filtro «Archiviati» — senza
+   * (o false) SOLO le voci in vista; `true` SOLO le archiviate; `'all'` tutte
+   * (la pagina aperta cerca la sua voce anche tra le archiviate).
+   */
+  libraryList(query?: string, kind?: string, archived?: boolean | 'all'): Promise<LibraryItemInfo[]>
   libraryGet(id: string, version?: number): Promise<LibraryContentInfo>
   libraryDelete(id: string): Promise<{ ok: boolean }>
   libraryRename(id: string, title: string): Promise<{ ok: boolean }>
   libraryPin(id: string, pinned: boolean): Promise<{ ok: boolean }>
+  /** B4 (fase b20-bug): archivia (`archived` true) o ripristina (false) una voce; non cancella niente */
+  libraryArchive(id: string, archived: boolean): Promise<{ ok: boolean }>
   libraryExport(id: string, format: string): Promise<{ ok: boolean; path: string; output: string }>
   /** fase pagine (G2): il SVG di una spec Vega-Lite (difese di charts.ts, lato daemon) */
   renderChartSpec(spec: string): Promise<{ svg: string }>
@@ -2172,6 +2179,12 @@ export interface LibraryItemInfo {
   fileSize?: number | null
   fileMime?: string | null
   hasTotp?: boolean
+  /**
+   * B4 (fase b20-bug): archiviata dall'utente — fuori dalla vista normale,
+   * dentro il filtro «Archiviati». Assente (record o chiamante vecchio) =
+   * non archiviata.
+   */
+  archived?: boolean
 }
 
 /** Il contenuto di una voce (documento: markdown della versione; grafico: sorgente; file: base64 per le immagini). */

@@ -2286,16 +2286,23 @@ export function buildApiMethods(
     },
 
     // ---- fase 14 (punti 1-5): la libreria ----
-    'library:list': async ([query, kind]) => {
+    // B4 (fase b20-bug): il terzo argomento è il filtro «Archiviati» — `true`
+    // chiede SOLO le archiviate, 'all' tutte (la pagina aperta cerca la sua
+    // voce anche tra quelle: un link a un documento archiviato resta
+    // apribile); senza (o con qualunque altro valore) la vista normale, le
+    // archiviate escluse
+    'library:list': async ([query, kind, archived]) => {
       const libraryStore = await import('../main/store/library')
       return libraryStore.listLibraryItems({
         ...(typeof query === 'string' && query.trim() ? { query } : {}),
-        ...(kind === 'document' || kind === 'chart' || kind === 'file' ? { kind } : {})
+        ...(kind === 'document' || kind === 'chart' || kind === 'file' ? { kind } : {}),
+        ...(archived === true || archived === 'all' ? { archived } : {})
       }).map((i): import('../shared/types').LibraryItemInfo => ({
         id: i.id, kind: i.kind, title: i.title, authorAgentId: i.authorAgentId,
         createdAt: i.createdAt, updatedAt: i.updatedAt, pinned: i.pinned, tainted: i.tainted,
         currentVersion: i.currentVersion, chartKind: i.chartKind ?? null,
-        fileName: i.fileName ?? null, fileSize: i.fileSize ?? null, fileMime: i.fileMime ?? null
+        fileName: i.fileName ?? null, fileSize: i.fileSize ?? null, fileMime: i.fileMime ?? null,
+        archived: i.archived
       }))
     },
     'library:get': async ([id, version]) => {
@@ -2344,6 +2351,19 @@ export function buildApiMethods(
       const libraryStore = await import('../main/store/library')
       if (!libraryStore.getLibraryItem(String(id))) throw uiError(UI.rpcItemNotFound)
       libraryStore.updateLibraryItem(String(id), { pinned: pinned === true, updatedAt: Date.now() })
+      return { ok: true }
+    },
+    /**
+     * B4 (fase b20-bug): archivia (`archived` true) o ripristina (false) una
+     * voce — azione dell'UTENTE dalla UI, come pin/rename/delete. Non cancella
+     * niente: la voce sparisce solo dalla vista normale. Il flag dev'essere un
+     * booleano (un valore mancante o spurio non cambia lo stato: errore).
+     */
+    'library:archive': async ([id, archived]) => {
+      const libraryStore = await import('../main/store/library')
+      if (typeof archived !== 'boolean') throw uiError(UI.rpcArchiveFlagInvalid)
+      if (!libraryStore.getLibraryItem(String(id))) throw uiError(UI.rpcItemNotFound)
+      libraryStore.updateLibraryItem(String(id), { archived })
       return { ok: true }
     },
     /** Fase 14: "ripristina come nuova versione" — la versione vecchia diventa l'ultima (MAI sovrascritta). */

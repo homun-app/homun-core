@@ -39,6 +39,9 @@ Scelte aggiunte durante la traduzione del catalogo (usate ovunque):
 | riepilogo (turni precedenti) | summary (of earlier turns) |
 | Fissa / Sblocca (libreria) | Pin / Unpin |
 | Esporta | Export |
+| Archivia / Archiviati / Ripristina (libreria) | Archive / Archived / Restore |
+| Elimina / Annulla | Delete / Cancel |
+| voce / voci (della Libreria); selezione | item / items; selection |
 | merce: tutte le date e le ore | formato `en-GB` (giorno prima del mese, 24 h) |
 
 Note di traduzione:

@@ -277,6 +277,12 @@ function open(): DatabaseSync {
   const groupCols = db.prepare("SELECT name FROM pragma_table_info('groups')").all() as Array<{ name: string }>
   if (!groupCols.some((c) => c.name === 'archived_at')) db.exec('ALTER TABLE groups ADD COLUMN archived_at INTEGER')
   if (!groupCols.some((c) => c.name === 'deleted_at')) db.exec('ALTER TABLE groups ADD COLUMN deleted_at INTEGER')
+  // B4 (fase b20-bug): l'archivio della LIBRERIA — la colonna `archived` di
+  // library_items per i DB esistenti (CREATE TABLE IF NOT EXISTS non la
+  // aggiunge). Additiva come le altre: SOLO se manca, mai DROP o ricreazioni;
+  // i record di prima restano col default 0 = NON archiviati
+  const libraryCols = db.prepare("SELECT name FROM pragma_table_info('library_items')").all() as Array<{ name: string }>
+  if (!libraryCols.some((c) => c.name === 'archived')) db.exec('ALTER TABLE library_items ADD COLUMN archived INTEGER DEFAULT 0')
   // Q1 (fase squadra): l'autonomia della squadra — le squadre esistenti (e i
   // valori NULL dei DB appena migrati) valgono 'box', il default della spec
   migrateGroupAutonomy(db)

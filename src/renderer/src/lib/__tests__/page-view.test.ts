@@ -190,3 +190,54 @@ describe('R2 (ritocchi-beta18): previewLineText — il testo, non il markdown', 
     expect(src).not.toContain('replace(/[#*_')
   })
 })
+
+// ---- B4 (fase b20-bug): le TABELLE nell'anteprima ----
+// Il difetto (catture della fase): le schede della Libreria mostravano le
+// tabelle crude — `|---|---|` e `| Ricetta | Data |`. previewLineText resta
+// la funzione UNICA: le righe separatrici spariscono, una riga di tabella
+// diventa celle separate da « · » (ripulite dagli spazi bordo; una cella vuota
+// non lascia separatori doppi né in testa/in coda).
+describe('B4 (b20-bug): previewLineText — le tabelle non restano crude', () => {
+  it('le righe separatrici spariscono: |---|---|, | :--- | ---: |, |---|:---:|', () => {
+    expect(previewLineText('|---|---|')).toBe('')
+    expect(previewLineText('| :--- | ---: |')).toBe('')
+    expect(previewLineText('|---|:---:|')).toBe('')
+    // con gli spazi bordo e senza i tubi esterni resta un separatore
+    expect(previewLineText('  | --- | --- | --- |  ')).toBe('')
+    expect(previewLineText('--- | ---')).toBe('')
+  })
+
+  it('una riga di tabella diventa celle separate da « · »: | Ricetta | Data | → «Ricetta · Data»', () => {
+    expect(previewLineText('| Ricetta | Data |')).toBe('Ricetta · Data')
+    expect(previewLineText('|Pastiera|domenica|')).toBe('Pastiera · domenica')
+    expect(previewLineText('| Ricetta | Data | Porzioni |')).toBe('Ricetta · Data · Porzioni')
+    expect(previewLineText('| Solo |')).toBe('Solo')
+  })
+
+  it('le celle vuote non lasciano separatori doppi né ai bordi', () => {
+    expect(previewLineText('| Ricetta | |')).toBe('Ricetta')
+    expect(previewLineText('| | 12 |')).toBe('12')
+    expect(previewLineText('| Ricetta |  | Data |')).toBe('Ricetta · Data')
+    expect(previewLineText('| | |')).toBe('')
+  })
+
+  it('dentro le celle valgono le stesse regole: link, grassetti, corsivi e codice perdono i marcatori', () => {
+    expect(previewLineText('| [Pastiera napoletana](lib_e7eeadc6) | **domenica** |')).toBe('Pastiera napoletana · domenica')
+    expect(previewLineText('| `v1.2` | _classico_ |')).toBe('v1.2 · classico')
+  })
+
+  it('una riga che NON è una tabella resta com\'è (un tubo in mezzo al testo, una linea ---)', () => {
+    expect(previewLineText('usa a | b nel terminale')).toBe('usa a | b nel terminale')
+    expect(previewLineText('---')).toBe('---')
+    expect(previewLineText('- voce con | tubo')).toBe('voce con | tubo')
+  })
+
+  it('la card (pagePreview) di un documento che inizia con una tabella: niente |---|---|, l\'intro è «Ricetta · Data Pastiera · domenica»', () => {
+    const md = ['# Ricettario', '', '| Ricetta | Data |', '|---|---|', '| Pastiera | domenica |', ''].join('\n')
+    const p = pagePreview(md)
+    expect(p.title).toBe('Ricettario')
+    expect(p.intro).toBe('Ricetta · Data Pastiera · domenica')
+    expect(p.intro).not.toContain('|')
+    expect(p.intro).not.toContain('---')
+  })
+})

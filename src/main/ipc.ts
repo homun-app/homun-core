@@ -91,7 +91,8 @@ export const DAEMON_RPC_CHANNELS = [
   'vault:items', 'vault:save-login', 'vault:save-contact', 'vault:delete-item', 'vault:get-contact',
   'fills:grants', 'fills:revoke', 'secureinput:submit',
   // fase 14: la libreria (documenti, grafici, file; esportazione anche da UI)
-  'library:list', 'library:get', 'library:delete', 'library:rename', 'library:pin', 'library:export', 'library:stats', 'library:restore-version', 'library:render-chart',
+  // B4 (fase b20-bug): library:archive — archivia/ripristina una voce
+  'library:list', 'library:get', 'library:delete', 'library:rename', 'library:pin', 'library:archive', 'library:export', 'library:stats', 'library:restore-version', 'library:render-chart',
   'approvals:resolve', 'approvals:resolve-latest', 'approvals:pending-all', 'approvals:log',
   // D2 (fase deleghe): lo stato dei job delle deleghe accodate e l'Annulla
   'delegations:status', 'delegations:cancel',

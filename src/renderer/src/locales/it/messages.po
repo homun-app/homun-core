@@ -274,6 +274,11 @@ msgstr "{0} richieste da {bots} bot · solo tu puoi deciderle · ogni richiesta 
 msgid "{0} selezionate"
 msgstr "{0} selezionate"
 
+#. placeholder {0}: bulkIds.length
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "{0} selezionati"
+msgstr "{0} selezionati"
+
 #. placeholder {0}: team.waitingCount
 #: src/renderer/src/components/Sidebar.tsx
 msgid "{0} ti aspettano"
@@ -931,6 +936,7 @@ msgstr "Alternativa: tramite Composio"
 msgid "Alto"
 msgstr "Alto"
 
+#: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/Sidebar.tsx
@@ -1104,6 +1110,7 @@ msgstr "apri"
 
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 #: src/renderer/src/components/TaskCard.tsx
@@ -1209,6 +1216,12 @@ msgstr "Aprire <0>{0}</0> nel tuo browser"
 msgid "Arancio"
 msgstr "Arancio"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.archiveFlagInvalid"
+msgstr "archived non valido: serve true o false"
+
+#: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Archivia"
 msgstr "Archivia"
@@ -1221,6 +1234,11 @@ msgstr "Archivia bot"
 msgid "Archivia team"
 msgstr "Archivia team"
 
+#: src/renderer/src/components/PageView.tsx
+msgid "Archiviata: non compare in Libreria finché non la ripristini."
+msgstr "Archiviata: non compare in Libreria finché non la ripristini."
+
+#: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Archiviati"
 msgstr "Archiviati"
@@ -1429,6 +1447,10 @@ msgstr "azione dell'insieme fisso: chiede sempre"
 msgid "azioni sul tuo Mac fuori dal computer"
 msgstr "azioni sul tuo Mac fuori dal computer"
 
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Azioni sulle voci selezionate"
+msgstr "Azioni sulle voci selezionate"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Azzera"
 msgstr "Azzera"
@@ -1571,15 +1593,6 @@ msgstr "Cambia token"
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Campi: {0}"
 msgstr "Campi: {0}"
-
-#: src/renderer/src/components/LibraryPanel.tsx
-msgid "Cancella"
-msgstr "Cancella"
-
-#. placeholder {0}: item.title
-#: src/renderer/src/components/LibraryPanel.tsx
-msgid "Cancellare «{0}» dalla libreria? Anche i file della voce vengono tolti."
-msgstr "Cancellare «{0}» dalla libreria? Anche i file della voce vengono tolti."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2998,6 +3011,7 @@ msgstr "Elenco"
 msgid "elimina"
 msgstr "elimina"
 
+#: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Elimina"
@@ -3038,6 +3052,15 @@ msgstr "Elimina il team {0}?"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Elimina team"
 msgstr "Elimina team"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Eliminare «{title}»?"
+msgstr "Eliminare «{title}»?"
+
+#. placeholder {0}: ids.length
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Eliminare {0} voci?"
+msgstr "Eliminare {0} voci?"
 
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 msgid "Eliminare {size}? Verranno cancellati per sempre i file che i bot hanno creato nel loro computer. Questa azione non si può annullare."
@@ -3124,6 +3147,10 @@ msgstr "es. Il mio gateway"
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "es. llama-3.2-3b-instruct"
 msgstr "es. llama-3.2-3b-instruct"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Esci dalla selezione"
+msgstr "Esci dalla selezione"
 
 #: src/renderer/src/lib/activity.ts
 msgid "esegue un comando…"
@@ -5501,6 +5528,10 @@ msgstr "nessun comando riconosciuto"
 msgid "Nessun consenso sempre attivo."
 msgstr "Nessun consenso sempre attivo."
 
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Nessun documento archiviato."
+msgstr "Nessun documento archiviato."
+
 #: src/renderer/src/components/ComputerFiles.tsx
 msgid "Nessun file caricato."
 msgstr "Nessun file caricato."
@@ -5914,6 +5945,10 @@ msgstr "Non serve"
 msgid "non serve la password del Mac"
 msgstr "non serve la password del Mac"
 
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Non si può annullare."
+msgstr "Non si può annullare."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "dialog.moveToApplications.daemonNotStopped"
@@ -5970,6 +6005,10 @@ msgstr "Nuova routine"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Nuovo"
 msgstr "Nuovo"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Nuovo titolo"
+msgstr "Nuovo titolo"
 
 #: src/renderer/src/components/plugin/ServerSecretRows.tsx
 msgid "Nuovo token"
@@ -7047,7 +7086,9 @@ msgstr "riprendi"
 msgid "Riprendi"
 msgstr "Riprendi"
 
+#: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/PageView.tsx
 #: src/renderer/src/components/Sidebar.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Ripristina"
@@ -7520,6 +7561,11 @@ msgstr "Segreto (salvato cifrato)"
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Segreto TOTP (opzionale)"
 msgstr "Segreto TOTP (opzionale)"
+
+#. placeholder {0}: i.title
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Seleziona {0}"
+msgstr "Seleziona {0}"
 
 #: src/renderer/src/components/ComputerFiles.tsx
 msgid "Seleziona un file per vederne il contenuto."

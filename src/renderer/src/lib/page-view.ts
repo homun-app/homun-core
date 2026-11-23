@@ -23,6 +23,46 @@ const isBlank = (line: string): boolean => !line.trim()
 /** La riga è un'immagine Markdown (`![alt](…)`, anche su più righe no: qui basta l'inizio)? */
 const isImage = (line: string): boolean => /^\s*!\[[^\]]*\]\([^)]*\)/.test(line)
 
+/** Le immagini spariscono; i link diventano il loro testo. */
+const stripLinksAndImages = (s: string): string =>
+  s
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+
+/**
+ * Corsivo e grassetto SOLO a confini di parola: il marcatore non è mai
+ * attaccato a una parola da un lato e staccato dall'altro — un `_` DENTRO
+ * una parola (lib_x, snake_case) non è un marcatore e resta; poi i backtick
+ * del codice inline spariscono.
+ */
+const stripEmphasis = (s: string): string =>
+  s
+    .replace(/(?<![A-Za-z0-9_`])\*\*(\S(?:[\s\S]*?\S)?)\*\*(?![A-Za-z0-9_`])/g, '$1')
+    .replace(/(?<![A-Za-z0-9_`])\*(\S(?:[\s\S]*?\S)?)\*(?![A-Za-z0-9_`])/g, '$1')
+    .replace(/(?<![A-Za-z0-9_`])_(\S(?:[\s\S]*?\S)?)_(?![A-Za-z0-9_`])/g, '$1')
+    .replace(/`([^`]*)`/g, '$1')
+    .trim()
+
+/**
+ * B4 (fase b20-bug): una riga di TABELLA per l'anteprima — null se la riga
+ * non è una tabella. Il separatore (`|---|---|`, anche `| :--- | ---: |` e
+ * `|---|:---:|`, con o senza i tubi esterni) diventa ''; una riga di celle
+ * (col `|` iniziale, come la scrivono i bot) diventa le celle separate da
+ * « · », ripulite dagli spazi bordo — una cella vuota non lascia separatori
+ * doppi né ai bordi. In ogni cella valgono le regole del testo in linea
+ * (link, grassetti, codice). Una riga con un tubo in mezzo al testo NON è
+ * una tabella e resta com'è. Pura.
+ */
+export function tableLineText(line: string): string | null {
+  const s = line.trim()
+  if (!s.includes('|')) return null
+  const cells = s.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+  // il separatore: ogni cella è solo trattini, con i : dell'allineamento
+  if (cells.every((c) => /^:?-+:?$/.test(c))) return ''
+  if (!s.startsWith('|')) return null
+  return cells.map((c) => stripEmphasis(stripLinksAndImages(c))).filter(Boolean).join(' · ')
+}
+
 /**
  * R2 (fase ritocchi-beta18): il TESTO di una riga di Markdown per
  * l'anteprima — la funzione UNICA delle card della Libreria (pagePreview) e
@@ -30,24 +70,16 @@ const isImage = (line: string): boolean => /^\s*!\[[^\]]*\]\([^)]*\)/.test(line)
  * niente; toglie corsivo e grassetto SOLO come marcatori di inizio e fine
  * parola, mai un `_` dentro una parola (`lib_x`, `snake_case` restano
  * intatti); i marcatori di riga (titolo, lista, citazione) e i backtick del
- * codice inline spariscono. Pura.
+ * codice inline spariscono. B4 (fase b20-bug): le righe di tabella passano
+ * da tableLineText (mai `|---|---|` né `| Ricetta | Data |` crudi). Pura.
  */
 export function previewLineText(line: string): string {
-  let s = line.trim()
-  // le immagini spariscono; i link diventano il loro testo
-  s = s.replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-  s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+  const table = tableLineText(line)
+  if (table !== null) return table
+  let s = stripLinksAndImages(line.trim())
   // i marcatori di riga: titolo, lista, citazione
   s = s.replace(/^(?:>+\s*|#{1,6}\s*|[-*+]\s+|\d+[.)]\s+)/, '')
-  // corsivo e grassetto SOLO a confini di parola: il marcatore non è mai
-  // attaccato a una parola da un lato e staccato dall'altro — un `_` DENTRO
-  // una parola (lib_x, snake_case) non è un marcatore e resta
-  s = s.replace(/(?<![A-Za-z0-9_`])\*\*(\S(?:[\s\S]*?\S)?)\*\*(?![A-Za-z0-9_`])/g, '$1')
-  s = s.replace(/(?<![A-Za-z0-9_`])\*(\S(?:[\s\S]*?\S)?)\*(?![A-Za-z0-9_`])/g, '$1')
-  s = s.replace(/(?<![A-Za-z0-9_`])_(\S(?:[\s\S]*?\S)?)_(?![A-Za-z0-9_`])/g, '$1')
-  // codice inline: i backtick spariscono (come faceva la vista a elenco)
-  s = s.replace(/`([^`]*)`/g, '$1')
-  return s.trim()
+  return stripEmphasis(s)
 }
 
 /** Il testo di un titolo senza i # e spazi/adiacenti (#). */

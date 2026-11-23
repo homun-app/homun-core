@@ -155,4 +155,10 @@ describe('fase 16c correzioni (R1): coerenza preload → ipc.ts → daemon', () 
       expect(daemon).toContain(ch)
     }
   })
+
+  it('B4 (fase b20-bug): library:archive è inoltrato — preload → ipc → daemon (senza l\'allowlist risponderebbe «No handler registered»)', () => {
+    expect(preload).toContain('library:archive')
+    expect(forwarded).toContain('library:archive')
+    expect(daemon).toContain('library:archive')
+  })
 })

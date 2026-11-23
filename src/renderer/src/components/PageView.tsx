@@ -9,6 +9,13 @@
 // (stessi renderer e difese della Libreria). Il compositore della chat resta
 // SOSPESO in basso: chi ci scrive parla al bot della chat, che riceve la riga
 // di contesto della pagina (G6). Si chiude con ✕ ed Esc.
+//
+// B4 (fase b20-bug): accanto a «Esporta» c'è anche il «⋯» del documento — lo
+// stesso menu della Libreria (Rinomina · Fissa/Sblocca · Archivia · Elimina;
+// Apri ed Esporta non servono: la pagina è già aperta e il bottone c'è). Una
+// pagina ARCHIVIATA si legge ancora — niente viene cancellato dall'archiviare
+// — e lo dice, con «Ripristina»; per questo la sua voce si cerca anche tra le
+// archiviate (library:list … 'all'), così il titolo è sempre quello giusto.
 import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { X, FileDown } from 'lucide-react'
@@ -17,6 +24,7 @@ import { formatDate } from '../lib/i18n'
 import { pageHeadings, pageBody } from '../lib/page-view'
 import { DocumentBody } from './DocumentMarkdown'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
+import { LibraryItemMenu } from './LibraryPanel'
 import type { LibraryItemInfo, LibraryContentInfo } from '../../../shared/types'
 
 /** Quante voci dell'indice si vedono prima di «Mostra tutti (N)». */
@@ -24,17 +32,43 @@ const TOC_PREVIEW = 12
 /** L'indice si mostra da questo numero di titoli in su. */
 const TOC_MIN_HEADINGS = 4
 
-export function PageView() {
+/**
+ * B4: lo stato di partenza dei test (render statico, senza effect) — il
+ * componente vero non lo passa mai.
+ */
+export interface PageViewInitial {
+  id?: string
+  content?: LibraryContentInfo | null
+  item?: LibraryItemInfo | null
+  /** la finestra di Elimina già aperta */
+  confirmDelete?: boolean
+  /** la finestra di Rinomina già aperta, col titolo scritto */
+  renameTitle?: string
+  error?: string
+}
+
+/** La voce del menu anche prima che la lista arrivi (o se manca): bastano id e titolo. */
+function pageItem(info: { id: string; title: string }, item: LibraryItemInfo | null): LibraryItemInfo {
+  if (item) return item
+  return {
+    id: info.id, kind: 'document', title: info.title || info.id, authorAgentId: '', createdAt: 0, updatedAt: 0,
+    pinned: false, tainted: false, currentVersion: 1, chartKind: null
+  }
+}
+
+export function PageView({ initial }: { initial?: PageViewInitial } = {}) {
   const { t } = useLingui()
   const info = useStore((s) => s.openPageInfo)
   const closePage = useStore((s) => s.closePage)
   const openLibrary = useStore((s) => s.openLibrary)
   const openPage = useStore((s) => s.openPage)
   const setPageMeta = useStore((s) => s.setPageMeta)
-  const [content, setContent] = useState<LibraryContentInfo | null>(null)
-  const [item, setItem] = useState<LibraryItemInfo | null>(null)
-  const [err, setErr] = useState('')
+  const [content, setContent] = useState<LibraryContentInfo | null>(initial?.content ?? null)
+  const [item, setItem] = useState<LibraryItemInfo | null>(initial?.item ?? null)
+  const [err, setErr] = useState(initial?.error ?? '')
   const [allHeadings, setAllHeadings] = useState(false)
+  // B4: un giro di ricarica in più dopo un'azione del «⋯» (rinomina, pin, ripristina)
+  const [reload, setReload] = useState(0)
   // D6 (fase deleghe): gli id dei documenti che esistono, per i link lib_…
   // nel corpo (il documento mancante diventa testo col tooltip)
   const [docIds, setDocIds] = useState<Set<string>>(new Set())
@@ -51,7 +85,9 @@ export function PageView() {
       .then(async (c) => {
         if (!alive) return
         setContent(c)
-        const items = await api.libraryList(undefined, undefined)
+        // B4: anche tra le archiviate ('all') — una pagina archiviata (aperta da un link
+        // o già aperta quando la si archivia) tiene titolo, avviso e «Ripristina»
+        const items = await api.libraryList(undefined, undefined, 'all')
         if (!alive) return
         setDocIds(new Set(items.map((i) => i.id)))
         const it = items.find((i) => i.id === info.id) ?? null
@@ -62,7 +98,7 @@ export function PageView() {
       .catch((e: unknown) => { if (alive) setErr(e instanceof Error ? e.message : String(e)) })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [info?.id])
+  }, [info?.id, reload])
 
   // Esc chiude la pagina — in FASE BOLLA e SOLO se nessun altro l'ha già
   // consumato: l'Esc di un menu Radix, di un foglio o dell'elenco / chiude
@@ -90,6 +126,8 @@ export function PageView() {
     if (info.from === 'library') openLibrary('')
     closePage()
   }
+  // B4: dopo un'azione del «⋯» la pagina si rilegge (il titolo cambia, lo stato di pin o di archivio)
+  const reloadPage = (): void => setReload((n) => n + 1)
   const goTo = (id: string): void => {
     scrollRef.current?.querySelector(`#${CSS.escape(id)}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }
@@ -129,6 +167,19 @@ export function PageView() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+          {/* B4: il «⋯» del documento — Rinomina · Fissa/Sblocca · Archivia/Ripristina · Elimina (con la conferma).
+              Confermata una cancellazione la pagina si chiude e si torna da dove si era venuti */}
+          <LibraryItemMenu
+            item={pageItem(info, item)}
+            where="page"
+            showOpen={false}
+            showExport={false}
+            onChanged={reloadPage}
+            onError={setErr}
+            onDeleted={back}
+            initialConfirmDelete={initial?.confirmDelete}
+            initialRename={initial?.renameTitle}
+          />
         </div>
       </div>
 
@@ -149,6 +200,20 @@ export function PageView() {
             {item?.tainted && (
               <p className="mt-3 rounded-[12px] bg-destructive/10 px-3 py-2 text-xs text-destructive" data-testid="page-tainted">
                 <Trans>⚠ proveniente da dati esterni</Trans>
+              </p>
+            )}
+            {/* B4: la pagina è archiviata — si legge lo stesso; da qui si ripristina in Libreria */}
+            {item?.archived === true && (
+              <p className="mt-3 flex flex-wrap items-center gap-2 rounded-[12px] bg-muted/60 px-3 py-2 text-xs text-muted-foreground" data-testid="page-archived-notice">
+                <span><Trans>Archiviata: non compare in Libreria finché non la ripristini.</Trans></span>
+                <button
+                  type="button"
+                  className="font-medium text-primary hover:underline"
+                  data-testid="page-restore"
+                  onClick={() => { void api.libraryArchive(info.id, false).then(reloadPage).catch((e: unknown) => setErr(e instanceof Error ? e.message : String(e))) }}
+                >
+                  <Trans>Ripristina</Trans>
+                </button>
               </p>
             )}
             {headings.length >= TOC_MIN_HEADINGS && (

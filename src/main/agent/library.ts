@@ -11,7 +11,8 @@
 // meta libraryTainted: il loop lo incarta nel blocco dato esterno e contamina
 // il turno che legge.
 //
-// Il bot NON cancella: delete/rename/pin sono della UI (store/library).
+// Il bot NON cancella e NON archivia: delete/rename/pin/archive sono della UI
+// (store/library); un documento archiviato si legge e si riscrive ancora.
 import { createHash } from 'node:crypto'
 // fase rilascio (A7): docker fuori dal PATH del Terminale
 import { activeBoxEngine } from '../sandbox/engine'
@@ -107,7 +108,7 @@ export function writeDocument(agentId: string, input: { title?: unknown; content
   insertLibraryItem({
     id: newId, kind: 'document', title, authorAgentId: agentId, createdAt: now, updatedAt: now,
     pinned: false, tainted: ctx.contaminated === true, currentVersion: 1,
-    chartKind: null, fileName: null, fileSha256: null, fileSize: null, fileMime: null
+    chartKind: null, fileName: null, fileSha256: null, fileSize: null, fileMime: null, archived: false
   })
   return { ok: true, value: { id: newId, title, version: 1, created: true } }
 }
@@ -260,7 +261,7 @@ export async function saveChart(agentId: string, input: { title?: unknown; kind?
   insertLibraryItem({
     id, kind: 'chart', title, authorAgentId: agentId, createdAt: now, updatedAt: now,
     pinned: false, tainted: ctx.contaminated === true, currentVersion: 1,
-    chartKind: kind, fileName: null, fileSha256: null, fileSize: null, fileMime: null
+    chartKind: kind, fileName: null, fileSha256: null, fileSize: null, fileMime: null, archived: false
   })
   return { ok: true, value: { id, title, kind } }
 }
@@ -444,7 +445,7 @@ export async function saveFileFromBox(
   insertLibraryItem({
     id, kind: 'file', title, authorAgentId: agentId, createdAt: now, updatedAt: now,
     pinned: false, tainted: ctx.contaminated === true, currentVersion: 1,
-    chartKind: null, fileName: name, fileSha256: sha || null, fileSize: size, fileMime: mimeOf(name)
+    chartKind: null, fileName: name, fileSha256: sha || null, fileSize: size, fileMime: mimeOf(name), archived: false
   })
   return { ok: true, value: { id, title, name, size } }
 }

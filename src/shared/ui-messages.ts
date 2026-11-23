@@ -523,6 +523,8 @@ export const UI = {
   rpcLoginValuesMissing: msg({ id: 'rpc.loginValuesMissing', message: 'Servono origine, utente e password' }),
   rpcSecretValuesMissing: msg({ id: 'rpc.secretValuesMissing', message: 'Servono il nome e il valore del secret' }),
   rpcItemNotFound: msg({ id: 'rpc.itemNotFound', message: 'voce non trovata' }),
+  // B4 (fase b20-bug): library:archive(id, archived) — il flag dev'essere true o false
+  rpcArchiveFlagInvalid: msg({ id: 'rpc.archiveFlagInvalid', message: 'archived non valido: serve true o false' }),
   rpcItemInconsistent: msg({ id: 'rpc.itemInconsistent', message: 'voce incoerente' }),
   rpcDocumentNotFound: msg({ id: 'rpc.documentNotFound', message: 'documento non trovato' }),
   rpcWebKeyOllama: msg({ id: 'rpc.webKeyOllama', message: 'la chiave per la ricerca web si imposta sul provider Ollama' }),

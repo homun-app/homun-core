@@ -4,6 +4,11 @@
 // <dataDir>/library/<id>/. La libreria è dell'UTENTE: tutti i suoi bot la
 // vedono e ogni voce dice chi l'ha creata (author_agent_id). Il bot NON
 // cancella: delete/rename/pin sono azioni dell'utente dalla UI.
+// B4 (fase b20-bug): l'ARCHIVIO. Anche archiviare è dell'utente: la voce
+// resta al suo posto (riga, file, versioni), si legge ancora — sparisce solo
+// dalla vista normale (listLibraryItems senza `archived: true`) finché non
+// la ripristina. La colonna `archived` nasce con la tabella e si aggiunge ai
+// DB esistenti dalla migrazione di db.ts (ALTER … ADD COLUMN, solo se manca).
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, rmSync } from 'node:fs'
@@ -25,7 +30,8 @@ export const LIBRARY_DDL = `
       file_name TEXT,
       file_sha256 TEXT,
       file_size INTEGER,
-      file_mime TEXT
+      file_mime TEXT,
+      archived INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_library_updated ON library_items(updated_at DESC);`
 
@@ -49,6 +55,8 @@ export interface LibraryItem {
   fileSha256?: string | null
   fileSize?: number | null
   fileMime?: string | null
+  /** B4: archiviata dall'utente — fuori dalla vista normale, si ripristina dal filtro «Archiviati» */
+  archived: boolean
 }
 
 interface LibraryRow {
@@ -56,6 +64,7 @@ interface LibraryRow {
   created_at: number; updated_at: number; pinned: number; tainted: number
   current_version: number; chart_kind: string | null; file_name: string | null
   file_sha256: string | null; file_size: number | null; file_mime: string | null
+  archived: number | null
 }
 
 function rowToItem(r: LibraryRow): LibraryItem {
@@ -63,7 +72,8 @@ function rowToItem(r: LibraryRow): LibraryItem {
     id: r.id, kind: r.kind as LibraryKind, title: r.title, authorAgentId: r.author_agent_id,
     createdAt: r.created_at, updatedAt: r.updated_at, pinned: !!r.pinned, tainted: !!r.tainted,
     currentVersion: r.current_version, chartKind: (r.chart_kind as LibraryItem['chartKind']) ?? null,
-    fileName: r.file_name, fileSha256: r.file_sha256, fileSize: r.file_size, fileMime: r.file_mime
+    fileName: r.file_name, fileSha256: r.file_sha256, fileSize: r.file_size, fileMime: r.file_mime,
+    archived: r.archived === 1
   }
 }
 
@@ -87,13 +97,14 @@ export function libraryItemDir(id: string): string {
 export function insertLibraryItem(item: LibraryItem): LibraryItem {
   db()
     .prepare(
-      `INSERT INTO library_items(id, kind, title, author_agent_id, created_at, updated_at, pinned, tainted, current_version, chart_kind, file_name, file_sha256, file_size, file_mime)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO library_items(id, kind, title, author_agent_id, created_at, updated_at, pinned, tainted, current_version, chart_kind, file_name, file_sha256, file_size, file_mime, archived)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     )
     .run(
       item.id, item.kind, item.title, item.authorAgentId, item.createdAt, item.updatedAt,
       item.pinned ? 1 : 0, item.tainted ? 1 : 0, item.currentVersion, item.chartKind ?? null,
-      item.fileName ?? null, item.fileSha256 ?? null, item.fileSize ?? null, item.fileMime ?? null
+      item.fileName ?? null, item.fileSha256 ?? null, item.fileSize ?? null, item.fileMime ?? null,
+      item.archived ? 1 : 0
     )
   return item
 }
@@ -103,15 +114,23 @@ export function getLibraryItem(id: string): LibraryItem | null {
   return r ? rowToItem(r) : null
 }
 
-export function updateLibraryItem(id: string, patch: Partial<Pick<LibraryItem, 'title' | 'updatedAt' | 'pinned' | 'tainted' | 'currentVersion'>>): void {
+/**
+ * Aggiorna i campi dell'utente (title, pin, tainted, versione corrente e —
+ * B4 — l'archivio). `archived` NON tocca `updatedAt`: archiviare o ripristinare
+ * non è una modifica del documento, e al ripristino la voce torna dov'era.
+ */
+export function updateLibraryItem(
+  id: string,
+  patch: Partial<Pick<LibraryItem, 'title' | 'updatedAt' | 'pinned' | 'tainted' | 'currentVersion' | 'archived'>>
+): void {
   const cur = getLibraryItem(id)
   if (!cur) return
   db()
-    .prepare('UPDATE library_items SET title=?, updated_at=?, pinned=?, tainted=?, current_version=? WHERE id=?')
+    .prepare('UPDATE library_items SET title=?, updated_at=?, pinned=?, tainted=?, current_version=?, archived=? WHERE id=?')
     .run(
       patch.title ?? cur.title, patch.updatedAt ?? cur.updatedAt,
       (patch.pinned ?? cur.pinned) ? 1 : 0, (patch.tainted ?? cur.tainted) ? 1 : 0,
-      patch.currentVersion ?? cur.currentVersion, id
+      patch.currentVersion ?? cur.currentVersion, (patch.archived ?? cur.archived) ? 1 : 0, id
     )
 }
 
@@ -119,8 +138,11 @@ export function updateLibraryItem(id: string, patch: Partial<Pick<LibraryItem, '
  * La lista (punto 4): le FISSATE prima, poi le altre dalle più recenti; filtro
  * per kind e per query sul titolo (case-insensitive); al massimo `limit` righe
  * (default 20, tetto 20).
+ * B4: `archived` decide quali — senza (default) SOLO le voci in vista, le
+ * archiviate no; `true` SOLO le archiviate (il filtro «Archiviati» della
+ * Libreria); `'all'` tutte. Vale anche per `list_library` del bot.
  */
-export function listLibraryItems(opts: { query?: string; kind?: LibraryKind; limit?: number } = {}): LibraryItem[] {
+export function listLibraryItems(opts: { query?: string; kind?: LibraryKind; limit?: number; archived?: boolean | 'all' } = {}): LibraryItem[] {
   const limit = Math.min(20, Math.max(1, opts.limit ?? 20))
   const rows = db()
     .prepare('SELECT * FROM library_items ORDER BY pinned DESC, updated_at DESC')
@@ -128,6 +150,7 @@ export function listLibraryItems(opts: { query?: string; kind?: LibraryKind; lim
   const q = (opts.query ?? '').trim().toLowerCase()
   return rows
     .map(rowToItem)
+    .filter((i) => (opts.archived === true ? i.archived : opts.archived === 'all' ? true : !i.archived))
     .filter((i) => (opts.kind ? i.kind === opts.kind : true))
     .filter((i) => (q ? i.title.toLowerCase().includes(q) : true))
     .slice(0, limit)

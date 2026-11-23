@@ -284,11 +284,13 @@ const api: SandbotApi = {
   fillGrantRevoke: (id) => ipcRenderer.invoke('fills:revoke', id),
   secureInputSubmit: (agentId, approvalId, values) => ipcRenderer.invoke('secureinput:submit', agentId, approvalId, values),
   // fase 14: la libreria
-  libraryList: (query, kind) => ipcRenderer.invoke('library:list', query, kind),
+  // B4 (fase b20-bug): library:list prende il filtro «Archiviati» (terzo argomento) e library:archive archivia/ripristina
+  libraryList: (query, kind, archived) => ipcRenderer.invoke('library:list', query, kind, archived),
   libraryGet: (id, version) => ipcRenderer.invoke('library:get', id, version),
   libraryDelete: (id) => ipcRenderer.invoke('library:delete', id),
   libraryRename: (id, title) => ipcRenderer.invoke('library:rename', id, title),
   libraryPin: (id, pinned) => ipcRenderer.invoke('library:pin', id, pinned),
+  libraryArchive: (id, archived) => ipcRenderer.invoke('library:archive', id, archived),
   libraryExport: (id, format) => ipcRenderer.invoke('library:export', id, format),
   // fase pagine (G2): il SVG di un blocco vega-lite lo produce il daemon (CSP)
   renderChartSpec: (spec) => ipcRenderer.invoke('library:render-chart', spec),
