@@ -10,7 +10,13 @@ import { App } from './App'
 import { PipView } from './components/PipView'
 // P1 (fase primo-avvio): il primo segnale dal renderer al main (renderer-ready nel registro)
 import { FirstPaintSignal } from './components/FirstPaintSignal'
+// B5 (fase b20-bug): il marcatore data-focus-from su <html> che styles.css
+// legge per l'anello del fuoco (regola unica e variante focus-visible)
+import { installFocusFrom } from './lib/focus-from'
 import './styles.css'
+
+// B5: subito, prima di montare — così vale dal primo clic
+installFocusFrom(document)
 
 // Fase 17a (L2): l'app si monta SOLO dopo la prima attivazione della lingua
 // (niente testo non tradotto che lampeggia), avvolta in I18nProvider — così

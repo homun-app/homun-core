@@ -8,6 +8,47 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
+ * B5 (fase b20-bug): l'anello del fuoco SOLO da tastiera.
+ * MISURATO DAL VIVO (sonda CDP, macOS con «Navigazione con tastiera» spenta):
+ * l'anello arancione è l'outline NATIVO di Chromium, quello che sta su
+ * :focus-visible, nel colore d'accento di sistema. Un clic VERO non lo mostra;
+ * lo mostra il TASTO premuto subito dopo, qualunque sia (Esc, ⌘K, uno Shift):
+ * per l'euristica di Chromium, se l'utente usa la tastiera l'elemento che ha
+ * il fuoco diventa :focus-visible anche quando il fuoco glielo aveva dato il
+ * mouse. Il CSS da solo non lo può rimediare — quando l'anello si vede
+ * l'elemento È :focus-visible — quindi su <html> sta scritto da dove ARRIVA IL
+ * FUOCO (data-focus-from: lo scrive lib/focus-from.ts — un clic → pointer, e
+ * ci resta finché la tastiera non sposta davvero il fuoco: Tab, frecce,
+ * Invio, Spazio).
+ * Quel marcatore si legge qui, e solo qui, in DUE punti con la STESSA regola:
+ *   1) la variante `focus-visible` di Tailwind, ridefinita qui sotto: le
+ *      utility `focus-visible:…` dei componenti (ring, outline, bordo) non
+ *      scattano sotto 'pointer';
+ *   2) in @layer base, la regola che toglie l'outline nativo ai controlli
+ *      presi col puntatore.
+ * Da tastiera non cambia niente; sotto 'pointer' l'interfaccia si comporta
+ * come se la tastiera non c'entrasse. I CAMPI DI TESTO restano fuori in tutti
+ * e due i punti (ci si scrive: il loro fuoco preso col mouse è fuoco da
+ * tastiera) e la lista dei tipi è la stessa — lo impone la guardia
+ * __tests__/focus-ring-guard.test.ts.
+ *
+ * Specificità della variante: :focus-visible resta FUORI da :where, vale
+ * (0,1,0) come nella variante di fabbrica `&:focus-visible`; la negazione sta
+ * DENTRO :where e non pesa.
+ */
+@custom-variant focus-visible (
+  &:focus-visible:not(
+    :where(
+      [data-focus-from='pointer'] :not(
+        input:not([type='button'], [type='checkbox'], [type='color'], [type='file'], [type='hidden'], [type='image'], [type='radio'], [type='range'], [type='reset'], [type='submit']),
+        textarea,
+        [contenteditable]:not([contenteditable='false'])
+      )
+    )
+  )
+);
+
+/*
  * Fase 16b correzioni 2 (Q2): la soglia container-query del campo di scrittura
  * — sotto i 560 px di contenitore «Ragiona: …» diventa un bottone tondo con
  * l'icona (varianti @max-pill sul <footer> dichiarato @container).
@@ -219,6 +260,27 @@
     color: var(--color-foreground);
     font-family: var(--font-sans);
     overflow: hidden;
+  }
+
+  /*
+   * B5 (fase b20-bug): la REGOLA UNICA dell'anello del fuoco (la catena della
+   * causa sta in cima, alla variante focus-visible — stesso marcatore, stessi
+   * campi di testo). Sotto 'pointer' nessun outline nativo ai controlli che
+   * non sono campi di testo. Non guarda :focus-visible, di proposito: dopo un
+   * clic un tasto qualunque lo fa scattare, ed è proprio lì che l'anello
+   * compariva. Sta in @layer base come qualunque regola d'autore: vince
+   * sull'outline NATIVO (l'autore prevale sul foglio del browser, a qualunque
+   * layer) e perde contro le utility di Tailwind (il layer utilities viene
+   * dopo): `outline-none`, `focus-visible:outline-*`… restano loro a decidere.
+   * Tutto dentro :where, tranne html[data-focus-from]: la specificità resta
+   * minima.
+   */
+  html[data-focus-from='pointer'] :where(:focus:not(
+    input:not([type='button'], [type='checkbox'], [type='color'], [type='file'], [type='hidden'], [type='image'], [type='radio'], [type='range'], [type='reset'], [type='submit']),
+    textarea,
+    [contenteditable]:not([contenteditable='false'])
+  )) {
+    outline: none;
   }
 }
 

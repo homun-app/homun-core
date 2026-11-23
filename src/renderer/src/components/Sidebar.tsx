@@ -767,6 +767,10 @@ function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
   // U3 (fase pulizia · ritocchi): una voce che APRE una finestra (App, Skill,
   // Impostazioni) lo segna qui, e alla chiusura il menu NON riprende il focus
   // sul suo trigger: il focus è della finestra (il campo di ricerca).
+  // B5 (fase b20-bug): sul trigger non c'è più la variante `focus:` davanti a
+  // `outline-none` — toglieva l'anello anche alla TASTIERA. Ci pensa la regola
+  // unica di styles.css: al clic nessun anello, con Tab quello nativo, come le
+  // righe qui accanto.
   const openedWindow = useRef(false)
   return (
     <DropdownMenu>
@@ -774,7 +778,7 @@ function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
         data-testid="account-menu-trigger"
         className={
           props?.triggerClassName ??
-          'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-muted/60 focus:outline-none'
+          'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-muted/60'
         }
       >
         {/* in rotaia solo l'iniziale (come il vecchio bottone), nel resto
@@ -971,7 +975,7 @@ function CollapsedColumn({
         <div className="mb-4 flex h-[60px] shrink-0 items-center justify-center">
           <AccountMenu
             rail
-            triggerClassName="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold text-foreground transition hover:bg-muted/70 focus:outline-none"
+            triggerClassName="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold text-foreground transition hover:bg-muted/70"
           />
         </div>
       </div>
