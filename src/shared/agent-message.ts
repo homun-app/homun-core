@@ -74,11 +74,113 @@ export function formatAgentMessage(fromName: string, text: string, opts: { id?: 
 /**
  * Per la chat del destinatario: il testo del messaggio senza il wrapper del
  * blocco evidenza né la regola (il titolo "Da <nome>" lo aggiunge la UI).
+ * B1 (fase b20-bug): la regola non si cerca più per testo esatto — vedi
+ * modelEnvelopeDisplay.
  */
 export function agentMessageDisplay(content: string): string {
-  const open = /<messaggio_da_agente[^>]*>\n?/
-  const close = /\n?<\/messaggio_da_agente>/
-  return content.replace(open, '').replace(close, '').replace(new RegExp(`\\n?${escapeRegExp(AGENT_MESSAGE_RULE)}$`), '').trim()
+  return modelEnvelopeDisplay(content)
+}
+
+// ---- B1 (fase b20-bug): ciò che del testo per il MODELLO si mostra in chat ----
+
+/**
+ * B1: gli INVOLUCRI con cui un testo per il modello apre un turno o viaggia
+ * nel transcript (tag di apertura a inizio riga, chiusura su riga propria).
+ * Un elenco CHIUSO: un tag qualunque nel testo (quello dell'utente, quello di
+ * una pagina letta) non è un involucro e non si tocca.
+ */
+export const MODEL_ENVELOPE_TAGS: ReadonlySet<string> = new Set([
+  'messaggio_da_agente',
+  'task_done',
+  'comando_finito',
+  'risultati_sottoagenti',
+  'sottoagente',
+  'brief',
+  'messaggio_dal_padre',
+  'turno_di_gruppo',
+  'evento',
+  'dato_esterno',
+  'risultati_ricerca',
+  'pagina_web',
+  'bot_template_setup_context',
+  'bot_template_setup_instructions'
+])
+
+/** Un blocco di PRIMO livello del testo: il suo contenuto e dove sta. */
+export interface ModelEnvelope {
+  tag: string
+  /** gli attributi del tag di apertura (nome, id, titolo, esito…) */
+  attrs: Record<string, string>
+  /** il contenuto fra i due tag (i blocchi annidati restano, con i loro tag) */
+  body: string
+  /** la riga (da 0) del tag di apertura e quella della chiusura VERA */
+  openLine: number
+  closeLine: number
+}
+
+// il tag di apertura, da solo su una riga; gli attributi possono contenere > e < dentro le virgolette
+const ENVELOPE_OPEN = /^<([a-z][a-z0-9_]*)([ \t].*)?>$/
+
+/**
+ * I blocchi di primo livello di un testo per il modello, nell'ordine (puro).
+ * La chiusura di un blocco è l'ULTIMA riga che è esattamente `</tag>`: i tag
+ * di chiusura ostili DENTRO il contenuto vengono neutralizzati da chi scrive
+ * il blocco (neutralizeClosingTag), e se qualcuno ne scrivesse uno non
+ * neutralizzato non taglia il contenuto. Un involucro mai chiuso non è un
+ * blocco: il testo resta tale e quale (non si toglie nulla per sbaglio).
+ */
+export function modelEnvelopes(content: string): ModelEnvelope[] {
+  const lines = content.split('\n')
+  const out: ModelEnvelope[] = []
+  let i = 0
+  while (i < lines.length) {
+    const m = ENVELOPE_OPEN.exec(lines[i]!)
+    if (!m || !MODEL_ENVELOPE_TAGS.has(m[1]!)) {
+      i++
+      continue
+    }
+    const tag = m[1]!
+    const close = new RegExp(`^</${escapeRegExp(tag)}\\s*>`, 'i')
+    let closeLine = -1
+    for (let j = lines.length - 1; j > i; j--) {
+      if (close.test(lines[j]!)) {
+        closeLine = j
+        break
+      }
+    }
+    if (closeLine === -1) {
+      i++
+      continue
+    }
+    const attrs: Record<string, string> = {}
+    for (const a of (m[2] ?? '').matchAll(/([a-z_]+)="([^"]*)"/g)) attrs[a[1]!] = a[2]!
+    out.push({ tag, attrs, body: lines.slice(i + 1, closeLine).join('\n'), openLine: i, closeLine })
+    i = closeLine + 1
+  }
+  return out
+}
+
+/**
+ * B1: ciò che di un testo per il modello si MOSTRA in chat (puro). La vista
+ * di prima toglieva la regola confrontando il testo esatto di
+ * AGENT_MESSAGE_RULE: la regola è cambiata (D3) e i messaggi salvati prima
+ * mostravano quella vecchia per intero. Qui non si confronta nessuna regola:
+ * si mostra il CONTENUTO degli involucri e ciò che sta PRIMA (il titolo di
+ * una routine col suo prompt, il saluto di un template, la riga di un task);
+ * tutto ciò che sta DOPO l'ultima chiusura — le regole per il modello, di
+ * qualunque versione — non si mostra mai. Senza involucri: il testo com'è.
+ */
+export function modelEnvelopeDisplay(content: string): string {
+  const blocks = modelEnvelopes(content)
+  if (blocks.length === 0) return content.trim()
+  const lines = content.split('\n')
+  const shown: string[] = []
+  let cursor = 0
+  for (const b of blocks) {
+    shown.push(...lines.slice(cursor, b.openLine), b.body)
+    cursor = b.closeLine + 1
+  }
+  return shown.join('\n').trim()
 }
 
 // ---- fase 8 (correzione B1): il summary di chiusura di un task come evidenza ----

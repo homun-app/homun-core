@@ -27,7 +27,8 @@ import { groupRepeatedNotices } from '../lib/notice-rows'
 import { modelNoticeTarget } from '../lib/model-notice'
 import { i18n, formatTime } from '../lib/i18n'
 import { GROUP_CHAIN_CLOSED_TEXT, GROUP_RATE_LIMIT_TEXT, GROUP_HOURLY_CAP_TEXT, parseCoordinatorNowText, parseMemberNoModelText } from '../../../main/agent/group-turns'
-import { agentMessageDisplay } from '../../../shared/agent-message'
+// B1 (fase b20-bug): dei testi per il MODELLO la chat mostra solo il contenuto dell'involucro
+import { agentMessageDisplay, modelEnvelopeDisplay, modelEnvelopes } from '../../../shared/agent-message'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, ThinkingSetting } from '../../../shared/types'
 import { ApprovalCard } from './ApprovalCard'
 // A3 (fase centro-autorizzazioni): il riquadro delle richieste in cima alla chat
@@ -245,9 +246,7 @@ function LiveReplyBubble({ agentId }: { agentId: string }) {
   return (
     <div className="flex justify-start">
       <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm leading-relaxed">
-        <div className="max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{live.text}</ReactMarkdown>
-        </div>
+        <BotMarkdown text={live.text} />
       </div>
     </div>
   )
@@ -813,6 +812,53 @@ function UserBubbleBody({ entry }: { entry: TranscriptEntry }): React.ReactNode 
 }
 
 /**
+ * B1 (fase b20-bug): il markdown di un messaggio del bot — UN componente per
+ * tutte le risposte di bot (le bolle, i messaggi storici, i messaggi tra
+ * bot): titoli, grassetto, elenchi, codice e tabelle si vedono uguali ovunque.
+ */
+function BotMarkdown({ text }: { text: string }) {
+  return (
+    <div className="max-w-none">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  )
+}
+
+/**
+ * B1 (fase b20-bug): un messaggio di un altro bot (o del padre, nel pannello
+ * di un figlio) — «Da <nome>» e il contenuto, con lo stesso markdown delle
+ * risposte del bot. Della regola per il modello non resta nulla:
+ * agentMessageDisplay mostra solo il contenuto dell'involucro, di qualunque
+ * versione sia la regola salvata.
+ */
+function BotToBotRow({ name, content, testid }: { name: string; content: string; testid: string }) {
+  return (
+    <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm leading-relaxed" data-testid={testid}>
+      <p className="mb-1 text-xs text-muted-foreground">
+        <Trans>Da {name}</Trans>
+      </p>
+      <BotMarkdown text={agentMessageDisplay(content)} />
+    </div>
+  )
+}
+
+/**
+ * B1 (fase b20-bug): l'apertura di un turno in un pannello (task in
+ * background, figlio) che non ha una riga sua — il testo per il modello in un
+ * dettaglio chiuso, senza involucri né regole.
+ */
+function OpeningDetailsRow({ text }: { text: string }) {
+  return (
+    <details className="rounded-[14px] bg-muted/40 px-3 py-1.5" data-testid="chat-opening-details">
+      <summary className="cursor-pointer select-none text-center text-xs text-muted-foreground">
+        <Trans>Istruzioni del turno</Trans>
+      </summary>
+      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">{text}</pre>
+    </details>
+  )
+}
+
+/**
  * D2 (fase deleghe): la riga della delega col suo STATO — «In coda per <bot>
  * · parte alle HH:MM» con Annulla finché il job è in coda, «Consegnato»
  * quando parte, niente riga di stato quando il risultato è arrivato (o la
@@ -845,7 +891,13 @@ function AgentSendDelegationRow({ entry }: { entry: TranscriptEntry }) {
   )
 }
 
-function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: TranscriptEntry; repeat?: number; showReasoning: boolean; debugSteps: boolean }) {
+/**
+ * B1 (fase b20-bug): `modelOpenings` nei pannelli di un task e di un figlio —
+ * lì nessun messaggio lo scrive l'utente: ogni entry «utente» senza initiator
+ * è un'apertura per il modello (il brief, un messaggio del padre) e non è
+ * mai una bolla dell'utente.
+ */
+function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings = false }: { entry: TranscriptEntry; repeat?: number; showReasoning: boolean; debugSteps: boolean; modelOpenings?: boolean }) {
   const { t } = useLingui()
   const reasoning = useStore((s) => s.reasoning[entry.id])
   switch (entry.kind) {
@@ -856,16 +908,10 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
       const opening = openingRowFor(entry)
       // fase 7: messaggio di un ALTRO bot (initiator AGENT) — riga «Da <nome>»
       if (opening.kind === 'agent') {
-        return (
-          <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm">
-            <p className="mb-1 text-xs text-muted-foreground">
-              <Trans>Da {String(entry.meta?.fromAgentName ?? 'altro bot')}</Trans>
-            </p>
-            <p className="whitespace-pre-wrap">{agentMessageDisplay(entry.content)}</p>
-          </div>
-        )
+        return <BotToBotRow name={String(entry.meta?.fromAgentName ?? 'altro bot')} content={entry.content} testid="chat-from-bot" />
       }
       // fase 7/8: kickstart dei template e report dei task — righe espandibili
+      // (B1: del testo per il modello si mostra il contenuto, mai la regola)
       if (opening.kind === 'details') {
         return (
           <details className="rounded-[14px] bg-muted/60 px-3 py-1.5">
@@ -875,7 +921,7 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
                 : <Trans>Report del task: {String(entry.meta?.taskTitle ?? '')} ({String(entry.meta?.taskRef ?? '')})</Trans>}
             </summary>
             <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
-              {entry.content}
+              {modelEnvelopeDisplay(entry.content)}
             </pre>
           </details>
         )
@@ -889,7 +935,7 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
               {opening.icon} {i18n.t(opening.label)}
             </summary>
             <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
-              {uiTextOf(entry)}
+              {modelEnvelopeDisplay(uiTextOf(entry))}
             </pre>
           </details>
         )
@@ -903,6 +949,14 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
       if (entry.role === 'user') {
         const brief = parseSubagentBrief(entry.content)
         if (brief) return <BriefCard entry={entry} />
+      }
+      // B1 (fase b20-bug): nei pannelli, un'apertura per il modello senza
+      // initiator — il messaggio del padre è «Da <padre>», il resto un dettaglio
+      if (modelOpenings && entry.role === 'user') {
+        const envelopes = modelEnvelopes(entry.content)
+        const fromParent = envelopes.find((b) => b.tag === 'messaggio_dal_padre')
+        if (fromParent) return <BotToBotRow name={fromParent.attrs.nome ?? ''} content={entry.content} testid="chat-from-parent" />
+        if (envelopes.length > 0) return <OpeningDetailsRow text={modelEnvelopeDisplay(entry.content)} />
       }
       // B3 (fase beta.4): la risposta a una domanda NON si ripete come bola
       // utente separata — resta la riga della card, riapribile
@@ -921,9 +975,7 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
       ) : (
         // messaggi assistant pre-fase 3 (transcript storici)
         <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm leading-relaxed">
-          <div className="max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content || '…'}</ReactMarkdown>
-          </div>
+          <BotMarkdown text={entry.content || '…'} />
         </div>
       )
     }
@@ -992,9 +1044,7 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
         // la bolla del bot: tenue, angoli 22 px, azioni al passaggio (S3.2)
         <div className="group flex items-end gap-1.5">
           <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm leading-relaxed">
-            <div className="max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content}</ReactMarkdown>
-            </div>
+            <BotMarkdown text={entry.content} />
             {meta.fallback && <p className="mt-1 text-[10px] text-muted-foreground"><Trans>risposta di ripiego</Trans></p>}
             {message?.type === 'text' && message.urgent && <p className="mt-1 text-[10px] text-destructive/80"><Trans>urgente</Trans></p>}
           </div>
@@ -1251,7 +1301,7 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
             <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Il task non ha ancora attività.</Trans></p>
           )}
           {taskEntries.map((e) => (
-            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} />
+            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} modelOpenings />
           ))}
         </div>
       </div>
@@ -1307,7 +1357,7 @@ function SubagentPanel() {
             <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Il sottoagente non ha ancora attività.</Trans></p>
           )}
           {subEntries.map((e) => (
-            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} />
+            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} modelOpenings />
           ))}
           {sub && (sub.summary || sub.reportPath) && (
             <div className="rounded-[18px] bg-muted p-4 text-sm">

@@ -2624,11 +2624,6 @@ msgstr "Cursor, Codex, ZCode, Claude Code…"
 msgid "Cursor, Codex, ZCode…"
 msgstr "Cursor, Codex, ZCode…"
 
-#. placeholder {0}: String(entry.meta?.fromAgentName ?? 'altro bot')
-#: src/renderer/src/components/Chat.tsx
-msgid "Da {0}"
-msgstr "Da {0}"
-
 #. placeholder {0}: String(Math.floor(min / 60))
 #. placeholder {1}: String(min % 60)
 #: src/renderer/src/components/BoxSetupProgress.tsx
@@ -2643,6 +2638,10 @@ msgstr "da {0} min"
 #: src/renderer/src/components/DraftCard.tsx
 msgid "da {accountLabel}"
 msgstr "da {accountLabel}"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Da {name}"
+msgstr "Da {name}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4597,6 +4596,10 @@ msgstr "Istruzioni"
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Istruzioni (markdown)"
 msgstr "Istruzioni (markdown)"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Istruzioni del turno"
+msgstr "Istruzioni del turno"
 
 #: src/renderer/src/components/BoxSetupProgress.tsx
 msgid "Kernel"
