@@ -1,3 +1,177 @@
+# REPORT FASE PRIMO-AVVIO (P1–P3, sonda): Homun si apre al primo clic — il clic sul Dock arrivava al daemon, che lo ignorava
+
+Base `main` a d74f4d53 (verificata: HEAD era esattamente lì su `main`, il tag `fase-primo-avvio` non esisteva); 10 commit: la guardia delle prove (l'app di prova non si registra come gestore di `sandbot://`), P1, P3.1 … P3.6, un fixup di P3.6, la sonda con gli strumenti della riproduzione, più questo REPORT; tag di chiusura `fase-primo-avvio` (annotato). Ordine rispettato: prima P1 (il registro), poi P2 (la riproduzione sul build di P1), poi P3. CHANGELOG invariato, nessun push, nessun tag `v*`. **Una deviazione da segnalare:** alla PRIMA impacchettatura dell'app `--dir` electron-builder ha scaricato da solo il suo pacchetto di strumenti per convertire l'icona (`icons-bundle.tar.gz`, 3,1 MB, in `~/Library/Caches/electron-builder/`) — un download vero che i vincoli escludevano e che non avevo previsto. Le dieci impacchettature dopo la prima sono partite con 0 righe `download` nel log (icns già generata riusata, Electron preso da `node_modules/electron/dist` con `-c.electronDist`), la cache creata dal download è stata cancellata a fine corsa. Per il resto, vincoli di sempre rispettati: niente Docker né `container` vero (solo la CLI finta della sonda) né eval col modello né dist firmata, niente Composio/npm veri, rete solo su 127.0.0.1, MAI `open` dell'Installer, MAI osascript né sudo, nessuno screencapture (catture solo via CDP), temporanei dei MIEI comandi con `mktemp -d` sotto /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/ e nei test sempre TEST_TMP_BASE, tutti cancellati (0 residue), mai avviato né letto nulla su ~/Library/Application Support/sandbot (nemmeno sandbot.bak-beta4-2026-11-15), non toccati com.apple.container, /Applications/Homun.app e il SUO daemon (stessi pid dall'inizio alla fine), vendor/llama, vendor/engramma, dist-installers/, i repo di fianco, l'Homebrew llama-server, out-review/ (intatto); MAI letti i file VERI delle altre app (config MCP e cartelle skill). **Due cose da sapere sulla riproduzione:** (1) `open` è stato usato SOLO nello script di riproduzione, e solo sull'app di prova in temporanea — per fare la parte del Finder, del Dock e del lancio in background (`open`, `open` all'app che gira, `open -g`); mai l'Installer; la sonda non lo usa (lo vieta la sua guardia). (2) per la durata della corsa (circa due ore e mezza, a intermittenza) le finestre di prova sono comparse davanti (ogni avvio porta l'app in primo piano: è il comportamento richiesto da P3.2): chi era al Mac in quel momento le ha viste.
+
+## Numeri
+
+Typecheck 0 errori. Suite intera 1 giro VERDE: **490 file / 6.126 test** (base prima di toccare: 478 file / 5.979 test — +12 file, +147 test). `npm run test:ci-sim` VERDE: **488 file pass + 2 skip / 6.122 test pass + 4 skip** (gli unici skip sono i test col modello locale, come sempre). Sonda `fase-primo-avvio`: **30/30 VERDE in due corse** (la prima contava 90 verifiche su 90 — tre per avvio — poi il conteggio è stato portato a un esito per avvio, come chiede la spec). Tempi dal vivo sui 30 avvii della seconda corsa: `window-shown` 247–365 ms, `ready-to-show` 191–305 ms, `renderer-ready` 219–761 ms, la finestra vista dal sistema a 639–864 ms (mediana 649), `before-quit windows=1` in tutti. Sonda `fase-centro`: **55/55 VERDE** (1 corsa). Sonda `fase-squadra`: **32/32 VERDE** (1 corsa). Le due sonde riscrivono le loro catture a ogni corsa: le 10 PNG di `fase-centro`, `fase-approvazioni-chiare`, `fase-ritocchi-beta18` e `fase-squadra` sono state riportate a HEAD (non sono di questa fase). Cattura CDP in `docs/catture/fase-primo-avvio/1-primo-avvio-finestra.png` (la prima finestra: la chat del bot, col modello finto).
+
+## P2 — cosa si è riprodotto (build di P1, app `--dir` in temporanea, 3 avvii a freddo per ipotesi + le prove mirate)
+
+Letto dal DI FUORI con `window-list` (Swift, sola lettura: `CGWindowListCopyWindowInfo` per le finestre, `NSRunningApplication` per l'attivazione dei processi del bundle) e dal registro di P1 nella temporanea.
+
+| Ipotesi | Riprodotta? | Cosa hanno detto le righe e il sistema |
+|---|---|---|
+| H1a — daemon della corsa prima vivo | **No** come «finestra assente» | 3/3: a schermo per il sistema (`onscreen=true layer=0 alpha=1`, dentro schermo 100%), `visible=true app-hidden=false inside=true`; `daemon-connected ms=241–269`, `renderer-ready ms=302–589` |
+| H1b — `daemon.json` di un'altra build (processo vivo) | **No** come causa | `daemon-connected ms=5486 took=5414` (il finto molla dopo 5 s); `renderer-ready` in ritardo (5898 / 1989 / 6133 ms) SOLO quando la finestra era coperta: pagina `hidden`, nessun `requestAnimationFrame` |
+| H1c — cartella calda, daemon fermo | **No** | 3/3 a schermo; `renderer-ready` 917–939 ms |
+| H1 — chi tiene i LOCK (`lsof`, UI e daemon vivi) | — | `Local Storage/leveldb/LOCK` lo tiene SOLO la UI; `Session Storage/leveldb/LOCK` non esiste; il daemon tiene `data/sandbot.db`(+wal/shm), `data/daemon.log` e **`GraphiteDawnCache/{index,data_0…3}` in comune con la UI** |
+| H2 — il renderer non arriva al paint | **No** a finestra visibile | `did-finish-load` → `renderer-ready` = 10–400 ms; `homun://` si registra in `whenReady` PRIMA di `createWindow`; nessun `did-fail-load` in nessun avvio |
+| H3 — finestra mostrata prima che l'app sia attiva | **Sì** | Lancio senza attivazione (eseguibile, `open -g`): finestra a schermo ma DIETRO l'app attiva, coperta al 100%, `visibilityState=hidden`, `focused=false`. Lanciata dal Finder (`open`): davanti e col fuoco in 7 avvii su 8 (linea del tempo ogni 250 ms) |
+| H4 — dalla lettura dell'avvio, confermato dal vivo | **Sì, 16 avvii su 16** | Ogni `activate` (il clic sul Dock) creava una SECONDA finestra: `window-created` 1→2, `before-quit windows=2`, due `window-closed`. La prima nasceva con `createWindow()` diretto (index.ts:431), fuori dal manager |
+| «daemon-sotto» (prova mirata) | **Sì, 3 corse su 3** | Col daemon nato sotto una UI non attivata macOS considera ATTIVO il daemon (`policy 0 regular, isActive`), la UI non riprende il fuoco nemmeno dopo due attivazioni di sistema; alla morte di quel daemon l'attivazione va a un'altra app e la finestra resta coperta al 100% (1 corsa su 3) |
+
+**Non riprodotta** la sequenza esatta dell'utente (avvio dal Dock → invisibile → clic sul Dock → niente) con i lanci «da Finder»: 8 avvii su 8 sono venuti davanti col fuoco.
+
+**La causa vera l'ha mostrata la correzione di P3.6**, facendo `open` sull'app di prova col daemon vivo (è il clic sul Dock, Spotlight, il doppio clic in Applicazioni): **LaunchServices vede «Homun è già in esecuzione» — è il processo daemon, dello stesso bundle — e NON avvia la UI: manda il reopen al daemon**, che non ha finestre e lo ignorava. Nel build di P1 il daemon non registrava l'`activate` (non lo gestiva); la riga qui sotto viene da un build di diagnosi col gestore ma con l'inoltro non ancora a posto, ed è quello che si vede quando il reopen arriva al daemon e niente lo porta alla UI:
+
+```
+2026-11-23T09:44:03.277Z daemon-activate          ← e basta: nessuna UI per 5 s, finché un secondo clic
+```
+
+Succede anche a UI già aperta: il reopen va comunque al daemon, che lo ignorava — «non si vede niente, nemmeno cliccando l'icona». Coerente con «succede al primo avvio del giorno e la seconda volta funziona», ma quale processo del bundle macOS consideri «l'app» in un dato momento NON l'ho stabilito: dipende dall'ordine in cui i due processi si sono registrati e da cosa è attivo, e nelle prove è cambiato da una corsa all'altra. La correzione non ci si appoggia: vale in tutti e due i casi.
+
+## Le correzioni (P3), una riga ciascuna
+
+- **P3.1** — In modalità daemon `app.setPath('sessionData', <userData>/daemon-session)` PRIMA di `whenReady`: i dati di Chromium del daemon non sono più quelli della UI. `userData` e `dataDir()` invariati. Il daemon non legge niente dal profilo della UI: in `src/daemon` nessun uso di `localStorage`, `session`, `webContents` o finestre (verificato con grep).
+- **P3.2** — La principale nasce NASCOSTA (`show: false`); la mostra `show-policy.ts` (puro): su `ready-to-show`, ripiego dopo 3 s con la riga `show-fallback`; subito dopo lo show `app.focus({ steal: true })` e poi `win.focus()` su macOS (`bringWindowToFront`).
+- **P3.3** — Prima di ogni show `window-placement.ts` (puro): fuori dalla workArea di ogni display → ricentrata sul primario, riga `window-recentered from=… to=…`.
+- **P3.4** — `renderer-watchdog.ts` (puro, una istanza PER AVVIO): entro 15 s dal `did-finish-load` nessun `renderer-ready`, o `did-fail-load` del frame principale, o `render-process-gone` → UN `reload()`; se non basta → chiusura e ricreazione UNA volta dalla porta unica `showMainWindow`; poi si ferma. Righe `renderer-watchdog step=reload|recreate|stop reason=…`. E `renderer-ready` arriva anche a pagina nascosta (vedi sotto).
+- **P3.5** — La PRIMA finestra nasce da `showMainWindow` (è nel manager: l'activate la riusa, non ne crea un'altra). Il manager PURA ripara quella che c'è già: `beforeShow` (bounds dentro uno schermo), `restore()` se minimizzata, `show()`, e la porta davanti. Una finestra che nasce nascosta non riceve il focus dal manager (la mostrerebbe prima del tempo).
+- **P3.6** — Il daemon gestisce `activate`: riga `daemon-activate` e INOLTRO alla UI — con una UI connessa come RPC `host.activate` sul canale ws che esiste già (la UI risponde con la riga `ui-activate` e `showMainWindow`), senza UI rilancia l'eseguibile (`uiRelaunchSpec`, l'inverso di `daemonSpawnSpec`). Un clic inoltrato al secondo. Più il fixup: il server ws chiude la connessione sul «end» del peer (vedi sotto).
+
+Ogni test visto ROSSO prima di scrivere il codice (stash dell'implementazione per vedere rosso anche i test aggiunti dopo una prima stesura: P3.4). Eccezioni dichiarate: i test delle funzioni pure della libreria di riproduzione (`resolveTestApp`, `onScreenWindow`, `uiBootSince`…) sono stati scritti DOPO le funzioni (erano esplorazione) e sono stati verdi alla prima corsa; la loro guardia è stata vista rossa solo nella parte sonda (finché `fase-primo-avvio-probe.mjs` non c'era).
+
+## Le righe di registro nuove, con un esempio vero dalla sonda (seconda corsa, `main.log` della temporanea)
+
+Avvio normale, daemon fermo prima (parte con la UI):
+
+```
+2026-11-23T10:00:19.513Z boot pid=19655 version=0.3.1001 mode=ui
+2026-11-23T10:00:19.514Z lock
+2026-11-23T10:00:19.570Z daemon-connect-start ms=58
+2026-11-23T10:00:19.641Z window-created
+2026-11-23T10:00:19.643Z did-start-loading ms=131
+2026-11-23T10:00:19.789Z dom-ready ms=277
+2026-11-23T10:00:19.789Z did-finish-load ms=277
+2026-11-23T10:00:19.790Z ready-to-show ms=278
+2026-11-23T10:00:19.845Z window-shown ms=333
+2026-11-23T10:00:19.987Z boot pid=19658 version=0.3.1001 mode=daemon
+2026-11-23T10:00:20.178Z daemon-connected ms=666 took=609
+2026-11-23T10:00:20.188Z renderer-ready ms=676
+2026-11-23T10:00:24.847Z window-snapshot ms=5335 visible=true minimized=false focused=false fullscreen=false bounds=360,76,1200x800 display=3 work-area=0,30,1920x1050 displays=2 inside=true app-hidden=false loading=false renderer-ready=true
+2026-11-23T10:00:24.990Z before-quit windows=1
+2026-11-23T10:00:25.097Z window-closed
+2026-11-23T10:00:25.097Z will-quit
+2026-11-23T10:00:25.098Z quit exit-ms=108
+```
+
+Col daemon della corsa prima ancora vivo (nessun boot del daemon, `renderer-ready` a 219 ms — il setting della lingua risponde subito):
+
+```
+2026-11-23T10:01:33.556Z boot pid=19970 version=0.3.1001 mode=ui
+2026-11-23T10:01:33.558Z lock
+2026-11-23T10:01:33.609Z daemon-connect-start ms=53
+2026-11-23T10:01:33.670Z window-created
+2026-11-23T10:01:33.672Z did-start-loading ms=116
+2026-11-23T10:01:33.711Z daemon-connected ms=155 took=102
+2026-11-23T10:01:33.768Z dom-ready ms=212
+2026-11-23T10:01:33.769Z did-finish-load ms=213
+2026-11-23T10:01:33.775Z renderer-ready ms=219
+2026-11-23T10:01:33.782Z ready-to-show ms=226
+2026-11-23T10:01:33.844Z window-shown ms=288
+2026-11-23T10:01:38.845Z window-snapshot ms=5289 visible=true minimized=false focused=false fullscreen=false bounds=360,76,1200x800 display=3 work-area=0,30,1920x1050 displays=2 inside=true app-hidden=false loading=false renderer-ready=true
+```
+
+Con un `daemon.json` stantio di un'altra build (lo rimuove e fa ripartire il daemon: `daemon partito a +402 ms`):
+
+```
+2026-11-23T10:02:33.110Z boot pid=20266 version=0.3.1001 mode=ui
+2026-11-23T10:02:33.114Z lock
+2026-11-23T10:02:33.177Z daemon-connect-start ms=67
+2026-11-23T10:02:33.246Z window-created
+2026-11-23T10:02:33.248Z did-start-loading ms=138
+2026-11-23T10:02:33.350Z dom-ready ms=240
+2026-11-23T10:02:33.351Z did-finish-load ms=241
+2026-11-23T10:02:33.351Z ready-to-show ms=241
+2026-11-23T10:02:33.407Z window-shown ms=297
+2026-11-23T10:02:33.512Z boot pid=20269 version=0.3.1001 mode=daemon
+2026-11-23T10:02:33.611Z daemon-connected ms=501 took=434
+2026-11-23T10:02:33.642Z renderer-ready ms=532
+2026-11-23T10:02:38.409Z window-snapshot ms=5299 visible=true minimized=false focused=true fullscreen=false bounds=360,76,1200x800 display=3 work-area=0,30,1920x1050 displays=2 inside=true app-hidden=false loading=false renderer-ready=true
+```
+
+(`focused=false` nelle prime due fotografie: a +5 s un'altra app aveva il fuoco — la finestra era comunque a schermo e intera. È il caso di chi lavora su un'altra app con Homun aperto.) Nel `daemon.log` ogni riga `[sandbotd]` ha ora l'orario ISO davanti, come `main.log`; lo stdout dei server MCP resta com'era.
+
+## P3.6 dal vivo: i due percorsi, e ciò che è stato provato e scartato
+
+A UI chiusa col daemon vivo (il clic che prima non faceva niente):
+
+```
+2026-11-23T09:49:57.303Z daemon-activate
+2026-11-23T09:49:57.645Z boot pid=17770 version=0.3.1001 mode=ui     ← la UI parte dal daemon, 342 ms dopo
+2026-11-23T09:49:57.893Z ready-to-show ms=248
+2026-11-23T09:49:57.939Z window-shown ms=294
+2026-11-23T09:49:57.947Z renderer-ready ms=302                      ← davanti e col fuoco (2 corse su 2)
+```
+
+A UI già aperta:
+
+```
+2026-11-23T09:50:02.675Z daemon-activate
+2026-11-23T09:50:02.675Z ui-activate ms=5030                         ← la UI avvertita in 1 ms, sul canale ws
+2026-11-23T09:50:02.682Z window-shown ms=5037 pid=17770               ← porta unica: davanti, NESSUNA istanza in più
+```
+
+**Provato e scartato, perché misurato peggiore:** (1) la prima versione di P3.6 (0f040454) inoltrava RILANCIANDO l'eseguibile sempre: a UI aperta nasceva una seconda istanza, e alla sua uscita (~1,3 s) macOS disattivava l'app — la finestra tornava dietro (2 volte su 2). (2) Il daemon `prohibited` fin dall'avvio, o quello che molla l'attivazione dentro il gestore: a UI chiusa il clic non faceva partire la UI per oltre 5 s, o ne faceva partire due.
+
+**Il difetto del fixup:** «UI connessa» era una bugia per secondi. La UI che esce manda un FIN senza close handshake; la socket del daemon restava in `CLOSE_WAIT` (lsof: ancora aperta a +4 s, chiusa a +8 s) e `hasUi()` diceva true finché il keep-alive (30 s) se ne accorgeva: l'inoltro sceglieva la RPC su una UI morta e restava appeso. Ora il server chiude la connessione sul «end» del peer.
+
+**Punto aperto, detto com'è:** nelle prove sul build finale, dopo un reopen passato dal daemon la UI è andata davanti in ~350–440 ms in tutte le misure; in molte corse ha perso l'attivazione 1–3 s dopo. Non ho potuto stabilire se fosse la persona al Mac che tornava alla sua finestra (alla baseline una finestra appena lanciata perdeva il fuoco allo stesso modo, e chi era al Mac stava lavorando: nelle fotografie `focused=false` a +5 s) o un passo tardivo del sistema. Le righe di P1 (`window-snapshot … focused=`, `ui-activate`, `daemon-activate`) lo diranno al prossimo caso vero.
+
+**Un'osservazione di P3.4 che viene da P2:** `renderer-ready` non può nascere da un `requestAnimationFrame` quando la pagina è nascosta (finestra coperta o mai mostrata). Ora, se dopo 2 s il frame non è passato e la pagina è nascosta, il segnale parte lo stesso: nel registro `renderer-ready ms=… frame=0`. Così il cane da guardia non scatta a vuoto e il registro distingue «React non ha montato» da «la pagina era nascosta». La sonda esige `renderer-ready` senza `frame=0`.
+
+## Pulizia
+
+```
+$ /bin/ps -ax -o pid=,ppid=,etime=,command= | /usr/bin/grep -i -E "electron|homun|--homun-daemon" | /usr/bin/grep -v grep | cut -c1-150
+ 1873     1 09-20:10:55 /Applications/1Password.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler --no-rate-limit -
+ 4264     1 05-01:33:47 /Applications/Cursor.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler --no-rate-limit --mo
+25627     1 09-02-41:23 /usr/local/libexec/container/plugins/container-network-vmnet/bin/container-network-vmnet start --id homun-box --service-identi
+31470     1 03-18:53:07 /Applications/ZCode.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler --no-rate-limit --mon
+64593     1 02-03-16:14 /Applications/Claude.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler --no-rate-limit --mo
+72430     1 01-02-37:29 /Applications/Cursor.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler --no-rate-limit --mo
+72777     1    03:13:35 /Applications/Homun.app/Contents/MacOS/Homun
+72778 72777    03:13:34 /Applications/Homun.app/Contents/Frameworks/Homun Helper.app/Contents/MacOS/Homun Helper --type=gpu-process --gpu-recent-crash
+72779 72777    03:13:34 /Applications/Homun.app/Contents/Frameworks/Homun Helper.app/Contents/MacOS/Homun Helper --type=utility --utility-sub-type=net
+72781 72777    03:13:34 /Applications/Homun.app/Contents/MacOS/Homun --homun-daemon
+72782 72777    03:13:34 /Applications/Homun.app/Contents/Frameworks/Homun Helper (Renderer).app/Contents/MacOS/Homun Helper (Renderer) --type=renderer
+72786 72781    03:13:33 /Applications/Homun.app/Contents/Frameworks/Homun Helper.app/Contents/MacOS/Homun Helper --type=gpu-process --gpu-recent-crash
+72787 72781    03:13:33 /Applications/Homun.app/Contents/Frameworks/Homun Helper.app/Contents/MacOS/Homun Helper --type=utility --utility-sub-type=net
+74292     1 01-02-37:04 /Users/fabio/Library/Application Support/Cursor/User/globalStorage/anysphere.cursor-agent-worker/agent-cli/.local/bin/cursor-a
+76893     1    02:56:31 /Applications/Grok Bot.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler --no-rate-limit -
+87205     1    02:27:34 /Applications/Cursor.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler --no-rate-limit --mo
+87481 64581 02-02-32:30 /Applications/Claude.app/Contents/Helpers/disclaimer --pgroup -- /Users/fabio/Library/Application Support/Claude/claude-code/2
+87482 87481 02-02-32:30 /Users/fabio/Library/Application Support/Claude/claude-code/2.1.330/4262a1273231/claude.app/Contents/MacOS/claude --output-for
+
+$ … | wc -l        → 18   (TUTTI i processi Electron / homun di questo Mac, senza filtri)
+$ … con --homun-daemon → 72781 /Applications/Homun.app/Contents/MacOS/Homun --homun-daemon   (1)
+$ di quelli della FASE (app impacchettata di prova, Electron del repo, cartelle sandbot-fase-* e sandbot-primo-avvio-*) → conteggio della fase: 0
+```
+
+**Il conteggio senza filtri NON è 0, e non può esserlo su questo Mac:** dei 18, nessuno è della fase. 11 sono di altre app (crashpad handler di 1Password, Cursor, ZCode, Claude, Grok Bot; cursor-agent; claude; la rete del box `homun-box`), 7 sono l'Homun VERO dell'utente da `/Applications/Homun.app` — la UI (72777) coi suoi helper e il SUO daemon `--homun-daemon` (72781) coi suoi: stessi pid dall'inizio alla fine della corsa, mai toccati (i vincoli lo vietano). **Processi della fase: 0** (app `--dir` di prova, Electron del repo, sonde).
+
+```
+$ ls -d /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/sandbot-* /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/homun* 2>/dev/null | wc -l
+0
+$ ls -d …/T/sandbot-frame-test-app-* 2>/dev/null | wc -l
+0
+$ ls -d …/T/sandbot-fase-primo-avvio* …/T/sandbot-primo-avvio* 2>/dev/null | wc -l
+0
+```
+
+Nessuna cartella temporanea residua: la cartella di lavoro della corsa (build di prova, log, binario di `window-list`, 1,4 GB) è stata cancellata a fine corsa, come la cache `~/Library/Caches/electron-builder` nata dal download. `dist-installers/` (10/11) e `out-review/` (19/11) hanno le date di prima: non toccati. Effetti residui dichiarati: LaunchServices ha registrato le copie di prova dell'app mentre esistevano (poi cancellate); il gestore di `sandbot://` non è mai stato toccato dalle prove (la guardia 5c72520e era già nel primo build lanciato).
+
 # REPORT FASE RITOCCHI-BETA18 (R1–R3): una richiesta, un posto solo — l'anteprima in testo, la sonda che fotografa quello che dice
 
 Base tag `fase-deleghe` (cbcb78a4, verificata: HEAD era esattamente lì, `fase-ritocchi-beta18` non esisteva) su `main`; 7 commit: R1, R2, R3, due fixup di R1 (il riquadro si rilegge SUBITO dopo una decisione presa in chat; le scelte del riquadro di squadra e la sonda centro) e uno di R3 (la cattura del documento con la Libreria che lo copriva), più questo REPORT con le catture; tag di chiusura `fase-ritocchi-beta18` (annotato). Freeze rispettato: solo i difetti delle verifiche di fase-approvazioni-chiare e fase-deleghe (catture del 22/11) — l'unica frase toccata oltre ai tre punti è `card.browserAsk` nei rami submit/enter, dove la «frase leggibile della card» chiesta da R1 conteneva ANCORA la stringa grezza `browser_type con submit: true` (IT+EN; il ramo refMissing con `browser_snapshot` resta, difetto non segnalato). CHANGELOG invariato, nessun push, nessun tag v*. Vincoli di sempre rispettati: niente Docker né `container` vero né eval col modello né dist firmata, nessun download vero, niente Composio/npm veri, rete solo su 127.0.0.1, MAI `open` dell'Installer né osascript né sudo, nessuno screencapture (catture solo via CDP), notifiche/badge/openExternal SOLO finti nei test, temporanei dei MIEI comandi con mktemp sotto /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/ e nei test sempre TEST_TMP_BASE, tutte cancellate (0 residue), mai avviato né letto nulla su ~/Library/Application Support/sandbot (nemmeno sandbot.bak-beta4-2026-11-15), non toccati com.apple.container, /Applications/Homun.app e il SUO daemon, vendor/llama, vendor/engramma, dist-installers/, i repo di fianco, l'Homebrew llama-server, out-review/ (intatto); MAI letti i file VERI delle altre app (config MCP e cartelle skill: solo HOME finta).
