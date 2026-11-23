@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from '@babel/parser'
 import { COLUMN_HEAD_HEIGHT, SIDEBAR_HEAD_PAD, TRAFFIC_LIGHT_BUTTON, TRAFFIC_LIGHT_PITCH, TRAFFIC_LIGHT_POSITION, TRAFFIC_LIGHT_ROW, TRAFFIC_LIGHTS_WIDTH } from '../../../shared/window-frame'
-import { SRC, rel, sourceFiles } from './design-scan'
+import { CSS_PATH, SRC, rel, sourceFiles } from './design-scan'
 
 const MAIN_INDEX = fileURLToPath(new URL('../../../main/index.ts', import.meta.url))
 
@@ -32,6 +32,17 @@ describe('DS3: il main e il renderer leggono la STESSA cornice', () => {
   it('la finestra nasce con la barra del titolo nascosta e la posizione dei semafori presa dalle costanti', () => {
     expect(MAIN).toMatch(/titleBarStyle:\s*'hiddenInset'/)
     expect(MAIN).toMatch(/trafficLightPosition:\s*TRAFFIC_LIGHT_POSITION\b/)
+  })
+  it('il documento non può scorrere, nemmeno da solo (overflow: clip sul body: focus e scrollIntoView non spostano la finestra)', () => {
+    const css = readFileSync(CSS_PATH, 'utf8')
+    const body = /@layer base\s*\{[\s\S]*?\bbody\s*\{[^}]*\}/.exec(css)?.[0] ?? ''
+    expect(body).toMatch(/overflow:\s*clip;/)
+    expect(body).not.toMatch(/overflow:\s*hidden;/)
+  })
+  it('la radice dell’app non scorre nemmeno da sola (overflow-clip): un focus() o un scrollIntoView sui suoi figli non può spostare la finestra', () => {
+    const app = readFileSync(join(SRC, 'App.tsx'), 'utf8')
+    const root = /className="relative flex h-screen w-screen flex-col overflow-(\w+) bg-background text-foreground"/.exec(app)
+    expect(root?.[1]).toBe('clip')
   })
   it('la vecchia costante della sola barra (80, scritta a mano) non esiste più: si usa SIDEBAR_HEAD_PAD', () => {
     for (const file of sourceFiles(SRC)) {

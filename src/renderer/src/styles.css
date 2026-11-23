@@ -345,7 +345,16 @@
     font-family: var(--font-sans);
     font-size: var(--text-body);
     line-height: var(--text-body--line-height);
-    overflow: hidden;
+    /*
+     * Fase design (DS3): il documento NON PUÒ scorrere, nemmeno da solo. Con
+     * «hidden» era comunque scorribile da focus() e scrollIntoView: aprendo il
+     * menu dell'account (in fondo alla barra) il primo elemento prendeva il
+     * fuoco prima che il menu si posizionasse, e tutta l'app saliva di 362 px
+     * — testate fuori dall'alto e una fascia vuota in basso — fino al prossimo
+     * ridimensionamento (lo ha misurato la sonda: «testata comincia a −362»).
+     * «clip» non è un contenitore che scorre: la finestra resta ferma.
+     */
+    overflow: clip;
   }
 
   /*

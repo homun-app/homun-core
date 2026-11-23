@@ -222,8 +222,9 @@ export function App() {
   const layout = layoutFor({ windowWidth, sidebarCollapsedByUser: sidebarCollapsed, sidebarWidthPref: sidebarWidth, panelOpen: rightPanel, panelTab })
   if (!onboardingKnown || guideView === 'loading') return <BootSplash />
   if (guideView === 'guide') return <GuideView />
+  // overflow-clip, non hidden (fase design, DS3): la radice NON è un contenitore che scorre. Con «hidden» lo era comunque per focus() e scrollIntoView — e il suo scrollHeight è alto quanto il transcript (uno sr-only in fondo, assoluto, col containing block fuori dello scorrimento): un «portami al centro» faceva salire tutta l'app
   return (
-    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+    <div className="relative flex h-screen w-screen flex-col overflow-clip bg-background text-foreground">
       <div className="relative flex min-h-0 flex-1">
       {/* U2 (fase prima-release): il bottone della barra, FISSO accanto ai
           semafori nella STESSA posizione da larga e da stretta. Fase design
