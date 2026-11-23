@@ -109,15 +109,22 @@ describe('DS2: PageShell — l’invaso di ogni pagina a tutta area', () => {
     const root = await render(full())
     const page = byTestid(root, 'pagina')
     expect(page.children.map((c) => c.attrs['data-page-shell'])).toEqual(['header', 'description', 'toolbar', 'scroll'])
-    // testata, descrizione e barra degli strumenti restano FERME (non si accartocciano)
+    // testata, descrizione e barra degli strumenti restano FERME (non si accartocciano) e riservano 6 px per lato
     for (const name of ['header', 'description', 'toolbar']) {
-      expectHasAll(slot(root, name), ['shrink-0'])
+      expectHasAll(slot(root, name), ['shrink-0', 'px-1.5'])
       expect(slot(root, name).parent).toBe(page)
     }
     // il corpo che scorre: lo schema di PP1 — prende lo spazio che resta, il di più scorre
     const scroller = byTestid(root, 'scorre')
     expect(scroller.attrs['data-page-shell']).toBe('scroll')
     expectHasAll(scroller, ['scroll-thin', 'min-h-0', 'flex-1', 'overflow-y-auto', 'overflow-x-hidden'])
+    // la barra di scroll-thin occupa 6 px: il corpo la riserva su TUTTI E DUE i lati (simmetrico: il contenuto resta al centro dell'area)
+    expect(has(scroller, '[scrollbar-gutter:stable_both-edges]')).toBe(true)
+    const css = await compileRenderer(['[scrollbar-gutter:stable_both-edges]', 'px-1.5'])
+    // compilato: la proprietà arbitraria genera la sua regola (la classe nel selettore è scappata)
+    expect(squashed(css)).toContain('scrollbar-gutter\\:stable_both-edges')
+    expect(squashed(css)).toContain('scrollbar-gutter: stable both-edges;')
+    expect(squashed(css)).toContain('.px-1\\.5 { padding-inline: calc(var(--spacing) * 1.5); }')
     expect(scroller.parent).toBe(page)
     expect(textOf(byTestid(root, 'corpo'))).toBe('contenuto')
     expect(textOf(byTestid(root, 'testata'))).toBe('Titolo')

@@ -153,20 +153,25 @@ export function PageShell({
           data-testid={testId}
         >
           {/* TAL QUALE, senza colonna intorno: il ColumnHead della testata
-              deve essere largo quanto l'area (è la fascia di trascinamento) */}
+              deve essere largo quanto l'area (è la fascia di trascinamento).
+              I tre slot fermi portano px-1.5 (6 px per lato): la barra di
+              scroll-thin OCCUPA 6 px, e il corpo li riserva su tutti e due i
+              lati (scrollbar-gutter, in fondo) — così testata, descrizione,
+              barra degli strumenti e contenuto hanno la stessa larghezza
+              utile e colonne allineate */}
           {header !== undefined && (
-            <div className="shrink-0" data-page-shell="header">{header}</div>
+            <div className="shrink-0 px-1.5" data-page-shell="header">{header}</div>
           )}
           {/* text-small E colore stanno bene assieme solo se cn() conosce le
               dimensioni di DS1: quello di fabbrica scambiava text-small per un
               colore e lo toglieva (lib/utils.ts; lo fissa un test) */}
           {description !== undefined && (
-            <div className="shrink-0" data-page-shell="description">
+            <div className="shrink-0 px-1.5" data-page-shell="description">
               <PageColumn className="pb-3 text-small text-muted-foreground">{description}</PageColumn>
             </div>
           )}
           {toolbar !== undefined && (
-            <div className="shrink-0" data-page-shell="toolbar">
+            <div className="shrink-0 px-1.5" data-page-shell="toolbar">
               <PageColumn>
                 <div className="flex min-h-10 items-center gap-3">{toolbar}</div>
               </PageColumn>
@@ -174,9 +179,15 @@ export function PageShell({
           )}
           {/* il corpo che scorre: figlio diretto della radice, largo quanto l'area
               (overflow-x-hidden: se una pagina è più larga la taglia fuori — le
-              tabelle larghe scorrono dentro se stesse) */}
+              tabelle larghe scorrono dentro se stesse).
+              scrollbar-gutter: stable both-edges — la barra di scroll-thin è
+              disegnata dall'app, quindi NON è a sovrapposizione: occupa 6 px.
+              Riservati su un lato solo, il contenuto sarebbe 3 px a sinistra
+              del centro dell'area e delle colonne ferme (lo misura la sonda:
+              «contenuto non centrato»); riservati su tutti e due i lati sono
+              simmetrici, e con px-1.5 sugli slot fermi tutto si allinea */}
           <div
-            className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+            className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable_both-edges]"
             data-page-shell="scroll"
             data-testid={scrollTestId}
           >

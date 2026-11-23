@@ -51,7 +51,19 @@ export const DESIGN_EXCEPTIONS: readonly DesignException[] = [
  * DS4 ci entrano i file della sua pagina; a fine DS4 l'elenco è superfluo
  * (nessuna area è più in attesa) e le aree provvisorie sono zero.
  */
-export const MIGRATED: readonly string[] = []
+export const MIGRATED: readonly string[] = [
+  // DS2 — i pezzi del sistema
+  'components/ui/column-head.tsx',
+  'components/ui/page-shell.tsx',
+  'components/ui/page-header.tsx',
+  'components/ui/section.tsx',
+  'components/ui/flat-list.tsx',
+  'components/ui/underline-tabs.tsx',
+  'components/ui/data-table.tsx',
+  'components/ui/notice.tsx',
+  'components/ui/button.tsx',
+  'lib/utils.ts'
+]
 
 /**
  * Aree del renderer NON ancora migrate al sistema (relative a
