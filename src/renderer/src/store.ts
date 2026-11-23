@@ -19,13 +19,17 @@ export type ComputerTab = 'screen' | 'terminal' | 'files' | 'activity'
  * suggerimento «Collega <App>» → l'app, la riga Skill del pannello → le
  * skill del bot). Si consuma dentro la pagina all'apertura.
  */
+/** Le schede interne della scheda di un plugin (PL2). */
+export type PluginCardTab = 'overview' | 'permissions' | 'accounts'
+
 export type PluginPoint =
   | { kind: 'segment'; seg: 'all' | 'connectors' | 'skills' | 'connected'; agentId?: string }
   | { kind: 'mcp' }
   | { kind: 'skill-new' }
   | { kind: 'developers'; scrollTo?: 'gateway' | 'marketplace' }
   | { kind: 'app'; appId: string }
-  | { kind: 'server'; serverId: string }
+  /** PP2 (fase plugin-pulita): `tab` è la scheda interna su cui aprire (la Cassaforte chiede «Account e bot») */
+  | { kind: 'server'; serverId: string; tab?: PluginCardTab }
 
 import type { UiTheme } from './theme'
 import { applyTheme, watchSystemTheme } from './theme'

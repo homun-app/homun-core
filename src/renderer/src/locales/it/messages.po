@@ -1200,6 +1200,10 @@ msgstr "Apri Memoria"
 msgid "Apri nel pannello del bot"
 msgstr "Apri nel pannello del bot"
 
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Apri nella scheda ›"
+msgstr "Apri nella scheda ›"
+
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Apri Server MCP"
 msgstr "Apri Server MCP"
@@ -2775,6 +2779,10 @@ msgstr "decisione precedente al registro"
 msgid "dedotto dal bot"
 msgstr "dedotto dal bot"
 
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Dei plugin"
+msgstr "Dei plugin"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "del bot"
 msgstr "del bot"
@@ -3778,6 +3786,10 @@ msgstr "i segreti stanno cifrati sul tuo Mac"
 msgid "I token stanno cifrati sul tuo Mac."
 msgstr "I token stanno cifrati sul tuo Mac."
 
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "I token, le intestazioni e le variabili segrete dei plugin si cambiano nella scheda di ciascuno. Qui si vedono solo quali sono, mai i valori."
+msgstr "I token, le intestazioni e le variabili segrete dei plugin si cambiano nella scheda di ciascuno. Qui si vedono solo quali sono, mai i valori."
+
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "I tuoi"
 msgstr "I tuoi"
@@ -4513,7 +4525,9 @@ msgid "intestazioni"
 msgstr "intestazioni"
 
 #. placeholder {0}: headerNames.length
+#. placeholder {0}: n.headers.length
 #: src/renderer/src/components/plugin/ServerSecretRows.tsx
+#: src/renderer/src/components/VaultSettings.tsx
 msgid "intestazioni: {0}"
 msgstr "intestazioni: {0}"
 
@@ -5528,6 +5542,10 @@ msgstr "Nessun modello: aprilo e ricrea uno di questi modelli, poi riprova."
 #: src/renderer/src/components/Settings.tsx
 msgid "Nessun passo saltato da riprendere"
 msgstr "Nessun passo saltato da riprendere"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Nessun plugin con un segreto salvato."
+msgstr "Nessun plugin con un segreto salvato."
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Nessun risultato."
@@ -8122,6 +8140,10 @@ msgstr "Togli la variabile"
 msgid "Toglie container da /usr/local. Ti chiederà la password del Mac. I computer dei bot vengono rimossi."
 msgstr "Toglie container da /usr/local. Ti chiederà la password del Mac. I computer dei bot vengono rimossi."
 
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "token"
+msgstr "token"
+
 #: src/renderer/src/components/plugin/ServerSecretRows.tsx
 msgid "token aziendale"
 msgstr "token aziendale"
@@ -8597,7 +8619,9 @@ msgid "Variabili d'ambiente"
 msgstr "Variabili d'ambiente"
 
 #. placeholder {0}: envNames.length
+#. placeholder {0}: n.env.length
 #: src/renderer/src/components/plugin/ServerSecretRows.tsx
+#: src/renderer/src/components/VaultSettings.tsx
 msgid "variabili segrete: {0}"
 msgstr "variabili segrete: {0}"
 

@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import { BadgeCheck, ChevronDown, Puzzle, Search, ChevronLeft } from 'lucide-react'
-import { api, useStore, type PluginPoint } from '../store'
+import { api, useStore, type PluginCardTab, type PluginPoint } from '../store'
 import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, type AppCategoryId } from '../../../shared/app-catalog'
 import type { McpServerInfo, SkillLibraryItem, SkillCatalogEntry } from '../../../shared/types'
@@ -60,6 +60,8 @@ export interface PluginPanelInitial {
   view?: PluginView
   /** il segmento di partenza (nei test senza clic; nei prodotti decide pluginAt) */
   seg?: PluginSegment
+  /** PP2: la scheda aperta fin dal primo render (nei test senza effect; nei prodotti decide pluginAt) */
+  card?: { appId?: string; serverId?: string; tab?: PluginCardTab }
 }
 
 /**
@@ -106,7 +108,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
   const [onlyDaSistemare, setOnlyDaSistemare] = useState(false)
   // PL2: la scheda del plugin (tavola 9) — si ricordano gli ID e gli oggetti
   // si cercano a OGNI render (vivi: un toggle che cambia enabledFor si vede)
-  const [card, setCard] = useState<{ appId?: string; serverId?: string } | null>(null)
+  const [card, setCard] = useState<{ appId?: string; serverId?: string; tab?: PluginCardTab } | null>(initial?.card ?? null)
   // A4 (fase approvazioni-chiare): «Per sviluppatori» in fondo — CHIUSO di default
   const [developersOpen, setDevelopersOpen] = useState(false)
   const [skillDetail, setSkillDetail] = useState<string | null>(null)
@@ -195,7 +197,8 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
     }
     else if (at.kind === 'server') {
       setView('list')
-      setCard({ serverId: at.serverId })
+      // PP2: la scheda interna chiesta dal rimando (la Cassaforte: «Account e bot»), altrimenti la Panoramica
+      setCard({ serverId: at.serverId, ...(at.tab ? { tab: at.tab } : {}) })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pluginAt])
@@ -798,6 +801,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
         <PluginCard
           app={cardApp ? { row: cardApp } : undefined}
           server={cardServer ?? undefined}
+          initialTab={card.tab}
           directEnabledFor={cardApp?.app.directId ? installed?.servers.find((s) => s.id === cardApp.app.directId)?.enabledFor ?? null : null}
           onConnect={cardApp ? (r) => { setCard(null); void flows.connect(r) } : undefined}
           onClose={() => setCard(null)}

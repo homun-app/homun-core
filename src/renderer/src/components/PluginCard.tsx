@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useReducer, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { Lock, ChevronLeft } from 'lucide-react'
-import { api, useStore } from '../store'
+import { api, useStore, type PluginCardTab } from '../store'
 import { i18n } from '../lib/i18n'
 import type { McpServerInfo, PermissionsConfig, ConnectorInfo } from '../../../shared/types'
 import type { CatalogRowView } from '../lib/apps-view'
@@ -56,9 +56,11 @@ export interface PluginCardInitial {
   secretNames?: Record<string, ServerSecretNames>
   /** PP2: lo stato di partenza dell'editor del segreto (per rendere il campo aperto nei test) */
   secretEdit?: SecretEditState
+  /** PP2: la scheda interna di partenza (nei test senza clic) */
+  tab?: PluginCardTab
 }
 
-export function PluginCard({ app, server, initial, directEnabledFor, onConnect, onClose, onChanged }: {
+export function PluginCard({ app, server, initial, initialTab, directEnabledFor, onConnect, onClose, onChanged }: {
   /** il connettore del catalogo (diretto o Composio) */
   app?: { row: CatalogRowView }
   /** il server MCP installato (manuale, registro, npm, plugin) */
@@ -66,6 +68,8 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
   initial?: PluginCardInitial
   /** PL2: l'enabledFor del server diretto (dal pannello, per i toggle per bot) */
   directEnabledFor?: string[] | null
+  /** PP2: la scheda interna su cui aprirsi (il rimando della Cassaforte chiede «Account e bot») */
+  initialTab?: PluginCardTab
   /** PL4: collega con la prima strada disponibile (la propone apps:connect) */
   onConnect?(row: CatalogRowView): void
   onClose(): void
@@ -77,7 +81,7 @@ export function PluginCard({ app, server, initial, directEnabledFor, onConnect, 
   const connectors = useStore((s) => s.connectors)
   const composio = useStore((s) => s.composio)
   const composioGateway = useStore((s) => s.composioGateway)
-  const [tab, setTab] = useState<'overview' | 'permissions' | 'accounts'>('overview')
+  const [tab, setTab] = useState<PluginCardTab>(initialTab ?? initial?.tab ?? 'overview')
   const [tools, setTools] = useState<CardTool[] | null>(initial?.tools ? toolsOf(initial.tools, server) : null)
   const [perms, setPerms] = useState<PermissionsConfig | null>(initial?.permissions ?? null)
   const [confirmRemove, setConfirmRemove] = useState(false)
