@@ -1,3 +1,203 @@
+# REPORT FASE PLUGIN-PULITA (PP1–PP4): la pagina Plugin scorre, il token si cambia nella scheda, meno muro
+
+Base `main` a bb84b6b4 (verificata: HEAD era esattamente lì su `main`, il tag `fase-plugin-pulita` non esisteva); 11 commit più questo REPORT (12 in tutto). Nove, uno per punto come chiede la spec: PP1, PP2 RPC, PP2 UI, PP2 Cassaforte, PP3, PP4 pezzi, PP4 lista, PP4 scheda, sonda. Due che la spec non elencava: un ritocco di PP4 lista (visto nelle catture: la parola di stato e la sua azione erano attaccate) e un secondo commit della sonda (le misure stampate anche quando è verde). Tag di chiusura `fase-plugin-pulita` (annotato). CHANGELOG invariato, nessun push, nessun tag `v*`. I commit sono su `main`, come quelli delle fasi precedenti.
+
+**Cose da sapere prima di tutto.**
+
+1. **Ho corretto un bug che la spec non elencava, trovato scrivendo i test di PP2 RPC.** `mcp:save` non faceva arrivare `auth.kind` alla config: lo scriveva sull'oggetto del chiamante e poi ri-salvava `x.listServers()`, riletto dal database senza `auth`. Il resolver manda il token solo se `auth.kind` è `bearer` (o `headers`): un server http manuale a cui si dava un token dal form non lo riceveva mai. Vivo dal 26 ottobre (fase 5, commit 611821cf). La correzione è dentro la funzione condivisa che la spec chiedeva di estrarre; i dettagli sono nel punto PP2 RPC.
+2. **Un RPC in più, di sola lettura: `mcp:secret-names`.** La spec chiedeva un campo per ogni nome di intestazione salvato e, nella Cassaforte, «intestazioni: 2», «variabili segrete: 3»: per sapere i nomi senza leggere i valori ci vuole qualcuno che apra lo store cifrato. Lo fa il daemon e torna solo i nomi.
+3. **Il conteggio dei processi dei REPORT di prima qui darebbe un falso zero.** `ps eww … | grep -v grep`: con l'ambiente in riga, in questa sessione ogni processo del repo porta nel PATH la parola `ripgrep`, e `grep -v grep` li scarta tutti — l'ho scoperto perché con l'app della sonda viva (7 processi Electron del repo, 1 daemon) quel comando diceva 0. Il conteggio qui sotto usa un comando che guarda l'eseguibile del processo, validato su quel caso positivo.
+4. **L'app delle sonde è stata avviata con tre interruttori di Chromium** (`--disable-features=MacWebContentsOcclusion`, `--disable-backgrounding-occluded-windows`, `--disable-renderer-backgrounding`): a finestra coperta da un'altra app Chromium la considera nascosta e la rotella di CDP non viene mai consegnata — la prima corsa della sonda è rimasta appesa lì. Gli interruttori valgono uguale per il build della fase e per la base (stessa sonda), non cambiano layout né scorrimento; l'app installata non li ha.
+5. **A 900×600 la sonda chiude il pannello del bot** (la ✕): sotto i 1000 px è un foglio sovrapposto col velo sopra tutta l'area centrale, pagina Plugin compresa. È il comportamento voluto del layout; lo dico perché le catture a 900×600 sono senza pannello.
+6. **Ho committato su `main`** senza aprire un ramo, seguendo la prassi delle fasi precedenti (base «main a …», tag di chiusura sullo stesso ramo).
+
+Per il resto, vincoli rispettati: niente Docker né `container` vero né eval col modello né dist firmata, niente Composio vero, niente `npm install` (solo script locali: `npm test`, `npm run test:ci-sim`, `npm run typecheck`, `npm run i18n:extract`), rete solo su 127.0.0.1, MAI `open` dell'Installer, MAI osascript né sudo, nessuno screencapture (catture solo via CDP), temporanei dei MIEI comandi con `mktemp -d` sotto /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/ e nei test sempre TEST_TMP_BASE, tutti cancellati (elenco in «Pulizia»), mai avviato né letto nulla su ~/Library/Application Support/sandbot (nemmeno sandbot.bak-beta4-2026-11-15), non toccati com.apple.container, /Applications/Homun.app e il SUO daemon (pid 72781 dall'inizio alla fine), vendor/llama, vendor/engramma, dist-installers/, i repo di fianco, l'Homebrew llama-server, out-review/ (intatto); MAI letti i file VERI delle altre app (config MCP e cartelle skill: solo la HOME finta delle sonde). I token di prova nascono a ogni corsa della sonda, non si stampano e non compaiono in nessun file della temporanea (la sonda li cerca: 0 file), né qui né nelle catture (il campo è una password e dopo «Salva» è vuoto).
+
+**Due cose da sapere sulle corse.** (1) Le finestre di prova sono comparse davanti durante le sonde: ogni corsa apre la finestra dell'app di prova in primo piano e la tiene fino a fine corsa (la sonda nuova ci mette circa 40 secondi), a intermittenza per tutto il pomeriggio. Le corse fatte strada facendo non le ho contate; quelle dell'ultima verifica sono le 11 della sonda nuova (10 sul build della fase e 1 dall'albero committato, subito prima di questo REPORT), più quelle sulla base, 3 di `fase-plugin`, 1 di `fase-centro` e 1 di `fase-squadra`. (2) `npm test` e `npm run test:ci-sim` fanno girare l'hook `pretest`: `prepare-wasm` riscrive in `vendor/` i due `.wasm` di tree-sitter (contenuto identico: l'impronta sha256 dei 18 file di `vendor/` è la stessa prima e dopo), `prepare-engramma` ha preso la via breve («già presenti — verificati 3/3», nessuna scrittura). `out/` l'ho ricompilato con `electron-vite build` diretto, senza l'hook `prebuild`; `--update-lock` mai.
+
+## Numeri
+
+Typecheck 0 errori. Suite intera 1 giro (`npm test`) VERDE: **498 file / 6.219 test** (base prima di toccare: 490 file / 6.126 test — +8 file, +93 test: 94 nuovi in 8 file, meno 1: il ciclo di `settings-close` sulla scheda «app», che non c'è più). `npm run test:ci-sim` VERDE: **496 file pass + 2 skip / 6.215 test pass + 4 skip** (gli unici skip sono i test col modello locale, come sempre). Sonda `fase-plugin-pulita`: **113/113 in dieci corse sul build della fase** (una alla volta) e in un'undicesima dall'albero committato, subito prima di questo REPORT (stesse misure); **sulla base 56/102** (46 rossi, tutti di PP1–PP4). Sonda `fase-plugin` (quella di prima, coi selettori aggiornati): **49/49 in 3 corse** sul build della fase. Sonda `fase-centro`: **55/55** (1 corsa). Sonda `fase-squadra`: **32/32** (1 corsa). Le sonde di prima riscrivono le loro catture: le 6 PNG di `fase-centro` (2 in `fase-centro`, 2 in `fase-approvazioni-chiare`, 2 in `fase-ritocchi-beta18`), le 4 di `fase-squadra` e le 4 di `fase-plugin` sono state riportate a HEAD con `git checkout` (non sono di questa fase). Catture di questa fase in `docs/catture/fase-plugin-pulita/`: 11 del build della fase e 9 «prima» della base (20 in tutto).
+
+Codice (senza catture e REPORT): 37 file, +4.942 / −905.
+
+## PP1 — la causa, con le righe di codice prima e dopo
+
+**Prima** (bb84b6b4). In ogni vista la colonna centrale è `flex flex-col` senza `min-h-0 flex-1`: cresce quanto il contenuto, e l'`overflow-y-auto` del figlio non ha un'altezza limitata. In `PluginPanel.tsx`:
+
+```
+268:  <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background px-8 py-6" data-testid="plugin-page">
+269:    <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">          ← vista «Server MCP»
+…
+291:  <div className="no-drag absolute inset-0 z-20 …" data-testid="plugin-page">
+292:    <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">          ← vista «Importa skill»
+306:      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto scroll-thin pb-6" data-testid="plugin-skill-import">
+…
+391:  <div className="no-drag absolute inset-0 z-20 …" data-testid="plugin-page">
+392:    <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">          ← vista «Crea una skill»
+…
+413:  <div className="no-drag absolute inset-0 z-20 …" data-testid="plugin-page">
+414:    <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">          ← la lista
+513:      <div className="min-h-0 flex-1 overflow-y-auto scroll-thin pb-6">
+```
+
+e in `PluginCard.tsx`:
+
+```
+165:  <div className="no-drag absolute inset-0 z-30 flex flex-col bg-background" data-testid="plugin-card">
+166:    <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-6 py-5">  ← la scheda
+234:      <div className="min-h-0 flex-1 overflow-y-auto scroll-thin pb-6">
+```
+
+**Dopo.** Lo schema vive in un pezzo solo, `src/renderer/src/components/plugin/PluginShell.tsx`; le quattro viste della pagina (`PluginPanel.tsx` 280, 305, 412, 437) e la scheda (`PluginCard.tsx` 240) lo montano:
+
+```
+41:  className={`no-drag absolute inset-0 ${LAYER[z]} flex flex-col bg-background ${outerClassName ?? ''}`}   ← radice: altezza definita
+46:  className={`mx-auto flex min-h-0 w-full flex-1 flex-col gap-3 ${WIDTH[size]} ${columnClassName ?? ''}`}   ← colonna: prende lo spazio che resta
+49:  <div className="shrink-0" data-plugin-shell="header">{header}</div>
+50:  {toolbar !== undefined && <div className="shrink-0" data-plugin-shell="toolbar">{toolbar}</div>}
+51:  <div className="min-h-0 flex-1 overflow-y-auto scroll-thin pb-6" data-plugin-shell="body">{children}</div>      ← corpo: il di più scorre
+```
+
+La scheda e i due fogli (dettaglio skill, anteprima del catalogo) stanno fuori dal corpo che scorre. I `data-testid` di oggi restano (`plugin-page`, `plugin-card`); un test legge il sorgente e vieta `absolute inset-0` scritto a mano in `PluginPanel.tsx` e `PluginCard.tsx`.
+
+**Misurato dalla sonda** (stessa sonda, stessi dati: 12 plugin finti, un server da 24 strumenti, cinque bot; la rotella è quella di CDP; «fuori» = il rettangolo dell'elemento non sta dentro la finestra):
+
+| Vista (finestra) | Prima: corpo · scrollHeight/clientHeight · scrollTop dopo la rotella · ultimo elemento | Dopo: corpo · scrollHeight/clientHeight · scrollTop dopo la rotella · in fondo · ultimo elemento |
+|---|---|---|
+| Lista 1200×800 | 192–1904 · 1712/1712 · 0 · «Per sviluppatori» 1777–1817, **fuori** | 178–776 · 1817/599 · 400 · 1218 di 1218 · 637–681, dentro |
+| Lista 900×600 | 192–2120 · 1928/1928 · 0 · «Per sviluppatori» 1993–2033, **fuori** | 178–576 · 1842/399 · 400 · 1443 di 1443 · 437–482, dentro |
+| Scheda · Autorizzazioni 1200×800 | 129–1729 · 1600/1600 · 0 · ultima azione 1610–1634, **fuori** | 129–780 · 1856/651 · 400 · 1205 di 1205 · 648–672, dentro |
+| Scheda · Autorizzazioni 900×600 | 129–1729 · 1600/1600 · 0 · 1610–1634, **fuori** | 129–580 · 1856/451 · 400 · 1405 di 1405 · 448–472, dentro |
+| Scheda · Account e bot 1200×800 | 129–897 · 769/769 · 0 · «Rimuovi» 845–873, **fuori: sotto il bordo di 800** | 129–780 · 651/651 (entra tutto) · — · «Rimuovi» 626–654, dentro |
+| Scheda · Account e bot 900×600 | 129–897 · 769/769 · 0 · «Rimuovi» 845–873, **fuori** | 129–580 · 549/451 · 98 (tutta la corsa con un colpo) · 98 di 98 · 528–556, dentro |
+| Vista «Server MCP» 1200×800 | 68–1402 · 1334/1334 · 0 · «Importa da altre app» 1362–1402, **fuori** | 68–776 · 1358/708 · 400 · 650 di 650 · 712–752, dentro |
+| Vista «Server MCP» 900×600 | 68–1402 · 1334/1334 · 0 · 1362–1402, **fuori** | 68–576 · 1358/508 · 400 · 850 di 850 · 512–552, dentro |
+| Vista «Importa skill» 1200×800 | 120–981 · 861/861 · 0 · barra «Importa» 925–957, **fuori** | 120–776 · 861/656 · 205 (tutta la corsa) · 205 di 205 · 720–752, dentro |
+| Vista «Importa skill» 900×600 | 120–981 · 861/861 · 0 · 925–957, **fuori** | 120–576 · 861/456 · 400 · 405 di 405 · 520–552, dentro |
+| Vista «Crea una skill» 1200×800 | 68–566 · 498/498 (entra) · dentro | 68–776 · 708/708 (entra) · dentro |
+| Vista «Crea una skill» 900×600 | 68–566 · 498/498 (entra) · dentro | 68–576 · 522/508 · 14 · 14 di 14 · il fondo 54–552, dentro |
+
+Sulla base `clientHeight` è uguale a `scrollHeight` in tutte le viste: il corpo è alto quanto il contenuto, non ha niente da far scorrere. Nelle viste «Server MCP» e «Crea una skill» non c'era nemmeno un elemento con `overflow-y-auto` (solo un involucro `min-h-0 flex-1`). Due note oneste: con la scheda rifatta a filo (PP4) «Account e bot» a 1200×800 entra tutta (651 di 651) — «Rimuovi» è a schermo anche senza scorrere; a 900×600 scorre di 98 e arriva.
+
+**Test** (`plugin-shell`, 6, visti ROSSI prima: modulo assente, zero corpi, `absolute inset-0` a mano): il contratto di `PluginShell` — il corpo con `overflow-y-auto` dentro una catena di genitori flex che hanno tutti `min-h-0`, fino alla radice `absolute inset-0`; che lista, le tre viste e la scheda lo montino; e il contratto BLOCCA lo schema di prima (la colonna senza `min-h-0`/`flex-1` viene segnalata).
+
+## PP2 — il token si cambia dove vive il server
+
+**RPC** (`src/daemon/api.ts`, `mcp:replace-secret(id, secret)`; commit 55e6f911). Scrive solo il segreto cifrato — lo stesso `sealed-store` e gli stessi `SECRET_KIND` di `mcp:save`: `bearer`, `headers`, `env` (per `env` si fonde con i valori vecchi, una chiave per volta) — non tocca nient'altro della config; aggiorna `auth.kind` se serve; pulisce `needsAuth` quando tutte le chiavi attese hanno un valore e dimentica l'ultima prova fallita (`connectors.state`: errore o token scaduto, da cui la pagina legge «accesso scaduto»); poi il test di connessione parte da solo come U5 di `mcp:save`, con la nota di sistema di oggi. L'esito del test torna alla scheda (`{ ok, test }`), che lo mostra: è la riga a dire «collegato» o il motivo. Un id inesistente: errore pulito (`server {id} non trovato`), nessuna scrittura. `MasterKeyUnavailableError` arriva intero, il resto con `UI.rpcSecretSaveFailed`. Vale per i manuali e per i server del registro/importati (stesso id, stesso store).
+
+**La funzione condivisa** (`src/daemon/server-secret.ts`): `planServerSecret` è PURA — dice cosa va nello store e come cambia `auth`, in due modi: «save» ricalcola tutto dal form (il record di intestazioni così com'è, le variabili dichiarate segrete da `envSpec`, i valori non segreti che tornano in config), «replace» fonde col vecchio; `applyServerSecretPlan` è l'I/O con l'unica mappatura degli errori. `mcp:save` passa di lì: i suoi test di oggi (`mcp-window-autotest`, `manual-needsauth`, `manual-env`) restano verdi senza modifiche.
+
+**Il bug di `mcp:save`.** Prima (bb84b6b4, `api.ts` 1573–1597): la config si salvava SUBITO (riga 1573), poi si scriveva il segreto e si faceva `cfg.auth = { kind: 'bearer' }` seguito da `x.saveServers(x.listServers())` — ma `cfg` è l'oggetto del chiamante e `x.listServers()` rilegge dal database, dove `auth` non c'è: il tipo di autenticazione non arrivava mai alla config. Il resolver (`wiring.ts` 210) manda il token solo con `auth.kind === 'bearer'`: un server http manuale a cui si dava un token dal form non lo riceveva mai (un server che lo pretendeva rispondeva 401). Chi importava da Cursor o Claude non lo vedeva, perché l'import scrive `auth` nel config direttamente (`import-sources.ts` 448). Ora la config si salva DOPO le scritture e con `auth` dentro — e una scrittura del segreto che non riescita non lascia più un server a metà (prima restava salvato, senza autenticazione). Un server salvato col form prima di oggi (token cifrato, `auth.kind` mai arrivato in config) lo riconoscono i nomi dei segreti: la scheda gli offre lo stesso «Cambia token», e sostituirlo scrive anche `auth.kind`.
+
+**RPC `mcp:secret-names`** (sola lettura): per ogni server con almeno un segreto, `{ id, bearer, headers: [nomi], env: [nomi] }` — mai un valore. Senza la chiave l'errore arriva intero (un elenco vuoto mentirebbe).
+
+**Nella scheda** (commit 9b6ecea2, `components/plugin/ServerSecretRows.tsx`): «token aziendale» ha a destra «Cambia token»; il clic apre sul posto un campo password («Nuovo token — sostituisce quello salvato») con «Salva» e «Annulla» (Invio salva, Esc annulla; «Salva» si può premere solo con qualcosa di scritto). Le intestazioni («intestazioni: N») e le variabili («variabili segrete: N») hanno «Cambia» e un campo per OGNI nome salvato: i nomi si vedono, i valori mai; si sostituiscono solo quelli scritti. OAuth ha «Ricollega» sempre, come azione della riga. Lo stato dell'editor è un reducer puro (`lib/plugin-secret.ts`): il valore scritto NON resta dopo il salvataggio.
+
+**Cassaforte › «Dei plugin»** (commit 551ad3d3, `VaultSettings.tsx`): scheda nuova, sola lettura — per ogni server con un segreto, logo, nome, tipo («token», «intestazioni: 2», «variabili segrete: 3») e «Apri nella scheda ›», che chiude le Impostazioni e apre la pagina Plugin con la scheda di quel server su «Account e bot». Nessun campo, nessun «Salva». Il punto della pagina (`PluginPoint`) accetta la scheda interna per un server; senza, la scheda si apre su «Panoramica» come prima. Nella scheda «Segreti» 🔐 è l'icona lucide `KeyRound`.
+
+**Test:** `mcp-replace-secret` (17: store vero su cartella `mkdtemp` di TEST_TMP_BASE, chiave e safeStorage FINTI, resolver VERO agganciato come fa il daemon, server MCP finti su 127.0.0.1 e su stdio che rifiutano il valore sbagliato): bearer — lo store ha il token nuovo, la config non cambia (a parte `auth`/`needsAuth`, e per un server http `firstOkAt`, che è la prova P7 della prima connessione riuscita, scritta dal test e non dall'RPC), il test parte da solo con il token nuovo e passa; token che non va — si salva lo stesso e il test dice perché; server spento — si cambia il segreto, il test non parte; intestazioni — solo la chiave scritta; variabili — fuse una chiave per volta e arrivano al processo; `needsAuth` si pulisce solo quando ci sono tutte; lo stato «token scaduto» si pulisce; id inesistente — errore e nessuna scrittura; `MasterKeyUnavailableError` intero. Più 3 sulla regressione di `mcp:save` (bearer e intestazioni restano in config e viaggiano nell'intestazione; senza la chiave la config resta com'era) e 2 su `mcp:secret-names`. Visti ROSSI prima: i primi 12 (gestore e modulo assenti) e i 3 della regressione, questi contro l'`api.ts` di bb84b6b4. **Eccezione dichiarata:** i 2 test di `mcp:secret-names` li ho scritti insieme al suo gestore e sono stati verdi alla prima corsa. `plugin-secret-row` (16, ROSSI prima: modulo assente): «Cambia token» apre il campo, «Salva» chiama `mcpReplaceSecret` con `{bearerToken}` (spazi tolti), il valore non resta nello stato, l'esito in riga («collegato», il motivo, «salvato»), intestazioni e variabili un campo per nome, solo le chiavi scritte, «Ricollega» sempre per OAuth, il server salvato col form di prima ha «Cambia token». `vault-plugins` (10, ROSSI prima): la scheda c'è, elenca i server col segreto e solo quelli, mai i nomi dei segreti né i valori, è sola lettura, «Apri nella scheda» chiude le Impostazioni e apre la scheda giusta sulla scheda interna giusta, `PluginPoint` ricorda la scheda, KeyRound al posto di 🔐.
+
+## PP3 — «App e skill» esce dalle Impostazioni
+
+Dalla colonna spariscono la voce e il pezzo che diceva «stanno nella pagina Plugin › Apri»: restano sei sezioni. **Compatibilità:** `setSettingsTab('app')` apre la pagina Plugin (come gli altri rimandi: chiude Attività e Libreria) e chiude le Impostazioni, senza lasciare una scheda appesa. Cercati tutti i chiamanti di `setSettingsTab` (Chat, RightPanel, ModelsPage, ApprovalsPage, lo store), i deep link (`sandbot://agent/<id>`: non apre schede), le guide dell'onboarding e i testi dei bot e del system prompt: **nessuno chiedeva `app` o diceva «Impostazioni › App e skill»** — gli unici testi che citavano «App e skill» erano l'etichetta e il rimando tolti, con le loro voci dei cataloghi IT ed EN. Test (`settings-no-app`, 8: 7 ROSSI prima, verde il controllo che le altre schede si aprono come prima; più `settings-close` senza la voce `app`).
+
+## PP4 — meno muro: pezzi, lista, scheda
+
+**Pezzi** (commit 29ee13fc, `components/ui/`, con test): `FlatList`/`FlatRow` — righe a filo, nessun fondo, filetto `divide-y divide-border/50`, `py-3` (12px), hover tenue solo sulle righe cliccabili, slot leading · title · subtitle · trailing; `UnderlineTabs` — testo, l'attiva in `text-foreground` con `border-b-2`, le altre `text-muted-foreground`, frecce sinistra/destra (da capo ai bordi) col fuoco che segue la scheda, `role="tablist"`/`tab`, `aria-selected`, tabindex a scacchi. Solo token già usati dall'app; nessuna libreria nuova; `SettingsGroup`/`SettingsRow` non si toccano. Test `ui-flat` (7, ROSSI prima).
+
+**Lista** (commit a7f79cc1 e il ritocco 718a61fd): `YourRow` e la riga del catalogo (`AppRow`) sono `FlatRow`, logo da 32 (era 40). Un solo segnale di stato: quando va bene nessuna parola e l'interruttore resta senza etichetta (l'`aria-label` sì); «non parte · Vedi perché», «non valida · Vedi perché» in rosso con l'interruttore (spegnere è un'altra cosa); «accesso scaduto · Ricollega», «da completare · Completa», «spento da Homun: non rispondeva · Riaccendi» AL POSTO dell'interruttore; «spento» in grigio con l'interruttore spento. Le azioni fanno quello che dicono: «Riaccendi» accende; «Ricollega» e «Completa» aprono la scheda su «Account e bot»; «Vedi perché» apre la scheda, che ora dice anche il perché (l'errore dell'ultima prova, tagliato a 300). «Tutti i bot» non si scrive più: i bot si nominano solo con l'accesso ristretto («Solo Ricerche», «Solo Ricerche +1», «nessun bot»). La riga grigia resta una sola. I segmenti in testa sono `UnderlineTabs` (anche i filtri dei connettori, quelli della tabella «Collegati» e le categorie del catalogo skill). «Aggiungi» è andato in testata, a destra del titolo, e resta l'unico bottone pieno della pagina (i bottoni del catalogo sono testo, il badge «Aggiunta» non è più nero). 32px tra le sezioni, titoli a 13px grigi, «Per sviluppatori» a filo, le categorie sono link di testo. Test `plugin-page-flat` (14, ROSSI prima).
+
+**Scheda** (commit 4adec8b7): testata — indietro · logo 40 · nome + riga grigia «tipo · strada · origine» (`cardGrayLineOf`, pura: la stessa della lista) · a destra l'interruttore senza etichetta e il menu ⋯ (Prova la connessione, con l'esito in testata; Ricollega se OAuth; Rimuovi/Scollega con conferma «… davvero»); lo stato in parole solo quando non va, e allora col perché. Spento da Homun: «Riaccendi» al posto dell'interruttore, come in lista. Schede interne → `UnderlineTabs`. Panoramica: niente riquadri; la descrizione in testa, 14px, quando c'è; tre gruppi di fatti — Provenienza · Sicurezza · Dati — in due colonne sopra i 560px del contenitore (`@container`: etichetta grigia a sinistra, valore a destra), etichetta sopra il valore sotto; filetti tra le voci; «Dati» compare solo quando c'è un fatto (un server a comando senza indirizzo non lo ha: mai dati inventati). Autorizzazioni: per gruppo una riga d'intestazione (nome · N, il selettore a destra) e le azioni come `FlatRow` (nome, descrizione su una riga troncata, selettore a destra), nessun fondo; la frase F8 in fondo. «Account e bot»: la riga Account (PP2), poi «Bot che lo usano» come `FlatList` — «Tutti i bot» con l'interruttore e un bot per riga — e «Rimuovi» in fondo come testo rosso. La scheda non importa più `SettingsGroup`/`SettingsRow`. Test `plugin-card-flat` (16: 15 ROSSI prima, verde il controllo sugli interruttori per bot).
+
+## I test di oggi cambiati, e perché
+
+La spec chiede di aggiornarli solo dove cambia il testo o la struttura voluta. Quattro file, un punto ciascuno — tre test e il ciclo delle schede del quarto:
+
+| Test | Prima | Dopo | Perché |
+|---|---|---|---|
+| `plugin-page` — «I tuoi»: la riga di un connettore collegato | la riga dice «attivo» | la riga NON dice «attivo» | PP4: un solo segnale di stato, nessuna parola quando va |
+| `plugin-card` — «lo stato, l'account onesto (…) e i bot» | la scheda dice «attivo» | non lo dice | PP4: lo stato in parole solo quando non va |
+| `skills-catalog-section` — i filtri del catalogo skill | pillole; la categoria attiva si ri-toglieva col clic | `UnderlineTabs`; la categoria attiva non si ri-toglie | PP4: schede come testo — «Tutte» è una scheda a fianco |
+| `settings-close` — il ciclo «scheda «…»: esattamente UN bottone «Chiudi»» | sette schede, «app» compresa | sei | PP3: la scheda «app» non c'è più |
+
+Tutto il resto dei test di `plugin-page` e `plugin-card` è passato senza modifiche.
+
+## Le catture, prima e dopo (stessa sonda, stessi dati, 1200×800)
+
+| Prima (bb84b6b4) | Dopo (fase plugin-pulita) |
+|---|---|
+| ![prima, lista](docs/catture/fase-plugin-pulita/prima-1-lista-1200x800-chiaro.png) | ![dopo, lista](docs/catture/fase-plugin-pulita/1-lista-1200x800-chiaro.png) |
+| ![prima, lista scura](docs/catture/fase-plugin-pulita/prima-1-lista-1200x800-scuro.png) | ![dopo, lista scura](docs/catture/fase-plugin-pulita/1-lista-1200x800-scuro.png) |
+| ![prima, Panoramica](docs/catture/fase-plugin-pulita/prima-2-scheda-panoramica-1200x800-chiaro.png) | ![dopo, Panoramica](docs/catture/fase-plugin-pulita/2-scheda-panoramica-1200x800-chiaro.png) |
+| ![prima, Panoramica scura](docs/catture/fase-plugin-pulita/prima-2-scheda-panoramica-1200x800-scuro.png) | ![dopo, Panoramica scura](docs/catture/fase-plugin-pulita/2-scheda-panoramica-1200x800-scuro.png) |
+| ![prima, Autorizzazioni](docs/catture/fase-plugin-pulita/prima-2-scheda-autorizzazioni-1200x800-chiaro.png) | ![dopo, Autorizzazioni](docs/catture/fase-plugin-pulita/2-scheda-autorizzazioni-1200x800-chiaro.png) |
+| ![prima, Autorizzazioni scura](docs/catture/fase-plugin-pulita/prima-2-scheda-autorizzazioni-1200x800-scuro.png) | ![dopo, Autorizzazioni scura](docs/catture/fase-plugin-pulita/2-scheda-autorizzazioni-1200x800-scuro.png) |
+| ![prima, Account e bot](docs/catture/fase-plugin-pulita/prima-2-scheda-account-1200x800-chiaro.png) | ![dopo, Account e bot](docs/catture/fase-plugin-pulita/2-scheda-account-1200x800-chiaro.png) |
+| ![prima, Account e bot scura](docs/catture/fase-plugin-pulita/prima-2-scheda-account-1200x800-scuro.png) | ![dopo, Account e bot scura](docs/catture/fase-plugin-pulita/2-scheda-account-1200x800-scuro.png) |
+| ![prima, lista a 900×600](docs/catture/fase-plugin-pulita/prima-4-lista-900x600-chiaro.png) | ![dopo, lista a 900×600](docs/catture/fase-plugin-pulita/4-lista-900x600-chiaro.png) |
+
+Solo del build della fase (sulla base non esistono): la Cassaforte «Dei plugin», [chiaro](docs/catture/fase-plugin-pulita/3-cassaforte-dei-plugin-1200x800-chiaro.png) e [scuro](docs/catture/fase-plugin-pulita/3-cassaforte-dei-plugin-1200x800-scuro.png). Nella cattura «prima» di Account e bot si vede il bug: «Rimuovi» è tagliato dal bordo inferiore. Le catture le ho guardate una per una, tutte e 20; in una di PP4 lista ho visto la parola e l'azione attaccate («non parte Vedi perché») e ne è nato il ritocco. Le 11 «dopo» committate vengono dalla corsa delle 16:00; l'undicesima corsa (dall'albero committato, 16:21) le ha riscritte e le ho riportate a quelle (ne ho riguardate due della corsa nuova, uguali).
+
+## Le altre sonde
+
+- **`fase-plugin`** (49/49 in 3 corse sul build della fase). Cambiati: il controllo della Panoramica chiede «Provenienza» al posto di «Strada» (il titolo non c'è più); il gruppo PL7 segue PP3 (la voce «App e skill» non c'è; chi la chiede apre la pagina). E una sincronizzazione in V5: la sonda rifaceva il clic sull'interruttore appena il daemon aveva scritto, prima che la riga si ridisegnasse — il secondo clic ripeteva «spegni». Ora aspetta che la riga mostri l'interruttore spento, come chi guarda la riga. Senza, una corsa su due era rossa: gara della sonda, non dell'app. Non ho toccato quel comportamento dell'app (un secondo clic prima del ridisegno ripete il comando: il ridisegno segue subito l'RPC, quindi con un mouse vero è difficile da ottenere, ma non impossibile).
+- **`fase-centro`** 55/55 e **`fase-squadra`** 32/32, 1 corsa ciascuna, una alla volta, uscita su file.
+- **`fase-impostazioni`**: la matrice delle sezioni elencava «App e skill»; l'ho tolta dall'elenco, ma NON ho fatto girare quella sonda (non è tra quelle che la spec chiede).
+- Non ho fatto girare `fase-catalogo-app` e `fase-pulizia`: cercano già da prima di questa fase la finestra «App» che non c'è più (`[data-testid="app-filters"]` dentro un dialogo).
+
+## Trovato per strada, non cambiato
+
+- Due messaggi al MODELLO in `src/main/connectors/install.ts` (righe 575 e 603) dicono «the user completes the setup in the App window»: la finestra «App» non c'è dalla fase plugin. Non citano «App e skill», non sono testi visibili, e toccarli cambia ciò che il bot legge: li ho lasciati. Da decidere.
+- Nella Cassaforte restano tre emoji fuori dal punto della spec: 🔑 in «Login» e in «Concessioni», 👤 in «Contatti». La spec chiedeva solo 🔐.
+- `BotTogglesForApp` (in `AppsWindow.tsx`) non è più usato dalla scheda, che ha le sue righe; resta esportato perché un test di oggi lo chiede.
+- `GatewayAccountsSection` (gli account Composio, riusato da `AppsWindow`) si mostra dentro la scheda com'era: non l'ho rifatta a filo.
+
+## Scostamenti di dettaglio da come la spec descrive a parole
+
+- La spec dice «estendi `PluginPanelInitial` se serve» per la scheda interna: l'ho esteso (`card`), ma il posto dove il rimando porta la scheda è il punto della pagina (`PluginPoint`), ed è lì che la scheda viaggia.
+- «Aggiungi» è in testata, a destra del titolo: la spec dice solo che resta l'unico pieno.
+- «Consigliati» e l'elenco dei connettori sono a una colonna (prima due colonne sopra `lg`): righe a filo su due colonne si sarebbero lette male.
+- Nella tabella «Collegati» lo stato resta una colonna (è una tabella), ma chi va bene è grigio, non verde.
+
+## Pulizia
+
+Conteggio dei processi del repo, senza filtri di esclusione — guarda l'eseguibile del processo (per questo non si inquina da solo):
+
+```
+$ ps -ax -o pid=,command= | awk -v e="$HOME/Projects/Bot/sandbot/node_modules/electron" '$2 ~ "^"e' | wc -l      ← ogni processo avviato dall'Electron del repo: UI, helper, daemon
+0
+$ ps -ax -o pid=,command= | awk '$2=="--homun-daemon" || $3=="--homun-daemon" { print $1, $2 }'                     ← TUTTI i processi col flag del daemon, di qualunque app
+72781 /Applications/Homun.app/Contents/MacOS/Homun
+$ ps -ax -o pid=,command= | awk -v e="$HOME/Projects/Bot/sandbot/node_modules/electron" '($2=="--homun-daemon" || $3=="--homun-daemon") && $2 ~ "^"e' | wc -l
+0
+$ ps -ax -o pid=,command= | awk -v e="$HOME/Projects/Bot/sandbot/node_modules/.bin/" '$2 ~ "^"e' | wc -l       ← vitest, electron-vite del repo
+0
+$ pgrep -fl "llama-server" | wc -l
+0
+$ pgrep -fl "fase-.*-probe.mjs|fake-plugin-pulita-mcp" | wc -l
+0
+```
+
+Il daemon 72781 è quello VERO dell'app installata, mai toccato: stesso pid dall'inizio alla fase (conteggio fatto prima di iniziare: 0 e 0, con lo stesso 72781). Il comando è stato validato sul caso positivo, con l'app della sonda viva: 7 processi dell'Electron del repo e 1 daemon del repo contati, mentre `ps eww -ax -o pid=,command= | grep -F "…/Electron" | grep -v grep | wc -l` (quello dei REPORT di prima) diceva 0.
+
+Temporanee:
+
+```
+$ ls /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/ | grep -cE "^sandbot-"
+0
+$ ls /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/ | grep -cE "^sandbot-frame-test-app-"
+0
+$ ls /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/ | grep -cE "^sandbot-fase-"
+0
+$ ls /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/ | grep -cE "fase-plugin-pulita"
+0
+```
+
+Il totale di `T/` non è un numero fisso — altre app e questa sessione stessa creano e tolgono voci (con `ls -1a`, `.` e `..` compresi: 1.944 con le mie tre cartelle, 1.942 con una sola, 1.940 al conteggio finale, senza le mie); ciò che si può dire è che nessuna voce mia è rimasta (gli zero qui sopra). Cartelle create da me, tutte con `mktemp -d` in `T/` e tutte cancellate: `fase-plugin-pulita-lavoro-JCKXQQ` (i log delle corse), `fase-plugin-pulita-base-anSLm4` (la copia del build della base, con tre symlink al repo tolti prima di cancellare: `node_modules`, `vendor` e `resources` sono intatti), `fase-plugin-pulita-report-QnIdcG` (per scrivere questo REPORT; dentro, la cartella `verifica` con l'uscita dell'ultima verifica: sonda, typecheck, suite intera, ci-sim). Le cartelle `sandbot-fase-plugin-pulita-*` le crea e le cancella la sonda a ogni corsa (controllo dentro la sonda: 0 rimaste, 0 daemon, 0 server MCP finti). Una è rimasta per un errore mio: alla prima corsa la sonda è rimasta appesa (la rotella non consegnata) e l'ho fermata a mano — la sua cartella `sandbot-fase-plugin-pulita-nIAG0f` è stata cancellata a mano subito dopo, col fermo del daemon.
+
+Il build della base: `out/` com'era all'inizio era il build di bb84b6b4 (nessun file di `src/`, `package.json` o config più recente del build; l'ultimo commit che tocca `src` è 4c0396dc, delle 10:51; il build delle 10:54; bb84b6b4 e il commit prima toccano solo REPORT.md e `scripts/`). L'ho copiato prima di ricompilare — 308 file, impronta sha256 della lista `e61bfbbc100ac9a194d2302957bb5892fe5e974a08c51de5dc536b67cf2600d4`, ricontrollata intatta prima dell'ultima corsa «prima». Il build della fase: 307 file, `570d235089489811e41d7056e49d969ce2f6fc74de0874dc5d13c7aa0d1c5a6d` (è l'`out/` che resta nel repo; ricontrollata dopo l'undicesima corsa). L'impronta, per entrambi, è `cd out && find . -type f | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256`.
+
 # REPORT FASE PRIMO-AVVIO (P1–P3, sonda): Homun si apre al primo clic — il clic sul Dock arrivava al daemon, che lo ignorava
 
 Base `main` a d74f4d53 (verificata: HEAD era esattamente lì su `main`, il tag `fase-primo-avvio` non esisteva); 10 commit: la guardia delle prove (l'app di prova non si registra come gestore di `sandbot://`), P1, P3.1 … P3.6, un fixup di P3.6, la sonda con gli strumenti della riproduzione, più questo REPORT; tag di chiusura `fase-primo-avvio` (annotato). Ordine rispettato: prima P1 (il registro), poi P2 (la riproduzione sul build di P1), poi P3. CHANGELOG invariato, nessun push, nessun tag `v*`. **Una deviazione da segnalare:** alla PRIMA impacchettatura dell'app `--dir` electron-builder ha scaricato da solo il suo pacchetto di strumenti per convertire l'icona (`icons-bundle.tar.gz`, 3,1 MB, in `~/Library/Caches/electron-builder/`) — un download vero che i vincoli escludevano e che non avevo previsto. Le dieci impacchettature dopo la prima sono partite con 0 righe `download` nel log (icns già generata riusata, Electron preso da `node_modules/electron/dist` con `-c.electronDist`), la cache creata dal download è stata cancellata a fine corsa. Per il resto, vincoli di sempre rispettati: niente Docker né `container` vero (solo la CLI finta della sonda) né eval col modello né dist firmata, niente Composio/npm veri, rete solo su 127.0.0.1, MAI `open` dell'Installer, MAI osascript né sudo, nessuno screencapture (catture solo via CDP), temporanei dei MIEI comandi con `mktemp -d` sotto /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/ e nei test sempre TEST_TMP_BASE, tutti cancellati (0 residue), mai avviato né letto nulla su ~/Library/Application Support/sandbot (nemmeno sandbot.bak-beta4-2026-11-15), non toccati com.apple.container, /Applications/Homun.app e il SUO daemon (stessi pid dall'inizio alla fine), vendor/llama, vendor/engramma, dist-installers/, i repo di fianco, l'Homebrew llama-server, out-review/ (intatto); MAI letti i file VERI delle altre app (config MCP e cartelle skill). **Due cose da sapere sulla riproduzione:** (1) `open` è stato usato SOLO nello script di riproduzione, e solo sull'app di prova in temporanea — per fare la parte del Finder, del Dock e del lancio in background (`open`, `open` all'app che gira, `open -g`); mai l'Installer; la sonda non lo usa (lo vieta la sua guardia). (2) per la durata della corsa (circa due ore e mezza, a intermittenza) le finestre di prova sono comparse davanti (ogni avvio porta l'app in primo piano: è il comportamento richiesto da P3.2): chi era al Mac in quel momento le ha viste.
