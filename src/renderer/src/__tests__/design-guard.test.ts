@@ -14,6 +14,10 @@
 //   max-w-[…px], w-[…px]      — larghezze libere in px: le tre di DS1 (o l'area meno i margini)
 //   uppercase, tracking-…     — nessun maiuscoletto
 //   emoji                     — solo icone lucide nell'interfaccia
+//   font-bold, font-light…    — i pesi sono 400, 500, 600 (chiudono DS1)
+//   leading-…                 — ogni dimensione ha la sua interlinea
+//   p-2.5, gap-7, top-11…     — le spaziature dalla scala (0.5 1 1.5 2 3 4 5 6 8 10 12 16) o con un nome
+//   le icone lucide           — 16 px (size-4) o 20 px (size-5), sempre scritti
 // Le eccezioni vivono in UN file (lib/design-exceptions.ts), ognuna con il
 // motivo; qui si controlla che nessuna sia morta. Lì sta anche, provvisorio
 // fino a fine DS4, l'elenco delle aree non ancora migrate.
@@ -22,7 +26,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DESIGN_EXCEPTIONS, MIGRATION_PENDING, type DesignRule } from '../lib/design-exceptions'
-import { CSS_PATH, SRC, isClassList, rel, scan, sourceFiles, stringsOf, violationsOfString } from './design-scan'
+import { CSS_PATH, SRC, iconViolations, isClassList, rel, scan, sourceFiles, stringsOf, violationsOfString } from './design-scan'
 
 const CSS = readFileSync(CSS_PATH, 'utf8')
 const none = (_rule: DesignRule, token: string): string => token
@@ -54,6 +58,18 @@ describe('DS6: la guardia sul sorgente del renderer', () => {
   })
   it('nessuna emoji nei sorgenti del renderer (solo icone lucide)', () => {
     expect(byRule('emoji').map((x) => `${x.file}: ${x.token} in «${x.text}»`).slice(0, 40)).toEqual([])
+  })
+  it('i pesi sono tre: 400, 500, 600 (niente font-bold, font-light…)', () => {
+    expect(byRule('font-weight').map((x) => `${x.file}: ${x.token}`).slice(0, 40)).toEqual([])
+  })
+  it('nessuna interlinea scritta a mano (leading-…): ogni dimensione porta la sua', () => {
+    expect(byRule('leading').map((x) => `${x.file}: ${x.token} in «${x.text}»`).slice(0, 40)).toEqual([])
+  })
+  it('le spaziature numeriche sono dalla scala di Tailwind (niente p-2.5, gap-7, top-11…)', () => {
+    expect(byRule('spacing-scale').map((x) => `${x.file}: ${x.token} in «${x.text}»`).slice(0, 40)).toEqual([])
+  })
+  it('le icone lucide sono da 16 o 20 px, e la misura è scritta (size-4 o size-5)', () => {
+    expect(byRule('icon-size').map((x) => `${x.file}: ${x.token}`).slice(0, 40)).toEqual([])
   })
   it('styles.css: niente maiuscoletto scritto a mano', () => {
     expect(CSS).not.toMatch(/text-transform:\s*uppercase/)
@@ -95,6 +111,32 @@ describe('DS6: la guardia vede quello che deve vedere', () => {
     expect(violationsOfString('w-[36rem] max-w-[80%] max-w-[36rem] w-[120px] max-w-[720px]', none).map((v) => v.token)).toEqual(['w-[120px]', 'max-w-[720px]'])
     expect(violationsOfString('uppercase tracking-wide hover:tracking-tight text-caption', none).map((v) => v.token)).toEqual(['uppercase', 'tracking-wide', 'hover:tracking-tight'])
     expect(violationsOfString('text-[13px] text-[var(--bubble-user-foreground)]', none).map((v) => v.rule)).toEqual(['text-arbitrary', 'text-arbitrary'])
+  })
+  it('pesi, interlinea, scala delle spaziature: le regole in più di DS1', () => {
+    expect(violationsOfString('flex font-bold leading-relaxed text-body', none).map((v) => `${v.rule}:${v.token}`).sort()).toEqual(['font-weight:font-bold', 'leading:leading-relaxed'].sort())
+    expect(violationsOfString('flex font-medium font-semibold font-normal leading-none', none).map((v) => v.token)).toEqual(['leading-none'])
+    expect(violationsOfString('flex p-4 gap-3 mt-1.5 px-0.5 h-7 w-9 p-section h-control', none)).toEqual([])
+    expect(violationsOfString('flex px-2.5 gap-7 top-11 -ml-3.5 space-y-9', none).map((v) => v.token).sort()).toEqual(['-ml-3.5', 'gap-7', 'px-2.5', 'space-y-9', 'top-11'].sort())
+    // le misure (h-, w-, size-) non sono spaziature: la scala non le guarda
+    expect(violationsOfString('flex size-7 h-9', none)).toEqual([])
+  })
+  it('le icone: dall’AST, solo quelle importate da lucide-react; la misura scritta e fra le due', () => {
+    const src = [
+      "import { Search, ChevronLeft, X as Close } from 'lucide-react'",
+      "import { Bot } from './Bot'",
+      'const a = <Search className="size-4 shrink-0" />',
+      'const b = <ChevronLeft className="mt-1 size-3.5" />',
+      'const c = <Close />',
+      "const d = <Search className={'size-5'} />",
+      'const e = <Search className={cls} />',
+      'const f = <Bot className="size-10" />',
+      'const g = <Search.Unit className="size-6" />'
+    ].join('\n')
+    expect(iconViolations(src)).toEqual([
+      { line: 4, name: 'ChevronLeft', token: 'size-3.5' },
+      { line: 5, name: 'Close', token: '(senza misura)' },
+      { line: 7, name: 'Search', token: '(senza misura)' }
+    ])
   })
   it('una stringa che NON è una lista di classi non conta (le emoji sì: stanno in qualunque testo)', () => {
     expect(violationsOfString('the rounded corners of the app window', none)).toEqual([])

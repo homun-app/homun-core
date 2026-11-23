@@ -75,10 +75,14 @@ describe('design-migrazione: le stringhe', () => {
       'const b = `p-4 ${x ? "gap-7" : "gap-3"} mt-[70px]`',
       'const c = "flex gap-2.5 \\"quoted\\" text-[13px]"',
       'const d = <p className="text-caption rounded" title="rounded">ciao text-xs</p>',
-      "import { Search, ChevronLeft } from 'lucide-react'",
+      "import { Search, ChevronLeft, Close } from 'lucide-react'",
+      "import { Bot } from './Bot'",
       'const e = <Search className="size-3.5 shrink-0" />',
       'const f = <ChevronLeft className="mt-1 size-6 text-muted-foreground" />',
-      'const g = <p className="flex items-center">{cond ? "text-xs" : \'rounded-xl\'}</p>'
+      'const g = <p className="flex items-center">{cond ? "text-xs" : \'rounded-xl\'}</p>',
+      'const h = <Close />',
+      'const i = <Search className={cls} />',
+      'const j = <Bot />'
     ].join('\n')
     const { source, changed } = migrateSource(src)
     expect(source).toBe([
@@ -87,12 +91,16 @@ describe('design-migrazione: le stringhe', () => {
       'const b = `p-4 ${x ? "gap-8" : "gap-3"} mt-16`',
       'const c = "flex gap-3 \\"quoted\\" text-small"',
       'const d = <p className="text-caption rounded-control" title="rounded">ciao text-xs</p>',
-      "import { Search, ChevronLeft } from 'lucide-react'",
+      "import { Search, ChevronLeft, Close } from 'lucide-react'",
+      "import { Bot } from './Bot'",
       'const e = <Search className="size-4 shrink-0" />',
       'const f = <ChevronLeft className="mt-1 size-5 text-muted-foreground" />',
-      'const g = <p className="flex items-center">{cond ? "text-caption" : \'rounded-surface\'}</p>'
+      'const g = <p className="flex items-center">{cond ? "text-caption" : \'rounded-surface\'}</p>',
+      'const h = <Close className="size-4" />',
+      'const i = <Search className={cls} />',
+      'const j = <Bot />'
     ].join('\n'))
-    expect(changed).toHaveLength(9)
+    expect(changed).toHaveLength(10)
   })
   it('una seconda passata non cambia più nulla (è idempotente)', () => {
     const once = migrateSource("const a = 'flex text-xs rounded-lg px-2.5 font-bold uppercase leading-relaxed'").source

@@ -1,5 +1,8 @@
 // Fase design (DS6): le ECCEZIONI della guardia sul sorgente
-// (__tests__/design-guard.test.ts). Le regole valgono per tutto il renderer;
+// (__tests__/design-guard.test.ts). Le regole valgono per tutto il renderer
+// (le prime otto sono quelle dell'elenco di DS6; le altre quattro chiudono
+// DS1: pesi 400/500/600, ogni dimensione con la sua interlinea, la scala
+// delle spaziature, le icone a 16 o 20 px);
 // OGNI eccezione vive qui, con il motivo. La guardia fallisce se un'esenzione
 // è morta (non copre più nulla): così l'elenco non marcisce.
 //
@@ -17,6 +20,10 @@ export type DesignRule =
   | 'width-px'
   | 'uppercase-tracking'
   | 'emoji'
+  | 'font-weight'
+  | 'leading'
+  | 'spacing-scale'
+  | 'icon-size'
 
 export interface DesignException {
   /** nome corto, per il REPORT */

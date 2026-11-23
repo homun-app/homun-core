@@ -18,7 +18,7 @@
 //             (a parità: in orizzontale il maggiore, in verticale il minore);
 //   pesi      font-bold, font-extrabold, font-black→semibold · font-light, font-thin, font-extralight→normal;
 //   maiuscoletti  uppercase e tracking-* escono;
-//   icone     le icone lucide con misura fuori dalle due (16 nel testo, 20 nelle testate): <18→size-4, da 18→size-5.
+//   icone     le icone lucide con misura fuori dalle due (16 nel testo, 20 nelle testate): <18→size-4, da 18→size-5; senza classe, size-4.
 // NON tocca: larghezze (max-w-*, w-*: le decide la pagina), le dimensioni libere non in px (calc, var, %),
 // le emoji (DS5), i file di test.
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -129,7 +129,7 @@ export const migrateIconClasses = (value) => {
   }).join(' ')
 }
 
-/** Le stringhe di un sorgente CON la loro posizione nella fonte: { start, end, value, kind }. */
+/** Le stringhe di un sorgente CON la loro posizione nella fonte: { start, end, value, kind }; `insert` è il punto dove scrivere la classe di un'icona che non l'ha. */
 const stringsWithPos = (source) => {
   const ast = parse(source, { sourceType: 'module', plugins: ['typescript', 'jsx'] })
   const out = []
@@ -147,7 +147,10 @@ const stringsWithPos = (source) => {
       prose.add(n.value)
     }
     if (n.type === 'JSXOpeningElement' && n.name?.type === 'JSXIdentifier' && lucide.has(n.name.name)) {
-      for (const a of n.attributes ?? []) if (a.type === 'JSXAttribute' && a.name?.name === 'className' && a.value?.type === 'StringLiteral') out.push({ start: a.value.start, end: a.value.end, value: a.value.value, kind: 'icon', quote: a.value.extra?.raw?.[0] ?? '"' })
+      // l'icona senza className: gli si SCRIVE la misura (16 px); con una espressione come classe si lascia: la decide la pagina
+      const cls = (n.attributes ?? []).find((a) => a.type === 'JSXAttribute' && a.name?.name === 'className')
+      if (!cls) out.push({ start: n.name.end, end: n.name.end, value: '', kind: 'insert' })
+      else if (cls.value?.type === 'StringLiteral') out.push({ start: cls.value.start, end: cls.value.end, value: cls.value.value, kind: 'icon', quote: cls.value.extra?.raw?.[0] ?? '"' })
     }
     for (const key of Object.keys(n)) {
       if (['loc', 'start', 'end', 'extra', 'errors', 'tokens', 'comments'].includes(key)) continue
@@ -166,10 +169,11 @@ const escapeWith = (quote, value) => value.replace(/\\/g, '\\\\').replace(new Re
 export const migrateSource = (source) => {
   const edits = []
   for (const s of stringsWithPos(source)) {
-    const next = s.kind === 'icon' ? migrateIconClasses(s.value) : migrateClasses(s.value)
+    const next = s.kind === 'insert' ? ' className="size-4"' : s.kind === 'icon' ? migrateIconClasses(s.value) : migrateClasses(s.value)
     if (next === s.value) continue
     let text
-    if (s.kind === 'string' || s.kind === 'icon') text = `${s.quote}${escapeWith(s.quote, next)}${s.quote}`
+    if (s.kind === 'insert') text = next
+    else if (s.kind === 'string' || s.kind === 'icon') text = `${s.quote}${escapeWith(s.quote, next)}${s.quote}`
     else if (s.kind === 'jsx') text = next
     else text = next.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${')
     edits.push({ ...s, next, text })
