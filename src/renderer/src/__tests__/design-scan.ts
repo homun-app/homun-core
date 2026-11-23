@@ -151,7 +151,11 @@ export function iconViolations(source: string): Array<{ line: number; name: stri
       const attr = attrs.find((a) => a.type === 'JSXAttribute' && (a.name as Node | undefined)?.type === 'JSXIdentifier' && (a.name as Node).name === 'className')
       const value = attr?.value as Node | undefined
       const inner = value?.expression as Node | undefined
-      const cls = value?.type === 'StringLiteral' ? String(value.value) : value?.type === 'JSXExpressionContainer' && inner?.type === 'StringLiteral' ? String(inner.value) : null
+      // la classe fissa (stringa), in un'espressione o in un template literal (bastano i pezzi fissi)
+      const cls = value?.type === 'StringLiteral' ? String(value.value)
+        : value?.type === 'JSXExpressionContainer' && inner?.type === 'StringLiteral' ? String(inner.value)
+        : value?.type === 'JSXExpressionContainer' && inner?.type === 'TemplateLiteral' ? (inner.quasis as Node[]).map((q) => String((q.value as { cooked?: unknown }).cooked ?? '')).join(' ')
+        : null
       const sizes = (cls ?? '').split(/\s+/).filter((t) => /(?:^|:)(?:size|-?[wh])-\d*\.?\d+$/.test(t))
       const loc = n.loc as { start?: { line?: number } } | undefined
       if (!cls || sizes.length === 0) out.push({ line: loc?.start?.line ?? 0, name: String(name.name), token: '(senza misura)' })
