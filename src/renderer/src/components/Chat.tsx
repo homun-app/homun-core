@@ -18,7 +18,9 @@ import { api, useStore, useResolvedModel } from '../store'
 // fase 17c (C2): il testo di notice/eventi/system dal meta.ui (lingua attiva)
 import { uiTextOf, uiTextOfTools } from '../lib/ui-text'
 // M2 (fase 0.3.1001): l'apertura di un turno con initiator è una riga di sistema
-import { openingRowFor, hidesUserBubble } from '../lib/opening-rows'
+// B2 (fase b20-bug): le righe invisibili (ragionamento, fine turno) non contano per raccogliere gli avvisi
+import { chatRowHidden, type ChatRowView } from '../lib/chat-rows'
+import { openingRowFor } from '../lib/opening-rows'
 // R1 (fase app — ritocchi): le notice in chat non sono tutte errori
 import { noticeSeverity } from '../lib/notice-severity'
 // RV4 (fase beta.2): la stessa notice consecutiva si mostra una volta; il
@@ -507,6 +509,8 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
   if (!agent || !info) {
     return <main className="flex flex-1 items-center justify-center text-muted-foreground"><Trans>Nessun agente</Trans></main>
   }
+  // B2: cosa si vede in chat — decide sia le righe nascoste sia il raggruppamento degli avvisi
+  const rowView: ChatRowView = { showReasoning, debugSteps }
 
   // fase 16b correzioni 2 (Q2): il testo del selettore «Ragiona» — calcolato
   // una volta, resta l'etichetta (e il tooltip) anche quando il trigger
@@ -623,7 +627,9 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
             {/* B2 (fase b20-bug): l'avviso che torna uguale dopo ogni apertura
                 automatica si raccoglie in una riga sola col conteggio, con UNA
                 riga di apertura davanti (lead) */}
-            {groupRepeatedNotices(entries.filter((e) => !e.meta?.taskId && !e.meta?.groupId)).map((g) => (
+            {groupRepeatedNotices(
+              entries.filter((e) => !e.meta?.taskId && !e.meta?.groupId && !chatRowHidden(e, rowView))
+            ).map((g) => (
               <Fragment key={g.entry.id}>
                 {g.lead && <EntryRow entry={g.lead} showReasoning={showReasoning} debugSteps={debugSteps} />}
                 <EntryRow entry={g.entry} repeat={g.repeat} showReasoning={showReasoning} debugSteps={debugSteps} />
@@ -907,6 +913,8 @@ function AgentSendDelegationRow({ entry }: { entry: TranscriptEntry }) {
 function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings = false }: { entry: TranscriptEntry; repeat?: number; showReasoning: boolean; debugSteps: boolean; modelOpenings?: boolean }) {
   const { t } = useLingui()
   const reasoning = useStore((s) => s.reasoning[entry.id])
+  // B2: ciò che la chat non mostra affatto (la lista è in chat-rows.ts, condivisa col raggruppamento)
+  if (chatRowHidden(entry, { showReasoning, debugSteps })) return null
   switch (entry.kind) {
     case 'message': {
       // M2 (fase 0.3.1001): una entry utente CON un qualsiasi initiator non è
@@ -950,8 +958,7 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
         )
       }
       // B2 (fase beta.4): il prompt NASCOSTO della presentazione del bot nuovo
-      // non compare in chat: la domanda arriva come card ask_user
-      if (opening.kind === 'hidden') return null
+      // non compare in chat: la domanda arriva come card ask_user (chatRowHidden)
       // P5 (fase uso-permessi): il brief di apertura del sottoagente è una card
       // «Compito affidato da <bot>» (titolo, prime righe, mostra tutto) — mai
       // la bola scura dell'utente con il XML grezzo
@@ -967,9 +974,8 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
         if (fromParent) return <BotToBotRow name={fromParent.attrs.nome ?? ''} content={entry.content} testid="chat-from-parent" />
         if (envelopes.length > 0) return <OpeningDetailsRow text={modelEnvelopeDisplay(entry.content)} />
       }
-      // B3 (fase beta.4): la risposta a una domanda NON si ripete come bola
-      // utente separata — resta la riga della card, riapribile
-      if (entry.role === 'user' && hidesUserBubble(entry)) return null
+      // B3 (fase beta.4): la risposta a una domanda NON si ripete come bolla
+      // utente separata — resta la riga della card, riapribile (chatRowHidden)
       return entry.role === 'user' ? (
         // bolla utente a destra — NEUTRA (G1, fase 0.3.1001 grafica): colore
         // fisso della chat, mai il colore del bot (che resta a mascotte,
@@ -990,7 +996,6 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
     }
     case 'thinking': {
       // fase 3 (§3bis L2): il ragionamento resta interno, col toggle
-      if (!showReasoning) return null
       return (
         <details className="rounded-[14px] bg-muted/60 px-3 py-1.5" open={!entry.content}>
           <summary className="cursor-pointer select-none text-xs text-muted-foreground"><Trans>Ragionamento</Trans></summary>
@@ -1002,7 +1007,6 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
     }
     case 'summary': {
       // fase 4: riepilogo dei turni più vecchi (compaction)
-      if (!showReasoning) return null
       return (
         <details className="rounded-[14px] bg-muted/60 px-3 py-1.5">
           <summary className="cursor-pointer select-none text-xs text-muted-foreground"><Trans>Riepilogo turni precedenti</Trans></summary>
@@ -1016,8 +1020,7 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
       // fase 3: l'UNICO contenuto visibile del bot — text | widget | draft
       const meta = (entry.meta ?? {}) as Partial<SendMessageMeta>
       const message = meta.message as SendMessagePayload | undefined
-      // fase 6: trattenuto nell'outbox — invisibile finché non consegnato
-      if (meta.held) return null
+      // fase 6: trattenuto nell'outbox — invisibile finché non consegnato (chatRowHidden)
       // B3 (fase beta.4): delega a un altro bot — UNA riga sola, apribile
       // (prima era una bolla piena, refusi del modello compresi); D2 (fase
       // deleghe): sotto, la riga di stato se la delega è IN CODA
@@ -1064,7 +1067,6 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
     case 'tool-call': {
       // fase 16b (S3.3): le righe degli strumenti NON compaiono più — la voce
       // di debug (Impostazioni › Generali) le rimette com'erano
-      if (!debugSteps) return null
       const args = entry.meta?.arguments as string | undefined
       return (
         <details className="rounded-[14px] bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
@@ -1078,7 +1080,6 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
       )
     }
     case 'tool-result':
-      if (!debugSteps) return null
       return (
         <details className="rounded-[14px] bg-muted/60 px-3 py-2 text-xs">
           <summary className="cursor-pointer select-none text-muted-foreground">
@@ -1100,8 +1101,7 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
       if (entry.meta?.summaryMessageId !== undefined && typeof entry.meta?.groupId === 'number') {
         return <SummaryPostedRow entry={entry} />
       }
-      // gli esiti di turno (meta.turnEnd) sono dettaglio interno
-      if (entry.meta?.turnEnd && !showReasoning) return null
+      // gli esiti di turno (meta.turnEnd) sono dettaglio interno (chatRowHidden)
       // B3 (fase beta.4): «Routine creata (in pausa)» col bottone «Attiva»
       if (entry.meta?.automation && (entry.meta.automation as { action?: unknown }).action === 'create') {
         return <RoutineCreatedRow entry={entry} />

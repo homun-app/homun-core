@@ -6,6 +6,7 @@
 // meta.ui vale il content.
 import { describe, expect, it } from 'vitest'
 import { groupRepeatedNotices } from '../lib/notice-rows'
+import { chatRowHidden } from '../lib/chat-rows'
 import type { TranscriptEntry } from '../../../shared/types'
 
 const e = (id: number, over: Partial<TranscriptEntry>): TranscriptEntry => ({
@@ -142,5 +143,58 @@ describe('B2: lo stesso avviso dopo ogni apertura automatica si raccoglie in una
     expect(out).toHaveLength(2)
     expect(out[1]!.repeat).toBe(2)
     expect(out[1]!.lead).toBeUndefined()
+  })
+})
+
+// ---- B2: le entry INVISIBILI (ragionamento, fine turno) non spezzano il gruppo ----
+// Nel transcript vero ogni turno del loop scrive: apertura · thinking · avviso ·
+// evento di fine turno. La vista raccogglie gli avvisi sulle righe che MOSTRA.
+describe('B2: le entry che la chat non mostra non spezzano il raggruppamento', () => {
+  const empty = (id: number) => e(id, { content: 'Risposta vuota.', meta: { ui: { id: 'notice.modelEmpty', values: { why: 'reasoning' } } } })
+  const wake = (id: number) => e(id, { kind: 'message', role: 'user', content: '<comando_finito>…', meta: { initiator: 'SHELL_DONE' } })
+  const think = (id: number) => e(id, { kind: 'thinking', role: 'assistant', content: 'penso' })
+  const turnEnd = (id: number) => e(id, { kind: 'event', role: 'system', content: 'Turno interrotto', meta: { turnEnd: 'STOPPED', stopReason: 'model-error' } })
+  const turn = (i: number) => [wake(i * 4 + 1), think(i * 4 + 2), empty(i * 4 + 3), turnEnd(i * 4 + 4)]
+  const hiddenByDefault = [0, 1, 2, 3].flatMap(turn).filter((x) => !chatRowHidden(x, { showReasoning: false, debugSteps: false }))
+  const shownWithReasoning = [0, 1].flatMap(turn).filter((x) => !chatRowHidden(x, { showReasoning: true, debugSteps: false }))
+
+  it('chatRowHidden: di default non si mostrano thinking, summary, fine turno, tool-call e tool-result; un [sistema] sì', () => {
+    const view = { showReasoning: false, debugSteps: false }
+    expect(chatRowHidden(think(1), view)).toBe(true)
+    expect(chatRowHidden(e(2, { kind: 'summary', role: 'assistant', content: 'riepilogo' }), view)).toBe(true)
+    expect(chatRowHidden(turnEnd(3), view)).toBe(true)
+    expect(chatRowHidden(e(4, { kind: 'tool-call', role: 'assistant', content: 'run-command' }), view)).toBe(true)
+    expect(chatRowHidden(e(5, { kind: 'tool-result', role: 'system', content: 'ok' }), view)).toBe(true)
+    expect(chatRowHidden(wake(6), view)).toBe(false)
+    expect(chatRowHidden(empty(7), view)).toBe(false)
+    expect(chatRowHidden(e(8, { kind: 'message', role: 'user', content: 'ciao', meta: null }), view)).toBe(false)
+    // ciò che resta in attesa nell'outbox non si mostra
+    expect(chatRowHidden(e(9, { kind: 'send-message', role: 'assistant', content: 'x', meta: { held: true } }), view)).toBe(true)
+  })
+
+  it('con «Mostra il ragionamento» il ragionamento SI VEDE: allora spezza il gruppo', () => {
+    expect(chatRowHidden(think(1), { showReasoning: true, debugSteps: false })).toBe(false)
+    // otto righe, nessun gruppo: il ragionamento (2, 6) e i fine turno (4, 8) si vedono
+    expect(groupRepeatedNotices(shownWithReasoning).map((g) => [g.entry.id, g.repeat])).toEqual([1, 2, 3, 4, 5, 6, 7, 8].map((id) => [id, 1]))
+  })
+
+  it('con i passaggi di debug le chiamate degli strumenti SI VEDONO: anche loro spezzano', () => {
+    expect(chatRowHidden(e(1, { kind: 'tool-call', role: 'assistant', content: 'run-command' }), { showReasoning: false, debugSteps: true })).toBe(false)
+  })
+
+  it('quattro turni veri (apertura · thinking · avviso · fine turno) → sulle righe mostrate UNA apertura e UN avviso, repeat 4', () => {
+    expect(hiddenByDefault.map((x) => x.id)).toEqual([1, 3, 5, 7, 9, 11, 13, 15])
+    const out = groupRepeatedNotices(hiddenByDefault)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.repeat).toBe(4)
+    expect(out[0]!.lead?.id).toBe(1)
+    expect(out[0]!.entry.id).toBe(3)
+  })
+
+  it('un evento che la chat MOSTRA (non di fine turno) spezza come una riga qualunque', () => {
+    const shown = e(9, { kind: 'event', role: 'system', content: 'Qualcos\'altro', meta: null })
+    expect(chatRowHidden(shown, { showReasoning: false, debugSteps: false })).toBe(false)
+    const out = groupRepeatedNotices([wake(1), empty(2), shown, wake(4), empty(5)])
+    expect(out.map((g) => [g.entry.id, g.repeat])).toEqual([[1, 1], [2, 1], [9, 1], [4, 1], [5, 1]])
   })
 })

@@ -111,6 +111,21 @@ describe('B2: l’avviso della risposta vuota in chat — una riga sola col cont
     expect(summaries(mixed)).toEqual(['Avvio automatico', 'Avvio automatico'])
   })
 
+  it('COME NEL TRANSCRIPT VERO: fra l’avviso e l’apertura dopo ci sono le entry INVISIBILI del loop (il ragionamento, l’evento di fine turno) — non spezzano il gruppo', () => {
+    // ogni turno del loop scrive: apertura · 2 thinking · avviso · evento di fine turno
+    const turn = (i: number): TranscriptEntry[] => [
+      wake(i * 5 + 1),
+      entry(i * 5 + 2, { kind: 'thinking', role: 'assistant', content: 'penso…' }),
+      entry(i * 5 + 3, { kind: 'thinking', role: 'assistant', content: '' }),
+      empty(i * 5 + 4),
+      entry(i * 5 + 5, { kind: 'event', role: 'system', content: 'Turno interrotto', meta: { turnEnd: 'STOPPED', stopReason: 'model-error' } })
+    ]
+    const root = parseHtml(renderChat([0, 1, 2, 3].flatMap(turn)))
+    expect(summaries(root)).toEqual(['Avvio automatico'])
+    expect(textOf(root)).toContain('Risposta vuota: il modello ha restituito solo ragionamento · 4 volte')
+    expect(findAll(root, (n) => n.attrs['data-testid'] === 'notice-retry')).toHaveLength(1)
+  })
+
   it('mai emoji nelle righe di apertura: l’icona è un <svg> lucide', () => {
     const html = renderChat(fourPairs())
     const emoji = /\p{Extended_Pictographic}/u
