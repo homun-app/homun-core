@@ -205,12 +205,6 @@ msgstr "{0} {1}"
 msgid "{0} / {1} per M"
 msgstr "{0} / {1} per M"
 
-#. placeholder {0}: row.bots.names.join(', ')
-#. placeholder {1}: row.bots.extra
-#: src/renderer/src/components/PluginPanel.tsx
-msgid "{0} +{1}"
-msgstr "{0} +{1}"
-
 #. placeholder {0}: groupPending.length
 #: src/renderer/src/components/TeamChat.tsx
 msgid "{0} azioni aspettano te"
@@ -1625,6 +1619,10 @@ msgstr "Cassaforte"
 msgid "Categorie"
 msgstr "Categorie"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Categorie delle skill"
+msgstr "Categorie delle skill"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Cerca"
@@ -2255,7 +2253,6 @@ msgstr "connector_poll: intervalMin deve essere ≥ 2 minuti"
 msgid "trigger.toolMissing"
 msgstr "connector_poll: tool mancante"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Connessa"
 msgstr "Connessa"
@@ -3311,6 +3308,10 @@ msgstr "File: {0} ({1} byte) — esportalo per vederlo."
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Filtra il registro"
 msgstr "Filtra il registro"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Filtra per strada"
+msgstr "Filtra per strada"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Filtra per tipo"
@@ -7801,6 +7802,17 @@ msgstr "soldi, messaggi a persone nuove, cancellazioni, cose fuori richiesta"
 msgid "notice.wakeNudge"
 msgstr "Sollecito di consegna al padre (wake_parent)."
 
+#. placeholder {0}: row.bots.names.join(', ')
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Solo {0}"
+msgstr "Solo {0}"
+
+#. placeholder {0}: row.bots.names.join(', ')
+#. placeholder {1}: row.bots.extra
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Solo {0} +{1}"
+msgstr "Solo {0} +{1}"
+
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "solo con /"
 msgstr "solo con /"
@@ -8703,6 +8715,10 @@ msgstr "Vista"
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Vista dal vivo del computer del bot"
 msgstr "Vista dal vivo del computer del bot"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Visualizza"
+msgstr "Visualizza"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

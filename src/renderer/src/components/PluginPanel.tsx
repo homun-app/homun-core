@@ -24,9 +24,12 @@ import { yourPlugins, grayLineOf, stateLabelOf, stradaLabel, connectedTable, daS
 import type { PermissionsConfig } from '../../../shared/types'
 import { humanizeSkillName } from '../../../shared/skill-md'
 import { Toggle } from './Settings'
-import { AppRow, AppLogo, FilterPill, useConnectFlows, DevelopersContent } from './AppsWindow'
+import { AppRow, AppLogo, useConnectFlows, DevelopersContent } from './AppsWindow'
 // PP1 (fase plugin-pulita): l'invaso unico delle viste — la colonna non cresce col contenuto, il corpo scorre
 import { PluginShell } from './plugin/PluginShell'
+// PP4 (fase plugin-pulita): righe a filo e schede come testo — meno contenitori, un solo segnale di stato
+import { FlatList, FlatRow } from './ui/flat-list'
+import { UnderlineTabs } from './ui/underline-tabs'
 // PL2 (fase plugin): la scheda del plugin (tavola 9) — clic su una riga
 import { PluginCard } from './PluginCard'
 import { ManualServers } from './McpWindow'
@@ -203,14 +206,16 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pluginAt])
 
-  /** Il clic su una riga di «I tuoi»: ogni riga apre la sua scheda (PL2). */
-  const openRow = (row: YourPluginRow): void => {
+  /** Il clic su una riga di «I tuoi»: ogni riga apre la sua scheda (PL2).
+   *  PP4: `tab` è la scheda interna su cui aprirla — le azioni «Ricollega» e
+   *  «Completa» della riga portano dove si fa, «Account e bot». */
+  const openRow = (row: YourPluginRow, tab?: PluginCardTab): void => {
     const target = row.open
     if (target.kind === 'app') {
       setSeg('connectors')
-      setCard({ appId: target.appId })
+      setCard({ appId: target.appId, ...(tab ? { tab } : {}) })
     } else if (target.kind === 'server') {
-      setCard({ serverId: target.serverId })
+      setCard({ serverId: target.serverId, ...(tab ? { tab } : {}) })
     } else if (target.kind === 'plugin') {
       // il plugin mostra i suoi pezzi: la riga porta al suo server principale
       // quando c'è, altrimenti resta nell'elenco (onesto)
@@ -259,7 +264,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
   // gli oggetti VIVI della scheda (cercati a ogni render: i toggle si vedono)
   const cardApp = card?.appId ? model.rows.find((r) => r.app.id === card.appId) ?? null : null
   const cardServer = card?.serverId ? installed?.servers.find((s) => s.id === card.serverId) ?? null : null
-  const rowGrid = 'grid grid-cols-1 gap-1.5 lg:grid-cols-2 lg:gap-x-8'
+  // PP4: i segmenti in testa sono testo (UnderlineTabs): Tutto · Connettori · Skill · Collegati
   const segments: Array<[PluginSegment, string]> = [
     ['all', t`Tutto`],
     ['connectors', t`Connettori`],
@@ -443,6 +448,73 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
           </button>
           <Puzzle className="size-5 text-muted-foreground" aria-hidden="true" />
           <h1 className="font-display text-2xl"><Trans>Plugin</Trans></h1>
+          <span className="flex-1" />
+          {/* il menu «Aggiungi ▾» con i sei percorsi di oggi — in testata, a
+              destra del titolo: PP4, l'unico bottone PIENO della pagina */}
+          <div className="relative">
+            <button
+              className="flex items-center gap-1.5 rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+              data-testid="plugin-add"
+              aria-expanded={addOpen}
+              onClick={() => setAddOpen((o) => !o)}
+            >
+              <Trans>Aggiungi</Trans> <ChevronDown className="size-3.5" />
+            </button>
+            {/* il menu sta SEMPRE nel DOM (nascosto quando chiuso): le sonde
+                lo aprono col clic, i test lo leggono senza clic */}
+            <div
+              className={`absolute right-0 top-full z-30 mt-1.5 flex w-72 flex-col gap-0.5 rounded-2xl bg-card p-1.5 shadow-soft ${addOpen ? '' : 'hidden'}`}
+              data-testid="plugin-add-menu"
+            >
+                <button
+                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                  onClick={() => { setAddOpen(false); setView('mcp') }}
+                >
+                  <span className="block"><Trans>Importa da altre app</Trans></span>
+                  <span className="block text-[11px] text-muted-foreground"><Trans>Cursor, Codex, ZCode…</Trans></span>
+                </button>
+                <button
+                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                  data-testid="plugin-add-mcp"
+                  onClick={() => { setAddOpen(false); setView('mcp') }}
+                >
+                  <Trans>Server MCP personalizzato</Trans>
+                </button>
+                <button
+                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                  data-testid="plugin-add-skill-import"
+                  onClick={() => { setAddOpen(false); setView('skill-import'); void runImportScan() }}
+                >
+                  <span className="block"><Trans>Importa skill</Trans></span>
+                  <span className="block text-[11px] text-muted-foreground"><Trans>Cursor, Codex, ZCode, Claude Code…</Trans></span>
+                </button>
+                <div className="my-1 h-px bg-border/60" aria-hidden="true" />
+                <button
+                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                  onClick={() => { setAddOpen(false); setView('skill-new') }}
+                >
+                  <Trans>Crea una skill</Trans>
+                </button>
+                <button
+                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                  onClick={() => {
+                    setAddOpen(false)
+                    setPluginOpen(false)
+                    // la richiesta precompilata nella chat (il meccanismo G4)
+                    setComposerPrefill(t`Crea una skill che `)
+                  }}
+                >
+                  <Trans>Crea con il bot</Trans>
+                </button>
+                <div className="my-1 h-px bg-border/60" aria-hidden="true" />
+                <button
+                  className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                  onClick={() => { setAddOpen(false); setDevelopersOpen(true); document.getElementById('plugin-advanced')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
+                >
+                  <Trans>Aggiungi un marketplace</Trans>
+                </button>
+              </div>
+          </div>
         </div>
       )}
       toolbar={(
@@ -451,7 +523,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
             <Trans>Connettori, server MCP e skill: tutto quello che dà capacità ai tuoi bot, in un posto.</Trans>
           </p>
 
-          {/* la ricerca e i segmenti (tavola 8) */}
+          {/* la ricerca e i segmenti (tavola 8) — PP4: i segmenti sono testo */}
           <label className="flex h-10 items-center gap-2.5 rounded-full bg-muted px-4 text-sm text-muted-foreground">
             <Search className="size-4 shrink-0" aria-hidden="true" />
             <input
@@ -462,86 +534,19 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
-          <div className="flex flex-wrap items-center gap-1.5" data-testid="plugin-segments">
-            {segments.map(([s, label]) => (
-              <FilterPill key={s} active={seg === s} onClick={() => setSeg(s)}>{label}</FilterPill>
-            ))}
-            <span className="flex-1" />
-            {/* il menu «Aggiungi ▾» con i sei percorsi di oggi */}
-            <div className="relative">
-              <button
-                className="flex items-center gap-1.5 rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-                data-testid="plugin-add"
-                aria-expanded={addOpen}
-                onClick={() => setAddOpen((o) => !o)}
-              >
-                <Trans>Aggiungi</Trans> <ChevronDown className="size-3.5" />
-              </button>
-              {/* il menu sta SEMPRE nel DOM (nascosto quando chiuso): le sonde
-                  lo aprono col clic, i test lo leggono senza clic */}
-              <div
-                className={`absolute right-0 top-full z-30 mt-1.5 flex w-72 flex-col gap-0.5 rounded-2xl bg-card p-1.5 shadow-soft ${addOpen ? '' : 'hidden'}`}
-                data-testid="plugin-add-menu"
-              >
-                  <button
-                    className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                    onClick={() => { setAddOpen(false); setView('mcp') }}
-                  >
-                    <span className="block"><Trans>Importa da altre app</Trans></span>
-                    <span className="block text-[11px] text-muted-foreground"><Trans>Cursor, Codex, ZCode…</Trans></span>
-                  </button>
-                  <button
-                    className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                    data-testid="plugin-add-mcp"
-                    onClick={() => { setAddOpen(false); setView('mcp') }}
-                  >
-                    <Trans>Server MCP personalizzato</Trans>
-                  </button>
-                  <button
-                    className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                    data-testid="plugin-add-skill-import"
-                    onClick={() => { setAddOpen(false); setView('skill-import'); void runImportScan() }}
-                  >
-                    <span className="block"><Trans>Importa skill</Trans></span>
-                    <span className="block text-[11px] text-muted-foreground"><Trans>Cursor, Codex, ZCode, Claude Code…</Trans></span>
-                  </button>
-                  <div className="my-1 h-px bg-border/60" aria-hidden="true" />
-                  <button
-                    className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                    onClick={() => { setAddOpen(false); setView('skill-new') }}
-                  >
-                    <Trans>Crea una skill</Trans>
-                  </button>
-                  <button
-                    className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                    onClick={() => {
-                      setAddOpen(false)
-                      setPluginOpen(false)
-                      // la richiesta precompilata nella chat (il meccanismo G4)
-                      setComposerPrefill(t`Crea una skill che `)
-                    }}
-                  >
-                    <Trans>Crea con il bot</Trans>
-                  </button>
-                  <div className="my-1 h-px bg-border/60" aria-hidden="true" />
-                  <button
-                    className="rounded-xl px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                    onClick={() => { setAddOpen(false); setDevelopersOpen(true); document.getElementById('plugin-advanced')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
-                  >
-                    <Trans>Aggiungi un marketplace</Trans>
-                  </button>
-                </div>
-            </div>
+          <div data-testid="plugin-segments">
+            <UnderlineTabs<PluginSegment> tabs={segments} value={seg} onChange={setSeg} label={t`Visualizza`} />
           </div>
         </>
       )}
     >
-      {/* --- TUTTO: I tuoi · Consigliati · Categorie --- */}
+      {/* --- TUTTO: I tuoi · Consigliati · Categorie --- (PP4: righe a filo,
+          titoli di sezione 13px grigi, 32px tra le sezioni) --- */}
       {seg === 'all' && (
         <>
-          <section className="mt-2" data-testid="plugin-yours">
+          <section className="mt-8" data-testid="plugin-yours">
             <div className="flex items-baseline justify-between">
-              <h2 className="text-[15px] font-medium"><Trans>I tuoi</Trans></h2>
+              <h2 className="text-[13px] text-muted-foreground"><Trans>I tuoi</Trans></h2>
               <button className="text-[12px] text-muted-foreground transition hover:text-foreground" onClick={() => setSeg('connected')}>
                 <Trans>Vedi i collegati →</Trans>
               </button>
@@ -551,18 +556,18 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                 <Trans>Nulla di collegato: comincia dai consigliati qui sotto.</Trans>
               </p>
             ) : (
-              <div className="mt-2 space-y-1.5">
+              <FlatList className="mt-2">
                 {yourRows.map((row) => (
-                  <YourRow key={row.key} row={row} lang={lang} onOpen={() => openRow(row)} onToggleActive={toggleActive} />
+                  <YourRow key={row.key} row={row} lang={lang} onOpen={openRow} onToggleActive={toggleActive} />
                 ))}
-              </div>
+              </FlatList>
             )}
           </section>
 
           {model.featured.length > 0 && !query && (
-            <section className="mt-6">
-              <h2 className="text-[15px] font-medium"><Trans>Consigliati per il tuo lavoro</Trans></h2>
-              <div className={`mt-2 ${rowGrid}`}>
+            <section className="mt-8">
+              <h2 className="text-[13px] text-muted-foreground"><Trans>Consigliati per il tuo lavoro</Trans></h2>
+              <FlatList className="mt-2">
                 {model.featured.map((r) => (
                   <AppRow
                     key={r.app.id}
@@ -574,18 +579,18 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                     onOpen={(x) => setCard({ appId: x.app.id })}
                   />
                 ))}
-              </div>
+              </FlatList>
             </section>
           )}
 
           {!query && (
-            <section className="mt-6" data-testid="plugin-categories">
-              <h2 className="text-[15px] font-medium"><Trans>Categorie</Trans></h2>
-              <div className="mt-2 flex flex-wrap gap-1.5">
+            <section className="mt-8" data-testid="plugin-categories">
+              <h2 className="text-[13px] text-muted-foreground"><Trans>Categorie</Trans></h2>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
                 {model.categoriesPresent.map((c) => (
                   <button
                     key={c}
-                    className="rounded-full bg-muted px-3 py-1.5 text-[12px] text-muted-foreground transition hover:text-foreground"
+                    className="text-[13px] text-muted-foreground transition hover:text-foreground"
                     data-testid={`plugin-category-${c}`}
                     onClick={() => { setCategory(c as AppCategoryId); setSeg('connectors') }}
                   >
@@ -600,14 +605,15 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
 
       {/* --- CONNETTORI: il catalogo di oggi (righe e flussi riusati) --- */}
       {seg === 'connectors' && (
-        <section className="mt-2" data-testid="plugin-connectors">
-          <div className="flex flex-wrap items-center gap-1.5" data-testid="plugin-connector-filters">
-            <FilterPill active={category === 'all'} onClick={() => setCategory('all')}><Trans>Tutte</Trans></FilterPill>
-            {model.categoriesPresent.map((c) => (
-              <FilterPill key={c} active={category === c} onClick={() => setCategory(c)}>{appCategoryLabel(c, lang)}</FilterPill>
-            ))}
-          </div>
-          <div className={`mt-3 ${rowGrid}`}>
+        <section className="mt-8" data-testid="plugin-connectors">
+          <UnderlineTabs<AppsFilter>
+            tabs={[['all', t`Tutte`], ...model.categoriesPresent.map((c) => [c, appCategoryLabel(c, lang)] as const)]}
+            value={category}
+            onChange={setCategory}
+            label={t`Categorie`}
+            testId="plugin-connector-filters"
+          />
+          <FlatList className="mt-2">
             {(model.grid ?? model.rows).map((r) => (
               <AppRow
                 key={r.app.id}
@@ -619,7 +625,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                 onOpen={(x) => setCard({ appId: x.app.id })}
               />
             ))}
-          </div>
+          </FlatList>
           {(model.grid ?? model.rows).length === 0 && (
             <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna app trovata. Prova con un altro nome.</Trans></p>
           )}
@@ -628,7 +634,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
 
       {/* --- SKILL (PL5): la libreria, le skill dei plugin e il catalogo, in casa --- */}
       {seg === 'skills' && (
-        <section className="mt-2 space-y-1.5" data-testid="plugin-skills">
+        <section className="mt-8 space-y-4" data-testid="plugin-skills">
           {skillsFilterAgent && (
             <button
               type="button"
@@ -641,59 +647,49 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
           {yourRows.filter((r) => r.kind === 'skill').length === 0 && (
             <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna skill. Creane una, importala, o chiedi a un bot di salvarne una.</Trans></p>
           )}
-          {yourRows.filter((r) => r.kind === 'skill').map((row) => (
-            <YourRow key={row.key} row={row} lang={lang} onOpen={() => openRow(row)} onToggleActive={toggleActive} />
-          ))}
+          <FlatList>
+            {yourRows.filter((r) => r.kind === 'skill').map((row) => (
+              <YourRow key={row.key} row={row} lang={lang} onOpen={openRow} onToggleActive={toggleActive} />
+            ))}
+          </FlatList>
 
           {/* il catalogo CURATO di oggi (K2), con le sue categorie: la
               ricerca del campo in alto filtra anche questo (T1) */}
-          <div className="mt-6 space-y-2" data-testid="plugin-skills-catalog">
-            <h3 className="text-[14px] font-medium text-muted-foreground"><Trans>Sfoglia</Trans></h3>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                className={`rounded-full px-3 py-1 text-[12px] transition ${skillCatFilter === 'all' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
-                onClick={() => setSkillCatFilter('all')}
-              >
-                <Trans>Tutte</Trans>
-              </button>
-              {SKILL_CATEGORIES.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className={`rounded-full px-3 py-1 text-[12px] transition ${skillCatFilter === c ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
-                  onClick={() => setSkillCatFilter(skillCatFilter === c ? 'all' : c)}
-                >
-                  {t`${skillCategoryLabel(c)}`}
-                </button>
-              ))}
-            </div>
+          <div className="space-y-4" data-testid="plugin-skills-catalog">
+            <h3 className="text-[13px] text-muted-foreground"><Trans>Sfoglia</Trans></h3>
+            <UnderlineTabs<'all' | SkillCategoryId>
+              tabs={[['all', t`Tutte`], ...SKILL_CATEGORIES.map((c) => [c, t`${skillCategoryLabel(c)}`] as const)]}
+              value={skillCatFilter}
+              onChange={setSkillCatFilter}
+              label={t`Categorie delle skill`}
+              className="flex-wrap"
+            />
             {(catalogRows.length === 0)
               ? <p className="py-3 text-sm text-muted-foreground"><Trans>Nessuna skill trovata</Trans></p>
               : SKILL_CATEGORIES.filter((c) => catalogRows.some((e) => e.category === c)).map((c) => (
-                <div key={c} className="space-y-1.5">
-                  <h4 className="pt-2 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">{t`${skillCategoryLabel(c)}`}</h4>
-                  {catalogRows.filter((e) => e.category === c).map((entry) => {
-                    const state = skillCatalogInstallState(entry, skills ?? [])
-                    return (
-                      <button
-                        key={entry.id}
-                        type="button"
-                        className="flex w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left transition hover:bg-muted/60"
-                        onClick={() => setCatalogId(entry.id)}
-                      >
-                        <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center gap-1.5">
-                            <span className="truncate text-[15px]">{humanize(entry.id)}</span>
-                            {state !== 'available' && <span className="shrink-0 rounded-full bg-foreground px-1.5 py-0.5 text-[10px] text-background"><Trans>Aggiunta</Trans></span>}
-                            {state === 'update' && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400"><Trans>Aggiornamento disponibile</Trans></span>}
-                          </span>
-                          <span className="block truncate text-[13px] text-muted-foreground">{skillCatalogDescription(entry, lang)}</span>
-                        </span>
-                      </button>
-                    )
-                  })}
+                <div key={c}>
+                  <h4 className="pb-1 text-[12px] text-muted-foreground">{t`${skillCategoryLabel(c)}`}</h4>
+                  <FlatList>
+                    {catalogRows.filter((e) => e.category === c).map((entry) => {
+                      const state = skillCatalogInstallState(entry, skills ?? [])
+                      return (
+                        <FlatRow
+                          key={entry.id}
+                          clickable
+                          onClick={() => setCatalogId(entry.id)}
+                          leading={<span className="grid size-8 shrink-0 place-items-center rounded-[9px] bg-muted text-sm" aria-hidden="true">✦</span>}
+                          title={humanize(entry.id)}
+                          subtitle={skillCatalogDescription(entry, lang)}
+                          trailing={
+                            <>
+                              {state !== 'available' && <span className="rounded-full border border-border/50 px-1.5 py-0.5 text-[10px] text-muted-foreground"><Trans>Aggiunta</Trans></span>}
+                              {state === 'update' && <span className="text-[11px] text-amber-600 dark:text-amber-400"><Trans>Aggiornamento disponibile</Trans></span>}
+                            </>
+                          }
+                        />
+                      )
+                    })}
+                  </FlatList>
                 </div>
               ))}
           </div>
@@ -702,17 +698,27 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
 
       {/* --- COLLEGATI (tavola 10): la tabella con le sette colonne --- */}
       {seg === 'connected' && (
-        <section className="mt-2" data-testid="plugin-connected">
-          {/* i filtri: per strada e «Da sistemare · N» */}
-          <div className="flex flex-wrap items-center gap-1.5" data-testid="plugin-connected-filters">
-            {([['all', t`Tutte le strade`], ['direct', t`MCP diretto`], ['composio', t`Composio`], ['mac', t`Sul Mac`], ['box', t`Nel computer isolato`]] as Array<[ConnectedFilter, string]>).map(([f, label]) => (
-              <FilterPill key={f} active={connFilter === f && !onlyDaSistemare} onClick={() => { setConnFilter(f); setOnlyDaSistemare(false) }}>{label}</FilterPill>
-            ))}
-            <FilterPill active={onlyDaSistemare} onClick={() => setOnlyDaSistemare((v) => !v)}>
-              {t`Da sistemare · ${daSistemareCount(yourRows)}`}
-            </FilterPill>
-          </div>
-          <table className="mt-3 w-full text-left text-[13px]" data-testid="plugin-connected-table">
+        <section className="mt-8" data-testid="plugin-connected">
+          {/* i filtri: per strada e «Da sistemare · N» — come testo (PP4) */}
+          <UnderlineTabs<ConnectedFilter | 'da-sistemare'>
+            tabs={[
+              ['all', t`Tutte le strade`],
+              ['direct', t`MCP diretto`],
+              ['composio', t`Composio`],
+              ['mac', t`Sul Mac`],
+              ['box', t`Nel computer isolato`],
+              ['da-sistemare', t`Da sistemare · ${daSistemareCount(yourRows)}`]
+            ]}
+            value={onlyDaSistemare ? 'da-sistemare' : connFilter}
+            onChange={(f) => {
+              if (f === 'da-sistemare') setOnlyDaSistemare(true)
+              else { setConnFilter(f); setOnlyDaSistemare(false) }
+            }}
+            label={t`Filtra per strada`}
+            className="flex-wrap"
+            testId="plugin-connected-filters"
+          />
+          <table className="mt-1 w-full text-left text-[13px]" data-testid="plugin-connected-table">
             <thead>
               <tr className="text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="py-1.5 pr-3 font-medium"><Trans>Collegamento</Trans></th>
@@ -751,7 +757,8 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
                     </span>
                   </td>
                   <td className="py-2 pr-3 text-muted-foreground">{r.row.accountLabel || '—'}</td>
-                  <td className={`py-2 pr-3 ${r.daSistemare ? 'text-destructive' : 'text-chart-2'}`}>{stateLabelOf(r.row.state, lang).label}</td>
+                  {/* PP4: lo stato in parole solo quando non va è per le righe; qui c'è la colonna — ma il verde non serve: chi va bene è grigio, chi non va è rosso */}
+                  <td className={`py-2 pr-3 ${r.daSistemare ? 'text-destructive' : 'text-muted-foreground'}`}>{stateLabelOf(r.row.state, lang).label}</td>
                   <td className="py-2 pr-3 text-muted-foreground">{permBriefOf(r.perms)}</td>
                   <td className="py-2 pr-3 text-muted-foreground">
                     {r.row.bots.all ? t`Tutti i bot` : r.row.bots.names.length > 0 ? r.row.bots.names.join(', ') : '—'}
@@ -771,15 +778,18 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
       )}
 
       {/* --- AVANZATE: gateway, marketplace, registro, chiave (per
-          sviluppatori) — A4: CHIUSA di default, una riga che si apre --- */}
+          sviluppatori) — A4: CHIUSA di default, una riga che si apre.
+          PP4: a filo, come il resto della pagina (niente riquadro) --- */}
       <section className="mt-8" id="plugin-advanced" data-testid="plugin-advanced">
         {developersOpen ? (
-          <div className="rounded-3xl bg-muted/40 p-5">
+          // il contenuto porta già il suo titolo e la sua introduzione
+          <div className="border-t border-border/50 pt-3">
             <DevelopersContent scrollTo={null} />
           </div>
         ) : (
           <button
-            className="flex w-full items-center justify-between gap-3 rounded-2xl bg-muted/40 px-4 py-2.5 text-left text-[13px] text-muted-foreground transition hover:text-foreground"
+            type="button"
+            className="flex w-full items-center justify-between gap-3 border-t border-border/50 py-3 text-left text-[13px] text-muted-foreground transition hover:text-foreground"
             data-testid="plugin-developers-toggle"
             aria-expanded={false}
             onClick={() => setDevelopersOpen(true)}
@@ -791,7 +801,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
       </section>
 
       {/* la frase della strada più diretta (tavola 8, in fondo) */}
-      <p className="mt-6 text-center text-[12px] leading-relaxed text-muted-foreground">
+      <p className="mt-8 text-center text-[12px] leading-relaxed text-muted-foreground">
         <Trans>Prima la strada più diretta. Per ogni servizio Homun usa, in quest'ordine: il server del fornitore, un server verificato nel computer isolato, e Composio solo per i servizi che non ne hanno uno.</Trans>
       </p>
     </PluginShell>
@@ -871,49 +881,64 @@ function useBriefOf(usage: { last: number; week: number } | null): string {
 }
 
 /**
- * Una riga di «I tuoi»: logo, nome, verificato se lo è, la riga grigia
- * «tipo · strada · origine», a destra lo stato con l'azione e — da V5 (fase
- * stato-vivo) — l'interruttore Attivo (server MCP, connettori Composio e
- * skill di libreria; spento scrive disabledReason 'user' / l'enabled della
- * voce). La riga non è più un <button>: l'interruttore dentro un bottone
- * non è HTML valido — div con ruolo e tasto, il click apre la scheda.
+ * Una riga di «I tuoi» — A FILO (PP4, FlatRow): logo da 32, nome (verificato
+ * se lo è), UNA riga grigia «tipo · strada · origine», e a destra il segnale.
+ * V5 (fase stato-vivo): l'interruttore Attivo c'è per i server MCP, i
+ * connettori (Composio e diretti col loro server) e le skill di LIBRERIA
+ * (spento scrive disabledReason 'user' / l'enabled della voce).
+ *
+ * PP4 — UN solo segnale di stato per riga:
+ *  - quando tutto va: nessuna parola (niente «attivo» verde); l'interruttore
+ *    resta, senza l'etichetta accanto (l'aria-label sì);
+ *  - quando qualcosa non va: la parola — rossa, o neutra per lo spento — con
+ *    la sua azione (Vedi perché · Ricollega · Completa · Riaccendi), AL POSTO
+ *    dell'interruttore quando l'azione è quella giusta (riaccendere,
+ *    ricollegare, completare); «Vedi perché» lo lascia (spegnere è un'altra cosa);
+ *  - spento dall'utente: «spento» in grigio e l'interruttore spento.
+ * «Tutti i bot» non si scrive: i bot si nominano solo quando l'accesso è
+ * ristretto («Solo Ricerca, Scrittura», o «nessun bot»). Esportata per i test.
  */
-function YourRow({ row, lang, onOpen, onToggleActive }: {
+export function YourRow({ row, lang, onOpen, onToggleActive }: {
   row: YourPluginRow
   lang: 'it' | 'en'
-  onOpen(): void
+  /** apre la scheda; `tab` la scheda interna («Ricollega» e «Completa» portano a «Account e bot») */
+  onOpen(row: YourPluginRow, tab?: PluginCardTab): void
   onToggleActive(row: YourPluginRow, next: boolean): void
 }): ReactNode {
   const { t } = useLingui()
   const st = stateLabelOf(row.state, lang)
   const url = row.kind === 'server' || row.kind === 'plugin' ? logoUrlForName(row.name) : null
-  const bots =
-    row.bots.all ? t`Tutti i bot`
-    : row.bots.names.length === 0 ? t`nessun bot`
-    : row.bots.extra > 0 ? t`${row.bots.names.join(', ')} +${row.bots.extra}`
-    : row.bots.names.join(', ')
+  const shown = row.kind === 'skill' ? humanizeSkillName(row.name) : row.name
   // V5: chi ha l'interruttore Attivo — i server, i connettori (Composio e
   // diretti col loro server), le skill di LIBRERIA (quelle dei plugin si
   // aggiornano col plugin); i plugin del marketplace passano dai server
   const togglable = row.kind === 'server' || row.kind === 'connector' || (row.kind === 'skill' && row.gray.strada === 'skill')
+  const showToggle = togglable && (row.state === 'active' || row.state === 'off-user' || row.state === 'broken' || row.state === 'invalid')
   const activeChecked = row.state !== 'off-user' && row.state !== 'off-homun'
+  // i bot solo quando l'accesso è ristretto
+  const bots =
+    row.bots.all ? null
+    : row.bots.names.length === 0 ? t`nessun bot`
+    : row.bots.extra > 0 ? t`Solo ${row.bots.names.join(', ')} +${row.bots.extra}`
+    : t`Solo ${row.bots.names.join(', ')}`
+  const actionLabel = st.action === 'why' ? t`Vedi perché` : st.action === 'reconnect' ? t`Ricollega` : st.action === 'setup' ? t`Completa` : st.action === 'reenable' ? t`Riaccendi` : ''
+  const onAction = (e: React.MouseEvent): void => {
+    e.stopPropagation()
+    if (st.action === 'reenable') onToggleActive(row, true)
+    else if (st.action === 'reconnect' || st.action === 'setup') onOpen(row, 'accounts')
+    else onOpen(row)
+  }
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] px-1 py-2 text-left transition hover:bg-muted/60"
-      data-testid={`plugin-row-${row.key}`}
-      onClick={onOpen}
-      onKeyDown={(e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') onOpen()
-      }}
-    >
-      {url
-        ? <img src={url} alt="" className="size-10 shrink-0 rounded-[11px] object-cover dark:bg-white" />
-        : <AppLogo logo={row.logo} name={row.kind === 'skill' ? humanizeSkillName(row.name) : row.name} />}
-      <span className="min-w-0 flex-1">
+    <FlatRow
+      clickable
+      testId={`plugin-row-${row.key}`}
+      onClick={() => onOpen(row)}
+      leading={url
+        ? <img src={url} alt="" className="size-8 shrink-0 rounded-[9px] object-cover dark:bg-white" />
+        : <AppLogo logo={row.logo} name={shown} className="size-8 text-sm" />}
+      title={(
         <span className="flex items-center gap-1.5">
-          <span className="truncate text-[15px]">{row.kind === 'skill' ? humanizeSkillName(row.name) : row.name}</span>
+          <span className="truncate">{shown}</span>
           {row.verified && (
             <span className="flex shrink-0 items-center gap-0.5 text-[11px] text-muted-foreground" title={t`verificato`}>
               <BadgeCheck className="size-3.5" aria-hidden="true" />
@@ -921,24 +946,37 @@ function YourRow({ row, lang, onOpen, onToggleActive }: {
             </span>
           )}
         </span>
-        {/* la riga grigia: tipo · strada · origine */}
-        <span className="block truncate text-[13px] text-muted-foreground" data-testid={`plugin-gray-${row.key}`}>{grayLineOf(row, lang)}</span>
-        <span className="block truncate text-[11px] text-muted-foreground/80">{bots}</span>
-      </span>
-      {/* lo stato con l'azione (tavola 8) */}
-      <span className={`shrink-0 text-[13px] ${row.state === 'active' ? 'text-chart-2' : row.state === 'broken' || row.state === 'invalid' ? 'text-destructive' : 'text-foreground'}`}>
-        {st.label}{st.action === 'why' ? ` · ${t`Vedi perché`}` : st.action === 'reconnect' ? ` · ${t`Ricollega`}` : st.action === 'setup' ? ` · ${t`Completa`}` : st.action === 'reenable' ? ` · ${t`Riaccendi`}` : ''}
-      </span>
-      {/* V5 (fase stato-vivo): l'interruttore Attivo — il click NON apre la scheda */}
-      {togglable && onToggleActive && (
-        <span
-          className="flex shrink-0 items-center gap-1.5 text-[13px] text-muted-foreground"
-          onClick={(e: React.MouseEvent) => e.stopPropagation()}
-        >
-          <Trans>Attivo</Trans>
-          <Toggle checked={activeChecked} onChange={(v) => onToggleActive(row, v)} label={t`Attivo`} testId={`plugin-active-${row.key}`} />
-        </span>
       )}
-    </div>
+      subtitle={(
+        <>
+          {/* la riga grigia: tipo · strada · origine */}
+          <span data-testid={`plugin-gray-${row.key}`}>{grayLineOf(row, lang)}</span>
+          {bots !== null && <span className="block">{bots}</span>}
+        </>
+      )}
+      trailing={(
+        <>
+          {row.state !== 'active' && (
+            <span
+              className={`text-[13px] ${row.state === 'off-homun' || row.state === 'off-user' ? 'text-muted-foreground' : 'text-destructive'}`}
+              data-testid={`plugin-state-${row.key}`}
+            >
+              {st.label}
+              {st.action !== null && (
+                <button type="button" className="ml-1.5 underline-offset-2 hover:underline" data-testid={`plugin-action-${row.key}`} onClick={onAction}>
+                  {actionLabel}
+                </button>
+              )}
+            </span>
+          )}
+          {/* l'interruttore: il click NON apre la scheda (senza etichetta accanto: PP4) */}
+          {showToggle && (
+            <span onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+              <Toggle checked={activeChecked} onChange={(v) => onToggleActive(row, v)} label={t`Attivo`} testId={`plugin-active-${row.key}`} />
+            </span>
+          )}
+        </>
+      )}
+    />
   )
 }

@@ -47,10 +47,15 @@ describe('K2 → PL5: la sezione «Sfoglia» sta nella pagina Plugin (segmento S
     expect(src).toMatch(/skillCatalogDescription\(entry, lang\)/)
   })
 
-  it('i filtri a pillola: «Tutte» più una per categoria', () => {
+  // PP4 (fase plugin-pulita): i filtri non sono più pillole ma testo (UnderlineTabs)
+  // — «Tutte» più una per categoria; quella attiva non si ri-toglie più col
+  // clic, perché «Tutte» è una scheda a fianco
+  it('i filtri come testo: «Tutte» più una per categoria (UnderlineTabs)', () => {
     expect(src).toMatch(/skillCatFilter === 'all'/)
-    expect(src).toMatch(/setSkillCatFilter\(skillCatFilter === c \? 'all' : c\)/)
-    expect(src).toContain('<Trans>Tutte</Trans>')
+    expect(src).toMatch(/<UnderlineTabs<'all' \| SkillCategoryId>/)
+    expect(src).toContain('onChange={setSkillCatFilter}')
+    expect(src).toContain("['all', t`Tutte`]")
+    expect(src).not.toMatch(/skillCatFilter === c \? 'bg-foreground/)
   })
 
   it('la ricerca in alto filtra ANCHE il catalogo, con la funzione condivisa del catalogo', () => {

@@ -205,12 +205,6 @@ msgstr "{0} {1}"
 msgid "{0} / {1} per M"
 msgstr "{0} / {1} per M"
 
-#. placeholder {0}: row.bots.names.join(', ')
-#. placeholder {1}: row.bots.extra
-#: src/renderer/src/components/PluginPanel.tsx
-msgid "{0} +{1}"
-msgstr "{0} +{1}"
-
 #. placeholder {0}: groupPending.length
 #: src/renderer/src/components/TeamChat.tsx
 msgid "{0} azioni aspettano te"
@@ -1625,6 +1619,10 @@ msgstr "Vault"
 msgid "Categorie"
 msgstr "Categories"
 
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Categorie delle skill"
+msgstr "Skill categories"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Cerca"
@@ -2255,7 +2253,6 @@ msgstr "connector_poll: intervalMin must be ≥ 2 minutes"
 msgid "trigger.toolMissing"
 msgstr "connector_poll: missing tool"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Connessa"
 msgstr "Connected"
@@ -3311,6 +3308,10 @@ msgstr "File: {0} ({1} byte) — export it to view it."
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Filtra il registro"
 msgstr "Filter the log"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Filtra per strada"
+msgstr "Filter by route"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Filtra per tipo"
@@ -7801,6 +7802,17 @@ msgstr "money, messages to new people, deletions, things outside your request"
 msgid "notice.wakeNudge"
 msgstr "Delivery reminder to the parent (wake_parent)."
 
+#. placeholder {0}: row.bots.names.join(', ')
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Solo {0}"
+msgstr "Only {0}"
+
+#. placeholder {0}: row.bots.names.join(', ')
+#. placeholder {1}: row.bots.extra
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Solo {0} +{1}"
+msgstr "Only {0} +{1}"
+
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "solo con /"
 msgstr "only with /"
@@ -8703,6 +8715,10 @@ msgstr "View"
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Vista dal vivo del computer del bot"
 msgstr "A live view of the bot’s computer"
+
+#: src/renderer/src/components/PluginPanel.tsx
+msgid "Visualizza"
+msgstr "View"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

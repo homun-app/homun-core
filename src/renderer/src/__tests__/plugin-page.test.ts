@@ -351,7 +351,7 @@ describe('PL1: la pagina Plugin (render vero, api finta)', () => {
     }
   })
 
-  it('«I tuoi»: la riga di un connettore collegato con la riga grigia e il stato (i dati api arrivano col sonda sul DOM vero)', async () => {
+  it('«I tuoi»: la riga di un connettore collegato con la riga grigia — e SENZA parola di stato quando tutto va (i dati api arrivano col sonda sul DOM vero)', async () => {
     const { PluginPanel } = await import('../components/PluginPanel')
     const { useStore } = await import('../store')
     stubApiMethod('connectorsInstalled', () => ({ servers: [], plugins: [] }))
@@ -376,7 +376,9 @@ describe('PL1: la pagina Plugin (render vero, api finta)', () => {
     expect(texts).toContain('I tuoi')
     expect(texts).toContain('Notion')
     expect(texts).toContain('Connettore · MCP diretto di Notion')
-    expect(texts).toContain('attivo')
+    // PP4 (fase plugin-pulita): un solo segnale di stato — quando tutto va
+    // nessuna parola (prima qui la riga diceva «attivo»; l'interruttore resta)
+    expect(texts).not.toContain('attivo')
     expect(texts).toContain('verificato')
     expect(texts).toContain('Collegati · 1')
     expect(callsOf('connectorsInstalled').length).toBeGreaterThanOrEqual(0)

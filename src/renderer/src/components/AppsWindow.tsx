@@ -15,6 +15,8 @@ import { api, useStore } from '../store'
 import { i18n } from '../lib/i18n'
 import type { AppsRegistryResult, ComposioGatewayAppInfo, ComposioGatewayStatusInfo } from '../../../shared/types'
 import { botsToggleState, gatewayAccountRows, accountLimitMessage, type CatalogRowView } from '../lib/apps-view'
+// PP4 (fase plugin-pulita): la riga del catalogo è a filo
+import { FlatRow } from './ui/flat-list'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
 import { Toggle } from './Settings'
@@ -584,10 +586,13 @@ export function useConnectFlows(rows: CatalogRowView[]): {
 
 /**
  * La riga di un'app dell'elenco unico: logo, nome, tagline (o lo stato del
- * flusso) e a destra Connetti / Connessa / Ricollega / l'attesa con Annulla.
+ * flusso) e a destra Connetti / Ricollega / l'attesa con Annulla.
  * NIENTE etichetta di provenienza: quella sta nel foglio del dettaglio. Il
  * clic sulla riga apre il dettaglio; il clic sul bottone collega.
  * PL1 (fase plugin): esportata — la pagina Plugin la riusa com'è.
+ * PP4 (fase plugin-pulita): la riga è A FILO (FlatRow), il logo da 32px, e
+ * quando è collegata non lo dice in parole («Connessa» era un segnale in
+ * più: lo stato in parole resta solo quando qualcosa non va).
  */
 export function AppRow({ row, flow, onConnect, onCancel, onConflictResolve, onOpen }: {
   row: CatalogRowView
@@ -596,81 +601,67 @@ export function AppRow({ row, flow, onConnect, onCancel, onConflictResolve, onOp
   onCancel(row: CatalogRowView): void
   onConflictResolve(row: CatalogRowView): void
   onOpen(row: CatalogRowView): void
-}) {
+}): ReactNode {
   const { t } = useLingui()
   const stop = (e: { stopPropagation(): void }): void => e.stopPropagation()
+  const quiet = 'rounded-full px-3.5 py-1.5 text-[13px] text-foreground transition hover:bg-muted'
   const statusLine =
     flow === 'login' ? t`Accedi a Composio nel browser…`
     : flow === 'app' ? t`Completa il login di ${row.app.name} nel browser…`
     : row.tagline
   return (
-    <div
-      className={`flex cursor-pointer items-center gap-3 rounded-[14px] px-1 py-1.5 text-left transition hover:bg-muted/60 ${flow === 'conflict' ? 'flex-wrap' : ''}`}
-      data-testid={`app-row-${row.app.id}`}
-      onClick={() => onOpen(row)}
-    >
-      <AppLogo logo={row.app.logo} name={row.app.name} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15px]">{row.app.name}</span>
-        {statusLine !== null && (
-          <span className={`block truncate text-[13px] ${flow === 'login' || flow === 'app' ? 'text-muted-foreground' : 'text-muted-foreground'}`}>
-            {statusLine}
-          </span>
-        )}
-      </span>
-      {flow === null && row.connected === 'connected' && (
-        <span className="shrink-0 text-sm text-chart-2"><Trans>Connessa</Trans></span>
-      )}
-      {flow === null && row.connected === 'reconnect' && (
-        <button
-          className="h-8 shrink-0 rounded-full bg-muted px-4 text-[13px] transition hover:bg-accent"
-          data-testid={`app-connect-${row.app.id}`}
-          onClick={(e) => { stop(e); onConnect(row) }}
-        >
-          <Trans>Ricollega</Trans>
-        </button>
-      )}
-      {flow === null && row.connected === null && (
-        <button
-          className="h-8 shrink-0 rounded-full bg-muted px-4 text-[13px] transition hover:bg-accent"
-          data-testid={`app-connect-${row.app.id}`}
-          onClick={(e) => { stop(e); onConnect(row) }}
-        >
-          <Trans>Connetti</Trans>
-        </button>
-      )}
-      {flow === 'direct' && <span className="shrink-0 text-[13px] text-muted-foreground">{t`autorizza nel browser…`}</span>}
-      {(flow === 'login' || flow === 'app') && (
-        <button
-          className="shrink-0 text-[13px] text-muted-foreground transition hover:text-foreground"
-          data-testid={`app-cancel-${row.app.id}`}
-          onClick={(e) => { stop(e); onCancel(row) }}
-        >
-          <Trans>Annulla</Trans>
-        </button>
-      )}
-      {flow === 'failed' && (
-        <>
-          <span className="shrink-0 text-[13px] text-destructive"><Trans>Non riuscito</Trans></span>
-          <button className="h-8 shrink-0 rounded-full bg-muted px-4 text-[13px] transition hover:bg-accent" onClick={(e) => { stop(e); onConnect(row) }}>
-            <Trans>Riprova</Trans>
-          </button>
-        </>
-      )}
+    <div>
+      <FlatRow
+        clickable
+        testId={`app-row-${row.app.id}`}
+        onClick={() => onOpen(row)}
+        leading={<AppLogo logo={row.app.logo} name={row.app.name} className="size-8 text-sm" />}
+        title={row.app.name}
+        subtitle={statusLine ?? undefined}
+        trailing={
+          <>
+            {flow === null && row.connected === 'reconnect' && (
+              <button type="button" className={quiet} data-testid={`app-connect-${row.app.id}`} onClick={(e) => { stop(e); onConnect(row) }}>
+                <Trans>Ricollega</Trans>
+              </button>
+            )}
+            {flow === null && row.connected === null && (
+              <button type="button" className={quiet} data-testid={`app-connect-${row.app.id}`} onClick={(e) => { stop(e); onConnect(row) }}>
+                <Trans>Connetti</Trans>
+              </button>
+            )}
+            {flow === 'direct' && <span className="text-[13px] text-muted-foreground">{t`autorizza nel browser…`}</span>}
+            {(flow === 'login' || flow === 'app') && (
+              <button type="button" className={quiet} data-testid={`app-cancel-${row.app.id}`} onClick={(e) => { stop(e); onCancel(row) }}>
+                <Trans>Annulla</Trans>
+              </button>
+            )}
+            {flow === 'failed' && (
+              <>
+                <span className="text-[13px] text-destructive"><Trans>Non riuscito</Trans></span>
+                <button type="button" className={quiet} onClick={(e) => { stop(e); onConnect(row) }}>
+                  <Trans>Riprova</Trans>
+                </button>
+              </>
+            )}
+          </>
+        }
+      />
       {flow === 'conflict' && (
-        <div className="w-full rounded-2xl bg-muted px-3 py-2 text-[13px]" onClick={stop} data-testid={`app-conflict-${row.app.id}`}>
-          <p><Trans>Composio è già attivo con la chiave di progetto (sviluppatori). Le due strade non possono stare insieme: disattivo la chiave e collego con il login?</Trans></p>
-          <div className="mt-1.5 flex gap-2">
-            <button
-              className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-              onClick={() => onConflictResolve(row)}
-            >
-              <Trans>Disattiva la chiave e collega</Trans>
-            </button>
-            <button className="rounded-full px-3 py-1.5 text-xs text-muted-foreground transition hover:text-foreground" onClick={() => onCancel(row)}>
-              <Trans>Annulla</Trans>
-            </button>
-          </div>
+        <div className="flex flex-wrap items-center gap-2 pb-3 text-[13px]" onClick={stop} data-testid={`app-conflict-${row.app.id}`}>
+          <p className="min-w-0 flex-1">
+            <Trans>Composio è già attivo con la chiave di progetto (sviluppatori). Le due strade non possono stare insieme: disattivo la chiave e collego con il login?</Trans>
+          </p>
+          <button
+            type="button"
+            className="rounded-full bg-muted px-3.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
+            onClick={() => onConflictResolve(row)}
+          >
+            <Trans>Disattiva la chiave e collega</Trans>
+          </button>
+          <button type="button" className="rounded-full px-3 py-1.5 text-xs text-muted-foreground transition hover:text-foreground" onClick={() => onCancel(row)}>
+            <Trans>Annulla</Trans>
+          </button>
         </div>
       )}
     </div>
