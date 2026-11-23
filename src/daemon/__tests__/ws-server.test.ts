@@ -178,3 +178,36 @@ describe('L8: /screen/<cap> malformato → 404, nessuna eccezione, il server res
     expect(whole(c.parts).toString('latin1')).toContain('101 Switching Protocols')
   })
 })
+
+// P3.6 (fase primo-avvio): una UI che SPARISCE senza close handshake — il
+// processo esce (⌘Q, crash): la sua socket manda un FIN e basta. Il server non
+// gestiva il «end» del peer: la connessione restava in CLOSE_WAIT e hasUi()
+// diceva «connessa» per secondi (misurato dal vivo: 4 s e oltre), finché il
+// keep-alive (30 s) se ne accorge. Per il daemon vuol dire chiamare una UI
+// che non c'è più (e l'inoltro dell'activate del Dock restava appeso).
+describe('P3.6: la UI che sparisce senza close handshake', () => {
+  const authed = async (srv: WsRpcServer): Promise<Socket> => {
+    const c = await wsConnect(srv.port)
+    socks.push(c.sock)
+    c.sock.write(rawFrame(true, 0x1, Buffer.from(JSON.stringify({ hello: true, token: 'tok' }))))
+    await vi.waitFor(() => expect(srv.hasUi()).toBe(true))
+    return c.sock
+  }
+
+  it('il processo della UI esce (FIN senza close frame): hasUi() è false SUBITO, e callUi rifiuta subito', async () => {
+    server = await startWsServer({ token: 'tok' })
+    const sock = await authed(server)
+    sock.end() // il peer chiude la sua metà: è quello che fa un processo che esce
+    await vi.waitFor(() => expect(server!.hasUi()).toBe(false), { timeout: 1_000, interval: 20 })
+    await expect(server!.callUi('host.activate', [])).rejects.toThrow(/non connessa/)
+  })
+
+  it('una RPC host in attesa di quella UI viene rifiutata (non resta appesa 15 s)', async () => {
+    server = await startWsServer({ token: 'tok' })
+    server.methods['eco'] = async () => 'ok'
+    const sock = await authed(server)
+    const pending = server.callUi('host.notify', ['titolo', 'corpo'])
+    sock.end()
+    await expect(pending).rejects.toThrow(/chiusa/)
+  })
+})

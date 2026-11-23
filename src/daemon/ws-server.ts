@@ -66,6 +66,12 @@ class Connection {
     socket.on('data', (d: Buffer) => this.feed(d))
     socket.on('close', () => this.destroy())
     socket.on('error', () => this.destroy())
+    // P3.6 (fase primo-avvio): il peer ha chiuso la sua metà (FIN) — è quello
+    // che fa una UI che esce o muore senza close handshake. Il protocollo non
+    // chiude mai a metà: la connessione è chiusa. Senza questo lato la socket
+    // restava in CLOSE_WAIT e hasUi() diceva «connessa» per secondi (fino al
+    // keep-alive): il daemon chiamava una UI che non c'era più
+    socket.on('end', () => this.destroy())
     // una connessione che non si autentica non resta appesa
     this.authTimer = setTimeout(() => {
       if (!this.authed) this.close(4001)

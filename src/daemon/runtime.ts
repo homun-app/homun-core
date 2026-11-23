@@ -26,7 +26,7 @@ import {
 } from '../main/store/db'
 import { requeueAllLeased, releaseJobsHeldForModel } from '../main/store/jobs'
 import { acquireDaemonLock, releaseDaemonLock, writeDaemonInfo, removeDaemonInfo } from './daemon-files'
-import { startWsServer, generateToken } from './ws-server'
+import { startWsServer, generateToken, type WsRpcServer } from './ws-server'
 import { buildApiMethods, notifyComposioAppConnected, purgeRemoved } from './api'
 import { JobWorker } from './worker'
 import { tickScheduler, tickConnectorPolls, enqueueRoutineRun } from './scheduler'
@@ -100,6 +100,12 @@ export interface DaemonRuntimeOptions {
    * Node non ne ha — con SANDBOT_TEST_FAKE_SAFESTORAGE subentra il finto.
    */
   safeStorage?: SafeStorageLike | null
+  /**
+   * P3.6 (fase primo-avvio): il server ws del daemon (hasUi, callUi), appena
+   * è su. Lo usa il daemon in modalità Electron per inoltrare l'activate del
+   * Dock alla UI connessa senza far nascere un secondo processo.
+   */
+  onServer?: (server: Pick<WsRpcServer, 'hasUi' | 'callUi'>) => void
 }
 
 export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void> {
@@ -454,6 +460,8 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
       }
     }
   })
+  // P3.6 (fase primo-avvio): al chiamante il server (hasUi, callUi)
+  opts.onServer?.(server)
   bridge = attachHostBridge({ callUi: (m, p) => server.callUi(m, p), hasUi: () => server.hasUi() })
 
   // fase 19b (T2): il terminale del bot — la porta del server ws per gli URL

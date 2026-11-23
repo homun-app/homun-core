@@ -21,7 +21,11 @@ import { initMainLanguage, applyStartupLanguage } from './i18n'
 import { DaemonClient } from './daemon-client'
 import { setDaemonSpawnContext } from './daemon-context'
 import { userDataDir } from './paths'
-import { createActivateForwarder, daemonSessionDataDir, isDaemonMode, registersProtocolClient, resolveDataDirArgv, uiRelaunchSpec } from './mode'
+import {
+  ACTIVATE_HOST_METHOD, activateForwardRoute, createActivateForwarder, daemonSessionDataDir, isDaemonMode,
+  registersProtocolClient, resolveDataDirArgv, uiRelaunchSpec
+} from './mode'
+import type { WsRpcServer } from '../daemon/ws-server'
 import { runDaemonRuntime } from '../daemon/runtime'
 import { APP_BUILD_ID } from './build-id'
 import { createRendererHandler, realFs, RENDERER_CSP } from './protocol'
@@ -108,10 +112,24 @@ if (isDaemonMode(process.argv)) {
       daemonLog.line('daemon-activate-failed', { reason: e instanceof Error ? e.message : String(e) })
     }
   }
-  const forwardActivate = createActivateForwarder(launchUi)
+  // il server ws del daemon (hasUi, callUi), appena il runtime lo ha acceso
+  let ui: Pick<WsRpcServer, 'hasUi' | 'callUi'> | null = null
+  const forwardActivate = (): void => {
+    const server = ui
+    // la UI è connessa? glielo si dice sul canale che c'è già: NESSUN secondo
+    // processo — la sua uscita disattiva l'app un istante dopo (misurato dal
+    // vivo) e la finestra torna dietro
+    if (server && activateForwardRoute(server.hasUi()) === 'host-call') {
+      void server.callUi(ACTIVATE_HOST_METHOD, []).catch(() => launchUi())
+      return
+    }
+    // nessuna UI: si riparte dall'eseguibile
+    launchUi()
+  }
+  const forwardOnActivate = createActivateForwarder(forwardActivate)
   app.on('activate', () => {
     daemonLog.line('daemon-activate')
-    forwardActivate()
+    forwardOnActivate()
   })
   app.whenReady().then(() => {
     const argDir = resolveDataDirArgv(process.argv) ?? process.env.SANDBOT_DATA_DIR
@@ -123,7 +141,9 @@ if (isDaemonMode(process.argv)) {
       dataDir: argDir ?? join(app.getPath('userData'), 'data'),
       getVersion: () => app.getVersion(),
       buildId: APP_BUILD_ID,
-      safeStorage: safeStorageBackendForEnv(safeStorage)
+      safeStorage: safeStorageBackendForEnv(safeStorage),
+      // P3.6: il server del daemon, per inoltrare l'activate alla UI connessa
+      onServer: (server) => { ui = server }
     }).catch((e) => {
       console.error('[sandbotd] avvio fallito:', e)
       app.exit(1)
@@ -450,6 +470,12 @@ function createPipHandle(options: Record<string, unknown>, url: string): PipWind
       const boot = new BootStatusTracker(client)
       setDaemonRestartListener((reason) => boot.handleRestart(reason))
       client.registerHost('host.screen.scaleFactor', () => screen.getPrimaryDisplay().scaleFactor || 1)
+      // P3.6 (fase primo-avvio): il Dock ha attivato il daemon (l'app, per
+      // macOS, è quella): la principale va davanti dalla porta unica
+      client.registerHost(ACTIVATE_HOST_METHOD, () => {
+        lifecycle.line('ui-activate', { ms: lifecycle.sinceBoot() })
+        showMainWindow()
+      })
       // K1.7 (fase rilascio — correzioni): le API ASINCRONE di safeStorage
       // (Electron 45 depreca le sincrone e avvisa nel log)
       client.registerHost('host.safeStorage.encrypt', async ([plain]) =>

@@ -127,3 +127,16 @@ export function createActivateForwarder(launch: () => void, now: () => number = 
     return true
   }
 }
+
+/** La RPC host con cui il daemon dice alla UI CONNESSA «ti hanno attivata: portati davanti». */
+export const ACTIVATE_HOST_METHOD = 'host.activate'
+
+/**
+ * P3.6: come il daemon inoltra l'activate. Con una UI connessa sul canale che
+ * c'è già (RPC host.activate): NIENTE secondo processo — la sua uscita
+ * disattiva l'app un istante dopo (misurato dal vivo) e la finestra torna
+ * dietro. Senza UI si riparte dall'eseguibile.
+ */
+export function activateForwardRoute(uiConnected: boolean): 'host-call' | 'relaunch' {
+  return uiConnected ? 'host-call' : 'relaunch'
+}

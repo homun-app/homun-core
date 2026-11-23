@@ -105,10 +105,12 @@ describe('W1: showMainWindow() — una funzione sola, sul main con BrowserWindow
   })
 
   it('activate, open-url senza agente e openAgent passano da showMainWindow', () => {
-    const activate = /app\.on\('activate'[\s\S]*?\n\s*\}\)/.exec(MAIN_INDEX)?.[0] ?? ''
+    // (P3.6: in modalità daemon c\'è un altro gestore activate — si guarda la UI)
+    const UI = MAIN_INDEX.slice(MAIN_INDEX.indexOf('// ---- modalità UI ----'))
+    const activate = /app\.on\('activate'[\s\S]*?\n\s*\}\)/.exec(UI)?.[0] ?? ''
     expect(activate, 'activate senza il vecchio «solo se non ci sono finestre»').toContain('showMainWindow')
     expect(activate).not.toContain('length === 0')
-    const openUrl = /app\.on\('open-url'[\s\S]*?\n\s*\}\)/.exec(MAIN_INDEX)?.[0] ?? ''
+    const openUrl = /app\.on\('open-url'[\s\S]*?\n\s*\}\)/.exec(UI)?.[0] ?? ''
     expect(openUrl, 'open-url senza agente → showMainWindow').toMatch(/else\s*\{?\s*showMainWindow\(\)/)
     const openAgent = /function openAgent[\s\S]*?\n    \}/.exec(MAIN_INDEX)?.[0] ?? ''
     expect(openAgent, 'openAgent mostra la finestra PRIMA di mandare l\'evento').toContain('showMainWindow')

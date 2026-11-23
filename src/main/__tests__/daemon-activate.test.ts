@@ -11,9 +11,10 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { createActivateForwarder, uiRelaunchSpec, ACTIVATE_FORWARD_GAP_MS } from '../mode'
+import { activateForwardRoute, createActivateForwarder, uiRelaunchSpec, ACTIVATE_FORWARD_GAP_MS, ACTIVATE_HOST_METHOD } from '../mode'
 
 const INDEX = readFileSync(fileURLToPath(new URL('../index.ts', import.meta.url)), 'utf8')
+const RUNTIME = readFileSync(fileURLToPath(new URL('../../daemon/runtime.ts', import.meta.url)), 'utf8')
 
 describe('P3.6: uiRelaunchSpec — come il daemon rilancia la UI (puro)', () => {
   it('nell\'app impacchettata: lo stesso eseguibile, SENZA argomenti (è la UI)', () => {
@@ -31,6 +32,17 @@ describe('P3.6: uiRelaunchSpec — come il daemon rilancia la UI (puro)', () => 
     for (const isPackaged of [true, false]) {
       expect(uiRelaunchSpec({ execPath: '/e', isPackaged, appPath: '/repo', env: {} }).args).not.toContain('--homun-daemon')
     }
+  })
+})
+
+describe('P3.6: activateForwardRoute — alla UI connessa si dice sul canale che c\'è già, altrimenti si riparte (puro)', () => {
+  it('UI connessa: RPC host.activate (nessun secondo processo: la sua uscita disattiva l\'app, misurato dal vivo)', () => {
+    expect(activateForwardRoute(true)).toBe('host-call')
+    expect(ACTIVATE_HOST_METHOD).toBe('host.activate')
+  })
+
+  it('nessuna UI connessa: si rilancia l\'eseguibile della UI', () => {
+    expect(activateForwardRoute(false)).toBe('relaunch')
   })
 })
 
@@ -55,7 +67,27 @@ describe('P3.6: il cablaggio nel main (guardie sul sorgente)', () => {
   it('in modalità daemon l\'activate si inoltra alla UI, e lo dice nel registro (daemon-activate)', () => {
     const handler = /app\.on\('activate', \(\) => \{[\s\S]*?\n  \}\)/.exec(daemon)?.[0] ?? ''
     expect(handler).toContain("daemonLog.line('daemon-activate')")
-    expect(handler).toContain('forwardActivate()')
+    expect(handler).toContain('forwardOnActivate()')
+  })
+
+  it('il runtime consegna al daemon il suo server ws (hasUi, callUi) appena è su', () => {
+    const at = RUNTIME.indexOf('const server = await startWsServer({')
+    expect(at).toBeGreaterThan(-1)
+    const after = RUNTIME.slice(at, at + 2500)
+    expect(after).toMatch(/opts\.onServer\?\.\(server\)/)
+  })
+
+  it('a UI connessa l\'activate le arriva come RPC host.activate (nessun secondo processo); senza UI si rilancia', () => {
+    const forward = /const forwardActivate = \(\): void => \{[\s\S]*?\n  \}/.exec(daemon)?.[0] ?? ''
+    expect(forward).toContain('activateForwardRoute(server.hasUi())')
+    expect(forward).toContain('server.callUi(ACTIVATE_HOST_METHOD, [])')
+    expect(forward, 'se la chiamata alla UI fallisce si riparte dall\'eseguibile').toMatch(/\.catch\(\(\) => launchUi\(\)\)/)
+    expect(forward, 'senza UI connessa si riparte dall\'eseguibile').toMatch(/\n\s*launchUi\(\)\s*\n\s*\}/)
+  })
+
+  it('la UI risponde a host.activate con la porta unica: la finestra va davanti (riga ui-activate)', () => {
+    expect(INDEX).toContain(`client.registerHost(ACTIVATE_HOST_METHOD, () => {`)
+    expect(INDEX).toMatch(/client\.registerHost\(ACTIVATE_HOST_METHOD, \(\) => \{\s*\n\s*lifecycle\.line\('ui-activate', \{ ms: lifecycle\.sinceBoot\(\) \}\)\s*\n\s*showMainWindow\(\)/)
   })
 
   it('rilancia con uiRelaunchSpec (staccato, senza ereditare i canali), e non è un handler della UI', () => {
