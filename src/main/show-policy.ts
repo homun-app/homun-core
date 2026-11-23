@@ -32,6 +32,8 @@ export interface ShowPolicyDeps<W> {
   clearTimeout(handle: unknown): void
   /** Porta l'app e la finestra davanti (bringWindowToFront con l'app e la piattaforma vere). */
   bringToFront(win: W): void
+  /** P3.3: subito PRIMA dello show (per esempio: i bounds dentro uno schermo). */
+  beforeShow?(win: W): void
 }
 
 /**
@@ -69,6 +71,8 @@ export function showWhenReady<W extends ShowableWindow>(
       deps.clearTimeout(timer)
       timer = null
     }
+    // P3.3: prima di mostrarsela, la finestra torna su uno schermo visibile
+    deps.beforeShow?.(win)
     win.show()
     if (reason === 'show-fallback') log.line('show-fallback', { ms: log.sinceBoot() })
     deps.bringToFront(win)

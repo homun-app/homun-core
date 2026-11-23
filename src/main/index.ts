@@ -49,6 +49,8 @@ import { watchWindow, type DisplayLike, type Rect, type WatchDeps, type WindowWa
 import { installDaemonLogTimestamps } from '../daemon/log-timestamp'
 // P3.2 (fase primo-avvio): la finestra si mostra quando ha qualcosa da mostrare (ready-to-show, o il ripiego)
 import { bringWindowToFront, showWhenReady, type ShowPolicyDeps } from './show-policy'
+// P3.3 (fase primo-avvio): prima dello show la finestra sta su uno schermo visibile
+import { onScreenBounds } from './window-placement'
 import { secondInstanceWhileQuitting } from './quit-behavior'
 // U6: il tray si distrugge all'uscita
 import { createTray, refreshTray, destroyTray } from './tray'
@@ -162,13 +164,25 @@ if (isDaemonMode(process.argv)) {
       setTimeout: (fn, ms) => setTimeout(fn, ms),
       clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout)
     }
+    // P3.3 (fase primo-avvio): la finestra sta su uno schermo visibile — PRIMA
+    // di ogni show: fuori dalla workArea di ogni display si ricentra sul
+    // display principale (puro: window-placement.ts), con la riga nel registro
+    const formatBounds = (b: Rect): string => `${b.x},${b.y},${b.width}x${b.height}`
+    const ensureOnScreen = (win: BrowserWindow): void => {
+      const r = onScreenBounds(win.getBounds(), screen.getAllDisplays().map(toDisplay), screen.getPrimaryDisplay().workArea as Rect)
+      if (r.changed) {
+        win.setBounds(r.bounds)
+        lifecycle.line('window-recentered', { ms: lifecycle.sinceBoot(), from: formatBounds(win.getBounds()), to: formatBounds(r.bounds) })
+      }
+    }
     // P3.2 (fase primo-avvio): i deps veri della politica di mostra — i timer
-    // del main e il porta-davanti (su macOS app.focus({ steal: true }), poi il
-    // focus della finestra)
+    // del main, il porta-davanti (su macOS app.focus({ steal: true }), poi il
+    // focus della finestra) e, prima dello show, i bounds dentro uno schermo
     const showPolicyDeps: ShowPolicyDeps<BrowserWindow> = {
       setTimeout: (fn, ms) => setTimeout(fn, ms),
       clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
-      bringToFront: (win) => bringWindowToFront(win, app, process.platform)
+      bringToFront: (win) => bringWindowToFront(win, app, process.platform),
+      beforeShow: ensureOnScreen
     }
     // U6 (fase mcp-ui): la PiP del turno (chiusa esplicitamente all'uscita)
     let pip: PipManager | null = null
@@ -184,6 +198,8 @@ if (isDaemonMode(process.argv)) {
       // della finestra (U6: la principale mostrata; P1: fotografia a 5 s)
       const alreadyVisible = current !== undefined && current.isVisible()
       const win = mainWindows.showMainWindow()
+      // P3.3: anche la finestra che c'è già torna su uno schermo visibile
+      ensureOnScreen(win)
       if (alreadyVisible) windowWatchers.get(win)?.shown({ pid: process.pid })
       return win
     }
