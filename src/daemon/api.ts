@@ -72,16 +72,17 @@ import type { Onboarding } from './onboarding'
 import { answerableOnboardingFocus } from './onboarding-focus'
 import { releaseJobsHeldForModel } from '../main/store/jobs'
 import type { OnboardingStepId } from '../shared/types'
-import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting, MainModel, ProviderKind, ReadingPageMeta } from '../shared/types'
+import type { SandbotEvent, SendMessagePayload, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting, MainModel, ProviderKind, ReadingPageMeta } from '../shared/types'
 // fase 18b (K3): la lettura /api/show condivisa col check dei tool e col loop
 import { readOllamaCapabilities } from '../main/agent/live-models'
-import { DEFAULT_AUTO_REVIEW } from '../shared/types'
+import { DEFAULT_AUTO_REVIEW, SECRET_KIND } from '../shared/types'
 // fase 17c (C2/C3): testi del catalogo UI — errori RPC nella lingua
 // dell'interfaccia, meta.ui sui messaggi [sistema] (il testo per il modello
 // resta inglese) e sulle notice
 import { uiLanguage, uiText, formatUi, ui, uiError } from '../main/ui-language'
 // K1.8 (fase rilascio — correzioni): l'errore tipizzato delle chiavi master
-import { isMasterKeyUnavailableError } from './master-keys'
+// PP2 (fase plugin-pulita): la scrittura del segreto di un server — la funzione PURA condivisa da mcp:save e mcp:replace-secret
+import { planServerSecret, applyServerSecretPlan, needsAuthAfterSecret, type ServerSecretOld } from './server-secret'
 import { UI } from '../shared/ui-messages'
 // A4 (fase approvazioni-chiare): l'insieme fisso (invii, pagamenti) — puro condiviso
 import { fixedAskOf } from '../shared/tool-classify'
@@ -1553,48 +1554,31 @@ export function buildApiMethods(
         setSetting: store.setSetting
       })
       const sec = secret as McpServerSecret | undefined
-      if (incoming.transport === 'stdio' && (incoming.envSpec?.length || incoming.envValues || incoming.needsAuth)) {
-        const { splitManualServerEnv, manualNeedsAuthAfterFill } = await import('../main/mcp/manual-env')
-        const { SECRET_KIND } = await import('../main/connectors/install')
-        const old = (await sealed.read<Record<string, string>>(incoming.id, SECRET_KIND.env).catch(() => null)) ?? {}
-        const split = splitManualServerEnv({ envSpec: incoming.envSpec ?? [], envValues: incoming.envValues ?? {} }, sec?.env ?? {}, old)
-        incoming.envValues = split.configEnvValues
+      // PP2 (fase plugin-pulita): la scrittura del segreto è la funzione PURA
+      // condivisa con mcp:replace-secret (planServerSecret) e il suo apply —
+      // il piano si fa PRIMA, la config si salva DOPO le scritture: una
+      // scrittura che non riescita non lascia un server a metà, e auth.kind
+      // entra nella config SALVATA (prima si scriveva sull'oggetto del
+      // chiamante e non arrivava mai al database: il resolver non mandava il
+      // token del form)
+      const envForm = incoming.transport === 'stdio' && Boolean(incoming.envSpec?.length || incoming.envValues || incoming.needsAuth)
+      const plan = planServerSecret(sec, {
+        env: envForm ? ((await sealed.read<Record<string, string>>(incoming.id, SECRET_KIND.env).catch(() => null)) ?? {}) : {}
+      }, {
+        mode: 'save',
+        transport: incoming.transport,
+        form: envForm ? { envSpec: incoming.envSpec, envValues: incoming.envValues } : undefined
+      })
+      if (envForm) {
+        incoming.envValues = plan.envValues
         // U7 (fase mcp-ui): il needsAuth «da compilare» (variabili riferite
         // importate) si PULISCE quando TUTTE le chiavi hanno un valore
-        incoming.needsAuth = manualNeedsAuthAfterFill(incoming.needsAuth, { ...split.configEnvValues, ...split.sealedEnv })
-        try {
-          if (Object.keys(split.sealedEnv).length) await sealed.write(incoming.id, SECRET_KIND.env, split.sealedEnv)
-          else await sealed.remove(incoming.id, [SECRET_KIND.env])
-        } catch (e) {
-          if (isMasterKeyUnavailableError(e)) throw e
-          throw uiError(UI.rpcSecretSaveFailed, { error: e instanceof Error ? e.message : String(e) })
-        }
+        const { manualNeedsAuthAfterFill } = await import('../main/mcp/manual-env')
+        incoming.needsAuth = manualNeedsAuthAfterFill(incoming.needsAuth, { ...plan.envValues, ...plan.sealedEnv })
       }
-      x.saveServers([...x.listServers().filter((y) => y.id !== (s as { id: string }).id), incoming])
-      // fase 5: bearer/header statici del server manuale → store CIFRATO (mai nei settings)
-      const cfg = s as McpServerInfo
-      if (sec) {
-        // il daemon reale ha il wiring con la chiave Keychain; nei test senza
-        // chiave il salvataggio segreto fallisce e il server resta senza auth
-        try {
-          if (sec.bearerToken) {
-            const { SECRET_KIND } = await import('../main/connectors/install')
-            await sealed.write(cfg.id, SECRET_KIND.bearer, sec.bearerToken)
-            cfg.auth = { kind: 'bearer' }
-            x.saveServers(x.listServers())
-          } else if (sec.headers) {
-            const { SECRET_KIND } = await import('../main/connectors/install')
-            await sealed.write(cfg.id, SECRET_KIND.headers, sec.headers)
-            cfg.auth = { kind: 'headers' }
-            x.saveServers(x.listServers())
-          }
-          } catch (e) {
-          // K1.8 (fase rilascio — correzioni): il testo del catalogo di
-          // MasterKeyUnavailableError arriva intero, non incapsulato
-          if (isMasterKeyUnavailableError(e)) throw e
-          throw uiError(UI.rpcSecretSaveFailed, { error: e instanceof Error ? e.message : String(e) })
-        }
-      }
+      await applyServerSecretPlan(sealed, incoming.id, plan)
+      if (plan.auth) incoming.auth = plan.auth
+      x.saveServers([...x.listServers().filter((y) => y.id !== incoming.id), incoming])
       // U5 (fase mcp-ui): dopo ogni aggiunta, modifica o riaccensione il test
       // di connessione parte DA SOLO e i bot abilitati ricevono la nota di
       // sistema («Server MCP collegato: <nome> (N strumenti)» / «non parte:
@@ -1619,6 +1603,77 @@ export function buildApiMethods(
       x.saveServers(x.listServers().filter((y) => y.id !== id))
     },
     'mcp:test': ([id]) => mcp().then((x) => x.testServer(id as string)),
+    // PP2 (fase plugin-pulita): il token di un server si cambia DOVE VIVE il
+    // server. RPC stretta: scrive SOLO il segreto cifrato (la funzione
+    // condivisa con mcp:save), non tocca nient'altro della config; aggiorna
+    // auth.kind se serve; pulisce needsReauth / needsAuth quando ora c'è
+    // tutto; poi il test di connessione parte da solo (U5) con la nota di
+    // sistema di oggi, e il suo esito torna alla scheda («collegato» / il
+    // motivo). Vale per i server manuali E per quelli del catalogo,
+    // importati o del registro (stesso id, stesso store). Il valore non si
+    // logga mai. Un id inesistente: errore pulito, NESSUNA scrittura.
+    'mcp:replace-secret': async ([id, secret]) => {
+      const x = await mcp()
+      const servers = x.listServers()
+      const cfg = servers.find((s) => s.id === id)
+      if (!cfg) throw uiError(UI.rpcServerNotFound, { id: String(id) })
+      const sec = (secret ?? {}) as McpServerSecret
+      if (!sec.bearerToken && Object.keys(sec.headers ?? {}).length === 0 && Object.keys(sec.env ?? {}).length === 0) {
+        throw uiError(UI.rpcInvalidValueType, { kind: 'secret' })
+      }
+      const storeMod = await import('../main/connectors/sealed-store')
+      const { getConnectorsKey } = await import('./keychain')
+      const sealed = storeMod.createConnectorsSecretStore({
+        getKey: () => getConnectorsKey(),
+        getSetting: store.getSetting,
+        setSetting: store.setSetting
+      })
+      // i segreti vecchi si rileggono SOLO per ciò che si sostituisce (si fondono, una chiave per volta)
+      const old: ServerSecretOld = {}
+      if (!sec.bearerToken && sec.headers) old.headers = (await sealed.read<Record<string, string>>(cfg.id, SECRET_KIND.headers).catch(() => null)) ?? {}
+      if (cfg.transport === 'stdio' && sec.env) old.env = (await sealed.read<Record<string, string>>(cfg.id, SECRET_KIND.env).catch(() => null)) ?? {}
+      const plan = planServerSecret(sec, old, { mode: 'replace', transport: cfg.transport })
+      await applyServerSecretPlan(sealed, cfg.id, plan)
+      // la config: SOLO auth.kind, needsAuth e needsReauth — e solo se cambiano
+      const changed: typeof cfg = { ...cfg }
+      let configChanged = false
+      if (plan.auth && changed.auth?.kind !== plan.auth.kind) {
+        changed.auth = plan.auth
+        configChanged = true
+      }
+      const needsAuth = needsAuthAfterSecret(changed.needsAuth, {
+        env: { ...(changed.envValues ?? {}), ...(plan.sealedEnv ?? old.env ?? {}) },
+        headers: plan.writes.find((w) => w.kind === 'headers')?.value as Record<string, string> | undefined ?? old.headers ?? {}
+      })
+      if (needsAuth !== changed.needsAuth) {
+        if (needsAuth) changed.needsAuth = needsAuth
+        else delete changed.needsAuth
+        configChanged = true
+      }
+      // needsReauth lo dice la pagina da connectors.state (stato «needs_auth»
+      // dell'ultima prova): l'ultima prova fallita — errore o token scaduto —
+      // si dimentica, e il test che parte adesso la riscrive se il nuovo
+      // valore non basta
+      const states = store.getSetting<Record<string, { status?: string }>>('connectors.state', {})
+      if (plan.writes.length > 0 && states[cfg.id] && (states[cfg.id].status === 'needs_auth' || states[cfg.id].status === 'error')) {
+        const rest = { ...states }
+        delete rest[cfg.id]
+        store.setSetting('connectors.state', rest)
+      }
+      if (configChanged) x.saveServers(servers.map((s) => (s.id === cfg.id ? changed : s)))
+      emit({ type: 'connectors' })
+      // U5, come mcp:save — mai per gli spenti e per chi aspetta ancora dei valori
+      let test: { ok: boolean; tools?: string[]; error?: string } | null = null
+      if (changed.enabled && !needsAuth) {
+        try {
+          test = await x.testServer(cfg.id)
+        } catch (e) {
+          test = { ok: false, error: e instanceof Error ? e.message : String(e) }
+        }
+        await notifyMcpServerState(changed, test, emit, worker).catch(() => undefined)
+      }
+      return { ok: true, test }
+    },
     // PL2 (fase plugin): gli strumenti completi di un server (annotazioni
     // comprese) per la scheda «Autorizzazioni»
     'mcp:tools': ([id]) => mcp().then((x) => x.toolsOfServer(id as string)),

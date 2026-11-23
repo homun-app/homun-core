@@ -198,6 +198,8 @@ const api: SandbotApi = {
   mcpSave: (s, secret) => ipcRenderer.invoke('mcp:save', s, secret),
   mcpDelete: (id) => ipcRenderer.invoke('mcp:delete', id),
   mcpTest: (id) => ipcRenderer.invoke('mcp:test', id),
+  // PP2 (fase plugin-pulita): «Cambia token» nella scheda del plugin — solo il segreto, poi il test da solo
+  mcpReplaceSecret: (id, secret) => ipcRenderer.invoke('mcp:replace-secret', id, secret),
   // PL2 (fase plugin): gli strumenti di un server (nome, descrizione,
   // annotazioni) per la scheda «Autorizzazioni» della pagina Plugin
   mcpTools: (id) => ipcRenderer.invoke('mcp:tools', id),

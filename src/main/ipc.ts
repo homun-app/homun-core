@@ -76,7 +76,7 @@ export const DAEMON_RPC_CHANNELS = [
   // fase skill · catalogo (K2/K3): il catalogo curato del repo e l'aggiunta
   // di una voce (staging al commit fissato, senza card in chat)
   'skills:catalog', 'skills:catalog-preview', 'skills:catalog-install',
-  'mcp:list', 'mcp:save', 'mcp:delete', 'mcp:test', 'mcp:tools', 'plugins:usage',
+  'mcp:list', 'mcp:save', 'mcp:delete', 'mcp:test', 'mcp:replace-secret', 'mcp:tools', 'plugins:usage',
   'connectors:list', 'connectors:connect', 'connectors:disconnect',
   'connectors:set-tools', 'connectors:set-instructions', 'connectors:save-static',
   // fase 13: connettori su larga scala (registro, plugin, gateway)

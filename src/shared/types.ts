@@ -1359,6 +1359,13 @@ export interface SandbotApi {
   mcpImportApply(picks: Array<{ source: string; name: string }>): Promise<Array<{ name: string; outcome: 'created' | 'duplicate' | 'missing' }>>
   mcpDelete(id: string): Promise<void>
   mcpTest(id: string): Promise<{ ok: boolean; error?: string; tools?: string[] }>
+  /**
+   * PP2 (fase plugin-pulita): sostituisce il segreto di un server DOVE VIVE il
+   * server (mcp:replace-secret): solo il segreto cifrato, il resto della
+   * config non si tocca. Poi il test di connessione parte da solo: `test` è
+   * il suo esito (null se non parte: server spento, o ancora senza valori).
+   */
+  mcpReplaceSecret(id: string, secret: McpServerSecret): Promise<{ ok: boolean; test: { ok: boolean; tools?: string[]; error?: string } | null }>
   /** PL2 (fase plugin): gli strumenti di un server MCP per la scheda Autorizzazioni */
   mcpTools(id: string): Promise<Array<{ name: string; description: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } }>>
   /** PL3 (fase plugin): l'uso degli strumenti per la tabella «Collegati» (indice, non transcript) */
