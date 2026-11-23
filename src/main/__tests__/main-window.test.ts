@@ -25,8 +25,12 @@ function fakeWindow(name: string, opts: { minimized?: boolean } = {}) {
     isDestroyed: () => w.destroyed,
     isMinimized: () => w.minimized,
     restore: () => { w.minimized = false; calls.push('restore') },
-    show: () => { calls.push('show') },
-    focus: () => { calls.push('focus') }
+    show: () => { w.calls.push('show'); w.visible = true },
+    focus: () => { calls.push('focus') },
+    // P3.5: il manager la usa (Electron: isVisible). Finché non lo si dice è
+    // visibile (come le finestre finte di W1); show() la rende visibile.
+    visible: undefined as boolean | undefined,
+    isVisible: () => w.visible !== false
   }
   return w
 }
@@ -115,5 +119,94 @@ describe('W1: showMainWindow() — una funzione sola, sul main con BrowserWindow
     expect(TRAY_SRC, 'il clic su un bot passa dalla stessa porta').toMatch(/const win = openMain\(\)/)
     expect(MAIN_INDEX, 'il main passa showMainWindow al tray').toMatch(/createTray\(showMainWindow\)/)
     expect(TRAY_SRC, 'via il vecchio w?.show() del tray').not.toMatch(/w\?\.show\(\)/)
+  })
+})
+
+// P3.5 (fase primo-avvio): l'activate del Dock RIPARA. Dalla riproduzione di
+// P2: (1) la prima finestra nasceva FUORI dal manager, e ogni activate (il
+// clic sul Dock) ne creava una SECONDA — 16 avvii su 16, before-quit
+// windows=2; (2) alla finestra che c'è già si faceva show() e focus() e
+// basta: se era invisibile, fuori schermo, o dietro le altre app, restava lì.
+describe('P3.5: showMainWindow ripara la principale che non si vede', () => {
+  const rig = (opts: { minimized?: boolean; visible?: boolean } = {}) => {
+    let created: FakeWindow | null = null
+    const front: string[] = []
+    const before: string[] = []
+    const m = createMainWindowManager<FakeWindow>(() => (created = fakeWindow('main', opts) as FakeWindow), {
+      beforeShow: (w) => { before.push(w.name) },
+      bringToFront: (w) => { front.push(w.name); w.focus() }
+    })
+    m.showMainWindow() // la prima creazione
+    created!.calls.length = 0
+    front.length = 0
+    before.length = 0
+    return { m, win: created!, front, before }
+  }
+
+  it('principale INVISIBILE (nascosta) → la MOSTRA e la porta davanti, senza ricrearla', () => {
+    const { m, win, front } = rig()
+    win.visible = false
+    const via = m.showMainWindow()
+    expect(via, 'la stessa finestra, non una nuova').toBe(win)
+    expect(win.calls).toEqual(['show', 'focus'])
+    expect(front, 'portata davanti (su macOS: app.focus({ steal: true }))').toEqual(['main'])
+  })
+
+  it('principale FUORI SCHERMO → prima si riporta (beforeShow), poi si mostra e va davanti', () => {
+    const { m, win, before, front } = rig()
+    m.showMainWindow()
+    expect(before, 'beforeShow PRIMA di tutto: il deps vero la ricentra su uno schermo').toEqual(['main'])
+    expect(front).toEqual(['main'])
+    expect(win.calls[0], 'show viene dopo beforeShow').toBe('show')
+  })
+
+  it('principale visibile → nessuna ricreazione, portata davanti (il clic sul Dock quando è dietro le altre app)', () => {
+    const { m, win, front } = rig()
+    m.showMainWindow()
+    expect(m.getMainWindow()).toBe(win)
+    expect(front).toEqual(['main'])
+  })
+
+  it('finestra NUOVA che nasce NASCOSTA (show: false, P3.2): il manager NON la mostra e NON le dà il focus — la mostra la politica di mostra, che la porta davanti', () => {
+    let created: FakeWindow | null = null
+    const front: string[] = []
+    const m = createMainWindowManager<FakeWindow>(() => {
+      created = fakeWindow('nuova') as FakeWindow
+      created.visible = false
+      return created
+    }, { bringToFront: (w) => { front.push(w.name) } })
+    const win = m.showMainWindow()
+    expect(win).toBe(created)
+    expect(win.calls, 'nessun focus su una finestra nascosta: la mostrerebbe prima del tempo').toEqual([])
+    expect(front).toEqual([])
+    expect(m.getMainWindow(), 'ed è REGISTRATA: il prossimo activate la riusa, non ne crea un\'altra').toBe(win)
+    // la politica l\'ha mostrata: ora il clic sul Dock la porta davanti
+    win.visible = true
+    m.showMainWindow()
+    expect(front).toEqual(['nuova'])
+  })
+
+  it('senza isVisible (finestra finta di prima) e senza deps il manager si comporta com\'era (W1)', () => {
+    const w = fakeWindow('main-vis') as FakeWindow
+    ;(w as unknown as { isVisible?: unknown }).isVisible = undefined
+    const m = createMainWindowManager<FakeWindow>(() => w)
+    m.showMainWindow()
+    expect(w.calls).toEqual(['focus'])
+    w.calls.length = 0
+    m.showMainWindow()
+    expect(w.calls).toEqual(['show', 'focus'])
+  })
+})
+
+describe('P3.5: il cablaggio — la prima finestra nasce dalla porta unica', () => {
+  it('la PRIMA finestra nasce da showMainWindow (nel manager), non da createWindow diretto: l\'activate la riusa', () => {
+    // sul CODICE, senza i commenti (che raccontano com'era prima)
+    expect(MAIN_INDEX.replace(/\/\/.*$/gm, ''), 'nessuna chiamata diretta a createWindow() nel main').not.toMatch(/(?<!function )\bcreateWindow\(\)/)
+    const ready = MAIN_INDEX.slice(MAIN_INDEX.indexOf('app.whenReady().then(async () => {'))
+    expect(ready).toMatch(/showMainWindow\(\)\s*\n\s*\/\/ W1: il tray riceve la PORTA UNICA/)
+  })
+
+  it('il manager riceve i deps veri: prima del show i bounds dentro uno schermo, e il porta-davanti', () => {
+    expect(MAIN_INDEX).toMatch(/createMainWindowManager<BrowserWindow>\(createWindow, \{\s*\n\s*beforeShow: ensureOnScreen,\s*\n\s*bringToFront: \(win\) => bringWindowToFront\(win, app, process\.platform\)\s*\n\s*\}\)/)
   })
 })

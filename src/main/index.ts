@@ -149,23 +149,8 @@ if (isDaemonMode(process.argv)) {
     const preloadPath = join(__dirname, '../preload/index.cjs')
     const preload = existsSync(preloadPath) ? preloadPath : join(__dirname, '../preload/index.js')
 
-    // W1 (fase avvio-finestra): la principale vive nel manager — UNA porta
-    // sola (showMainWindow: crea se manca, restore+show+focus altrimenti) e
-    // getMainWindow che torna SOLO lei, mai la PiP né le altre finestre
-    const mainWindows = createMainWindowManager<BrowserWindow>(createWindow)
-    // P1 (fase primo-avvio): il registro di ogni finestra principale (chiave:
-    // la finestra) — il primo paint di una finestra arriva al SUO registro
-    const windowWatchers = new Map<BrowserWindow, WindowWatch>()
-    // P1: i deps veri del registro della finestra — l'app, lo schermo di
-    // Electron e i timer del main
+    // P1: lo schermo di Electron per le funzioni pure (display e workArea)
     const toDisplay = (d: { id: number; workArea: Rect }): DisplayLike => ({ id: d.id, workArea: d.workArea })
-    const windowWatchDeps: WatchDeps = {
-      appHidden: () => app.isHidden(),
-      displays: () => screen.getAllDisplays().map(toDisplay),
-      displayMatching: (b) => toDisplay(screen.getDisplayMatching(b)),
-      setTimeout: (fn, ms) => setTimeout(fn, ms),
-      clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout)
-    }
     // P3.3 (fase primo-avvio): la finestra sta su uno schermo visibile — PRIMA
     // di ogni show: fuori dalla workArea di ogni display si ricentra sul
     // display principale (puro: window-placement.ts), con la riga nel registro
@@ -176,6 +161,29 @@ if (isDaemonMode(process.argv)) {
         win.setBounds(r.bounds)
         lifecycle.line('window-recentered', { ms: lifecycle.sinceBoot(), from: formatBounds(win.getBounds()), to: formatBounds(r.bounds) })
       }
+    }
+    // W1 (fase avvio-finestra): la principale vive nel manager — UNA porta
+    // sola (showMainWindow: crea se manca, restore+show+focus altrimenti) e
+    // getMainWindow che torna SOLO lei, mai la PiP né le altre finestre.
+    // P3.5 (fase primo-avvio): la prima finestra nasce da QUI (prima nasceva
+    // fuori dal manager, e ogni activate ne creava una seconda), e alla
+    // finestra che c'è già il manager la ripara: prima i bounds dentro uno
+    // schermo, poi show() e la porta davanti
+    const mainWindows = createMainWindowManager<BrowserWindow>(createWindow, {
+      beforeShow: ensureOnScreen,
+      bringToFront: (win) => bringWindowToFront(win, app, process.platform)
+    })
+    // P1 (fase primo-avvio): il registro di ogni finestra principale (chiave:
+    // la finestra) — il primo paint di una finestra arriva al SUO registro
+    const windowWatchers = new Map<BrowserWindow, WindowWatch>()
+    // P1: i deps veri del registro della finestra — l'app, lo schermo di
+    // Electron e i timer del main
+    const windowWatchDeps: WatchDeps = {
+      appHidden: () => app.isHidden(),
+      displays: () => screen.getAllDisplays().map(toDisplay),
+      displayMatching: (b) => toDisplay(screen.getDisplayMatching(b)),
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout)
     }
     // P3.2 (fase primo-avvio): i deps veri della politica di mostra — i timer
     // del main, il porta-davanti (su macOS app.focus({ steal: true }), poi il
@@ -220,9 +228,9 @@ if (isDaemonMode(process.argv)) {
       // mette in corsa la fotografia): la riga la scrive da qui il registro
       // della finestra (U6: la principale mostrata; P1: fotografia a 5 s)
       const alreadyVisible = current !== undefined && current.isVisible()
+      // P3.5: al manager (beforeShow = i bounds dentro uno schermo, restore,
+      // show, e la porta davanti)
       const win = mainWindows.showMainWindow()
-      // P3.3: anche la finestra che c'è già torna su uno schermo visibile
-      ensureOnScreen(win)
       if (alreadyVisible) windowWatchers.get(win)?.shown({ pid: process.pid })
       return win
     }
@@ -525,7 +533,10 @@ function createPipHandle(options: Record<string, unknown>, url: string): PipWind
       // (single-flight + adozione del «Bot» vuoto delle beta). Qui si crea la
       // finestra e basta: la UI resta in caricamento finché il daemon non
       // dice lo stato dell'onboarding.
-      createWindow()
+      // P3.5 (fase primo-avvio): dalla PORTA UNICA — prima nasceva con
+      // createWindow() diretto, fuori dal manager, e il primo activate (il
+      // clic sul Dock) ne creava una seconda
+      showMainWindow()
       // W1: il tray riceve la PORTA UNICA (crea la principale se manca)
       createTray(showMainWindow)
       refreshTray()
