@@ -10,6 +10,16 @@ export function isDaemonMode(argv: string[]): boolean {
   return argv.includes(DAEMON_FLAG)
 }
 
+/**
+ * Fase primo-avvio: l'app deve registrarsi come gestore di sandbot://? No
+ * nelle prove (SANDBOT_TEST_USER_DATA): una copia impacchettata di prova, in
+ * una cartella temporanea, prenderebbe il posto di quella vera FINCHÉ
+ * l'app vera non si riavvia — e intanto la copia viene cancellata.
+ */
+export function registersProtocolClient(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !env.SANDBOT_TEST_USER_DATA
+}
+
 /** Directory dati esplicita (--data <dir>): resta accettata per i test. */
 export function resolveDataDirArgv(argv: string[]): string | null {
   const i = argv.indexOf('--data')

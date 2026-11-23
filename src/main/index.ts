@@ -20,7 +20,7 @@ import { initMainLanguage, applyStartupLanguage } from './i18n'
 import { DaemonClient } from './daemon-client'
 import { setDaemonSpawnContext } from './daemon-context'
 import { userDataDir } from './paths'
-import { isDaemonMode, resolveDataDirArgv } from './mode'
+import { isDaemonMode, registersProtocolClient, resolveDataDirArgv } from './mode'
 import { runDaemonRuntime } from '../daemon/runtime'
 import { APP_BUILD_ID } from './build-id'
 import { createRendererHandler, realFs, RENDERER_CSP } from './protocol'
@@ -471,8 +471,9 @@ function createPipHandle(options: Record<string, unknown>, url: string): PipWind
       // controllare GitHub (fuori dalle prove la variabile è ignorata)
       openTestUpdateWindowIfRequested()
 
-      // deep link sandbot://agent/<id>
-      app.setAsDefaultProtocolClient('sandbot')
+      // deep link sandbot://agent/<id>. Fase primo-avvio: mai nelle prove con
+      // l'app impacchettata (la copia di prova non prende il posto di quella vera)
+      if (registersProtocolClient(process.env)) app.setAsDefaultProtocolClient('sandbot')
       app.on('open-url', (_e, url) => {
         const m = url.match(/^sandbot:\/\/agent\/([A-Za-z0-9_-]+)$/)
         if (m) openAgent(m[1])
