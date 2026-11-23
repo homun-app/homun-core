@@ -47,6 +47,8 @@ import { createLifecycleLog, mainLogDir } from './lifecycle-log'
 // fotografia a 5 s) e gli orari nel daemon.log
 import { watchWindow, type DisplayLike, type Rect, type WatchDeps, type WindowWatch } from './window-lifecycle'
 import { installDaemonLogTimestamps } from '../daemon/log-timestamp'
+// P3.2 (fase primo-avvio): la finestra si mostra quando ha qualcosa da mostrare (ready-to-show, o il ripiego)
+import { bringWindowToFront, showWhenReady, type ShowPolicyDeps } from './show-policy'
 import { secondInstanceWhileQuitting } from './quit-behavior'
 // U6: il tray si distrugge all'uscita
 import { createTray, refreshTray, destroyTray } from './tray'
@@ -160,6 +162,14 @@ if (isDaemonMode(process.argv)) {
       setTimeout: (fn, ms) => setTimeout(fn, ms),
       clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout)
     }
+    // P3.2 (fase primo-avvio): i deps veri della politica di mostra — i timer
+    // del main e il porta-davanti (su macOS app.focus({ steal: true }), poi il
+    // focus della finestra)
+    const showPolicyDeps: ShowPolicyDeps<BrowserWindow> = {
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
+      bringToFront: (win) => bringWindowToFront(win, app, process.platform)
+    }
     // U6 (fase mcp-ui): la PiP del turno (chiusa esplicitamente all'uscita)
     let pip: PipManager | null = null
 
@@ -259,6 +269,9 @@ function createPipHandle(options: Record<string, unknown>, url: string): PipWind
         minHeight: 600,
         titleBarStyle: 'hiddenInset',
         backgroundColor: '#0b0d10',
+        // P3.2 (fase primo-avvio): nasce NASCOSTA — la mostra la politica di
+        // mostra (ready-to-show, o il ripiego), e la porta davanti
+        show: false,
         webPreferences: {
           preload,
           contextIsolation: true,
@@ -272,12 +285,15 @@ function createPipHandle(options: Record<string, unknown>, url: string): PipWind
       // vita — caricamento della pagina, primo paint, fotografia dopo ogni show
       const watch = watchWindow(win, lifecycle, windowWatchDeps)
       windowWatchers.set(win, watch)
+      // P3.2: si mostra su ready-to-show, o dopo 3 s comunque (show-fallback)
+      const policy = showWhenReady(win, lifecycle, showPolicyDeps)
       // W1: la chiusura si comunica al manager (che dimentica SOLO la principale)
       // U6: la riga del registro del ciclo di vita; P1: la finestra ESCE dal registro
       win.on('closed', () => {
         mainWindows.forget(win)
         windowWatchers.delete(win)
         watch.dispose()
+        policy.dispose()
         lifecycle.line('window-closed')
       })
       // U6: la finestra principale creata; la riga di ogni mostra (il primo
