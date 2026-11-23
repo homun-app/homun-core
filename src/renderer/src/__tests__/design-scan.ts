@@ -41,7 +41,7 @@ export const RULES: Readonly<Record<DesignRule, RegExp>> = {
 }
 
 /** Un token che dice «questa stringa è una lista di classi» (una utility qualunque di layout o aspetto). */
-const CLASS_LIKE = /^(?:!?-?(?:[\w-]+:))*(?:flex|grid|inline-flex|inline-grid|inline-block|block|hidden|contents|truncate|relative|absolute|fixed|sticky|static|isolate|container|underline|italic|flex-\S+|grid-\S+|col-\S+|row-\S+|items-\S+|justify-\S+|self-\S+|content-\S+|gap-\S+|space-[xy]-\S+|p[xytrbl]?-\S+|m[xytrbl]?-\S+|text-\S+|bg-\S+|border\b|border-\S+|divide-\S+|rounded\S*|font-\S+|leading-\S+|tracking-\S+|size-\S+|w-\S+|h-\S+|min-\S+|max-\S+|transition\S*|duration-\S+|cursor-\S+|overflow-\S+|shadow\S*|opacity-\S+|z-\S+|order-\S+|shrink\S*|grow\S*|basis-\S+|object-\S+|select-\S+|pointer-events-\S+|whitespace-\S+|break-\S+|align-\S+|list-\S+|outline\S*|ring\S*|sr-only|no-drag|drag-region|antialiased)$/
+const CLASS_LIKE = /^(?:!?-?(?:[\w-]+:))*(?:flex|grid|inline-flex|inline-grid|inline-block|block|hidden|contents|truncate|relative|absolute|fixed|sticky|static|isolate|container|underline|italic|flex-\S+|grid-\S+|col-\S+|row-\S+|items-\S+|justify-\S+|self-\S+|content-\S+|gap-\S+|space-[xy]-\S+|p[xytrbl]?-\S+|m[xytrbl]?-\S+|text-\S+|bg-\S+|border\b|border-\S+|divide-\S+|rounded\S*|font-\S+|leading-\S+|tracking-\S+|size-\S+|w-\S+|h-\S+|min-\S+|max-\S+|top-\S+|bottom-\S+|left-\S+|right-\S+|inset-\S+|translate-\S+|transition\S*|duration-\S+|cursor-\S+|overflow-\S+|shadow\S*|opacity-\S+|z-\S+|order-\S+|shrink\S*|grow\S*|basis-\S+|object-\S+|select-\S+|pointer-events-\S+|whitespace-\S+|break-\S+|align-\S+|list-\S+|outline\S*|ring\S*|sr-only|no-drag|drag-region|antialiased)$/
 
 /**
  * La stringa è una lista di classi? Almeno DUE token lo dicono, oppure è un
@@ -50,7 +50,8 @@ const CLASS_LIKE = /^(?:!?-?(?:[\w-]+:))*(?:flex|grid|inline-flex|inline-grid|in
  */
 export const isClassList = (value: string): boolean => {
   const tokens = value.split(/\s+/).filter((t) => t !== '')
-  const like = tokens.filter((t) => CLASS_LIKE.test(t)).length
+  // il meno davanti (le spaziature negative: -mt-2) non fa parte del nome: si toglie prima di guardare
+  const like = tokens.filter((t) => CLASS_LIKE.test(t.replace(/^-/, ''))).length
   return like >= 2 || (tokens.length === 1 && like === 1)
 }
 
