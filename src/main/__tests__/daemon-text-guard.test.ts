@@ -142,6 +142,9 @@ const ALLOWED_SYMBOLS: Record<string, string[]> = {
   // qui sopra (con IT_STRONG allargato scattano i singoli «mancante», «deve»…)
   'src/main/connectors/index.ts': ['validateCatalog', 'loadCatalog'],
   'src/main/templates/index.ts': ['validateTemplate', 'loadTemplates'],
+  // B1 (fase b20-bug): i NOMI degli involucri per il modello sono tag del
+  // protocollo (<evento>, <brief>, <risultati_sottoagenti>…), non testi della UI
+  'src/shared/agent-message.ts': ['MODEL_ENVELOPE_TAGS'],
   // RX (fase revisore: correzioni dalla misura): i DATI dell'eval del revisore
   // — le parole del proprietario e i titoli dei 13 casi sono italiani per
   // costruzione (simulano i messaggi dell'utente), come ACTION_OBJECTS — e i
