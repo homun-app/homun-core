@@ -151,7 +151,7 @@ export function tabVeil(side: 'left' | 'right', on: boolean): { 'aria-hidden': '
 /** A riposo, prima di misurare: nessun velo (se tutto ci sta, restano spenti). */
 const NO_EDGES: TabEdges = { left: false, right: false }
 
-export function UnderlineTabs<T extends string>({ tabs, value, onChange, label, testId, className }: {
+export function UnderlineTabs<T extends string>({ tabs, value, onChange, label, testId, tabTestId, className }: {
   tabs: ReadonlyArray<UnderlineTab<T>>
   /** la scheda attiva */
   value: T
@@ -159,6 +159,8 @@ export function UnderlineTabs<T extends string>({ tabs, value, onChange, label, 
   /** il nome accessibile del gruppo («Visualizza», «Schede del plugin»…) */
   label?: string
   testId?: string
+  /** il testid di OGNI scheda, dal suo id (le sonde delle altre fasi cercano approvals-tab-<id> e simili) */
+  tabTestId?: (id: T) => string
   /** le classi del chiamante: vanno sull'involucro (la radice), mai sulla tablist */
   className?: string
 }): ReactNode {
@@ -237,6 +239,7 @@ export function UnderlineTabs<T extends string>({ tabs, value, onChange, label, 
               role="tab"
               aria-selected={active}
               tabIndex={active ? 0 : -1}
+              {...(tabTestId ? { 'data-testid': tabTestId(id) } : {})}
               // clsx e non cn: qui stanno insieme text-body e un colore (vedasi in testa)
               className={clsx(
                 'shrink-0 whitespace-nowrap border-b-2 py-2 text-body transition focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',

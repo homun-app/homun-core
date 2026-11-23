@@ -348,3 +348,14 @@ describe('DS2: UnderlineTabs — una riga sola, che scorre (fase design)', () =>
     expect(ruleOf(css, '.focus-visible\\:outline-ring' + suTastiera)).toMatch(/outline-color:\s*var\(--ring\);/)
   })
 })
+
+describe('DS4: UnderlineTabs — il testid di ogni scheda (le sonde cercano approvals-tab-<id> e simili)', () => {
+  it('con tabTestId ogni scheda porta il suo data-testid; senza, nessuna', () => {
+    const render = (tabTestId?: (id: string) => string) => parseHtml(renderHtml(createElement(UnderlineTabs as never, {
+      tabs: [['a', 'Alfa'], ['b', 'Beta']] as never, value: 'a', onChange: () => undefined, label: 'Schede', tabTestId
+    } as never)))
+    const ids = (root: HtmlNode) => findAll(root, (n) => n.attrs.role === 'tab').map((n) => n.attrs['data-testid'])
+    expect(ids(render((id) => `scheda-${id}`))).toEqual(['scheda-a', 'scheda-b'])
+    expect(ids(render())).toEqual([undefined, undefined])
+  })
+})
