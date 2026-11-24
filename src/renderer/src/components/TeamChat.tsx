@@ -75,7 +75,7 @@ function MentionPill({ text, members, agents, effectiveMain }: {
   return (
     <span
       className="rounded-full px-1.5 font-medium"
-      style={av ? { background: `var(--bot-${av.color})`, color: 'var(--bot-ink)' } : { background: 'var(--muted)' }}
+      style={av ? { background: `var(--bot-dot-${av.color})`, color: 'var(--bot-ink)' } : { background: 'var(--muted)' }}
     >
       {text}
     </span>

@@ -322,7 +322,12 @@ function TeamRobot({ team, size = 20 }: { team: SidebarTeam; size?: number }) {
   )
 }
 
-/** Il pallino del colore del bot: decorativo, 8 px (aria-hidden). */
+/**
+ * Il pallino del colore del bot: decorativo, 8 px (aria-hidden). R5
+ * (b20-ritocchi): usa la PALETTE DEI PUNTINI (--bot-dot-*), non quella della
+ * mascotte — la tinta è quella del bot, la luminosità è tarata per tema
+ * perché su 8 px il contrasto si vede (≥ 3:1 sul fondo della riga).
+ */
 function ColorDot({ agent }: { agent: Agent }) {
   const agents = useStore((s) => s.agents)
   const mainAgentId = useStore((s) => s.mainAgentId)
@@ -332,7 +337,7 @@ function ColorDot({ agent }: { agent: Agent }) {
       data-testid="bot-dot-color"
       aria-hidden="true"
       className="size-2 shrink-0 rounded-full"
-      style={{ background: `var(--bot-${av.color})` }}
+      style={{ background: `var(--bot-dot-${av.color})` }}
     />
   )
 }
@@ -1106,7 +1111,7 @@ function RailBotCircle({ agent, state }: { agent: Agent; state: BotState }) {
         data-testid="rail-bot-circle"
         data-size="22"
         className="grid shrink-0 place-items-center rounded-full text-caption font-semibold text-background"
-        style={{ width: 22, height: 22, background: `var(--bot-${av.color})` }}
+        style={{ width: 22, height: 22, background: `var(--bot-dot-${av.color})` }}
         aria-hidden="true"
       >
         {agent.name.slice(0, 1).toUpperCase()}

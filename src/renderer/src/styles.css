@@ -318,6 +318,23 @@
   --bot-c5: oklch(0.82 0.16 90);
   --bot-c6: oklch(0.7 0.12 195);
   --bot-c7: oklch(0.25 0.01 80);
+  /*
+   * R5 (b20-ritocchi): LA PALETTE DEI PUNTINI. Quella della mascotte
+   * (--bot-c*) è fatta per le FORME GRANDI: su un pallino da 8 px mezzo
+   * colore sparisce (il c7 in tema scuro era nero su nero: il membro
+   * «Scrittura» non si vedeva). I puntini e i dischi piccoli (il pallino
+   * della barra, il cerchio della rotaia, il disco del nome in squadra)
+   * tengono la TINTA del bot e cambiano luminosità col tema: contrasto
+   * ≥ 3:1 sul fondo della riga (card e muted), misurato — lo misura anche
+   * la sonda di fase-design su ogni puntino, in chiaro e in scuro.
+   */
+  --bot-dot-c1: oklch(0.51 0.2 45);
+  --bot-dot-c2: oklch(0.59 0.24 355);
+  --bot-dot-c3: oklch(0.39 0.17 155);
+  --bot-dot-c4: oklch(0.44 0.19 255);
+  --bot-dot-c5: oklch(0.4 0.16 90);
+  --bot-dot-c6: oklch(0.39 0.12 195);
+  --bot-dot-c7: oklch(0.25 0.01 80);
   --shadow-soft: 0 20px 50px -25px oklch(0.2 0.02 80 / 0.25);
 }
 
@@ -362,6 +379,15 @@
   --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.551 0.027 264.364);
+  /* R5 (b20-ritocchi): i puntini in scuro — la tinta del bot, la luminosità
+     che si vede (≥ 3:1 su card e muted) */
+  --bot-dot-c1: oklch(0.76 0.2 45);
+  --bot-dot-c2: oklch(0.81 0.24 355);
+  --bot-dot-c3: oklch(0.72 0.17 155);
+  --bot-dot-c4: oklch(0.71 0.19 255);
+  --bot-dot-c5: oklch(0.82 0.16 90);
+  --bot-dot-c6: oklch(0.71 0.12 195);
+  --bot-dot-c7: oklch(0.67 0.01 80);
 }
 
 @layer base {
