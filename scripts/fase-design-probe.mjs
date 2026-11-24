@@ -645,13 +645,16 @@ const MEASURE_JS = (rootExpr, { withSidebar }) => `(() => {
             if (hit0 && (hit0 === b.el || b.el.contains(hit0))) { owner = b; pt = [cxOf(b), cyOf(b)]; break }
           }
           if (!owner) continue
-          // 2) fascia nascosta: al punto si vede il testo?
+          // 2) fascia nascosta: al punto si vede IL TESTO? (l'elemento stesso o
+          //    un suo discendente: se la domanda torna un ANTENATO — la radice
+          //    del guscio che sta sotto la fascia nascosta — il testo lì non è
+          //    raggiungibile, non è lui che si vede)
           hidden.push([owner.el, owner.el.style.visibility])
           owner.el.style.visibility = 'hidden'
           const hit = document.elementFromPoint(pt[0], pt[1])
           owner.el.style.visibility = hidden[hidden.length - 1][1]
           hidden.pop()
-          if (!hit || !(hit === el || el.contains(hit) || hit.contains(el))) continue
+          if (!hit || !(hit === el || el.contains(hit))) continue
           // 3) la fascia copre? (sfondo con alpha, o sfocatura)
           const csHead = getComputedStyle(owner.el)
           const copre = alphaOf(csHead.backgroundColor) > 0 || csHead.backdropFilter !== 'none'
