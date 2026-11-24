@@ -19,13 +19,9 @@ msgid "Cerca nella memoria…"
 msgstr "Search memory…"
 
 #. js-lingui-explicit-id
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Come si risolve"
-msgstr "How to fix it"
-
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "grafo"
-msgstr "graph"
+msgstr ""
 
 #: src/renderer/src/components/TaskCard.tsx
 msgid " — rispondi dalla vista del task (Apri)"
@@ -2050,6 +2046,10 @@ msgstr "Same as the others ({0})"
 #: src/renderer/src/components/GuideView.tsx
 msgid "Come si chiama?"
 msgstr "What’s their name?"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Come si risolve"
+msgstr "How to fix it"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "compaction"

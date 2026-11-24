@@ -19,10 +19,6 @@ msgid "Cerca nella memoria…"
 msgstr "Cerca nella memoria…"
 
 #. js-lingui-explicit-id
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Come si risolve"
-msgstr "Come si risolve"
-
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "grafo"
 msgstr "grafo"
@@ -2050,6 +2046,10 @@ msgstr "Come gli altri ({0})"
 #: src/renderer/src/components/GuideView.tsx
 msgid "Come si chiama?"
 msgstr "Come si chiama?"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Come si risolve"
+msgstr "Come si risolve"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "compaction"
