@@ -1,3 +1,53 @@
+# REPORT FASE B20-CHIUSURA: i due rossi della suite dopo b20-ritocchi
+
+Base: tag `fase-b20-ritocchi` (36a2f15a), verifica fatta: HEAD era esattamente lì (gli unici non tracciati `out-review/` e `scripts/vetrina/`, mai toccati). Tre commit di codice, uno per punto, più questo REPORT e il tag annotato `fase-b20-chiusura`. Freeze 0.3.1002: solo i tre punti chiesti, nessun ritocco in più.
+
+**Perché adesso è diverso.** La verifica a fine b20-ritocchi trovava la suite ROSSA mentre quel REPORT diceva verde: la corsa era stata fatta PRIMA del commit dei cataloghi (e3730f16). Regola di questa fase: suite e ci-sim si lanciano DOPO l'ultimo commit di codice — tutti i numeri qui sotto vengono dalle corse fatte dopo 01bb82d, il terzo e ultimo commit di codice.
+
+## C1 (bloccante) — l'inglese ha ritrovato «graph»
+
+La causa, trovata leggendo come Lingui 6.6.0 estrae e rilegge i cataloghi (babel-plugin-extract-messages + format-po) e non solo guardando il .po: la voce «grafo» era stata scritta a mano nel .po SENZA il marcatore `#. js-lingui-explicit-id` — in lettura la sua chiave interna era quindi l'HASH del testo (format-po rigenera la chiave quando il marcatore manca), mentre `i18n.t('grafo')` di MemoryPanel.tsx:266 estraeva la chiave letterale «grafo». Per l'extract quella voce risultava NUOVA: msgstr vuoto in en (in it il vuoto si riempie col msgid, lingua sorgente), e `--clean` buttava la vecchia insieme a «graph». Poi la voce riscritta dall'extract col marcatore sarebbe stata stabile — ma intanto la traduzione era persa e il test «nessun msgstr vuoto nel catalogo en» era rosso.
+
+Non era l'unico `i18n.t('…')` del renderer: anche il placeholder «Cerca nella memoria…» lo è (MemoryPanel.tsx:228), ma la SUA voce porta il marcatore — chiave letterale da entrambi i lati, mai si è mossa. Le altre voci `#. js-lingui-explicit-id` vengono da `msg({ id, message })` di src/shared/ui-messages.ts, con id e message entrambi estratti dal codice: stabili pure loro. Il ramo fragile era solo «grafo».
+
+Corretta la causa, non solo il .po: MemoryPanel adotta la macro `t` come ogni altro testo del renderer (`t`grafo`` da `useLingui()`), la voce torna hash-keyed come le altre 1.980, e «graph» è di nuovo nel .po e nel catalogo compilato `en/messages.mjs` (chiave hash uguale nelle due lingue: `["graph"]` contro `["grafo"]`). Prova: `npm run i18n:extract` lanciato tre volte di fila — dal secondo giro nessun file cambia (verificato a shasum sui due .po e i due .mjs) — e il test passa (5/5 nel file dei cataloghi). Controllato il diff `fase-design..HEAD` dei due .po con uno script di confronto msgid→msgstr: **0 msgstr svuotati, 0 persi, 0 nuovi vuoti**, in en e in it (1.980 → 1.981 voci: l'unica nuova è «Come si risolve» di R6, che a fase-design non c'era).
+
+## C2 — il test del gruppo non scade più e non lascia la temporanea
+
+Il test «il pid scritto è quello del GRUPPO» (docker-argv.test.ts) ha DUE `vi.waitFor` da 5 s dentro un test col timeout di default (5 s, nessun testTimeout in vitest.config.ts): nella suite intera, sotto carico, scadeva prima delle attese, vitest lo abbandonava e la pulizia nel `finally` restava a mezzo — la `sandbot-wrap-*` rimaneva a terra (rossa anche per test-tmp-guard) e il «sleep 30» del wrapper campava. Ora il timeout del test è esplicito: **15 s, somma delle attese (5+5) più margine**; la pulizia sta in `onTestFinished`: SIGKILL al GRUPPO del wrapper (il leader è `child.pid`, nato `detached`: `-child.pid` È il gruppo, si arriva al pid anche se il pid file non è mai comparso) e cancellazione della temporanea — gira in verde come in rosso, anche su un test abbandonato. Lo sweep richiesto: nello stesso file e in `src/main/sandbox/__tests__/` gli altri `waitFor` sono uno da 2 s (disk-space) e due test con 2 s + 2 s (box-image-engine): nessuna somma supera il timeout del proprio test, nessun processo esterno da ammazzare — lasciati com'erano (freeze). Prova: suite intera due volte di fila verde, e nessun processo «sleep 30» vivo a fine corsa, controllato dopo ognuna delle due.
+
+## C3 (piccolo) — le etichette delle affiancate
+
+`fase-design-probe.mjs` non scrive più a mano «PRIMA · base fase-b20-bug» / «DOPO · fase design» nelle composta affiancate: le scritte si passano da riga di comando con `--etichetta-prima` e `--etichetta-dopo` (default «PRIMA» / «DOPO»), così la prossima fase può nominare la sua base di riferimento senza toccare la sonda. Le 154 catture affiancate NON sono state rigenerate.
+
+## Numeri
+
+Tutte le corse DOPO l'ultimo commit di codice. Typecheck **0 errori** (`tsc --noEmit`). `npm test` **VERDE: 533 file / 6.844 test**, due giri di fila (il secondo giro è la prova di C2); `npm run test:ci-sim` **VERDE: 531 file pass + 2 skip / 6.840 test pass + 4 skip** (gli skip sono i soliti due file: modello locale e embed-lane). Entrambe col Docker Desktop della macchina che NON risponde: la guardia R7 di b20-ritocchi lo rende irraggiungibile per costruzione. Sonda `fase-b20-bug`, una volta sola (C1 tocca i cataloghi), sull'app appena ricostruita all'HEAD della fase (`electron-vite build` diretto, senza hook): **76/76 controlli OK**, 8 catture riscritte in `docs/catture/fase-b20-bug/`, e la sonda stessa riferisce 0 cartelle proprie rimaste e 0 daemon della sonda. Codice: 7 file (+52/−41 con i cataloghi rigenerati).
+
+## Vincoli e pulizia
+
+Niente Docker né container vero né eval col modello né dist firmata, niente Composio vero, nessun pacchetto nuovo (solo `tsc --noEmit`, `npm test`, `npm run test:ci-sim`, `lingui extract --clean`/`compile`, `electron-vite build` diretto senza hook e la sonda b20-bug, che usa il suo modello finto su 127.0.0.1 e CDP), rete solo su 127.0.0.1, mai le porte 11434 e 1234, mai `open`/`osascript`/`sudo`/`screencapture`, temporanei solo con mktemp -d nella cartella dei vincoli (i log delle corse in `b20c-*.log`, cancellati a fine fase; nessuna sandbot-* né ds4-* residua), mai l'Application Support vero né i file delle altre app, migrazioni DB nessuna, out-review/ e scripts/vetrina/ intatti, CHANGELOG invariato, nessun push e nessun tag v*. Il daemon Homun dell'utente mai toccato.
+
+## Chiusura
+
+Processi Electron e `--homun-daemon` DEL REPO, contati per eseguibile: **0 e 0**. Nessuna cartella temporanea residua. I comandi e i loro esiti, fedeli:
+
+```
+$ ps -axo pid=,comm= | grep "sandbot/node_modules/electron" | grep -v grep
+(uscita 1 — nessuna riga: 0 Electron del repo)
+
+$ ps -axo args= | grep -- "--homun-daemon" | grep "Projects/Bot/sandbot" | grep -v grep
+(uscita 1 — nessuna riga: 0 daemon del repo)
+
+$ ls …/T/ | grep -E 'sandbot|ds4'   → nessuna riga (i b20c-*.log cancellati)
+
+$ pgrep -fl 'sleep 30'               → nessuna riga
+```
+
+Tag annotato `fase-b20-chiusura` dopo il commit di questo REPORT. Nessun push, nessun tag v*.
+
+---
+
 # REPORT FASE B20-RITOCCHI (R1–R9): i difetti che la sonda non vedeva
 
 Base: `main` a 35ede104 (tag `fase-design`, verifica fatta: HEAD era esattamente lì; gli unici non tracciati `out-review/` e `scripts/vetrina/`, mai toccati). Dodici commit più questo REPORT: nove punti, un commit per punto, più i seguiti (cn+allowlist, cataloghi, sonda b20-bug) e i ritocchi alla sonda nuova. La sonda di fase-design misurava le DIMENSIONI — testi, icone, scorrimenti, testate — e aveva dato 0 violazioni: ma non vedeva come le cose si DISPONEVANO. Questa fase corregge i difetti visti nelle catture e insegna alla sonda a vederli.
