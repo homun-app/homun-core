@@ -20,7 +20,15 @@ vi.mock('../../store/db', () => ({
   getAgent: () => null
 }))
 
+const { setDiskSpaceProbeForTests } = await import('../disk-space')
 const { ensureBoxImage, setDockerRunnerForTests } = await import('../index')
+
+// fase design (verifica della suite): il probe dello spazio disco, come fa
+// disk-space.test.ts — qui fingiamo TUTTO (la CLI del box, il runner) e il
+// controllo dello spazio leggeva invece il disco VERO della macchina: la
+// suite diventava verde o rossa secondo i GB liberi del momento (il prodotto
+// chiede ~6,5 GB liberi prima di costruire l'immagine del box).
+setDiskSpaceProbeForTests(() => 20_000_000_000)
 const { setActiveEngineForTests, appleContainerEngine, dockerEngine } = await import('../engine')
 import type { BoxEngine } from '../engine'
 import type { BuildProgress } from '../build-progress'

@@ -140,6 +140,10 @@ describe('BX3: le righe di «Spazio su disco» (diskSpaceRows, pura)', () => {
 
 describe('BX3: i comportamenti automatici dell\'ensure del box', () => {
   it('dopo una build RIUSCITA parte la pulizia SICURA della cache (mai l\'immagine in uso)', async () => {
+    // fase design (verifica della suite): il probe dello spazio disco anche qui
+    // (il test qui sotto lo reimposta a null per provare quello VERO): senza, la
+    // build partiva solo se la macchina aveva ~6,5 GB liberi davvero
+    disk.setDiskSpaceProbeForTests(() => 20_000_000_000)
     const calls: string[][] = []
     let imageMissing = true
     setDockerRunnerForTests(async (argv) => {
