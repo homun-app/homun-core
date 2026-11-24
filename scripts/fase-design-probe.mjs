@@ -607,11 +607,12 @@ const MEASURE_JS = (rootExpr, { withSidebar }) => `(() => {
 
   // ---- R8 (b20-ritocchi): LA DISPOSIZIONE — come le cose si mettono ----
   // (a) SOVRAPPOSIZIONI: nessun testo visibile sotto una testata senza
-  // sfondo. Si scorre a metà, si nascondono le testate e al punto centrale
-  // di ogni riga di testo caduta nella fascia dei 52 si chiede che cosa ci
-  // si vede: se è il testo stesso, la testata (di nuovo visibile) deve
-  // COPRIRLO (sfondo velato o sfocatura) — altrimenti il testo le scorre
-  // sotto e resta leggibile in cima alla colonna
+  // sfondo. Al punto centrale di ogni riga di testo caduta nella fascia dei
+  // 52, CON le testate visibili si chiede chi è in cima: se è la TESTATA, il
+  // testo le scorre sotto; allora la si nasconde e si rifà la domanda: se è
+  // il testo, la testata deve COPRIRLO (sfondo velato o sfocatura). Se in
+  // cima c'è altro — un dialogo sopra la colonna — non è un testo della
+  // fascia, e non si conta. Tutto a scorrimento a metà
   const overlapped = []
   {
     const bands = [...document.querySelectorAll('[data-col-head]')].filter(vis).map((el) => ({ el, r: el.getBoundingClientRect() }))
@@ -619,26 +620,47 @@ const MEASURE_JS = (rootExpr, { withSidebar }) => `(() => {
       const savedScroll = sc ? sc.scrollTop : 0
       if (sc && sc.scrollHeight > sc.clientHeight) sc.scrollTop = Math.floor((sc.scrollHeight - sc.clientHeight) / 2)
       const pieces = [...scope.querySelectorAll('*')].filter((el) => inScope(el) && !skip(el) && [...el.childNodes].some((n) => n.nodeType === 3 && (n.nodeValue ?? '').trim()))
-      const hidden = []
-      for (const b of bands) { hidden.push([b.el, b.el.style.visibility]); b.el.style.visibility = 'hidden' }
-      for (const el of pieces) {
-        if (!vis(el)) continue
-        const er = el.getBoundingClientRect()
-        if (er.width === 0 || er.height === 0) continue
-        const band = bands.find((b) => er.top < b.r.bottom - 1 && er.bottom > b.r.top + 1 && er.right > b.r.left && er.left < b.r.right)
-        if (!band) continue
-        const cx = Math.min(Math.max((er.left + er.right) / 2, band.r.left + 1), band.r.right - 1)
-        const cy = Math.min(Math.max((er.top + er.bottom) / 2, band.r.top + 1), band.r.bottom - 1)
-        const hit = document.elementFromPoint(cx, cy)
-        if (!hit || !(hit === el || el.contains(hit) || hit.contains(el))) continue
-        const csHead = getComputedStyle(band.el)
-        const a = /rgba?\\((?:[\\d.]+, ){2}[\\d.]+,\\s*([\\d.]+)\\)/.exec(csHead.backgroundColor)
-        const alpha = a ? Number(a[1]) : 1
-        const copre = alpha > 0 || csHead.backdropFilter !== 'none'
-        if (!copre) overlapped.push({ ...describe(el), head: band.el.dataset.colHead })
+      const alphaOf = (bg) => {
+        const a = /rgba?\\((?:[\\d.]+, ){2}[\\d.]+, ?([\\d.]+)\\)/.exec(bg)
+        if (a) return Number(a[1])
+        const ok = /oklch\\([^/)]*\\/ ?([\\d.]+)%?\\)/.exec(bg)
+        if (ok) return Number(ok[1])
+        return bg === 'transparent' ? 0 : 1
       }
-      for (const [el, v] of hidden) el.style.visibility = v
-      if (sc && sc.scrollHeight > sc.clientHeight) sc.scrollTop = savedScroll
+      const hidden = []
+      try {
+        for (const el of pieces) {
+          if (!vis(el)) continue
+          const er = el.getBoundingClientRect()
+          if (er.width === 0 || er.height === 0) continue
+          const cxOf = (b) => Math.min(Math.max((er.left + er.right) / 2, b.r.left + 1), b.r.right - 1)
+          const cyOf = (b) => Math.min(Math.max((er.top + er.bottom) / 2, b.r.top + 1), b.r.bottom - 1)
+          // 1) con le testate VISIBILI: la fascia che comanda il punto (se il
+          //    punto non è di nessuna fascia — un dialogo sopra — si salta)
+          let owner = null
+          let pt = null
+          for (const b of bands) {
+            if (!(er.top < b.r.bottom - 1 && er.bottom > b.r.top + 1 && er.right > b.r.left && er.left < b.r.right)) continue
+            const hit0 = document.elementFromPoint(cxOf(b), cyOf(b))
+            if (hit0 && (hit0 === b.el || b.el.contains(hit0))) { owner = b; pt = [cxOf(b), cyOf(b)]; break }
+          }
+          if (!owner) continue
+          // 2) fascia nascosta: al punto si vede il testo?
+          hidden.push([owner.el, owner.el.style.visibility])
+          owner.el.style.visibility = 'hidden'
+          const hit = document.elementFromPoint(pt[0], pt[1])
+          owner.el.style.visibility = hidden[hidden.length - 1][1]
+          hidden.pop()
+          if (!hit || !(hit === el || el.contains(hit) || hit.contains(el))) continue
+          // 3) la fascia copre? (sfondo con alpha, o sfocatura)
+          const csHead = getComputedStyle(owner.el)
+          const copre = alphaOf(csHead.backgroundColor) > 0 || csHead.backdropFilter !== 'none'
+          if (!copre) overlapped.push({ ...describe(el), head: owner.el.dataset.colHead })
+        }
+      } finally {
+        for (const [el, v] of hidden) el.style.visibility = v
+        if (sc && sc.scrollHeight > sc.clientHeight) sc.scrollTop = savedScroll
+      }
     }
   }
 
