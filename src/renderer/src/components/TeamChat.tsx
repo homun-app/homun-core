@@ -336,7 +336,8 @@ export function TeamChat() {
           La riga interna è larga quanto la testata (w-full): la testata è un
           flex in RIGA e una figlia è larga quanto il suo contenuto — senza, lo
           spazio che centra la pillola non c'è e la pillola resta a sinistra */}
-      <div data-col-head="chat" className="drag-region absolute inset-x-0 top-0 z-10 flex h-col-head">
+      {/* R2 (b20-ritocchi): col-head-velo — il corpo della squadra scorre SOTTO la fascia */}
+      <div data-col-head="chat" className="col-head-velo drag-region absolute inset-x-0 top-0 z-10 flex h-col-head">
         <div className="flex h-full w-full min-w-0 items-center gap-3 px-4">
           <span className="w-8 shrink-0" aria-hidden="true" />
           <span className="flex min-w-0 flex-1 justify-center">

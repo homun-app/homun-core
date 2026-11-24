@@ -579,7 +579,11 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
           trascinamento). G2: a pannello APERTO il bottone PanelRight sparisce
           — resta la ✕ del pannello — ma il posto w-9 resta occupato, così la
           pillola al centro non salta di posizione */}
-      <div data-col-head="chat" className="drag-region absolute inset-x-0 top-0 z-10 flex h-col-head">
+      {/* R2 (b20-ritocchi): la fascia porta il VELO (styles.css: .col-head-velo)
+          — sfondo della colonna velato, sfocatura e sfumatura sul bordo basso.
+          Il transcript le scorre SOTTO, come le barre di macOS; il primo
+          messaggio, a scorrimento zero, resta sotto la fascia (pt-16 più giù) */}
+      <div data-col-head="chat" className="col-head-velo drag-region absolute inset-x-0 top-0 z-10 flex h-col-head">
         {/* w-full: la testata è una riga flex, e una sua figlia è larga quanto
             il contenuto — senza, lo flex-1 che centra la pillola non aveva
             spazio e la pillola restava a sinistra (difetto di DS3, visto dal

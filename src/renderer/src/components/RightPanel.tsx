@@ -92,10 +92,17 @@ function PanelClose({ onClose }: { onClose(): void }) {
   )
 }
 
-/** La fascia alta del pannello: trascinamento della finestra + la ✕ (Q3). Fase design (DS3): alta 52 come la testata di OGNI colonna (h-col-head), la ✕ in un bottone da 32. */
+/** La fascia alta del pannello: trascinamento della finestra + la ✕ (Q3). Fase design (DS3): alta 52 come la testata di OGNI colonna (h-col-head), la ✕ in un bottone da 32.
+ * R2 (b20-ritocchi): il velo — nel pannello dei MEMBRI il corpo scorre dalla
+ * cima e passa sotto la fascia; il fondo del pannello è CARD, non la colonna
+ * principale: lo dichiara a .col-head-velo con la sua variabile. */
 function PanelTopBand({ onClose }: { onClose(): void }) {
   return (
-    <div data-col-head="pannello" className="drag-region absolute inset-x-0 top-0 z-10 flex h-col-head">
+    <div
+      data-col-head="pannello"
+      className="col-head-velo drag-region absolute inset-x-0 top-0 z-10 flex h-col-head"
+      style={{ '--col-head-velo-bg': 'var(--card)' } as React.CSSProperties}
+    >
       {/* w-full: la fascia è un flex in RIGA e una figlia è larga quanto il suo
           contenuto — senza, justify-end non ha spazio e la ✕ resta a SINISTRA
           invece che sul bordo destro del pannello (lo guarda

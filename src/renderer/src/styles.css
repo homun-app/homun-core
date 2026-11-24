@@ -165,6 +165,25 @@
 .no-drag {
   -webkit-app-region: no-drag;
 }
+
+/*
+ * R2 (b20-ritocchi): il VELO della fascia dei 52 SOSPESA sul contenuto che
+ * scorre (chat, squadra, pannello destro). Prima la fascia non aveva sfondo:
+ * il testo ci scorreva sotto e restava leggibile in cima alla colonna, e la
+ * pillola del bot copriva l'intestazione di una tabella. Lo stato dell'arte
+ * delle app macOS: il contenuto passa SOTTO una fascia che lo separa — qui
+ * con lo sfondo della colonna VELATO (82%) e la sfocatura di ciò che passa;
+ * la sfumatura sul bordo bassa la fa un'ombra morbida del COLORE STESSO
+ * della colonna (non un filetto). Chi sta su un fondo diverso dalla colonna
+ * principale lo dichiara con --col-head-velo-bg (il pannello destro:
+ * var(--card)).
+ */
+.col-head-velo {
+  background: color-mix(in oklab, var(--col-head-velo-bg, var(--background)) 82%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 12px 16px -12px color-mix(in oklab, var(--col-head-velo-bg, var(--background)) 92%, transparent);
+}
 /*
  * Le fasce di trascinamento IGNORANO lo z-index (Electron): un dialogo o un
  * menu disegnato sopra una fascia perde i clic che ci cadono sopra — la ✕

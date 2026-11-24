@@ -145,3 +145,55 @@ describe('DS3: ogni fascia di trascinamento è una testata (e ogni testata è un
     expect(bad).toEqual([])
   })
 })
+
+describe('R2 (b20-ritocchi): la fascia dei 52 sospesa sul contenuto che scorre', () => {
+  const elements = (): Array<{ file: string; cls: string | null; head: string | null; ariaHidden: boolean }> => {
+    const out: Array<{ file: string; cls: string | null; head: string | null; ariaHidden: boolean }> = []
+    for (const file of sourceFiles(SRC)) {
+      const visit = (node: unknown): void => {
+        if (!node || typeof node !== 'object') return
+        const n = node as Node
+        if (n.type === 'JSXOpeningElement') out.push({ file: rel(file), cls: classTextOf(n), head: attrText(n, 'data-col-head'), ariaHidden: ((n.attributes ?? []) as Node[]).some((a) => a.type === 'JSXAttribute' && (a.name as Node | undefined)?.name === 'aria-hidden') })
+        for (const key of Object.keys(n)) {
+          if (key === 'loc' || key === 'start' || key === 'end' || key === 'extra' || key === 'errors' || key === 'tokens' || key === 'comments') continue
+          const child = n[key]
+          if (Array.isArray(child)) for (const c of child) visit(c)
+          else if (child && typeof child === 'object') visit(child)
+        }
+      }
+      visit(parse(readFileSync(file, 'utf8'), { sourceType: 'module', plugins: ['typescript', 'jsx'] }).program)
+    }
+    return out
+  }
+  const has = (cls: string | null, token: string): boolean => (cls ?? '').split(/\s+/).includes(token)
+
+  it('le tre colonne con la testata SOSPESA (assoluta, in cima) hanno il velo: chat, squadra, pannello destro', () => {
+    // la guida non ha contenuto che scorre sotto la fascia (le sue sono strisce
+    // aria-hidden di solo trascinamento, la scena è ferma): le colonne sospese
+    // sono le testate posizionate in cima con dentro dei controlli
+    const sospese = elements().filter((e) => e.head !== null && has(e.cls, 'absolute') && has(e.cls, 'top-0') && !e.ariaHidden)
+    expect(sospese.map((e) => `${e.file} [${e.head}]`).sort()).toEqual([
+      'components/Chat.tsx [chat]',
+      'components/RightPanel.tsx [pannello]',
+      'components/TeamChat.tsx [chat]'
+    ])
+    for (const e of sospese) expect(has(e.cls, 'col-head-velo'), `${e.file}: la fascia sospesa porta il velo`).toBe(true)
+  })
+
+  it('il velo è una regola VERA di styles.css: sfondo velato della colonna, sfocatura di ciò che scorre sotto, sfumatura sul bordo basso', async () => {
+    const { compileRenderer } = await import('./tailwind-compile')
+    const css = await compileRenderer(['col-head-velo'])
+    // la regola intera (dentro può esserci un @supports di color-mix: si prende
+    // fino alla regola successiva, non fino al primo «}»)
+    const start = css.indexOf('.col-head-velo')
+    expect(start, '.col-head-velo ha la sua regola').toBeGreaterThanOrEqual(0)
+    const next = css.indexOf('\n.', start + 1)
+    const rule = css.slice(start, next === -1 ? undefined : next)
+    // lo sfondo della colonna (velato: il testo ci passa sotto e non si legge)
+    expect(rule).toMatch(/background:\s*color-mix\(in oklab,\s*var\(--col-head-velo-bg,\s*var\(--background\)\)/)
+    // la sfocatura di ciò che scorre sotto la fascia
+    expect(rule).toMatch(/backdrop-filter:\s*blur\(/)
+    // la sfumatura sul bordo basso: il velo finisce, non si chiude con un filetto
+    expect(rule).toMatch(/box-shadow:[^;]*var\(--col-head-velo-bg,\s*var\(--background\)\)/)
+  })
+})
