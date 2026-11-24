@@ -354,14 +354,14 @@ const activeCardTab = (cdp) => pageEval(cdp, `
 `)
 
 // ---- le misure dello scorrimento ----
-/** Il corpo di una vista: quello dell'invaso (data-plugin-shell); sulla base il primo overflow-y-auto, oppure l'involucro `min-h-0 flex-1` delle viste che non avevano NESSUNO scorrimento. */
-const BODY_OF = (rootSel) => `(() => { const r = document.querySelector(${JSON.stringify(rootSel)}); return r ? (r.querySelector('[data-plugin-shell="body"]') ?? r.querySelector('.overflow-y-auto.scroll-thin') ?? r.querySelector('.min-h-0.flex-1')) : null })()`
+/** Il corpo di una vista: quello dell'invaso — data-plugin-shell (fase plugin-pulita) o data-page-shell (fase design, PageShell ha preso il posto di PluginShell); sulla base il primo overflow-y-auto, oppure l'involucro `min-h-0 flex-1` delle viste che non avevano NESSUNO scorrimento. */
+const BODY_OF = (rootSel) => `(() => { const r = document.querySelector(${JSON.stringify(rootSel)}); return r ? (r.querySelector('[data-plugin-shell="body"]') ?? r.querySelector('[data-page-shell="scroll"]') ?? r.querySelector('.overflow-y-auto.scroll-thin') ?? r.querySelector('.min-h-0.flex-1')) : null })()`
 /** L'espressione (nel renderer) della misura del corpo di una vista. */
 const MEASURE_JS = (rootSel) => `(() => {
   const body = ${BODY_OF(rootSel)}
   if (!body) return null
   const r = body.getBoundingClientRect()
-  return { scrollHeight: body.scrollHeight, clientHeight: body.clientHeight, scrollTop: body.scrollTop, hasShell: !!body.closest('[data-plugin-shell="root"]'), top: Math.round(r.top), bottom: Math.round(r.bottom), innerHeight: window.innerHeight, innerWidth: window.innerWidth }
+  return { scrollHeight: body.scrollHeight, clientHeight: body.clientHeight, scrollTop: body.scrollTop, hasShell: !!body.closest('[data-plugin-shell="root"], [data-page-shell="root"]'), top: Math.round(r.top), bottom: Math.round(r.bottom), innerHeight: window.innerHeight, innerWidth: window.innerWidth }
 })()`
 const measure = (cdp, rootSel) => pageEval(cdp, `return ${MEASURE_JS(rootSel)}`)
 const rectOf = (cdp, rootSel, elExpr) => pageEval(cdp, `

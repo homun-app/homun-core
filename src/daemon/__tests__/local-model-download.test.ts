@@ -114,7 +114,12 @@ beforeEach(async () => {
   seenRanges.length = 0
   events.length = 0
   lm.setLocalModelCatalogForTest(ENTRY)
-  lm.setLocalModelEligibilityFactsForTest(null)
+  // fase design (verifica della suite): l'idoneità della macchina VERACE anche qui —
+  // con null questi test RPC restavano verdi o rossi secondo i GB liberi del momento
+  // (il demone nega il download del modello integrato sotto i 2 GB liberi, e questo
+  // Mac oggi ne ha 1,7). I test che provano i rifiuti d'idoneità fissano i FATTI
+  // loro, sotto, e non passano da qui.
+  lm.setLocalModelEligibilityFactsForTest({ arch: 'arm64', ramGb: 24, freeDiskBytes: 500 * 1024 ** 3 })
   lm.resetLocalModelDownloadForTest()
   // LD1: niente listener residui dai test precedenti (ogni test registra il suo)
   lm.resetLocalModelReadyForTest()
