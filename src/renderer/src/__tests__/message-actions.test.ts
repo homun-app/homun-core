@@ -51,13 +51,12 @@ function renderChat(entries: Array<Record<string, unknown>>): string {
 }
 
 /** il bottone delle azioni col nome accessibile cercato (title/aria-label) */
+// Fase design (DS4): l'azione è il pezzo del sistema (Button, solo icona, da 32) — non più un <button>
+// scritto a mano con size-7: si riconosce dal nome accessibile, fra i <button> e i <Button>
+const isButton = (type: unknown): boolean => type === 'button' || (typeof type === 'function' && (type as { name?: string }).name === 'Button')
 const actionButton = (label: string) =>
   capture.els.find(
-    (e) =>
-      e.type === 'button' &&
-      typeof e.props.className === 'string' &&
-      e.props.className.includes('size-7') &&
-      (e.props['aria-label'] === label || e.props.title === label)
+    (e) => isButton(e.type) && (e.props['aria-label'] === label || e.props.title === label)
   ) ?? null
 
 describe('U1: le azioni sotto i messaggi — via «Cita» e «Passaggi», «Copia» resta', () => {

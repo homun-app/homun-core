@@ -507,7 +507,7 @@ msgstr "{name}, sta scrivendo"
 msgid "{name}? Mi piace. E che faccia ho?"
 msgstr "{name}? Mi piace. E che faccia ho?"
 
-#: src/renderer/src/components/Chat.tsx
+#: src/renderer/src/components/ui/notice.tsx
 msgid "{repeat, plural, one {· 1 volta} other {· # volte}}"
 msgstr "{repeat, plural, one {· 1 volta} other {· # volte}}"
 
@@ -601,8 +601,8 @@ msgid "⚠ dati letti da una fonte esterna"
 msgstr "⚠ dati letti da una fonte esterna"
 
 #: src/renderer/src/components/Chat.tsx
-msgid "⚠ errore"
-msgstr "⚠ errore"
+#~ msgid "⚠ errore"
+#~ msgstr "⚠ errore"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "⚠ esterno"
@@ -617,12 +617,12 @@ msgid "⚠ Richiesta nata dopo contenuti letti dal web: controlla che l'origine 
 msgstr "⚠ Richiesta nata dopo contenuti letti dal web: controlla che l'origine sia davvero quella del sito."
 
 #: src/renderer/src/components/RuleProposalCard.tsx
-msgid "⚡ Regola proposta — continuo da solo quando…"
-msgstr "⚡ Regola proposta — continuo da solo quando…"
+#~ msgid "⚡ Regola proposta — continuo da solo quando…"
+#~ msgstr "⚡ Regola proposta — continuo da solo quando…"
 
 #: src/renderer/src/components/RuleProposalCard.tsx
-msgid "⛔ Regola proposta — mi fermo e chiedo sempre quando…"
-msgstr "⛔ Regola proposta — mi fermo e chiedo sempre quando…"
+#~ msgid "⛔ Regola proposta — mi fermo e chiedo sempre quando…"
+#~ msgstr "⛔ Regola proposta — mi fermo e chiedo sempre quando…"
 
 #. placeholder {0}: message.name
 #: src/renderer/src/components/ConnectorCards13.tsx
@@ -667,8 +667,8 @@ msgid "✨ Suggerisci dal transcript"
 msgstr "✨ Suggerisci dal transcript"
 
 #: src/renderer/src/components/MemoryPanel.tsx
-msgid "🗂 Memoria di questo bot"
-msgstr "🗂 Memoria di questo bot"
+#~ msgid "🗂 Memoria di questo bot"
+#~ msgstr "🗂 Memoria di questo bot"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "30 giorni"
@@ -1907,6 +1907,10 @@ msgstr "Chiudi"
 msgid "Chiudi i membri di {0}"
 msgstr "Chiudi i membri di {0}"
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Chiudi il dettaglio"
+msgstr "Chiudi il dettaglio"
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Chiudi il pannello"
 msgstr "Chiudi il pannello"
@@ -1914,6 +1918,10 @@ msgstr "Chiudi il pannello"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Chiudi la barra (⌘\\)"
 msgstr "Chiudi la barra (⌘\\)"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Chiudi la memoria"
+msgstr "Chiudi la memoria"
 
 #: src/renderer/src/App.tsx
 msgid "Ci sta mettendo più del solito"
@@ -3149,6 +3157,7 @@ msgstr "Era già acceso"
 msgid "Era già presente"
 msgstr "Era già presente"
 
+#: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/DraftCard.tsx
 msgid "errore"
@@ -5214,6 +5223,10 @@ msgstr "Membri"
 msgid "Memoria"
 msgstr "Memoria"
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Memoria di questo bot"
+msgstr "Memoria di questo bot"
+
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Meno"
 msgstr "Meno"
@@ -6919,6 +6932,14 @@ msgstr "registro MCP"
 #: src/renderer/src/components/RuleProposalCard.tsx
 msgid "Regola aggiunta"
 msgstr "Regola aggiunta"
+
+#: src/renderer/src/components/RuleProposalCard.tsx
+msgid "Regola proposta — continuo da solo quando…"
+msgstr "Regola proposta — continuo da solo quando…"
+
+#: src/renderer/src/components/RuleProposalCard.tsx
+msgid "Regola proposta — mi fermo e chiedo sempre quando…"
+msgstr "Regola proposta — mi fermo e chiedo sempre quando…"
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Regole per strumento"

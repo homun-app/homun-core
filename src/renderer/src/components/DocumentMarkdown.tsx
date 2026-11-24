@@ -11,13 +11,158 @@
 // nella Libreria, #ancora scorre, http(s) va al browser esterno SENZA
 // navigare, /workspace e /box restano percorsi, tutto il resto è testo: un
 // link scritto in un documento non può ricaricare o svuotare la finestra.
-import { useEffect, useMemo, useRef, useState } from 'react'
+//
+// Fase design (DS4, Chat): UN SOLO MARKDOWN. Prima qui c'erano due renderer
+// con due insiemi di regole: BotMarkdown in Chat.tsx, nudo (i titoli e le
+// tabelle prendevano quelle del browser, e con il reset di Tailwind un titolo
+// usciva della stessa taglia del testo), e questo per i documenti. Le regole
+// di DS1 stanno adesso in UN posto, PROSE qui sotto, e ci passa ogni testo
+// reso: le bolle della chat, i messaggi della squadra, i pannelli di task e
+// sottoagente (BotMarkdown) e i documenti (DocumentBody). Il documento APERTO
+// (typography="page") mette sopra le sue regole .page-prose di styles.css —
+// i titoli col carattere dei documenti — che, non essendo a livelli, vincono
+// sulle utility: la pagina riusa lo stesso albero con la sua tipografia.
+import { createElement, createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { FileCog } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { renderVegaLiteInRenderer } from '../vega-render'
 import { pageHeadings } from '../lib/page-view'
+import { mapText } from '../lib/mentions'
+import { cn } from '../lib/utils'
+
+/*
+ * LE REGOLE DEL TESTO RESO (DS1). La taglia la decide il contenitore — la
+ * radice è text-reading (16/26: i messaggi della chat e il testo dei
+ * documenti) — e la ereditano paragrafi, elenchi e citazioni. Una taglia
+ * diversa si dichiara dove serve: i titoli (text-title, 20/28), il codice
+ * (text-small), le celle di una tabella (text-body) e le sue intestazioni
+ * (text-caption, grigie, in tono normale: nessun maiuscoletto).
+ * A ogni elemento react-markdown passa anche `node` (il suo nodo dell'albero
+ * del markdown): NON va sul DOM, si toglie prima di spargere le altre prop.
+ */
+
+/**
+ * «Sono dentro un <pre>». Un <code> è di blocco quando sta in un <pre> e
+ * inline altrimenti — lo dice il SUO POSTO, non una classe `language-*` (un
+ * blocco senza lingua dichiarata è comunque un blocco). Il <pre> lo scrive
+ * nel contesto e il <code> figlio lo legge: è l'unico modo affidabile, perché
+ * a un componente react-markdown passa il suo nodo, non il padre.
+ */
+const DentroPre = createContext(false)
+
+/** Le classi dei titoli: le stesse anche al documento che dà loro un id. */
+const TITOLO = {
+  h1: 'mt-2 text-title font-semibold first:mt-0',
+  h2: 'mt-2 text-title font-semibold first:mt-0',
+  h3: 'mt-1 font-semibold first:mt-0'
+} as const
+
+/** PROSE: le regole di DS1 per ogni elemento del markdown. L'unico posto. */
+const PROSE: Components = {
+  h1: ({ node: _n, ...p }) => <h1 {...p} className={TITOLO.h1} />,
+  h2: ({ node: _n, ...p }) => <h2 {...p} className={TITOLO.h2} />,
+  h3: ({ node: _n, ...p }) => <h3 {...p} className={TITOLO.h3} />,
+  // da h4 in giù cambia solo il peso: restano della misura del testo
+  h4: ({ node: _n, ...p }) => <h4 {...p} className="font-semibold" />,
+  h5: ({ node: _n, ...p }) => <h5 {...p} className="font-semibold" />,
+  h6: ({ node: _n, ...p }) => <h6 {...p} className="font-semibold" />,
+  // un link si riconosce dalla sottolineatura: il colore resta quello del testo
+  a: ({ node: _n, ...p }) => <a {...p} className="underline underline-offset-2" />,
+  ul: ({ node: _n, ...p }) => <ul {...p} className="list-disc pl-6" />,
+  ol: ({ node: _n, ...p }) => <ol {...p} className="list-decimal pl-6" />,
+  // la voce resta una voce di elenco: il pallino vive sul <li>, e su un
+  // elemento flex il marcatore sparisce. I blocchi dentro di lei (un elenco
+  // «largo»: due paragrafi per voce) stanno in un involucro che li distanzia
+  li: ({ node: _n, children, ...p }) => (
+    <li {...p} className="my-0.5">
+      <div className="flex flex-col gap-2">{children}</div>
+    </li>
+  ),
+  blockquote: ({ node: _n, ...p }) => <blockquote {...p} className="border-l-2 border-border pl-3" />,
+  // i pesi sono tre: il grassetto del browser (700) non esiste nella scala
+  strong: ({ node: _n, ...p }) => <strong {...p} className="font-semibold" />,
+  code: ({ node: _n, className, children, ...p }) => {
+    const blocco = useContext(DentroPre)
+    return (
+      // nel blocco il fondo, il raggio e il respiro sono del <pre>: dentro, il codice è nudo
+      <code {...p} className={cn('font-mono text-small', !blocco && 'rounded-control bg-muted px-1.5 py-0.5', className)}>
+        {children}
+      </code>
+    )
+  },
+  // il blocco di codice scorre DENTRO se stesso: una riga lunga non allarga mai la bolla
+  pre: ({ node: _n, children, ...p }) => (
+    <DentroPre.Provider value={true}>
+      <pre {...p} className="scroll-thin overflow-x-auto rounded-control bg-muted p-3 font-mono text-small">{children}</pre>
+    </DentroPre.Provider>
+  ),
+  // la tabella sta in un contenitore che scorre in orizzontale: se è più
+  // larga della colonna scorre lei, mai la pagina
+  table: ({ node: _n, children, ...p }) => (
+    <div className="w-full scroll-thin overflow-x-auto">
+      <table {...p} className="w-full border-collapse text-left">{children}</table>
+    </div>
+  ),
+  // intestazioni: taglia didascalia, grigie, in tono normale, nessuno sfondo;
+  // filetti fra le righe come nelle tabelle dell'interfaccia. La prima
+  // colonna parte in linea col testo (niente respiro a sinistra)
+  th: ({ node: _n, ...p }) => (
+    <th {...p} className="border-b border-border/50 px-3 py-2 text-left align-middle font-normal whitespace-nowrap text-caption text-muted-foreground first:pl-0" />
+  ),
+  td: ({ node: _n, ...p }) => (
+    <td {...p} className="border-b border-border/50 px-3 py-2 text-left align-top text-body first:pl-0" />
+  ),
+  img: ({ node: _n, ...p }) => <img {...p} className="max-w-full rounded-surface" />,
+  hr: ({ node: _n, ...p }) => <hr {...p} className="border-t border-border" />
+}
+
+/** Le regole di DS1 più ciò che chi chiama aggiunge o sostituisce (i link di un documento, gli id dei titoli). */
+const proseWith = (extra?: Components): Components => ({ ...PROSE, ...extra })
+
+/** Gli elementi del markdown che portano TESTO (dentro possono stare le @menzioni della squadra). */
+const TAG_DI_TESTO = ['p', 'li', 'td', 'th', 'strong', 'em', 'del', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const
+
+/**
+ * Le regole del markdown per gli elementi di testo, coi pezzi di TESTO
+ * passati da `fn` PRIMA di essere resi: la squadra ci cerca le @menzioni
+ * (lib/mentions.ts: mapText cambia il contenuto di un albero, mai la forma).
+ * La forma resta quella di PROSE — per il tag che non ha una regola sua (p,
+ * em, del) la base è il tag nudo. Si danno a `components` di BotMarkdown, e
+ * sostituiscono la regola di PROSE per quel tag con la stessa, col testo
+ * passato da `fn`.
+ */
+export function proseWithText(fn: (text: string) => ReactNode): Components {
+  return Object.fromEntries(TAG_DI_TESTO.map((tag) => {
+    const base = (PROSE as Record<string, unknown>)[tag] ?? tag
+    return [tag, ({ node: _n, children, ...rest }: { node?: unknown; children?: ReactNode } & Record<string, unknown>) =>
+      createElement(base as never, { ...rest, children: mapText(children, fn) } as never)]
+  })) as Components
+}
+
+/**
+ * Il markdown di un testo di bot — UN componente per tutte le risposte (B1,
+ * fase b20-bug: titoli, grassetto, elenchi, codice e tabelle si vedono
+ * uguali ovunque), con le regole di DS1. `components` aggiunge o sostituisce
+ * un elemento (il documento: i suoi link, gli id dei titoli).
+ * La radice è una colonna flex con gap-3: i blocchi stanno a 12 px l'uno
+ * dall'altro. I margini dei paragrafi li azzera il reset di Tailwind: senza
+ * questo, due paragrafi consecutivi si leggevano come righe consecutive.
+ * min-w-0: dentro una bolla (una riga flex) il contenuto lungo non ne impone
+ * la larghezza — cedono la tabella e il blocco di codice, che scorrono dentro.
+ */
+export function BotMarkdown({ text, components, className }: {
+  text: string
+  components?: Components
+  className?: string
+}): React.ReactNode {
+  return (
+    <div className={cn('flex min-w-0 flex-col gap-3 text-reading', className)}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={proseWith(components)}>{text}</ReactMarkdown>
+    </div>
+  )
+}
 
 /** base64 → data URL per l'<img> (mai SVG nel DOM). */
 export const svgDataUrl = (svg: string): string =>
@@ -120,11 +265,11 @@ function DocLink({ href, children, onOpenDoc, docExists }: {
     return (
       <button
         type="button" data-testid="doc-path"
-        className="inline-flex items-center gap-1 rounded-md bg-muted/70 px-1.5 py-0.5 font-mono text-[0.85em] text-muted-foreground hover:text-foreground"
+        className="inline-flex items-center gap-1 rounded-control bg-muted/70 px-1.5 py-0.5 font-mono text-small text-muted-foreground hover:text-foreground"
         title={t`percorso del computer dei bot — clic per copiare`}
         onClick={() => { void navigator.clipboard?.writeText(target.path).catch(() => undefined) }}
       >
-        <FileCog size={11} aria-hidden />
+        <FileCog className="size-4" aria-hidden />
         {target.path}
       </button>
     )
@@ -173,6 +318,10 @@ export function docPartsOf(markdown: string): DocPart[] {
  * StrictMode non consuma due volte). D6: il componente `a` c'è SEMPRE, anche
  * senza id (prima `components` si passava solo con gli id e i link restavano
  * <a> nudi che navigavano).
+ * Le regole sono quelle di PROSE, le stesse dei messaggi di bot. Il documento
+ * APERTO (typography="page", la classe .page-prose) ci mette sopra le sue
+ * differenze — i titoli col carattere dei documenti — che, non essendo a
+ * livelli, vincono sulle utility.
  */
 function MarkdownPart({ text, ids, onOpenDoc, docExists }: {
   text: string
@@ -182,38 +331,33 @@ function MarkdownPart({ text, ids, onOpenDoc, docExists }: {
 }) {
   const queueRef = useRef<string[]>(ids ?? [])
   queueRef.current = ids ?? []
-  const components = useMemo(() => ({
+  const components = useMemo(() => proseWith({
     ...(ids ? {
-      h2: ({ children }: { children?: React.ReactNode }) => (
-        <h2 id={queueRef.current.shift() ?? undefined}>{children}</h2>
-      ),
-      h3: ({ children }: { children?: React.ReactNode }) => (
-        <h3 id={queueRef.current.shift() ?? undefined}>{children}</h3>
-      )
+      h2: ({ node: _n, ...p }) => <h2 {...p} id={queueRef.current.shift() ?? undefined} className={TITOLO.h2} />,
+      h3: ({ node: _n, ...p }) => <h3 {...p} id={queueRef.current.shift() ?? undefined} className={TITOLO.h3} />
     } : {}),
     a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
       <DocLink href={href} onOpenDoc={onOpenDoc} docExists={docExists}>{children}</DocLink>
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [onOpenDoc, docExists])
-  return (
-    <div className="max-w-none">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown>
-    </div>
-  )
+  return <BotMarkdown text={text} components={components} />
 }
 
 /**
  * Il corpo del documento. `headingIds`: quando la pagina lo usa, i titoli
- * ##/### prendono gli id dell'indice (pageHeadings) in ordine di documento —
+ * ##/### prendono l'id dell'indice (pageHeadings) in ordine di documento —
  * così il clic sull'indice scorre alla sezione. D6: `onOpenDoc`/`docExists`
  * cablano i link lib_… all'apertura del documento (chi renderizza li passa
  * dallo store; senza, i link doc restano bottoni che non aprono nulla).
+ * Fase design (DS4): è testo di lettura come i messaggi della chat, con le
+ * stesse regole (PROSE). I blocchi — le parti Markdown e i grafici — stanno a
+ * 12 px l'uno dall'altro; a pagina lo fa .page-prose (styles.css).
  */
 export function DocumentBody({ markdown, headingIds, typography = 'compact', onOpenDoc, docExists }: {
   markdown: string
   headingIds?: string[]
-  /** compact = la vista della Libreria di oggi; page = tipografia da documento */
+  /** compact = il documento nella Libreria; page = il documento aperto (i titoli col carattere dei documenti) */
   typography?: 'compact' | 'page'
   /** D6: apre il documento lib_… (stesso percorso del clic su una card) */
   onOpenDoc?: (id: string) => void
@@ -233,7 +377,7 @@ export function DocumentBody({ markdown, headingIds, typography = 'compact', onO
     })
   }, [markdown, headingIds])
   return (
-    <div className={typography === 'page' ? 'page-prose' : 'space-y-3 text-sm leading-relaxed text-foreground'}>
+    <div className={typography === 'page' ? 'page-prose' : 'flex flex-col gap-3 text-foreground'}>
       {parts.map(({ part: p, ids }, i) =>
         p.kind === 'md'
           ? <MarkdownPart key={i} text={p.text} ids={ids} onOpenDoc={onOpenDoc} docExists={docExists} />
@@ -266,16 +410,17 @@ export function InlineChart({ lang, source }: { lang: 'vega-lite' | 'mermaid'; s
   }, [lang, source])
   if (failed) {
     return (
-      <figure className="rounded-xl border border-border bg-muted/60 px-3 py-2">
-        <figcaption className="mb-1.5 text-xs text-destructive/90">
+      <figure className="rounded-surface border border-border bg-muted/60 p-3">
+        <figcaption className="mb-1.5 text-small text-destructive">
           <Trans>Il blocco {lang} non si può rendere: resta il codice.</Trans>
         </figcaption>
-        <pre className="overflow-x-auto text-xs text-muted-foreground">{source}</pre>
+        {/* il codice che resta è un blocco di codice: le stesse regole di PROSE */}
+        <pre className="scroll-thin overflow-x-auto rounded-control bg-card p-3 font-mono text-small text-muted-foreground">{source}</pre>
       </figure>
     )
   }
-  if (!url) return <p className="text-xs text-muted-foreground"><Trans>…grafico…</Trans></p>
-  return <img className="max-w-full rounded-xl border border-border bg-white" src={url} alt={t`grafico ${lang}`} />
+  if (!url) return <p className="text-small text-muted-foreground"><Trans>…grafico…</Trans></p>
+  return <img className="max-w-full rounded-surface border border-border bg-white" src={url} alt={t`grafico ${lang}`} />
 }
 
 /** Gli id dei titoli ##/### di un documento, nell'ordine (per le ancore). */

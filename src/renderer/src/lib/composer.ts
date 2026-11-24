@@ -1,20 +1,26 @@
-// M1 (fase beta12-correzioni): il raggio del compositore — a UNA riga la
-// pillola di oggi, da due righe in su gli angoli da 24 px. La decisione non
-// conta gli a capo del testo ma LA MISURA del textarea (scrollHeight contro
-// l'altezza della riga unica): così il testo lungo senza a capo che va su
-// più righe conta come oggi conta lo \n esplicito. Puro, testato; la misura
-// la fa il componente col suo ref, le classi le decide composerFormRadius.
+// M1 (fase beta12-correzioni): il compositore NON si deforma con un testo
+// lungo. La decisione non conta gli a capo del testo ma LA MISURA del
+// textarea (scrollHeight contro l'altezza della riga unica): così il testo
+// lungo senza a capo che va su più righe conta come oggi conta lo \n
+// esplicito. Puro, testato; la misura la fa il componente col suo ref.
+//
+// Fase design (DS4): qui restano la MISURA e il LAYOUT a più righe. Il raggio
+// dinamico di M1 (composerFormRadius: pillola a una riga, angoli da 24 px da
+// due in su) non c'è più, e non è una perdita: i raggi di DS1 sono tre, e il
+// campo di scrittura è una superficie (rounded-surface) a una riga come a
+// dieci — lo scrivono i due form, e basta. Quel che M1 voleva — che la barra
+// del textarea non toccasse un angolo troppo tondo — lo garantisce il raggio
+// piccolo (14) meglio dei 24, a ogni altezza.
 
-/** L'altezza della riga unica del composer della chat (min-h-9: py-2 + leading-5). */
+/** L'altezza della riga unica del composer della chat: min-h-control (36). */
 export const CHAT_COMPOSER_SINGLE_ROW_PX = 36
 
-/** L'altezza della riga unica del composer della squadra (min-h-11). */
-export const TEAM_COMPOSER_SINGLE_ROW_PX = 44
-
-/** Il raggio del form: pillola a una riga, angoli da 24 px da due in su. */
-export function composerFormRadius(multiRow: boolean): string {
-  return multiRow ? 'rounded-3xl' : 'rounded-full'
-}
+/**
+ * L'altezza della riga unica del composer della squadra. Era 44 (min-h-11):
+ * con i token di DS1 il campo è un campo come gli altri, 36 px (min-h-control
+ * attorno a una riga di text-body), come quello della chat.
+ */
+export const TEAM_COMPOSER_SINGLE_ROW_PX = 36
 
 /**
  * Il testo va su più righe? La misura VERA (scrollHeight del textarea contro

@@ -11,6 +11,7 @@ import { Trans } from '@lingui/react/macro'
 import { parseSubagentBrief } from '../../../shared/agent-message'
 import type { TranscriptEntry } from '../../../shared/types'
 import { CardShell } from './DecidedRow'
+import { Button } from './ui/button'
 
 /** Le righe del compito mostrate prima di «mostra tutto». */
 const PREVIEW_LINES = 3
@@ -31,22 +32,21 @@ export function BriefCard({ entry }: { entry: TranscriptEntry }) {
   const lines = brief.body.split('\n')
   const shown = open ? lines : lines.slice(0, PREVIEW_LINES)
   return (
+    // DS4: l'anatomia di una card della chat — etichetta text-caption grigia,
+    // titolo text-body in peso medio, il testo text-small; «mostra tutto» è
+    // un'azione dentro la card: testo (ghost)
     <CardShell testid="card-compito-affidato">
-      <span className="text-xs font-medium text-muted-foreground">
+      <span className="text-caption text-muted-foreground">
         {parentName ? <Trans>Compito affidato da {parentName}</Trans> : <Trans>Compito affidato</Trans>}
       </span>
-      <p className="mt-1 text-sm font-semibold text-foreground">{brief.title}</p>
-      <p className="mt-1 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/85" data-testid="compito-righe">
+      <p className="mt-1.5 text-body font-medium text-foreground">{brief.title}</p>
+      <p className="mt-2 whitespace-pre-wrap text-small text-foreground" data-testid="compito-righe">
         {shown.join('\n')}
       </p>
       {lines.length > PREVIEW_LINES && (
-        <button
-          className="mt-1 text-[13px] text-muted-foreground underline-offset-2 transition hover:text-foreground hover:underline"
-          data-testid="compito-mostra-tutto"
-          onClick={() => setOpen((v) => !v)}
-        >
+        <Button variant="ghost" size="sm" className="-ml-3 mt-2" data-testid="compito-mostra-tutto" onClick={() => setOpen((v) => !v)}>
           {open ? <Trans>mostra meno</Trans> : <Trans>mostra tutto</Trans>}
-        </button>
+        </Button>
       )}
     </CardShell>
   )

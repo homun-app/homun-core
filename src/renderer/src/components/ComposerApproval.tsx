@@ -19,6 +19,7 @@ import { msg } from '@lingui/core/macro'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useStore } from '../store'
 import { visibleApprovalsRows, byUrgency } from '../lib/approvals-center'
+import { Button } from './ui/button'
 // R1: il pezzo unico della richiesta — lo stesso della card nei messaggi
 import { ApprovalRequestContent } from './ApprovalCard'
 import { CardShell } from './DecidedRow'
@@ -57,32 +58,38 @@ export function ComposerApproval({ botId }: { botId: string }): React.ReactNode 
     createdAt: r.when
   }
   return (
+    // DS4: larghezza e centro sono quelli della colonna del campo (la PageColumn
+    // del footer in cui sta); qui solo la distanza e il fuoco portato dal clic
     <div
-      className="mx-auto mb-2 max-w-3xl outline-none"
+      className="mb-2 outline-none"
       data-testid="composer-approval"
       tabIndex={-1}
     >
       {ordered.length > 1 && (
-        <div className="mb-1 flex items-center justify-center gap-1.5" data-testid="composer-approval-count">
-          <button
+        <div className="mb-1 flex items-center justify-center gap-2" data-testid="composer-approval-count">
+          <Button
+            variant="ghost"
+            size="sm"
+            icon
             data-testid="composer-approval-prev"
             aria-label={i18n.t(msg`Richiesta precedente`)}
-            className="grid size-6 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
             onClick={() => setIndex((i - 1 + ordered.length) % ordered.length)}
           >
             <ChevronLeft className="size-4" aria-hidden="true" />
-          </button>
-          <span className="text-xs text-muted-foreground" data-testid="composer-approval-step">
+          </Button>
+          <span className="text-caption text-muted-foreground" data-testid="composer-approval-step">
             {i18n.t(msg`${i + 1} di ${ordered.length}`)}
           </span>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
+            icon
             data-testid="composer-approval-next"
             aria-label={i18n.t(msg`Richiesta successiva`)}
-            className="grid size-6 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
             onClick={() => setIndex((i + 1) % ordered.length)}
           >
             <ChevronRight className="size-4" aria-hidden="true" />
-          </button>
+          </Button>
         </div>
       )}
       <CardShell tone="waiting" testid="composer-approval-card">

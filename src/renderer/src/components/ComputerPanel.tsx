@@ -5,8 +5,26 @@
 // modalità. Le schede tengono la loro SESSIONE quando si passa dall'una
 // all'altra (montate, nascoste col CSS): il terminale non si chiude cambiando
 // scheda — si chiude chiudendo il pannello.
+//
+// Fase design (DS4): DENTRO il pannello del bot la scheda è una colonna nel
+// modo di PageShell, senza però lo scorrimento di colonna del pannello:
+//   - la radice è un figlio diretto del pannello e riempie lo spazio che resta
+//     (min-h-0 flex-1). Prima aveva un'altezza minima di 420 px DENTRO lo
+//     scorrimento del pannello: in una finestra bassa (900×640) scorreva tutto
+//     il pannello, sotto la testa fissa;
+//   - la riga delle sotto-schede sta FERMA in testa, alla larghezza del
+//     contenuto del pannello (px-1.5 + PageColumn: gli stessi 6 + 24 px per
+//     lato della testa);
+//   - le aree che scorrono (file, attività) sono LARGHE QUANTO IL PANNELLO —
+//     la barra sta sul bordo — col margine DENTRO: lo schema del pannello
+//     (RightPanel), ripetuto qua.
+// Le sotto-schede sono un interruttore a segmenti (Button: la scelta
+// «secondary», le altre «ghost») e NON UnderlineTabs: hanno sopra, a due
+// passi, le schede a sottolineatura del pannello, e due righe uguali si
+// leggerebbero come una sola. Le righe di Docker sono Notice del sistema.
 import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
+import { TriangleAlert, X } from 'lucide-react'
 import { api, useStore, type ComputerTab } from '../store'
 // fase rilascio (A7): docker trovato e avviato?
 export const DOCKER_DESKTOP_URL = 'https://www.docker.com/products/docker-desktop/'
@@ -14,6 +32,10 @@ import { BotScreen } from './BotScreen'
 import { ComputerTerminal } from './ComputerTerminal'
 import { ComputerFiles } from './ComputerFiles'
 import { ComputerActivity } from './ComputerActivity'
+import { Button } from './ui/button'
+import { Notice } from './ui/notice'
+import { PageColumn } from './ui/page-shell'
+import { cn } from '../lib/utils'
 
 export function ComputerPanel({ agentId, onClose, embedded = false }: { agentId: string; onClose: () => void; embedded?: boolean }) {
   const { t } = useLingui()
@@ -88,71 +110,79 @@ export function ComputerPanel({ agentId, onClose, embedded = false }: { agentId:
     <section
       className={
         embedded
-          ? // fase 16b (S4): dentro il pannello del bot, la scheda Computer si
-            // allarga a 560 px e il contenuto riempie lo spazio
-            'flex h-full min-h-[420px] flex-col'
-          : 'mx-5 mt-3 flex max-h-[70vh] min-h-[420px] flex-col overflow-hidden rounded-xl border bg-card shadow-soft'
+          ? // fase 16b (S4): dentro il pannello del bot la scheda si allarga a
+            // 560 px e il contenuto riempie lo spazio che resta (DS4: è un
+            // figlio diretto del pannello, vedi in cima)
+            'flex min-h-0 flex-1 flex-col'
+          : // fuori dal pannello (oggi nessuno la rende così): una scheda che
+            // galleggia, alta dai 420 px ai sette decimi del contenitore
+            'mx-5 mt-3 flex max-h-7/10 min-h-105 flex-col overflow-hidden rounded-surface border bg-card shadow-soft'
       }
     >
       {/* fase 16b correzioni (P5): in modalità embedded (dentro il pannello del
           bot) NIENTE titolo «COMPUTER DEL BOT» e NIENTE ✕ — la chiusura è
-          quella tonda del pannello del bot; restano solo le schede interne */}
-      <header className={`flex items-center gap-3 px-1 py-2 ${embedded ? '' : 'justify-between'}`}>
-        <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
+          quella tonda del pannello del bot; restano solo le schede interne.
+          Fase design (DS4): la riga è ferma e sta alla larghezza del contenuto
+          del pannello (px-1.5 + PageColumn); alta 40, come la barra degli
+          strumenti delle pagine. Niente overflow-x-auto qui: l'anello del
+          fuoco dei bottoni sporge di 4 px e verrebbe tagliato (e le quattro
+          voci ci stanno sempre, a 560 px) */}
+      <header className={cn('flex shrink-0 items-center gap-3 border-b border-border/50 px-1.5', !embedded && 'justify-between py-2')}>
+        <PageColumn className="flex min-h-10 min-w-0 items-center gap-1">
           {!embedded && (
-            <p className="mr-2 hidden text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:inline">
+            <p className="mr-2 hidden text-caption font-medium text-muted-foreground sm:inline">
               <Trans>Computer del bot</Trans>
             </p>
           )}
           {tabs.filter((x) => x.on).map((x) => (
-            <button
-              key={x.id}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${tab === x.id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-              onClick={() => setPanel(true, x.id)}
-            >
+            // sotto-schede: un bottone ciascuna, col solo testo (le sonde le
+            // cercano per testo esatto fra i «button» del pannello)
+            <Button key={x.id} variant={tab === x.id ? 'secondary' : 'ghost'} size="sm" onClick={() => setPanel(true, x.id)}>
               {x.label}
-            </button>
+            </Button>
           ))}
-        </div>
+        </PageColumn>
         {!embedded && (
-          <button
-            className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground"
-            title={t`Chiudi`}
-            onClick={onClose}
-          >
-            ✕
-          </button>
+          <Button variant="ghost" size="sm" icon title={t`Chiudi`} onClick={onClose}>
+            <X className="size-4" />
+          </Button>
         )}
       </header>
 
       {/* fase rilascio (A7): Docker Desktop serve per schermo e terminale */}
       {dockerMode && !dockerOk && (
-        <div className="mx-2 mb-1 flex items-center justify-between gap-3 rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">
-          <p>
-            <Trans>Per il computer dei bot serve Docker Desktop: installalo e aprilo, poi Riprova.</Trans>{' '}
-            <a className="underline" href={DOCKER_DESKTOP_URL} target="_blank" rel="noreferrer">
-              <Trans>docker.com</Trans>
-            </a>
-          </p>
-          <button
-            className="shrink-0 rounded-full bg-foreground px-3 py-1 text-[11px] text-background disabled:opacity-40"
-            disabled={dockerBusy}
-            onClick={() => readDockerStatus(true)}
-          >
-            <Trans>Riprova</Trans>
-          </button>
+        <div className="shrink-0 border-b border-border/50 px-1.5 py-1">
+          <PageColumn>
+            <Notice
+              icon={<TriangleAlert className="size-4" aria-hidden="true" />}
+              action={(
+                <Button size="sm" disabled={dockerBusy} onClick={() => readDockerStatus(true)}>
+                  <Trans>Riprova</Trans>
+                </Button>
+              )}
+            >
+              <Trans>Per il computer dei bot serve Docker Desktop: installalo e aprilo, poi Riprova.</Trans>{' '}
+              <a className="underline" href={DOCKER_DESKTOP_URL} target="_blank" rel="noreferrer">
+                <Trans>docker.com</Trans>
+              </a>
+            </Notice>
+          </PageColumn>
         </div>
       )}
 
       {/* M10 (fase 0.3.1001): prefisso dei nomi del box di prova non valido —
           la riga Docker lo dice; la sandbox non parte mai coi nomi dell'utente */}
       {dockerMode && prefixInvalid && (
-        <div className="mx-2 mb-1 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          <Trans>Prefisso di prova non valido: correggi SANDBOT_TEST_BOX_PREFIX (deve partire per «sbtest») o toglierla, poi riavvia.</Trans>
+        <div className="shrink-0 border-b border-border/50 px-1.5 py-1">
+          <PageColumn>
+            <Notice tone="destructive" icon={<TriangleAlert className="size-4" aria-hidden="true" />}>
+              <Trans>Prefisso di prova non valido: correggi SANDBOT_TEST_BOX_PREFIX (deve partire per «sbtest») o toglierla, poi riavvia.</Trans>
+            </Notice>
+          </PageColumn>
         </div>
       )}
 
-      <div className="relative flex-1 overflow-hidden">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         {/* ogni scheda visitata resta MONTATA: la sessione (terminale, anteprima)
             sopravvive al passaggio dall'una all'altra */}
         <div className={`h-full overflow-y-auto scroll-thin ${tab === 'screen' ? '' : 'hidden'}`} role="tabpanel" hidden={tab !== 'screen'}>

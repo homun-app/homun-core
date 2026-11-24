@@ -11,6 +11,8 @@
 // dell'attività corrente riusa le etichette della riga del bot (mai l'argomento
 // grezzo), il tempo scorre ogni secondo finché il figlio è aperto e i passi si
 // contano.
+// Fase design (DS4): ai token di DS1 — misure di testo, distanze e i bottoni
+// del sistema; la logica non cambia.
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { useLingui, Trans } from '@lingui/react/macro'
@@ -20,6 +22,7 @@ import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, SubagentInfo
 import { CardShell } from './DecidedRow'
 import { ApprovalCard } from './ApprovalCard'
 import { activityPhrase } from '../lib/activity'
+import { Button } from './ui/button'
 // P6 (fase uso-permessi): lo stato col SEGNO della barra, niente emoji
 import { StateSign } from './StateSign'
 
@@ -94,12 +97,15 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
 
   return (
     <>
+      {/* DS4: l'anatomia di una card della chat — etichetta e stato in cima
+          (text-caption), titolo text-body in peso medio, seconde righe
+          text-small grigie, i bottoni del sistema */}
       <CardShell testid="card-aiutante">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-medium text-muted-foreground"><Trans>Aiutante</Trans></span>
+          <span className="text-caption text-muted-foreground"><Trans>Aiutante</Trans></span>
           {/* P6: il segno della barra accanto alla parola — mai emoji di stato */}
           <span
-            className={`flex items-center gap-1.5 text-[11px] font-medium ${waiting ? 'text-waiting' : STATUS_CLS[status]}`}
+            className={`flex items-center gap-1.5 text-caption font-medium ${waiting ? 'text-waiting' : STATUS_CLS[status]}`}
             data-testid="card-aiutante-stato"
           >
             <StateSign state={waiting ? 'aspetta-te' : STATUS_SIGN[status]} testid="card-aiutante-segno" />
@@ -107,18 +113,18 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
           </span>
         </div>
         <p
-          className="mt-1 cursor-pointer text-sm text-foreground transition hover:underline"
+          className="mt-1.5 cursor-pointer text-body font-medium text-foreground transition hover:underline"
           onClick={() => openSubagent(message.subagentId)}
         >
           {message.title}
         </p>
         {sub && (
-          <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="aiutante-tempo">
+          <p className="mt-0.5 text-small text-muted-foreground" data-testid="aiutante-tempo">
             <Trans>{i18n.t(fmtAgo(sub.startedAt ?? sub.createdAt, now))} trascorsi · {sub.steps} {sub.steps === 1 ? t`passo` : t`passi`}{sub.status === 'done' && sub.summary ? ` — ${sub.summary.slice(0, 120)}` : ''}</Trans>
           </p>
         )}
         {sub && open && activity && (
-          <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="aiutante-attivita">
+          <p className="mt-0.5 text-small text-muted-foreground" data-testid="aiutante-attivita">
             {i18n.t(activityPhrase(activity, 'present', i18n.locale === 'en' ? 'en' : 'it'))}
           </p>
         )}
@@ -126,36 +132,30 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
             qui, nella chat del padre — «aspetta te» (lo stato della barra) con
             la FRASE della richiesta e «Decidi» che apre il centro su di essa */}
         {waiting && (sub?.pendingApprovals?.length ?? 0) > 0 && (
-          <div className="mt-2 flex items-start justify-between gap-2 rounded-[12px] bg-waiting/10 px-3 py-2" data-testid="card-aiutante-aspetta-te">
+          <div className="mt-3 flex items-start justify-between gap-3 rounded-control bg-waiting/10 p-3" data-testid="card-aiutante-aspetta-te">
             <div className="min-w-0">
-              <p className="text-[13px] font-semibold text-waiting"><Trans>aspetta te</Trans></p>
-              <p className="mt-0.5 line-clamp-2 text-xs text-foreground/80">
+              <p className="text-body font-medium text-waiting"><Trans>aspetta te</Trans></p>
+              <p className="mt-0.5 line-clamp-2 text-small text-foreground">
                 {sub!.pendingApprovals![0]!.content}
               </p>
             </div>
-            <button
-              className="shrink-0 self-center rounded-[10px] bg-foreground px-3 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
+            <Button
+              className="self-center"
               data-testid="aiutante-decidi"
               onClick={() => setApprovalsOpen(true, String(sub!.pendingApprovals![0]!.meta?.approvalId ?? ''))}
             >
               <Trans>Decidi</Trans>
-            </button>
+            </Button>
           </div>
         )}
-        <div className="mt-2 flex gap-2">
-          <button
-            className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
-            onClick={() => openSubagent(message.subagentId)}
-          >
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Button onClick={() => openSubagent(message.subagentId)}>
             <Trans>Apri</Trans>
-          </button>
+          </Button>
           {open && sub && (
-            <button
-              className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
-              onClick={() => stopSubagent(message.subagentId)}
-            >
+            <Button variant="ghost" onClick={() => stopSubagent(message.subagentId)}>
               <Trans>Ferma</Trans>
-            </button>
+            </Button>
           )}
         </div>
       </CardShell>
@@ -163,8 +163,8 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
           decisa qui si risolve sul FIGLIO (entry.agentId) e, decisa altrove,
           sparisce da qui (il daemon emette subagents alla risoluzione) */}
       {(sub?.pendingApprovals ?? []).map((ap) => (
-        <div key={ap.id} data-testid="aiutante-card-figlio" className="mt-1">
-          <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+        <div key={ap.id} data-testid="aiutante-card-figlio" className="mt-3">
+          <p className="mb-1.5 text-small text-muted-foreground">
             <Trans>L’aiutante «{message.title}» chiede:</Trans>
           </p>
           <ApprovalCard entry={ap} ownerName={message.title} />

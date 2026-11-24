@@ -7,13 +7,26 @@
 // riga d'attività (activityPhrase) e col popover dei passaggi; dopo il turno
 // li rimette solo la voce di debug di Impostazioni › Generali. U1 (fase
 // prima-release): sotto il messaggio resta il solo «Copia» con la spunta.
+//
+// Fase design (DS4, Chat): la pagina passa al sistema di DS1.
+//  - LA COLONNA. Il transcript scorre in un contenitore largo quanto l'area
+//    (la barra di scorrimento sta sul bordo) e DENTRO il contenuto è centrato
+//    alla larghezza di lettura (PageColumn reading: 720 px, l'area meno i
+//    margini se è più stretta). Il campo di scrittura sta in una PageColumn
+//    reading sua: stessa larghezza, stesso centro.
+//  - I MESSAGGI in text-reading; la bolla dell'utente al massimo all'85%.
+//  - LO STESSO MARKDOWN per ogni testo di bot: BotMarkdown (DocumentMarkdown).
+//  - LE RIGHE DI SISTEMA con Notice (components/ui/notice): prima erano
+//    scritte a mano, una per tipo, ognuna con le sue misure.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import { Paperclip, PanelRight, ArrowUp, Square, Copy, Check, Brain, ScrollText } from 'lucide-react'
+import {
+  Paperclip, PanelRight, ArrowUp, Square, Copy, Check, Brain, ScrollText,
+  X, Circle, CircleAlert, TriangleAlert, Info, Wrench, History, Cpu, LayoutTemplate, FileText, SquareTerminal, ChevronRight,
+  type LucideIcon
+} from 'lucide-react'
 import { api, useStore, useResolvedModel } from '../store'
 // fase 17c (C2): il testo di notice/eventi/system dal meta.ui (lingua attiva)
 import { uiTextOf, uiTextOfTools } from '../lib/ui-text'
@@ -22,12 +35,13 @@ import { uiTextOf, uiTextOfTools } from '../lib/ui-text'
 import { chatRowHidden, type ChatRowView } from '../lib/chat-rows'
 import { openingRowFor } from '../lib/opening-rows'
 // R1 (fase app — ritocchi): le notice in chat non sono tutte errori
-import { noticeSeverity } from '../lib/notice-severity'
+import { noticeSeverity, type NoticeSeverity } from '../lib/notice-severity'
 // RV4 (fase beta.2): la stessa notice consecutiva si mostra una volta; il
 // bottone della notice apre il selettore del bot quando c'è un provider
 import { groupRepeatedNotices } from '../lib/notice-rows'
 import { modelNoticeTarget } from '../lib/model-notice'
 import { i18n, formatTime } from '../lib/i18n'
+import { cn } from '../lib/utils'
 import { GROUP_CHAIN_CLOSED_TEXT, GROUP_RATE_LIMIT_TEXT, GROUP_HOURLY_CAP_TEXT, parseCoordinatorNowText, parseMemberNoModelText } from '../../../main/agent/group-turns'
 // B1 (fase b20-bug): dei testi per il MODELLO la chat mostra solo il contenuto dell'involucro
 import { agentMessageDisplay, modelEnvelopeDisplay, modelEnvelopes } from '../../../shared/agent-message'
@@ -71,21 +85,53 @@ import { narrationStatusLine } from '../../../shared/narration'
 // P6 (fase pulizia): il layout (pannello docked/overlay) per il limite dei menu
 import type { LayoutResult } from '../layout'
 import { THINKING_LABELS } from './ui/ModelPicker'
-// M1 (fase beta12-correzioni): il raggio dinamico del composer
-import { composerFormRadius, composerMultiFromMeasure, composerLayout, nextComposerMulti, CHAT_COMPOSER_SINGLE_ROW_PX } from '../lib/composer'
+// M1 (fase beta12-correzioni): il layout a più righe del composer (la misura
+// del textarea e l'isteresi). Il suo raggio dinamico non c'è più: fra i tre
+// raggi di DS1 il campo di scrittura è una superficie, sempre (lib/composer.ts)
+import { composerMultiFromMeasure, composerLayout, nextComposerMulti, CHAT_COMPOSER_SINGLE_ROW_PX } from '../lib/composer'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
+// fase design (DS4): i pezzi del sistema
+import { BotMarkdown } from './DocumentMarkdown'
+import { PageColumn } from './ui/page-shell'
+import { Notice } from './ui/notice'
+import { Button, buttonVariants } from './ui/button'
+// le righe che si apriscono (SystemRow, SystemText) e la card dell'esito di un figlio
+import { CardShell, SystemRow, SystemText } from './DecidedRow'
 
-/** Il popover dei passaggi: «N passaggi · Xs» e l'elenco ✓/○ (S3.3).
+/**
+ * La bolla di un messaggio del bot (DS4): la stessa per tutti — la risposta
+ * in diretta, i messaggi storici, quelli di un altro bot, quelli dei pannelli.
+ * La larghezza la decide chi la mette: al massimo l'85% della colonna quando
+ * sta in una riga flex (BOLLA_BOT_LARGA), tutta quella del suo involucro
+ * quando è già dentro un limite (la riga «Da <nome>»).
+ * min-w-0: in una riga flex il contenuto lungo non impone la sua larghezza
+ * (una tabella o un blocco di codice larghi scorrono dentro, non allargano).
+ */
+const BOLLA_BOT = 'min-w-0 rounded-surface bg-muted px-4 py-2 text-reading'
+/** La bolla in una riga flex: quanto il testo, fino all'85% della colonna. */
+const BOLLA_BOT_LARGA = 'max-w-[85%]'
+
+/**
+ * Un avviso (notice) parla con la sua SEVERITÀ (lib/notice-severity): info
+ * grigia, warning ambra, errore rossa. Il tono è quello di Notice, il segno
+ * un'icona lucide: le due tabelle hanno la stessa chiave, così una severità
+ * nuova non può restare senza tono o senza segno (lo dice il compilatore).
+ */
+const TONO: Record<NoticeSeverity, 'neutral' | 'warning' | 'destructive'> = { info: 'neutral', warning: 'warning', error: 'destructive' }
+const SEGNO: Record<NoticeSeverity, LucideIcon> = { info: Info, warning: TriangleAlert, error: CircleAlert }
+
+/** Il popover dei passaggi: «N passaggi · Xs» e l'elenco fatto-da-fare (S3.3).
  *  correzioni 2 (Q4): chi lo posiziona lo aggancia al suo bordo (pt-1 dentro
  *  il wrapper, così il passaggio col mouse non lo chiude) e resta nella
- *  finestra anche a 900×600 — max la larghezza meno il margine. */
+ *  finestra anche a 900×600 — max la larghezza meno il margine.
+ *  Fase design (DS4): i segni sono icone lucide da 16 (prima i glifi ✓ e ○). */
 export function StepsPopover({ group, live }: { group: StepGroup; live: boolean }) {
   const { i18n } = useLingui()
   const lang = i18n.locale === 'en' ? 'en' : 'it'
   const duration = stepsDurationLabel(group, Date.now())
   return (
-    <div data-testid="steps-popover" className="w-72 max-w-[calc(100vw-1.5rem)] rounded-[14px] bg-card p-3 text-[13px] shadow-soft">
-      <p className="mb-1.5 text-xs text-muted-foreground">
+    <div data-testid="steps-popover" className="w-72 max-w-[calc(100vw-1.5rem)] rounded-surface bg-card p-3 text-small shadow-soft">
+      <p className="mb-1.5 text-caption text-muted-foreground">
         <Plural value={group.steps.length} one="# passo" other="# passaggi" />
         {/* P5: sotto il secondo «< 1 s», senza durata nota niente tempo (mai «0 s») */}
         {duration !== null && <> · {duration}</>}
@@ -93,13 +139,16 @@ export function StepsPopover({ group, live }: { group: StepGroup; live: boolean 
       {group.steps.length === 0 && <p className="text-muted-foreground">{i18n.t(msg`ancora nessun passo`)}</p>}
       <div className="space-y-1">
         {group.steps.map((st, i) => (
-          <p key={i} className={`flex gap-1.5 ${st.done ? 'text-foreground/80' : 'text-muted-foreground'}`}>
-            <span className="shrink-0">{st.done ? '✓' : '○'}</span>
+          <p key={i} className={`flex items-center gap-1.5 ${st.done ? 'text-foreground/80' : 'text-muted-foreground'}`}>
+            {/* lo slot è un quadrato da 16: il segno sta sul centro della riga */}
+            <span className="grid size-4 shrink-0 place-items-center">
+              {st.done ? <Check className="size-4" /> : <Circle className="size-4" />}
+            </span>
             <span className="min-w-0 truncate">{i18n.t(activityPhrase({ tool: st.tool, target: st.target, ...(st.args ? { args: st.args } : {}) }, 'past', lang))}</span>
           </p>
         ))}
       </div>
-      {!live && <p className="mt-1.5 text-[11px] text-muted-foreground">{i18n.t(msg`i passaggi del turno`)}</p>}
+      {!live && <p className="mt-1.5 text-caption text-muted-foreground">{i18n.t(msg`i passaggi del turno`)}</p>}
     </div>
   )
 }
@@ -223,7 +272,8 @@ function ActivityRow({ agentId }: { agentId: string }) {
           {/* l'ombra morbida ovale sotto la mascotte (mai un riquadro) */}
           <span aria-hidden="true" className="mt-1 h-1.5 w-7 rounded-full bg-foreground/10" />
         </button>
-        <span aria-live="polite" className="text-sm text-muted-foreground">
+        {/* la mezza riga d'attività è una seconda riga grigia (text-small) */}
+        <span aria-live="polite" className="text-small text-muted-foreground">
           {narration || i18n.t(phrase)}
         </span>
       </div>
@@ -247,7 +297,7 @@ function LiveReplyBubble({ agentId }: { agentId: string }) {
   if (!live?.text) return null
   return (
     <div className="flex justify-start">
-      <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm leading-relaxed">
+      <div className={cn(BOLLA_BOT, BOLLA_BOT_LARGA)}>
         <BotMarkdown text={live.text} />
       </div>
     </div>
@@ -261,7 +311,9 @@ const COPY_FEEDBACK_MS = 1500
  *  di citazione e di passaggi, U1 fase prima-release, non avevano un uso
  *  chiaro). «Copia» risponde: l'icona diventa una spunta per
  *  COPY_FEEDBACK_MS col tooltip «Copiato»; se il clipboard fallisce, la
- *  spunta non compare. */
+ *  spunta non compare.
+ *  Fase design (DS4): il bottone è quello del sistema (Button, ghost, 32 px:
+ *  un'icona in una riga) con l'icona a 16. */
 function MessageActions({ entry }: { entry: TranscriptEntry }) {
   const { t } = useLingui()
   const [copied, setCopied] = useState(false)
@@ -277,15 +329,9 @@ function MessageActions({ entry }: { entry: TranscriptEntry }) {
   const Icon = copied ? Check : Copy
   return (
     <div className="flex items-center self-end opacity-0 transition group-hover:opacity-100">
-      <button
-        className="grid size-7 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-        data-testid="message-copy"
-        title={copied ? t`Copiato` : t`Copia`}
-        aria-label={copied ? t`Copiato` : t`Copia`}
-        onClick={onCopy}
-      >
-        <Icon className="size-3.5" />
-      </button>
+      <Button variant="ghost" size="sm" icon data-testid="message-copy" title={copied ? t`Copiato` : t`Copia`} aria-label={copied ? t`Copiato` : t`Copia`} onClick={onCopy}>
+        <Icon className="size-4" />
+      </Button>
     </div>
   )
 }
@@ -538,7 +584,11 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
           — resta la ✕ del pannello — ma il posto w-9 resta occupato, così la
           pillola al centro non salta di posizione */}
       <div data-col-head="chat" className="drag-region absolute inset-x-0 top-0 z-10 flex h-col-head">
-        <div className="flex h-full min-w-0 items-center gap-3 px-4">
+        {/* w-full: la testata è una riga flex, e una sua figlia è larga quanto
+            il contenuto — senza, lo flex-1 che centra la pillola non aveva
+            spazio e la pillola restava a sinistra (difetto di DS3, visto dal
+            vivo; lo fissa __tests__/ds4-chat.test.ts) */}
+        <div className="flex h-full w-full min-w-0 items-center gap-3 px-4">
           <span className="w-8 shrink-0" aria-hidden="true" />
           <span className="flex min-w-0 flex-1 justify-center">
             <button
@@ -550,7 +600,7 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
               onClick={() => setRightPanel(!rightPanel)}
             >
               <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={24} track={false} dimmed={info.dimmed} />
-              <span className="truncate text-[15px] font-medium">{agent.name}</span>
+              <span className="truncate text-body font-medium">{agent.name}</span>
             </button>
           </span>
           {rightPanel ? (
@@ -571,35 +621,37 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
 
       {memoryOpen && activeId && <MemoryPanel agentId={activeId} onClose={() => setMemoryOpen(false)} />}
 
-      {/* Chiedi al volo (⌘K): la finestra di oggi, sospesa sotto l'etichetta */}
+      {/* Chiedi al volo (⌘K): la finestra di oggi, sospesa sotto l'etichetta.
+          Fase design (DS4): una superficie (rounded-surface), larga 576 e mai
+          più dell'area meno il margine (involucro da inset-x-6, così non ci
+          vogliono misure libere); il campo è un campo dei token (36 px,
+          rounded-control, text-body) e «chiudi» è un bottone da 32 */}
       {quickOpen && (
-        <div className="absolute left-1/2 top-16 z-10 w-[36rem] max-w-[80%] -translate-x-1/2 rounded-[18px] bg-card p-4 shadow-soft">
-          <div className="flex gap-2">
-            <input
-              autoFocus
-              className="flex-1 rounded-full bg-muted px-4 py-2 text-sm outline-none placeholder:text-muted-foreground"
-              placeholder={t`Chiedi qualcosa a ${agent.name} senza inquinare la conversazione…`}
-              value={quickQ}
-              onChange={(e) => setQuickQ(e.target.value)}
-              onKeyDown={async (e) => {
-                if (e.key === 'Enter' && quickQ.trim() && activeId) {
-                  setQuickBusy(true); setQuickA('')
-                  try { setQuickA(await api.quickAsk(activeId, quickQ.trim())) }
-                  catch (err) { setQuickA(t`Errore: ${err instanceof Error ? err.message : String(err)}`) }
-                  setQuickBusy(false)
-                }
-              }}
-            />
-            <button
-              className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              aria-label={t`Chiudi`}
-              onClick={() => { setQuickOpen(false); setQuickA('') }}
-            >
-              ✕
-            </button>
+        <div className="absolute inset-x-6 top-16 z-10 flex justify-center">
+          <div className="w-144 max-w-full rounded-surface bg-card p-4 shadow-soft">
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                className="h-control min-w-0 flex-1 rounded-control bg-muted px-3 text-body outline-none placeholder:text-muted-foreground"
+                placeholder={t`Chiedi qualcosa a ${agent.name} senza inquinare la conversazione…`}
+                value={quickQ}
+                onChange={(e) => setQuickQ(e.target.value)}
+                onKeyDown={async (e) => {
+                  if (e.key === 'Enter' && quickQ.trim() && activeId) {
+                    setQuickBusy(true); setQuickA('')
+                    try { setQuickA(await api.quickAsk(activeId, quickQ.trim())) }
+                    catch (err) { setQuickA(t`Errore: ${err instanceof Error ? err.message : String(err)}`) }
+                    setQuickBusy(false)
+                  }
+                }}
+              />
+              <Button variant="ghost" size="sm" icon aria-label={t`Chiudi`} onClick={() => { setQuickOpen(false); setQuickA('') }}>
+                <X className="size-4" />
+              </Button>
+            </div>
+            {quickBusy && <p className="mt-2 text-small text-muted-foreground"><Trans>pensando…</Trans></p>}
+            {quickA && <p className="mt-2 whitespace-pre-wrap text-body">{quickA}</p>}
           </div>
-          {quickBusy && <p className="mt-2 text-xs text-muted-foreground"><Trans>pensando…</Trans></p>}
-          {quickA && <p className="mt-2 whitespace-pre-wrap text-sm">{quickA}</p>}
         </div>
       )}
 
@@ -611,35 +663,62 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
             bot o squadre, ridotte («+N altrove») — quella di QUESTO bot sta
             sopra il campo di scrittura, dove guarda l'utente */}
         <ApprovalsBannerElsewhere excludeBotId={agent.id} />
-        <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden scroll-thin px-6 pb-4 pt-16">
-          {entries.length === 0 && (
-            <p className="mt-16 text-center text-sm text-muted-foreground">
-              <Trans>Manda un messaggio a {agent.name} per iniziare.</Trans>
-            </p>
-          )}
-          <div className="mx-auto max-w-3xl space-y-3">
-            {/*
-              fase 8/10: solo le entry senza meta.taskId e senza meta.groupId.
-              fase 16b (S3.3): le tool-call/tool-result NON compaiono (le racconta
-              la mascotte); la voce di debug le rimette
-            */}
-            {/* RV4: la stessa notice consecutiva senza altro in mezzo si mostra
-                UNA volta, col contatore discreto — le altre entry passano tali */}
-            {/* B2 (fase b20-bug): l'avviso che torna uguale dopo ogni apertura
-                automatica si raccoglie in una riga sola col conteggio, con UNA
-                riga di apertura davanti (lead) */}
-            {groupRepeatedNotices(
-              entries.filter((e) => !e.meta?.taskId && !e.meta?.groupId && !chatRowHidden(e, rowView))
-            ).map((g) => (
-              <Fragment key={g.entry.id}>
-                {g.lead && <EntryRow entry={g.lead} showReasoning={showReasoning} debugSteps={debugSteps} />}
-                <EntryRow entry={g.entry} repeat={g.repeat} showReasoning={showReasoning} debugSteps={debugSteps} />
-              </Fragment>
-            ))}
-            {/* fase risposta (R6): la risposta in diretta, bolla provvisoria */}
-            <LiveReplyBubble agentId={agent.id} />
-            {/* fase 16b (S3.3): mentre lavora, la mascotte con la mezza riga */}
-            {busy && <ActivityRow agentId={agent.id} />}
+        {/* Fase design (DS4): LA COLONNA DI LETTURA, fatta a mano come fa
+            PageShell (qui il guscio non si usa: la testata della chat è
+            sospesa sul transcript, non in flusso sopra).
+            – il contenitore che scorre è largo quanto l'AREA (niente respiro
+              laterale qui: la barra di scorrimento sta sul bordo destro) e
+              riserva la sua barra su tutti e due i lati (scrollbar-gutter:
+              stable both-edges: la barra di scroll-thin OCCUPA 6 px, non è a
+              sovrapposizione — riservati da un lato solo il contenuto sarebbe
+              3 px fuori centro);
+            – DENTRO, il contenuto è centrato alla larghezza di lettura
+              (PageColumn reading: min(720, area − 12 − 2·margine), margine 32
+              o 24 sotto i 900 px di area);
+            – il CONTENITORE DI QUERY è questo involucro, largo quanto l'area
+              e antenato del solo transcript — NON <main>: un contenitore di
+              query porta con sé la containment di layout, e <main> diventerebbe
+              il contenitore di riferimento dei position:fixed (l'immagine
+              grande della galleria resterebbe chiusa nella colonna) e un
+              contesto d'impilamento (la pagina aperta finirebbe sotto il
+              pannello in overlay: oggi gli sta sopra). Per la stessa ragione
+              PageView sta FUORI dall'involucro. */}
+        <div className="@container flex min-h-0 flex-1 flex-col">
+          <div
+            ref={scrollRef}
+            className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable_both-edges]"
+          >
+            {/* pt-16 = 64: la testata sospesa (52, col-head) + il respiro di 12
+                (row-pad) fra lei e la prima riga; pb-4: 16 prima del campo */}
+            <PageColumn width="reading" className="flex flex-col gap-3 pb-4 pt-16">
+              {entries.length === 0 && (
+                <p className="mt-16 text-center text-small text-muted-foreground">
+                  <Trans>Manda un messaggio a {agent.name} per iniziare.</Trans>
+                </p>
+              )}
+              {/*
+                fase 8/10: solo le entry senza meta.taskId e senza meta.groupId.
+                fase 16b (S3.3): le tool-call/tool-result NON compaiono (le racconta
+                la mascotte); la voce di debug le rimette
+              */}
+              {/* RV4: la stessa notice consecutiva senza altro in mezzo si mostra
+                  UNA volta, col contatore discreto — le altre entry passano tali */}
+              {/* B2 (fase b20-bug): l'avviso che torna uguale dopo ogni apertura
+                  automatica si raccoglie in una riga sola col conteggio, con UNA
+                  riga di apertura davanti (lead) */}
+              {groupRepeatedNotices(
+                entries.filter((e) => !e.meta?.taskId && !e.meta?.groupId && !chatRowHidden(e, rowView))
+              ).map((g) => (
+                <Fragment key={g.entry.id}>
+                  {g.lead && <EntryRow entry={g.lead} showReasoning={showReasoning} debugSteps={debugSteps} />}
+                  <EntryRow entry={g.entry} repeat={g.repeat} showReasoning={showReasoning} debugSteps={debugSteps} />
+                </Fragment>
+              ))}
+              {/* fase risposta (R6): la risposta in diretta, bolla provvisoria */}
+              <LiveReplyBubble agentId={agent.id} />
+              {/* fase 16b (S3.3): mentre lavora, la mascotte con la mezza riga */}
+              {busy && <ActivityRow agentId={agent.id} />}
+            </PageColumn>
           </div>
         </div>
         <PageView />
@@ -651,161 +730,174 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
       {/* fase 12 (punto 7): vista del transcript del sottoagente aperto */}
       <SubagentPanel />
 
-      {/* il campo di scrittura: una pillola sospesa (S3.4). correzioni 2 (Q2):
-          il footer è un @container — sotto i 560 px «Ragiona: …» diventa un
-          bottone tondo con l'icona, il campo non scende mai sotto 120 px e
-          allega/invia restano DENTRO la pillola anche con la chat al minimo */}
-      <footer className="@container px-6 pb-4">
-        {/* A3 (fase approvazioni-chiare): la richiesta in attesa di QUESTO
-            bot, agganciata in basso sopra il campo (come i permessi degli
-            strumenti per sviluppatori): resta visibile scorrendo e il campo
-            resta usabile */}
-        <ComposerApproval botId={agent.id} />
-        {/* fase skill (S7.1): l'elenco delle skill quando il messaggio comincia con / */}
-        {slashOpen && slashOptions.length > 0 && (
-          <div className="mx-auto mb-2 max-w-3xl overflow-hidden rounded-2xl bg-card p-1.5 shadow-soft" data-testid="slash-picker">
-            {slashOptions.map((sk, i) => (
-              <button
-                key={sk.name}
-                type="button"
-                className={`flex w-full items-center gap-3 rounded-xl px-3 py-1.5 text-left ${i === slashIndex ? 'bg-muted' : ''}`}
-                onMouseEnter={() => setSlashIndex(i)}
-                onClick={() => insertSkill(sk.name)}
-              >
-                <span className="font-mono text-xs text-foreground">/{sk.name}</span>
-                <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">{sk.description.replace(/\s+/g, ' ').slice(0, 120)}</span>
-              </button>
-            ))}
-          </div>
-        )}
-        {/* fase locale (L4.3): stato dell'INTERFACCIA, mai del prompt — una
-            riga fissa e discreta quando questo bot gira sul modello integrato */}
-        {onLocalModel && (
-          <p className="mx-auto mb-1.5 max-w-3xl text-center text-[11px] text-muted-foreground/80">
-            <Trans>modello integrato · più lento</Trans>
-          </p>
-        )}
-        <form
-          className={`mx-auto flex max-w-3xl items-end gap-2 bg-card py-2 pl-2 pr-2 shadow-soft transition-[border-radius] duration-150 ${composerFormRadius(multiRow)} ${layoutCls.form}`}
-          onSubmit={(e) => { e.preventDefault(); sendNow() }}
-        >
-          <button
-            type="button"
-            className="relative grid size-9 shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
-            aria-label={noVision ? t`Allega immagine — questo modello non vede le immagini` : t`Allega immagine`}
-            title={noVision ? t`Allega immagine — questo modello non vede le immagini` : t`Allega immagine`}
-            onClick={async () => {
-              const img = await api.pickImage()
-              if (img) setImages([...images, img])
-            }}
-          >
-            <Paperclip className="size-4" />
-            {images.length > 0 && (
-              <span className="absolute -top-1 -right-1 grid size-4 place-items-center rounded-full bg-foreground text-[10px] text-background">{images.length}</span>
+      {/* il campo di scrittura (S3.4). correzioni 2 (Q2): il footer è un
+          @container — sotto i 560 px «Ragiona: …» diventa un bottone tondo
+          con l'icona, il campo non scende mai sotto 120 px e allega/invia
+          restano DENTRO anche con la chat al minimo.
+          Fase design (DS4): il campo sta in una PageColumn reading, la STESSA
+          del transcript (stessa larghezza, stesso centro). px-1.5 sull'involucro
+          della colonna — non sul contenitore, così le query misurano l'area
+          come nel transcript — perché il corpo che scorre riserva 6 px di barra
+          per lato: le due colonne hanno la stessa larghezza utile. */}
+      <footer className="@container shrink-0 pb-4">
+        <div className="px-1.5">
+          <PageColumn width="reading" className="flex flex-col">
+            {/* A3 (fase approvazioni-chiare): la richiesta in attesa di QUESTO
+                bot, agganciata in basso sopra il campo (come i permessi degli
+                strumenti per sviluppatori): resta visibile scorrendo e il campo
+                resta usabile */}
+            <ComposerApproval botId={agent.id} />
+            {/* fase skill (S7.1): l'elenco delle skill quando il messaggio comincia con / */}
+            {slashOpen && slashOptions.length > 0 && (
+              <div className="mb-2 overflow-hidden rounded-surface bg-card p-1.5 shadow-soft" data-testid="slash-picker">
+                {slashOptions.map((sk, i) => (
+                  <button
+                    key={sk.name}
+                    type="button"
+                    className={`flex w-full items-center gap-3 rounded-control px-3 py-1.5 text-left ${i === slashIndex ? 'bg-muted' : ''}`}
+                    onMouseEnter={() => setSlashIndex(i)}
+                    onClick={() => insertSkill(sk.name)}
+                  >
+                    <span className="font-mono text-body text-foreground">/{sk.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-small text-muted-foreground">{sk.description.replace(/\s+/g, ' ').slice(0, 120)}</span>
+                  </button>
+                ))}
+              </div>
             )}
-          </button>
-          {/* fase sfoglia veloce (V3): a UNA riga il campo è alto quanto i
-              bottoni (36 px: py-2 attorno a una riga da 20 px, leading-5),
-              così testo e segnaposto stanno sulla linea centrale di graffetta,
-              Ragiona e Invia; a capo cresce verso l'alto (il form resta items-end) */}
-          <textarea
-            ref={composerRef}
-            className={`max-h-40 min-h-9 min-w-[120px] flex-1 resize-none bg-transparent py-2 pl-3 pr-5 text-sm leading-5 outline-none placeholder:text-muted-foreground ${layoutCls.field}`}
-            placeholder={t`Scrivi a ${agent.name}`}
-            rows={Math.min(6, text.split('\n').length)}
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value)
-              setTyping(e.target.value ? agent.id : null)
-            }}
-            onKeyDown={(e) => {
-              // fase skill (S7.1): l'elenco `/` si attraversa con le frecce,
-              // Invio SCEGLIE e Esc chiude — solo finché è aperto
-              if (slashOpen && slashOptions.length > 0) {
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault()
-                  setSlashIndex((i) => (i + 1) % slashOptions.length)
-                  return
-                }
-                if (e.key === 'ArrowUp') {
-                  e.preventDefault()
-                  setSlashIndex((i) => (i - 1 + slashOptions.length) % slashOptions.length)
-                  return
-                }
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  insertSkill(slashOptions[slashIndex]!.name)
-                  return
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault()
-                  setSlashOpen(false)
-                  return
-                }
-              }
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                sendNow()
-              }
-            }}
-          />
-          {/* Ragiona: <livello> ▾ — il selettore che stava nel chip (S3.4).
-              Q2: sotto i 560 px di contenitore resta solo l'icona (Brain), il
-              testo vive in aria-label e tooltip; il menu è identico */}
-          <DropdownMenu onOpenChange={(open) => { if (open) clampReasonMenuSoon() }}>
-            <DropdownMenuTrigger
-              className={`grid h-9 shrink-0 place-items-center rounded-full px-3 text-[13px] text-muted-foreground transition hover:bg-muted hover:text-foreground ${layoutCls.push}`}
-              aria-label={t`Livello di ragionamento`}
-              title={reasonLabel}
+            {/* fase locale (L4.3): stato dell'INTERFACCIA, mai del prompt — una
+                riga fissa e discreta quando questo bot gira sul modello integrato */}
+            {onLocalModel && (
+              <p className="mb-1.5 text-center text-caption text-muted-foreground">
+                <Trans>modello integrato · più lento</Trans>
+              </p>
+            )}
+            {/* Fase design (DS4): il campo è una superficie (rounded-surface) a
+                una riga come a dieci — i raggi sono tre, e la pillola di M1 con
+                i suoi angoli da 24 px non esiste più (lib/composer.ts); resta
+                il LAYOUT a più righe. I controlli sono quelli del sistema:
+                l'icona (graffetta) in un bottone da 32, le azioni da 36 */}
+            <form
+              className={`flex items-end gap-2 rounded-surface bg-card py-2 pl-2 pr-2 shadow-soft ${layoutCls.form}`}
+              onSubmit={(e) => { e.preventDefault(); sendNow() }}
             >
-              <span className="@max-pill:hidden">{reasonLabel}</span>
-              <Brain className="hidden size-4 @max-pill:block" aria-hidden="true" />
-            </DropdownMenuTrigger>
-            {/* P6: il menu resta DENTRO la colonna VISIBILE della chat — a
-                900 px col pannello in overlay non lo copre, a 1100 docked resta
-                nella colonna */}
-            <DropdownMenuContent
-              ref={reasonMenuRef}
-              align="end"
-              collisionBoundary={chatVisibleRef.current ?? chatColumnRef.current}
-            >
-              {(['default', ...levels] as ThinkingSetting[]).map((l) => (
-                <DropdownMenuItem key={l} onClick={() => { void api.updateAgent(agent.id, { thinking: l }).catch(() => undefined) }}>
-                  {i18n.t(THINKING_LABELS[l] ?? msg`${l}`)}
-                </DropdownMenuItem>
-              ))}
-              <DropdownMenuItem onClick={() => setShowReasoning(!showReasoning)}>
-                {showReasoning ? '✓ ' : ''}{i18n.t(msg`Mostra il ragionamento in chat`)}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {busy ? (
-            <button
-              type="button"
-              className="grid size-10 shrink-0 place-items-center rounded-full bg-foreground text-background transition hover:opacity-90"
-              aria-label={t`Ferma`}
-              title={t`Ferma`}
-              onClick={interrupt}
-            >
-              <Square className="size-4" />
-            </button>
-          ) : (
-            <button
-              type="submit"
-              className="grid size-10 shrink-0 place-items-center rounded-full bg-foreground text-background transition hover:opacity-90 disabled:opacity-40"
-              aria-label={t`Invia`}
-              title={t`Invia`}
-              disabled={!text.trim()}
-            >
-              <ArrowUp className="size-4" />
-            </button>
-          )}
-        </form>
-        {noVision && (
-          <p className="mx-auto mt-1.5 max-w-3xl text-center text-[11px] text-muted-foreground">
-            <Trans>Questo modello non vede le immagini</Trans>
-          </p>
-        )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                icon
+                className="relative"
+                aria-label={noVision ? t`Allega immagine — questo modello non vede le immagini` : t`Allega immagine`}
+                title={noVision ? t`Allega immagine — questo modello non vede le immagini` : t`Allega immagine`}
+                onClick={async () => {
+                  const img = await api.pickImage()
+                  if (img) setImages([...images, img])
+                }}
+              >
+                <Paperclip className="size-4" />
+                {images.length > 0 && (
+                  // il conteggio delle immagini allegate: un badge (text-caption) sull'angolo
+                  <span className="absolute -top-1 -right-1 grid size-4 place-items-center rounded-full bg-foreground text-caption text-background">{images.length}</span>
+                )}
+              </Button>
+              {/* fase sfoglia veloce (V3): a UNA riga il campo è alto quanto i
+                  bottoni (36 px: py-2 attorno a una riga da 20 px — l'interlinea
+                  che text-body porta con sé), così testo e segnaposto stanno
+                  sulla linea centrale di graffetta, Ragiona e Invia; a capo
+                  cresce verso l'alto (il form resta items-end) */}
+              <textarea
+                ref={composerRef}
+                className={`max-h-40 min-h-control min-w-30 flex-1 resize-none bg-transparent py-2 pr-5 pl-3 text-body outline-none placeholder:text-muted-foreground ${layoutCls.field}`}
+                placeholder={t`Scrivi a ${agent.name}`}
+                rows={Math.min(6, text.split('\n').length)}
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value)
+                  setTyping(e.target.value ? agent.id : null)
+                }}
+                onKeyDown={(e) => {
+                  // fase skill (S7.1): l'elenco `/` si attraversa con le frecce,
+                  // Invio SCEGLIE e Esc chiude — solo finché è aperto
+                  if (slashOpen && slashOptions.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault()
+                      setSlashIndex((i) => (i + 1) % slashOptions.length)
+                      return
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault()
+                      setSlashIndex((i) => (i - 1 + slashOptions.length) % slashOptions.length)
+                      return
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      insertSkill(slashOptions[slashIndex]!.name)
+                      return
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      setSlashOpen(false)
+                      return
+                    }
+                  }
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    sendNow()
+                  }
+                }}
+              />
+              {/* Ragiona: <livello> — il selettore che stava nel chip (S3.4).
+                  Q2: sotto i 560 px di contenitore resta solo l'icona (Brain), il
+                  testo vive in aria-label e tooltip; il menu è identico.
+                  Fase design (DS4): le classi sono quelle di Button (ghost, 36) */}
+              <DropdownMenu onOpenChange={(open) => { if (open) clampReasonMenuSoon() }}>
+                <DropdownMenuTrigger
+                  className={cn(buttonVariants({ variant: 'ghost', size: 'md' }), layoutCls.push)}
+                  aria-label={t`Livello di ragionamento`}
+                  title={reasonLabel}
+                >
+                  <span className="@max-pill:hidden">{reasonLabel}</span>
+                  <Brain className="hidden size-4 @max-pill:block" aria-hidden="true" />
+                </DropdownMenuTrigger>
+                {/* P6: il menu resta DENTRO la colonna VISIBILE della chat — a
+                    900 px col pannello in overlay non lo copre, a 1100 docked resta
+                    nella colonna */}
+                <DropdownMenuContent
+                  ref={reasonMenuRef}
+                  align="end"
+                  collisionBoundary={chatVisibleRef.current ?? chatColumnRef.current}
+                >
+                  {(['default', ...levels] as ThinkingSetting[]).map((l) => (
+                    <DropdownMenuItem key={l} onClick={() => { void api.updateAgent(agent.id, { thinking: l }).catch(() => undefined) }}>
+                      {i18n.t(THINKING_LABELS[l] ?? msg`${l}`)}
+                    </DropdownMenuItem>
+                  ))}
+                  {/* la spunta sta nello spazio che la voce riserva a sinistra
+                      (pl-8): la voce non si sposta quando è scelta */}
+                  <DropdownMenuItem onClick={() => setShowReasoning(!showReasoning)}>
+                    <span className="pointer-events-none absolute top-1/2 left-2 grid size-4 -translate-y-1/2 place-items-center" aria-hidden="true">
+                      {showReasoning ? <Check className="size-4" /> : null}
+                    </span>
+                    {i18n.t(msg`Mostra il ragionamento in chat`)}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {busy ? (
+                <Button type="button" icon aria-label={t`Ferma`} title={t`Ferma`} onClick={interrupt}>
+                  <Square className="size-4" />
+                </Button>
+              ) : (
+                <Button type="submit" icon aria-label={t`Invia`} title={t`Invia`} disabled={!text.trim()}>
+                  <ArrowUp className="size-4" />
+                </Button>
+              )}
+            </form>
+            {noVision && (
+              <p className="mt-1.5 text-center text-caption text-muted-foreground">
+                <Trans>Questo modello non vede le immagini</Trans>
+              </p>
+            )}
+          </PageColumn>
+        </div>
       </footer>
     </main>
   )
@@ -818,22 +910,9 @@ function UserBubbleBody({ entry }: { entry: TranscriptEntry }): React.ReactNode 
   if (!invoked) return uiTextOf(entry)
   return (
     <>
-      <span className="mb-1 inline-block rounded-full bg-black/10 px-2 py-0.5 font-mono text-[11px] dark:bg-white/10">/{invoked[1]}</span>
+      <span className="mb-1 inline-block rounded-full bg-black/10 px-2 py-0.5 font-mono text-caption dark:bg-white/10">/{invoked[1]}</span>
       {invoked[2] ?? ''}
     </>
-  )
-}
-
-/**
- * B1 (fase b20-bug): il markdown di un messaggio del bot — UN componente per
- * tutte le risposte di bot (le bolle, i messaggi storici, i messaggi tra
- * bot): titoli, grassetto, elenchi, codice e tabelle si vedono uguali ovunque.
- */
-function BotMarkdown({ text }: { text: string }) {
-  return (
-    <div className="max-w-none">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
-    </div>
   )
 }
 
@@ -843,14 +922,20 @@ function BotMarkdown({ text }: { text: string }) {
  * risposte del bot. Della regola per il modello non resta nulla:
  * agentMessageDisplay mostra solo il contenuto dell'involucro, di qualunque
  * versione sia la regola salvata.
+ * Fase design (DS4): chi parla sta SOPRA, in text-small grigio (non più
+ * dentro la bolla); la bolla è quella di ogni messaggio di bot.
+ * w-fit: larga quanto il testo, fino all'85% della colonna (com'è la bolla
+ * delle risposte: un blocco nudo qui era sempre largo al massimo).
  */
 function BotToBotRow({ name, content, testid }: { name: string; content: string; testid: string }) {
   return (
-    <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm leading-relaxed" data-testid={testid}>
-      <p className="mb-1 text-xs text-muted-foreground">
+    <div className={cn('w-fit min-w-0', BOLLA_BOT_LARGA)} data-testid={testid}>
+      <p className="mb-1 text-small text-muted-foreground">
         <Trans>Da {name}</Trans>
       </p>
-      <BotMarkdown text={agentMessageDisplay(content)} />
+      <div className={BOLLA_BOT}>
+        <BotMarkdown text={agentMessageDisplay(content)} />
+      </div>
     </div>
   )
 }
@@ -862,12 +947,11 @@ function BotToBotRow({ name, content, testid }: { name: string; content: string;
  */
 function OpeningDetailsRow({ text }: { text: string }) {
   return (
-    <details className="rounded-[14px] bg-muted/40 px-3 py-1.5" data-testid="chat-opening-details">
-      <summary className="flex cursor-pointer select-none items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
-        <ScrollText className="size-3.5 shrink-0" aria-hidden="true" />
+    <details data-testid="chat-opening-details">
+      <SystemRow icon={ScrollText}>
         <Trans>Istruzioni del turno</Trans>
-      </summary>
-      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">{text}</pre>
+      </SystemRow>
+      <SystemText text={text} />
     </details>
   )
 }
@@ -929,32 +1013,28 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
       // fase 7/8: kickstart dei template e report dei task — righe espandibili
       // (B1: del testo per il modello si mostra il contenuto, mai la regola)
       if (opening.kind === 'details') {
+        // l'icona dice che cosa si apre: il modello di un template, il report di un task
+        const Icon = opening.template ? LayoutTemplate : FileText
         return (
-          <details className="rounded-[14px] bg-muted/60 px-3 py-1.5">
-            <summary className="cursor-pointer select-none text-xs text-muted-foreground">
+          <details>
+            <SystemRow icon={Icon}>
               {opening.template
                 ? <Trans>Configurazione da template: {String(entry.meta?.templateName ?? '')}</Trans>
                 : <Trans>Report del task: {String(entry.meta?.taskTitle ?? '')} ({String(entry.meta?.taskRef ?? '')})</Trans>}
-            </summary>
-            <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
-              {modelEnvelopeDisplay(entry.content)}
-            </pre>
+            </SystemRow>
+            <SystemText text={modelEnvelopeDisplay(entry.content)} className="max-h-60" />
           </details>
         )
       }
       // M2: routine, giro al rientro, risvegli di sistema — riga breve col
       // testo del modello chiuso nei dettagli
       if (opening.kind === 'system') {
+        // B2 (fase b20-bug): l'icona è lucide (mai emoji); la riga è Notice (DS4)
+        const Icon = opening.icon
         return (
-          <details className="rounded-[14px] bg-muted/40 px-3 py-1.5">
-            {/* B2 (fase b20-bug): l'icona è lucide (mai emoji) */}
-            <summary className="flex cursor-pointer select-none items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
-              <opening.icon className="size-3.5 shrink-0" aria-hidden="true" />
-              {i18n.t(opening.label)}
-            </summary>
-            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
-              {modelEnvelopeDisplay(uiTextOf(entry))}
-            </pre>
+          <details>
+            <SystemRow icon={Icon}>{i18n.t(opening.label)}</SystemRow>
+            <SystemText text={modelEnvelopeDisplay(uiTextOf(entry))} />
           </details>
         )
       }
@@ -978,11 +1058,15 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
       // B3 (fase beta.4): la risposta a una domanda NON si ripete come bolla
       // utente separata — resta la riga della card, riapribile (chatRowHidden)
       return entry.role === 'user' ? (
+        // Fase design (DS4): testo text-reading come i messaggi del bot, al
+        // massimo l'85% della colonna (prima 75%), raggio di superficie.
+        // min-w-0 + wrap-anywhere: in una riga flex una parola lunghissima (un
+        // indirizzo) non impone la sua larghezza — va a capo DENTRO la bolla
         // bolla utente a destra — NEUTRA (G1, fase 0.3.1001 grafica): colore
         // fisso della chat, mai il colore del bot (che resta a mascotte,
         // pillola e avatar); si ritocca dai token --bubble-user in styles.css
         <div className="flex justify-end">
-          <div className="max-w-[75%] rounded-[22px] bg-[var(--bubble-user)] px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-[var(--bubble-user-foreground)]">
+          <div className="min-w-0 max-w-[85%] rounded-surface bg-[var(--bubble-user)] px-4 py-2 text-reading wrap-anywhere text-[var(--bubble-user-foreground)] whitespace-pre-wrap">
             {/* fase skill (S7.2): un messaggio che comincia con /nome mostra
                 l'etichetta compatta della skill, poi il resto del testo */}
             <UserBubbleBody entry={entry} />
@@ -990,7 +1074,7 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
         </div>
       ) : (
         // messaggi assistant pre-fase 3 (transcript storici)
-        <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm leading-relaxed">
+        <div className={cn(BOLLA_BOT, BOLLA_BOT_LARGA)}>
           <BotMarkdown text={entry.content || '…'} />
         </div>
       )
@@ -998,22 +1082,18 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
     case 'thinking': {
       // fase 3 (§3bis L2): il ragionamento resta interno, col toggle
       return (
-        <details className="rounded-[14px] bg-muted/60 px-3 py-1.5" open={!entry.content}>
-          <summary className="cursor-pointer select-none text-xs text-muted-foreground"><Trans>Ragionamento</Trans></summary>
-          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
-            {entry.content || reasoning || '…'}
-          </pre>
+        <details open={!entry.content}>
+          <SystemRow icon={Brain}><Trans>Ragionamento</Trans></SystemRow>
+          <SystemText text={entry.content || reasoning || '…'} />
         </details>
       )
     }
     case 'summary': {
       // fase 4: riepilogo dei turni più vecchi (compaction)
       return (
-        <details className="rounded-[14px] bg-muted/60 px-3 py-1.5">
-          <summary className="cursor-pointer select-none text-xs text-muted-foreground"><Trans>Riepilogo turni precedenti</Trans></summary>
-          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
-            {entry.content || '…'}
-          </pre>
+        <details>
+          <SystemRow icon={History}><Trans>Riepilogo turni precedenti</Trans></SystemRow>
+          <SystemText text={entry.content || '…'} className="max-h-48" />
         </details>
       )
     }
@@ -1054,12 +1134,12 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
       // fase 19a (V5): il bot chiede all'utente di prendere il controllo
       if (message?.type === 'takeover-request') return <TakeoverCard entry={entry} />
       return (
-        // la bolla del bot: tenue, angoli 22 px, azioni al passaggio (S3.2)
+        // la bolla del bot (DS4: BOLLA_BOT), azioni al passaggio (S3.2)
         <div className="group flex items-end gap-1.5">
-          <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm leading-relaxed">
+          <div className={cn(BOLLA_BOT, BOLLA_BOT_LARGA)}>
             <BotMarkdown text={entry.content} />
-            {meta.fallback && <p className="mt-1 text-[10px] text-muted-foreground"><Trans>risposta di ripiego</Trans></p>}
-            {message?.type === 'text' && message.urgent && <p className="mt-1 text-[10px] text-destructive/80"><Trans>urgente</Trans></p>}
+            {meta.fallback && <p className="mt-2 text-small text-muted-foreground"><Trans>risposta di ripiego</Trans></p>}
+            {message?.type === 'text' && message.urgent && <p className="mt-2 text-small text-destructive"><Trans>urgente</Trans></p>}
           </div>
           <MessageActions entry={entry} />
         </div>
@@ -1070,32 +1150,35 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
       // di debug (Impostazioni › Generali) le rimette com'erano
       const args = entry.meta?.arguments as string | undefined
       return (
-        <details className="rounded-[14px] bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none">
-            <span className="font-mono text-foreground">⚙ {entry.content}</span>
-          </summary>
-          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all text-[11px] text-muted-foreground">
-            {args}
-          </pre>
+        <details>
+          {/* il nome dello strumento in monospazio; il segno è l'icona lucide (DS4: prima il glifo ⚙) */}
+          <SystemRow icon={Wrench}>
+            <span className="font-mono text-foreground">{entry.content}</span>
+          </SystemRow>
+          <SystemText text={args ?? ''} className="max-h-48" />
         </details>
       )
     }
     case 'tool-result':
       return (
-        <details className="rounded-[14px] bg-muted/60 px-3 py-2 text-xs">
-          <summary className="cursor-pointer select-none text-muted-foreground">
-            {t`risultato`} {entry.meta?.error ? t`⚠ errore` : ''}
-          </summary>
-          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all text-[11px] text-muted-foreground">
-            {entry.content}
-          </pre>
+        <details>
+          <SystemRow icon={SquareTerminal} tone={entry.meta?.error ? 'destructive' : 'neutral'}>
+            {t`risultato`}
+            {/* l'errore lo dice l'icona lucide (DS4: prima il glifo ⚠), nello stesso tono rosso della riga */}
+            {entry.meta?.error ? (
+              <>
+                {' '}<TriangleAlert className="inline-block size-4 align-text-bottom" aria-hidden="true" />{' '}{t`errore`}
+              </>
+            ) : null}
+          </SystemRow>
+          <SystemText text={entry.content} className="max-h-64" />
         </details>
       )
     case 'approval':
       return <ApprovalCard entry={entry} />
     case 'notice':
-      // fase 16b (S6): gli errori del modello con una via d'uscita sono un
-      // banner col bottone che li risolve; le notice informative restano righe
+      // fase 16b (S6): gli errori del modello con una via d'uscita portano il
+      // bottone che li risolve; le notice informative restano righe
       return <NoticeRow entry={entry} repeat={repeat} />
     case 'event': {
       // la riga discreta del riepilogo pubblicato nella squadra (S1.2)
@@ -1107,7 +1190,8 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
       if (entry.meta?.automation && (entry.meta.automation as { action?: unknown }).action === 'create') {
         return <RoutineCreatedRow entry={entry} />
       }
-      return <p className="text-center text-xs text-muted-foreground">{uiTextOf(entry)}</p>
+      // un evento: una riga di sistema senza icona (DS4)
+      return <Notice>{uiTextOf(entry)}</Notice>
     }
     default:
       return null
@@ -1115,7 +1199,7 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
 }
 
 /**
- * Il banner degli errori del modello, con l'azione che li risolve (S6).
+ * Le righe degli avvisi del modello, con l'azione che li risolve (S6).
  * RV4 (fase beta.2): «Scegli un modello» apre il selettore del BOT della
  * chat (lo stesso del foglio «Impostazioni del bot») quando c'è almeno un
  * provider attivo; senza provider resta Impostazioni › Modelli, dove prima
@@ -1123,6 +1207,17 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
  * B2 (fase b20-bug): l'avviso della risposta vuota ha «Riprova» — lo stesso
  * turno, un'altra volta (turn:retry legge dal meta dell'avviso ciò che il
  * loop ha salvato); l'avviso ripetuto dice «· N volte».
+ *
+ * Fase design (DS4): UNA riga per tutte — Notice (components/ui/notice).
+ * Prima c'erano quattro forme scritte a mano (il riquadro della memoria, quel
+ * del modello, la riga colorata al centro, il banner rosso), ognuna con le
+ * sue misure. Quel che cambia da una all'altra ora sono soltanto tre cose
+ * che Notice già sa portare: il TONO e l'ICONA (dalla severità di
+ * lib/notice-severity: info grigia, warning ambra, errore rossa — R1), il
+ * testo (con o senza il nome dello strumento in parole, P2) e l'AZIONE,
+ * che è il bottone del sistema (Button, ghost, 32: un'azione dentro una
+ * riga è testo). Le condizioni sono quelle di sempre, testid e handler
+ * compresi: cambia solo come si vede.
  */
 function NoticeRow({ entry, repeat = 1 }: { entry: TranscriptEntry; repeat?: number }) {
   const { t } = useLingui()
@@ -1150,115 +1245,110 @@ function NoticeRow({ entry, repeat = 1 }: { entry: TranscriptEntry; repeat?: num
   const withAction =
     accessibility || uiId === 'notice.modelError' || uiId === 'notice.modelNotResponding' || uiId === 'notice.configureProviderFirst' || emptyReply
   const fallback = uiId === 'notice.modelFallback' || uiId === 'notice.modelFallbackRoute' || uiId === 'notice.modelRouteCooled'
+
+  // il conteggio «· N volte» solo agli avvisi ripetuti (una volta sola non si conta)
+  const volte = repeat > 1 ? repeat : undefined
+  // il tono è la severità della notice (R1): mai rossa per default
+  const severity = noticeSeverity(uiId)
+  const Icon = SEGNO[severity]
+
   if (memoryQuarantined) {
     const memoryId = String((entry.meta as { memoryId?: unknown } | undefined)?.memoryId ?? '')
     return (
-      <div className="flex items-center gap-3 rounded-[14px] bg-muted/70 px-4 py-2.5 text-sm text-foreground">
-        <span className="min-w-0 flex-1">
-          {uiTextOf(entry)}
-          {repeat > 1 && <RepeatMark repeat={repeat} />}
-        </span>
-        <button
-          className="shrink-0 rounded-full bg-card px-3 py-1.5 text-xs text-foreground transition hover:ring-1 hover:ring-foreground/20"
-          data-testid="memory-quarantined-open"
-          onClick={() => openMemoryNote(memoryId)}
-        >
-          <Trans>Apri Memoria</Trans>
-        </button>
-      </div>
+      <Notice
+        icon={<Brain className="size-4" />}
+        repeat={volte}
+        action={
+          <Button variant="ghost" size="sm" data-testid="memory-quarantined-open" onClick={() => openMemoryNote(memoryId)}>
+            <Trans>Apri Memoria</Trans>
+          </Button>
+        }
+      >
+        {uiTextOf(entry)}
+      </Notice>
     )
   }
   if (needModel) {
     return (
-      <div className="flex items-center gap-3 rounded-[14px] bg-muted/70 px-4 py-2.5 text-sm text-foreground">
-        <span className="min-w-0 flex-1">
-          {uiTextOf(entry)}
-          {repeat > 1 && <RepeatMark repeat={repeat} />}
-        </span>
-        <button
-          className="shrink-0 rounded-full bg-card px-3 py-1.5 text-xs text-foreground transition hover:ring-1 hover:ring-foreground/20"
-          data-testid="need-model-choose"
-          onClick={() => {
-            // riapre la guida al passo model (se era saltato); se non si può
-            // (guida finita e modello perso dopo), le Impostazioni dei modelli
-            void api.onboardingReopen('model').then((r) => {
-              if (!r) { setSettingsTab('modelli'); setSettingsOpen(true) }
-            }).catch(() => { setSettingsTab('modelli'); setSettingsOpen(true) })
-          }}
-        >
-          <Trans>Scegli un modello</Trans>
-        </button>
-      </div>
-    )
-  }
-  if (!withAction && !fallback) {
-    // R1 (fase app — ritocchi): le notice non sono tutte errori — info grigia
-    // come le righe di sistema, warning ambra (token --waiting ≥ 4,5:1), solo
-    // gli errori restano rossi
-    const severity = noticeSeverity(uiId)
-    // P2 (fase pulizia): il valore {tool} della notice in parole (Bloccato dai
-    // permessi: Creare un bot), mai il nome tecnico
-    const text = uiTextOfTools(entry)
-    if (severity === 'error') {
-      return <p className="text-center text-xs text-destructive/90">{text}{repeat > 1 && <RepeatMark repeat={repeat} />}</p>
-    }
-    if (severity === 'warning') {
-      return <p className="text-center text-xs text-waiting">{text}{repeat > 1 && <RepeatMark repeat={repeat} />}</p>
-    }
-    return <p className="text-center text-xs text-muted-foreground">{text}{repeat > 1 && <RepeatMark repeat={repeat} />}</p>
-  }
-  return (
-    <div className="flex items-center gap-3 rounded-[14px] bg-destructive/10 px-4 py-2.5 text-sm text-foreground">
-      <span className="min-w-0 flex-1">
-        {uiTextOf(entry)}
-        {repeat > 1 && <RepeatMark repeat={repeat} />}
-      </span>
-      {withAction && (
-        accessibility ? (
-          <button
-            className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
-            onClick={() => { void api.openAccessibilitySettings().catch(() => undefined) }}
-          >
-            <Trans>Apri Accessibilità</Trans>
-          </button>
-        ) : emptyReply ? (
-          <button
-            className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
-            data-testid="notice-retry"
+      <Notice
+        icon={<Cpu className="size-4" />}
+        repeat={volte}
+        action={
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid="need-model-choose"
             onClick={() => {
-              // B2: lo stesso turno, un'altra volta (un secondo clic non accoda un doppione: lo decide il daemon)
-              void api.turnRetry(entry.agentId, entry.id).catch(() => undefined)
-            }}
-          >
-            <Trans>Riprova</Trans>
-          </button>
-        ) : (
-          <button
-            className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
-            data-testid="notice-choose-model"
-            onClick={() => {
-              // RV4: col provider che c'è, si sceglie il modello del BOT qui in
-              // chat; senza provider, prima va aggiunto uno (Impostazioni › Modelli)
-              if (modelNoticeTarget(providers) === 'bot') openBotModel()
-              else { setSettingsTab('modelli'); setSettingsOpen(true) }
+              // riapre la guida al passo model (se era saltato); se non si può
+              // (guida finita e modello perso dopo), le Impostazioni dei modelli
+              void api.onboardingReopen('model').then((r) => {
+                if (!r) { setSettingsTab('modelli'); setSettingsOpen(true) }
+              }).catch(() => { setSettingsTab('modelli'); setSettingsOpen(true) })
             }}
           >
             <Trans>Scegli un modello</Trans>
-          </button>
-        )
-      )}
-      <span className="sr-only">{t`errore del modello`}</span>
-    </div>
-  )
-}
-
-/** Il contatore delle notice ripetute: «· N volte» (RV4 era «×N»; B2 (fase b20-bug): in parole, dopo un punto medio). */
-function RepeatMark({ repeat }: { repeat: number }) {
-  if (repeat <= 1) return null
+          </Button>
+        }
+      >
+        {uiTextOf(entry)}
+      </Notice>
+    )
+  }
+  if (!withAction && !fallback) {
+    // P2 (fase pulizia): il valore {tool} della notice in parole (Bloccato dai
+    // permessi: Creare un bot), mai il nome tecnico
+    return (
+      <Notice icon={<Icon className="size-4" />} tone={TONO[severity]} repeat={volte}>
+        {uiTextOfTools(entry)}
+      </Notice>
+    )
+  }
   return (
-    <span className="whitespace-nowrap text-muted-foreground/80">
-      {' '}<Plural value={repeat} one="· 1 volta" other="· # volte" />
-    </span>
+    <Notice
+      icon={<Icon className="size-4" />}
+      tone={TONO[severity]}
+      repeat={volte}
+      action={
+        <>
+          {withAction && (accessibility ? (
+            <Button variant="ghost" size="sm" onClick={() => { void api.openAccessibilitySettings().catch(() => undefined) }}>
+              <Trans>Apri Accessibilità</Trans>
+            </Button>
+          ) : emptyReply ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="notice-retry"
+              onClick={() => {
+                // B2: lo stesso turno, un'altra volta (un secondo clic non accoda un doppione: lo decide il daemon)
+                void api.turnRetry(entry.agentId, entry.id).catch(() => undefined)
+              }}
+            >
+              <Trans>Riprova</Trans>
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="notice-choose-model"
+              onClick={() => {
+                // RV4: col provider che c'è, si sceglie il modello del BOT qui in
+                // chat; senza provider, prima va aggiunto uno (Impostazioni › Modelli)
+                if (modelNoticeTarget(providers) === 'bot') openBotModel()
+                else { setSettingsTab('modelli'); setSettingsOpen(true) }
+              }}
+            >
+              <Trans>Scegli un modello</Trans>
+            </Button>
+          ))}
+          {/* il nome che leggono gli aid: sta in coda alla riga, DOPO il conteggio e
+              l'azione, così «testo · N volte» resta tutto di seguito */}
+          <span className="sr-only">{t`errore del modello`}</span>
+        </>
+      }
+    >
+      {uiTextOf(entry)}
+    </Notice>
   )
 }
 
@@ -1267,23 +1357,96 @@ function SummaryPostedRow({ entry }: { entry: TranscriptEntry }) {
   const openGroup = useStore((s) => s.openGroup)
   const groupId = entry.meta?.groupId as number
   return (
-    <p className="text-center text-xs text-muted-foreground">
+    <Notice>
       <button
-        className="underline-offset-2 transition hover:text-foreground hover:underline"
+        className="inline-flex max-w-full items-center gap-1 text-left underline underline-offset-2 transition hover:text-foreground"
         onClick={() => openGroup(groupId)}
       >
-        {uiTextOf(entry)} ›
+        {uiTextOf(entry)}
+        <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
       </button>
-    </p>
+    </Notice>
   )
 }
 
 /**
- * Fase 7 (onboarding): widget di sistema che porta alle impostazioni del
- * provider — il bottone apre le Impostazioni, niente turno del modello.
- * Fase locale (L4): TRE strade (cloud consigliato, Ollama se trovato,
- * Integrato se la macchina è idonea): i bottoni arrivano dal widget, ognuno
- * apre le Impostazioni → modelli (l'Integrato sulla sua scheda).
+ * L'impalcatura dei due pannelli che coprono la chat — il sotto-transcript di
+ * un task in background e quello di un figlio (DS4). Fanno ciò che fa la
+ * chat, e con le stesse misure: la testata sta in flusso (questi pannelli
+ * coprono la fascia di trascinamento della chat: sono no-drag, perché le fasce
+ * ignorano lo z-index — un clic su di loro servirebbe a trascinare la
+ * finestra), il transcript scorre in un contenitore largo quanto l'area e
+ * DENTRO è centrato alla larghezza di lettura (PageColumn reading): la stessa
+ * colonna, lo stesso centro della chat sotto. Il perché del contenitore di
+ * query — qui, non su <main> — sta al transcript della chat.
+ * Il titolo è text-title: è il titolo di un pannello, non di pagina (il
+ * carattere dei documenti è solo del titolo di pagina e dei titoli dei
+ * documenti).
+ */
+function PanelFrame({ label, title, actions, scrollRef, foot, children }: {
+  label: React.ReactNode
+  title: React.ReactNode
+  /** i controlli a destra: portano ciascuno il suo nome accessibile */
+  actions: React.ReactNode
+  scrollRef: React.Ref<HTMLDivElement>
+  /** la riga ferma in fondo (lo stato del turno), già in una sua PageColumn */
+  foot?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
+      {/* pt-8: sotto sta la testata sospesa della chat; il pannello la copre
+          col suo velo, il titolo comincia più giù di lei. px-1.5: la stessa
+          larghezza utile del transcript (che riserva 6 px di barra per lato) */}
+      <header className="shrink-0 px-1.5 pt-8 pb-3">
+        <PageColumn width="reading">
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-small text-muted-foreground">{label}</p>
+              <h2 className="truncate text-title font-semibold">{title}</h2>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">{actions}</div>
+          </div>
+        </PageColumn>
+      </header>
+      <div className="@container flex min-h-0 flex-1 flex-col">
+        <div ref={scrollRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable_both-edges]">
+          <PageColumn width="reading" className="flex flex-col gap-3 py-4">{children}</PageColumn>
+        </div>
+      </div>
+      {foot !== undefined && <div className="shrink-0 py-2">{foot}</div>}
+    </div>
+  )
+}
+
+/** «Chiudi» di un pannello: un'icona lucide in un bottone da 32 (DS4: prima il glifo ✕). */
+function PanelClose({ onClick }: { onClick: () => void }) {
+  const { t } = useLingui()
+  return (
+    <Button variant="ghost" size="sm" icon aria-label={t`Chiudi`} title={t`Chiudi`} onClick={onClick}>
+      <X className="size-4" />
+    </Button>
+  )
+}
+
+/** L'interruttore «Ragionamento» di un pannello: acceso è un bottone secondario, spento è testo. */
+function ReasoningToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <Button variant={on ? 'secondary' : 'ghost'} size="sm" aria-pressed={on} onClick={onToggle}>
+      <Trans>Ragionamento</Trans>
+    </Button>
+  )
+}
+
+/** Il messaggio di un pannello senza righe (DS4): una seconda riga grigia, come il vuoto della chat. */
+function PanelEmpty({ children }: { children: React.ReactNode }) {
+  return <p className="mt-16 text-center text-small text-muted-foreground">{children}</p>
+}
+
+/**
+ * Fase 8 (§3bis L7): la vista del sotto-transcript del task in background
+ * aperto. Le righe sono quelle della chat (EntryRow), con `modelOpenings`:
+ * lì nessun messaggio lo scrive l'utente.
  */
 function TaskPanel({ onClose }: { onClose: () => void }) {
   const entries = useStore((s) => s.entries)
@@ -1304,47 +1467,34 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
   const open = task?.status === 'working' || task?.status === 'needs_input'
 
   return (
-    // verifica impostazioni: sopra la fascia di trascinamento (60 px) della chat
-    // la testata cadrebbe dentro la fascia: no-drag (Electron ignora lo z-index)
-    <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
-      <header className="flex items-center justify-between px-5 pt-8 pb-3">
-        <div>
-          <p className="text-[13px] text-muted-foreground"><Trans>Task</Trans></p>
-          <h2 className="truncate font-display text-lg">{task?.title ?? `#${openTaskId}`}</h2>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            className={`rounded-full px-3 py-1.5 text-xs transition ${showReasoning ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-            onClick={() => setShowReasoning(!showReasoning)}
-          >
-            <Trans>Ragionamento</Trans>
-          </button>
+    <PanelFrame
+      label={<Trans>Task</Trans>}
+      title={task?.title ?? `#${openTaskId}`}
+      scrollRef={scrollRef}
+      actions={
+        <>
+          <ReasoningToggle on={showReasoning} onToggle={() => setShowReasoning(!showReasoning)} />
           {open && (
-            <button className="rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent" onClick={() => cancelTask(openTaskId)}>
+            <Button variant="secondary" size="sm" onClick={() => cancelTask(openTaskId)}>
               <Trans>Interrompi task</Trans>
-            </button>
+            </Button>
           )}
-          <button className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground" onClick={onClose}>
-            ✕
-          </button>
-        </div>
-      </header>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden scroll-thin px-5 py-4">
-        <div className="mx-auto max-w-3xl space-y-3">
-          {taskEntries.length === 0 && (
-            <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Il task non ha ancora attività.</Trans></p>
-          )}
-          {taskEntries.map((e) => (
-            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} modelOpenings />
-          ))}
-        </div>
-      </div>
-    </div>
+          <PanelClose onClick={onClose} />
+        </>
+      }
+    >
+      {taskEntries.length === 0 && <PanelEmpty><Trans>Il task non ha ancora attività.</Trans></PanelEmpty>}
+      {taskEntries.map((e) => (
+        <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} modelOpenings />
+      ))}
+    </PanelFrame>
   )
 }
 
 /**
- * Fase 12 (punto 7): la vista del transcript di un FIGLIO.
+ * Fase 12 (punto 7): la vista del transcript di un FIGLIO. In fondo, mentre
+ * lavora, la riga di stato del turno col SEGNO della barra (P6, fase
+ * uso-permessi) — una riga di sistema (Notice).
  */
 function SubagentPanel() {
   const { t } = useLingui()
@@ -1363,55 +1513,43 @@ function SubagentPanel() {
 
   if (openSubagentId === null) return null
   const open = sub?.status === 'queued' || sub?.status === 'running'
+  const waiting = sub?.agentStatus === 'paused-for-approval'
 
   return (
-    // verifica impostazioni: sopra la fascia di trascinamento (60 px) della chat
-    // la testata cadrebbe dentro la fascia: no-drag (Electron ignora lo z-index)
-    <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
-      <header className="flex items-center justify-between px-5 pt-8 pb-3">
-        <div className="min-w-0">
-          <p className="text-[13px] text-muted-foreground"><Trans>Sottoagente</Trans></p>
-          <h2 className="truncate font-display text-lg">{sub?.title ?? openSubagentId}</h2>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            className={`rounded-full px-3 py-1.5 text-xs transition ${showReasoning ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-            onClick={() => setShowReasoning(!showReasoning)}
-          >
-            <Trans>Ragionamento</Trans>
-          </button>
-          <button className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground" onClick={() => openSubagent(null)}>
-            ✕
-          </button>
-        </div>
-      </header>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden scroll-thin px-5 py-4">
-        <div className="mx-auto max-w-3xl space-y-3">
-          {subEntries.length === 0 && (
-            <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Il sottoagente non ha ancora attività.</Trans></p>
-          )}
-          {subEntries.map((e) => (
-            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} modelOpenings />
-          ))}
-          {sub && (sub.summary || sub.reportPath) && (
-            <div className="rounded-[18px] bg-muted p-4 text-sm">
-              <p className="text-xs text-muted-foreground">
-                {sub.status === 'done' ? t`Consegnato` : sub.status === 'failed' ? t`Fallito` : t`Esito`}
-              </p>
-              {sub.summary && <p className="mt-1 whitespace-pre-wrap">{sub.summary}</p>}
-              {sub.reportPath && <p className="mt-1 font-mono text-xs text-muted-foreground">{t`report: ${sub.reportPath}`}</p>}
+    <PanelFrame
+      label={<Trans>Sottoagente</Trans>}
+      title={sub?.title ?? openSubagentId}
+      scrollRef={scrollRef}
+      actions={<><ReasoningToggle on={showReasoning} onToggle={() => setShowReasoning(!showReasoning)} /><PanelClose onClick={() => openSubagent(null)} /></>}
+      foot={
+        open ? (
+          <PageColumn width="reading">
+            <Notice icon={<StateSign state={waiting ? 'aspetta-te' : 'lavora'} />}>
+              {waiting ? t`aspetta te: rispondi alle card qui sopra.` : t`Al lavoro: le card di approvazione del figlio compaiono qui.`}
+            </Notice>
+          </PageColumn>
+        ) : undefined
+      }
+    >
+      {subEntries.length === 0 && <PanelEmpty><Trans>Il sottoagente non ha ancora attività.</Trans></PanelEmpty>}
+      {subEntries.map((e) => (
+        <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} modelOpenings />
+      ))}
+      {/* l'esito del figlio è una card (DS4): etichetta text-small, il testo del figlio col markdown di tutti i bot */}
+      {sub && (sub.summary || sub.reportPath) && (
+        <CardShell>
+          <p className="text-small text-muted-foreground">
+            {sub.status === 'done' ? t`Consegnato` : sub.status === 'failed' ? t`Fallito` : t`Esito`}
+          </p>
+          {sub.summary && (
+            <div className="mt-1">
+              <BotMarkdown text={sub.summary} />
             </div>
           )}
-        </div>
-      </div>
-      {open && (
-        <p className="flex items-center justify-center gap-1.5 px-5 py-2 text-center text-[11px] text-muted-foreground">
-          {/* P6 (fase uso-permessi): la riga di stato del turno col SEGNO della barra */}
-          <StateSign state={sub?.agentStatus === 'paused-for-approval' ? 'aspetta-te' : 'lavora'} />
-          {sub?.agentStatus === 'paused-for-approval' ? t`aspetta te: rispondi alle card qui sopra.` : t`Al lavoro: le card di approvazione del figlio compaiono qui.`}
-        </p>
+          {sub.reportPath && <p className="mt-2 font-mono text-small wrap-anywhere text-muted-foreground">{t`report: ${sub.reportPath}`}</p>}
+        </CardShell>
       )}
-    </div>
+    </PanelFrame>
   )
 }
 

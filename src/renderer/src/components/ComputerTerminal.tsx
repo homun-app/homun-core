@@ -9,6 +9,13 @@
 // mai un riquadro nero muto: entro 15 s la sessione è connessa o si vede
 // l'errore. La sessione vive finché il pannello è aperto: cambiare scheda non
 // chiude nulla (il pannello tiene le schede montate).
+//
+// Fase design (DS4): lo schema del pannello (RightPanel), ripetuto nella
+// scheda. La riga di stato sta ferma in testa, alla larghezza del contenuto
+// del pannello (px-1.5 + PageColumn: 6 + 24 px per lato); anche il terminale
+// comincia alla stessa ascissa (i margini stanno nei DUE contenitori sopra il
+// suo: xterm misura il suo contenitore padre e non saprebbe togliergli un
+// padding suo).
 import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { Terminal } from '@xterm/xterm'
@@ -16,6 +23,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { api } from '../store'
 import { ipcErrorMessage } from '../lib/ipc-error'
+import { Button } from './ui/button'
+import { PageColumn } from './ui/page-shell'
 import { encodeTerminalInput, encodeTerminalResize } from '../../../shared/terminal-frames'
 
 /** Se entro 15 s non si è connessi: errore, mai un riquadro nero muto. */
@@ -182,30 +191,32 @@ export function ComputerTerminal({ agentId }: { agentId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-1.5">
-        <p className="min-w-0 truncate text-xs text-muted-foreground">{statusLine()}</p>
-        <div className="flex shrink-0 items-center gap-2">
+      {/* la riga di stato: ferma, alta 40 */}
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/50 px-1.5">
+        <PageColumn className="flex min-h-10 items-center justify-between gap-3">
+          <p className="min-w-0 truncate text-small text-muted-foreground">{statusLine()}</p>
           {(phase === 'closed' || phase === 'idle-closed') && (
-            <button
-              className="rounded-lg bg-muted px-3 py-1 text-xs font-medium text-foreground transition hover:bg-accent"
-              onClick={() => void open()}
-            >
+            <Button variant="secondary" size="sm" onClick={() => void open()}>
               <Trans>Riapri</Trans>
-            </button>
+            </Button>
           )}
+        </PageColumn>
+      </div>
+      {/* il terminale vive qui (xterm): nero su chiaro col tema di Homun. I
+          margini sono quelli di tutte le righe del pannello (6 + 24 px per
+          lato); il ref — ciò che xterm misura — è il contenitore PIÙ INTERNO,
+          senza padding suo */}
+      <div className="min-h-0 flex-1 overflow-hidden px-1.5 py-1">
+        <div className="h-full px-page-margin @max-[900px]:px-page-margin-narrow">
+          <div ref={holder} className="h-full" />
         </div>
       </div>
-      {/* il terminale vive qui (xterm): nero su chiaro col tema di Homun */}
-      <div ref={holder} className="min-h-0 flex-1 overflow-hidden px-2 py-1" />
       {phase === 'error' && (
-        <div className="border-t border-border px-4 py-4 text-center">
-          <p className="text-sm text-destructive/90">{error || t`Errore di connessione.`}</p>
-          <button
-            className="mt-3 rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
-            onClick={() => void open()}
-          >
+        <div className="flex shrink-0 flex-col items-center gap-3 border-t border-border/50 px-4 py-4">
+          <p className="text-body text-destructive/90">{error || t`Errore di connessione.`}</p>
+          <Button variant="secondary" size="sm" onClick={() => void open()}>
             <Trans>Riprova</Trans>
-          </button>
+          </Button>
         </div>
       )}
     </div>

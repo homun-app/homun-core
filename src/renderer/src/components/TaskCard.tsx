@@ -2,6 +2,8 @@
 // principale — titolo, stato live, ultima attività, "Apri" (vista del
 // sotto-transcript) e "Interrompi". Lo stato arriva dalla tabella tasks
 // (aggiornata via eventi), non dal testo del modello.
+// Fase design (DS4): ai token di DS1 — le misure di testo, le distanze e i
+// bottoni del sistema; la logica non cambia.
 import { useStore } from '../store'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
@@ -9,6 +11,7 @@ import type { MessageDescriptor } from '@lingui/core'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 import type { TaskInfo } from '../../../shared/types'
 import { CardShell } from './DecidedRow'
+import { Button } from './ui/button'
 // P6 (fase uso-permessi): lo stato col SEGNO della barra, niente emoji
 import { StateSign } from './StateSign'
 
@@ -58,35 +61,33 @@ export function TaskCard({ entry }: { entry: TranscriptEntry }) {
   const now = Date.now()
 
   return (
+    // DS4, l'anatomia di una card della chat: in cima l'etichetta (text-caption
+    // grigia) con lo stato a destra; il titolo text-body in peso medio; la
+    // seconda riga text-small grigia; le azioni a 16 px dal resto, e sono i
+    // bottoni del sistema (la principale è una pillola, le altre testo)
     <CardShell>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground"><Trans>Task</Trans></span>
+        <span className="text-caption text-muted-foreground"><Trans>Task</Trans></span>
         {/* P6: il segno della barra accanto alla parola — mai emoji di stato */}
-        <span className={`flex items-center gap-1.5 text-[11px] font-medium ${STATUS_CLS[status]}`} data-testid="task-stato">
+        <span className={`flex items-center gap-1.5 text-caption font-medium ${STATUS_CLS[status]}`} data-testid="task-stato">
           <StateSign state={STATUS_SIGN[status]} testid="task-segno" />
           {i18n.t(STATUS_LABEL[status])}
         </span>
       </div>
-      <p className="mt-1 text-sm text-foreground">{message.title}</p>
+      <p className="mt-1.5 text-body font-medium text-foreground">{message.title}</p>
       {task && (
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
+        <p className="mt-0.5 text-small text-muted-foreground">
           <Trans>ultima attività {i18n.t(fmtAgo(task.updatedAt, now))}{status === 'needs_input' ? t` — rispondi dalla vista del task (Apri)` : ''}</Trans>
         </p>
       )}
-      <div className="mt-2 flex gap-2">
-        <button
-          className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
-          onClick={() => openTask(message.taskId)}
-        >
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button onClick={() => openTask(message.taskId)}>
           <Trans>Apri</Trans>
-        </button>
+        </Button>
         {open && (
-          <button
-            className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
-            onClick={() => cancelTask(message.taskId)}
-          >
+          <Button variant="ghost" onClick={() => cancelTask(message.taskId)}>
             <Trans>Interrompi</Trans>
-          </button>
+          </Button>
         )}
       </div>
     </CardShell>

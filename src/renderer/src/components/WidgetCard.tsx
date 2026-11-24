@@ -9,7 +9,8 @@ import { useStore, api } from '../store'
 import { i18n } from '../lib/i18n'
 import { widgetDecidedLabel } from '../lib/widget-decision'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
-import { DecidedRow, CardShell } from './DecidedRow'
+import { DecidedRow, CardShell, SU_CARD } from './DecidedRow'
+import { Button } from './ui/button'
 
 type Widget = Extract<SendMessagePayload, { type: 'widget' }>
 
@@ -43,28 +44,29 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
 
   const body = (
     <>
+      {/* DS4: la domanda è il titolo grande della card (text-title); «Chiudi» è
+          un bottone secondario — su fondo card, perché la card è già muted */}
       <div className="flex w-full items-start justify-between gap-3">
-        <p className="text-[15px] font-semibold text-foreground">{widget.prompt}</p>
+        <p className="text-title font-semibold text-foreground">{widget.prompt}</p>
         {focus && !responded && !dismissed && (
-          <button
-            className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground transition hover:text-foreground"
-            data-testid="focus-dismiss"
-            onClick={() => { void api.onboardingFocusDismiss(entry.id) }}
-          >
+          <Button variant="secondary" size="sm" className={SU_CARD} data-testid="focus-dismiss" onClick={() => { void api.onboardingFocusDismiss(entry.id) }}>
             <Trans>Chiudi</Trans>
-          </button>
+          </Button>
         )}
       </div>
-      {widget.helpText && <p className="mt-1 text-xs text-muted-foreground">{widget.helpText}</p>}
-      <div className="mt-2.5 space-y-1.5">
+      {widget.helpText && <p className="mt-1.5 text-small text-muted-foreground">{widget.helpText}</p>}
+      <div className="mt-3 flex flex-col gap-2">
         {widget.options.map((o) => {
           const chosen = selected.includes(o.value)
           return (
+            // una riga-scelta: alta quanto un controllo (36), raggio di controllo, su
+            // fondo card. La scelta si vede da un filetto; l'anello del fuoco è
+            // quello del sistema, solo da tastiera, staccato della larghezza dell'offset
             <button
               key={o.value}
               data-testid={`widget-option-${o.value}`}
               disabled={confirming}
-              className={`flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left text-sm transition-colors disabled:opacity-40 ${
+              className={`flex min-h-control w-full cursor-pointer items-center gap-3 rounded-control px-3 py-2 text-left text-body transition-colors outline-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-muted ${
                 widget.multiSelect
                   ? chosen
                     ? 'bg-card ring-1 ring-foreground/30'
@@ -76,7 +78,7 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
               title={o.description}
               onClick={() => (widget.multiSelect ? toggle(o.value) : send(o.value))}
             >
-              <span className={`grid size-5.5 shrink-0 place-items-center rounded-[6px] text-[11px] font-semibold ${o.style === 'primary' && !widget.multiSelect ? 'bg-background/20' : 'bg-muted'}`}>
+              <span className={`grid size-5 shrink-0 place-items-center rounded-control text-caption font-semibold ${o.style === 'primary' && !widget.multiSelect ? 'bg-background/20' : 'bg-muted'}`}>
                 {letterOf(o.value)}
               </span>
               {o.label}
@@ -86,7 +88,7 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
         {widget.allowCustom && !dismissed && (
           <div className="flex gap-2">
             <input
-              className="min-w-0 flex-1 rounded-[10px] border border-dashed border-border bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-foreground/40"
+              className="h-control min-w-0 flex-1 rounded-control border border-dashed border-border bg-transparent px-3 text-body outline-none placeholder:text-muted-foreground focus:border-foreground/40"
               data-testid="widget-custom-input"
               placeholder={t`Scrivi tu…`}
               value={custom}
@@ -96,23 +98,16 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
                 if (e.key === 'Enter' && custom.trim()) send(custom.trim())
               }}
             />
-            <button
-              disabled={confirming || !custom.trim()}
-              className="shrink-0 rounded-[10px] bg-card px-3 py-2 text-sm transition hover:ring-1 hover:ring-foreground/20 disabled:opacity-40"
-              onClick={() => send(custom.trim())}
-            >
+            <Button variant="secondary" className={SU_CARD} disabled={confirming || !custom.trim()} onClick={() => send(custom.trim())}>
               <Trans>Invia</Trans>
-            </button>
+            </Button>
           </div>
         )}
       </div>
       {widget.multiSelect && selected.length > 0 && !confirming && (
-        <button
-          className="mt-2 rounded-full bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
-          onClick={() => send(selected)}
-        >
+        <Button className="mt-4" onClick={() => send(selected)}>
           <Trans>Conferma ({selected.length})</Trans>
-        </button>
+        </Button>
       )}
     </>
   )

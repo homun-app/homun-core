@@ -1,17 +1,23 @@
 // M1 (fase beta12-correzioni): il box di scrittura NON si deforma con un
-// testo lungo — a UNA riga resta la pillola di oggi (rounded-full), da due
-// righe in su il form passa a rounded-3xl (angoli da 24 px) e la barra di
-// scorrimento del textarea sta dentro un margine interno, senza toccare il
-// bordo arrotondato. I bottoni restano in basso (items-end, già vero) e il
-// passaggio non salta: transizione del raggio ≤ 150 ms, oppure nessuna.
+// testo lungo. Allora: a UNA riga la pillola (rounded-full), da due righe in
+// su il form passava a rounded-3xl (angoli da 24 px) con una transizione del
+// raggio; il textarea si misura (scrollHeight contro l'altezza della riga
+// unica) e la barra di scorrimento sta dentro un margine interno.
 // Vale per il composer di Chat.tsx E quello di TeamChat.tsx.
-// Senza DOM (niente jsdom): la logica pura si testa qui (la misura VERA di
-// scrollHeight la fa il componente con il suo ref; le guardie verificano che
-// la usi) e la cattura a 40 righe incollate la fa la sonda via CDP.
+//
+// Fase design (DS4): IL RAGGIO DINAMICO NON C'È PIÙ. I raggi sono tre (DS1) e
+// il campo di scrittura è una superficie (rounded-surface) a una riga come a
+// dieci: composerFormRadius è uscito da lib/composer.ts, e quel che M1
+// voleva — che la barra del textarea non toccasse un angolo troppo tondo —
+// lo garantisce il raggio piccolo (14) a ogni altezza. RESTANO la MISURA
+// vera (la fa il componente col suo ref: qui se ne prova la logica pura e
+// le guardie verificano che la usi) e il LAYOUT a più righe (in fondo).
+// Senza DOM (niente jsdom); la cattura a 40 righe incollate la fa la sonda
+// via CDP.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { composerFormRadius, composerMultiFromMeasure } from '../lib/composer'
+import { composerMultiFromMeasure } from '../lib/composer'
 
 const CHAT = fileURLToPath(new URL('../components/Chat.tsx', import.meta.url))
 const TEAM = fileURLToPath(new URL('../components/TeamChat.tsx', import.meta.url))
@@ -25,14 +31,15 @@ function composerBlock(path: string): string {
   return src.slice(start, end)
 }
 
-describe('M1: il raggio del compositore (pura)', () => {
-  it('una riga → pillola; due o più righe → angoli da 24 px', () => {
-    expect(composerFormRadius(false)).toBe('rounded-full')
-    expect(composerFormRadius(true)).toBe('rounded-3xl')
-  })
+/** Il tag di apertura del form: fino al primo «>» dopo le classi. */
+function formTagOf(block: string): string {
+  // le classi sono in un template literal: il tag finisce al «>» che chiude il form
+  return block.slice(0, block.indexOf('onSubmit'))
+}
 
-  it('la misura: scrollHeight oltre la riga unica = più righe (a capo E testo lungo senza a capo)', () => {
-    // una riga sola (36 px visibili, niente oltre): pillola
+describe('M1: la misura (pura)', () => {
+  it('scrollHeight oltre la riga unica = più righe (a capo E testo lungo senza a capo)', () => {
+    // una riga sola (36 px visibili, niente oltre)
     expect(composerMultiFromMeasure(36, 36)).toBe(false)
     // due righe esplicite (\n): il contenuto supera la riga unica
     expect(composerMultiFromMeasure(56, 36)).toBe(true)
@@ -44,68 +51,50 @@ describe('M1: il raggio del compositore (pura)', () => {
   })
 })
 
-describe('M1: Chat.tsx usa il raggio dinamico', () => {
-  const block = composerBlock(CHAT)
+/** Le guardie di DS4 sul form di un compositore: una superficie, sempre, e la misura vera. */
+function guardieSuperficie(dove: string, path: string): void {
+  const block = composerBlock(path)
+  const src = readFileSync(path, 'utf8')
+  const formTag = formTagOf(block)
 
-  it('il form NON ha un rounded-* fisso: il raggio arriva da composerFormRadius', () => {
-    const formTag = block.slice(0, block.indexOf('>'))
-    expect(formTag).not.toMatch(/rounded-(full|3xl)/)
-    expect(formTag).toContain('composerFormRadius(')
+  it(`${dove}: il form è una superficie (rounded-surface) a una riga come a dieci — niente raggio dinamico`, () => {
+    expect(formTag).toContain('rounded-surface')
+    expect(formTag).not.toMatch(/rounded-(full|3xl|2xl|xl|control)/)
+    expect(src).not.toContain('composerFormRadius(')
   })
 
-  it('la misura vera: il textarea si misura (scrollHeight contro la riga unica) a ogni cambio del testo', () => {
-    const src = readFileSync(CHAT, 'utf8')
+  it(`${dove}: niente transizione del raggio (il raggio non cambia più)`, () => {
+    expect(formTag).not.toMatch(/transition-\[border-radius\]/)
+  })
+
+  it(`${dove}: la barra di scorrimento sta dentro un margine interno (pr-5 sul textarea)`, () => {
+    const at = block.indexOf('<textarea')
+    const ta = block.slice(at, block.indexOf('/>', at))
+    expect(ta).toContain('pr-5')
+  })
+
+  it(`${dove}: il campo è alto quanto i controlli a una riga (min-h-control, 36) e mai sotto i 120 px (min-w-30)`, () => {
+    const at = block.indexOf('<textarea')
+    const ta = block.slice(at, block.indexOf('/>', at))
+    expect(ta).toContain('min-h-control')
+    expect(ta).toContain('min-w-30')
+    expect(ta).not.toMatch(/min-h-11/)
+  })
+
+  it(`${dove}: la misura vera — il textarea si misura (scrollHeight contro la riga unica) a ogni cambio del testo`, () => {
     expect(src).toContain('composerMultiFromMeasure(')
     expect(src).toMatch(/scrollHeight/)
-    expect(src).toContain('CHAT_COMPOSER_SINGLE_ROW_PX')
+    expect(src).toMatch(/_COMPOSER_SINGLE_ROW_PX/)
   })
 
-  it('la barra di scorrimento sta dentro un margine interno (pr-5 sul textarea quando cresce)', () => {
-    const at = block.indexOf('<textarea')
-    const ta = block.slice(at, block.indexOf('/>', at))
-    expect(ta).toContain('pr-5')
-  })
-
-  it('il passaggio non salta: transizione SOLO del raggio, ≤ 150 ms', () => {
-    const formTag = block.slice(0, block.indexOf('>'))
-    expect(formTag).toMatch(/transition-\[border-radius\]/)
-    const m = /duration-(\d+)/.exec(formTag)
-    expect(m).not.toBeNull()
-    expect(Number(m![1])).toBeLessThanOrEqual(150)
-  })
-
-  it('i bottoni restano allineati in basso: il form è items-end', () => {
-    const formTag = block.slice(0, block.indexOf('>'))
+  it(`${dove}: i bottoni restano allineati in basso (il form è items-end) e sono quelli del sistema (Button)`, () => {
     expect(formTag).toContain('items-end')
+    expect(block).toContain('<Button')
   })
-})
+}
 
-describe('M1: TeamChat.tsx allineato allo stesso comportamento', () => {
-  const block = composerBlock(TEAM)
-
-  it('il form NON ha un rounded-* fisso: il raggio arriva da composerFormRadius', () => {
-    const formTag = block.slice(0, block.indexOf('>'))
-    expect(formTag).not.toMatch(/rounded-(full|3xl)/)
-    expect(formTag).toContain('composerFormRadius(')
-  })
-
-  it('la misura vera e il margine interno della barra di scorrimento', () => {
-    const src = readFileSync(TEAM, 'utf8')
-    expect(src).toContain('composerMultiFromMeasure(')
-    expect(src).toContain('TEAM_COMPOSER_SINGLE_ROW_PX')
-    const at = block.indexOf('<textarea')
-    const ta = block.slice(at, block.indexOf('/>', at))
-    expect(ta).toContain('pr-5')
-  })
-
-  it('il passaggio non salta: transizione SOLO del raggio, ≤ 150 ms', () => {
-    const formTag = block.slice(0, block.indexOf('>'))
-    expect(formTag).toMatch(/transition-\[border-radius\]/)
-    const m = /duration-(\d+)/.exec(formTag)
-    expect(m).not.toBeNull()
-    expect(Number(m![1])).toBeLessThanOrEqual(150)
-  })
-})
+describe('DS4: il compositore di Chat.tsx', () => { guardieSuperficie('Chat', CHAT) })
+describe('DS4: il compositore di TeamChat.tsx, lo stesso', () => { guardieSuperficie('TeamChat', TEAM) })
 
 // Passata di design (beta.13): da due righe il campo va a tutta larghezza e i
 // bottoni scendono sotto; l'isteresi evita l'altalena al limite della riga.

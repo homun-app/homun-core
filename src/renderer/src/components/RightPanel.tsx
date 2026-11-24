@@ -10,6 +10,25 @@
 // raggruppato per giorno e «Mostra altro». Le larghezze restano quelle della
 // 16b-correzioni-2 (pannello 340, Computer 560, layoutFor); con una SQUADRA
 // aperta il pannello mostra «Membri» come prima.
+//
+// Fase design (DS4): il pannello è una COLONNA del sistema, con lo schema di
+// PageShell (components/ui/page-shell) dentro un <aside>:
+//   - la radice è un contenitore (@container): il margine laterale dipende
+//     dall'AREA del pannello (24 px sotto i 900: qui lo è sempre), non dalla
+//     finestra;
+//   - ciò che sta FERMO sopra lo scorrimento (mascotte, nome, modello,
+//     schede) porta px-1.5 e dentro una PageColumn;
+//   - il corpo che scorre è un figlio diretto della radice, LARGO QUANTO IL
+//     PANNELLO: la barra sta sul suo bordo destro. Lo scorrimento riserva il
+//     gutter della barra su tutti e due i lati (scrollbar-gutter: stable
+//     both-edges: la barra di scroll-thin occupa 6 px) e il margine sta
+//     DENTRO, nella PageColumn — 6 + 24 px per lato, gli stessi della testa
+//     ferma (px-1.5 + margine): così le colonne sono allineate.
+// La scheda Computer non ha lo scorrimento di colonna: il suo pannello è un
+// figlio diretto della radice e riempie lo spazio che resta (le sue aree che
+// scorrono sono larghe quanto il pannello, col margine dentro: ComputerPanel).
+// I pezzi del sistema: UnderlineTabs per le schede, FlatList/FlatRow per le
+// righe, Section per i titoli di gruppo, Button per le azioni.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
@@ -40,6 +59,23 @@ import { activityPhrase } from '../lib/activity'
 import { ModelSelect } from './ui/ModelSelect'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
+// fase design (DS2): i pezzi del sistema
+import { Button } from './ui/button'
+import { PageColumn } from './ui/page-shell'
+import { Section } from './ui/section'
+import { FlatList, FlatRow } from './ui/flat-list'
+import { UnderlineTabs } from './ui/underline-tabs'
+import { cn } from '../lib/utils'
+
+/**
+ * Lo scorrimento di colonna del pannello (il corpo di Attività e Libreria, e
+ * dei Membri): figlio diretto della radice, largo quanto il pannello. Le
+ * stesse classi del corpo di PageShell — il perché sta nel commento in cima.
+ */
+const PANEL_SCROLL = 'scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable_both-edges]'
+
+/** Il campo di testo (textarea, input, select) dei fogli e dei Membri: 36 px, il raggio dei campi, l'anello solo da tastiera. */
+const FIELD = 'w-full rounded-control bg-muted px-3 py-2 text-body outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
 /** L'etichetta ✕ del pannello, sulla riga comune (fase 16b correzioni 2, Q3). */
 function PanelClose({ onClose }: { onClose(): void }) {
@@ -60,7 +96,11 @@ function PanelClose({ onClose }: { onClose(): void }) {
 function PanelTopBand({ onClose }: { onClose(): void }) {
   return (
     <div data-col-head="pannello" className="drag-region absolute inset-x-0 top-0 z-10 flex h-col-head">
-      <div className="flex h-full items-center justify-end px-4">
+      {/* w-full: la fascia è un flex in RIGA e una figlia è larga quanto il suo
+          contenuto — senza, justify-end non ha spazio e la ✕ resta a SINISTRA
+          invece che sul bordo destro del pannello (lo guarda
+          __tests__/right-panel-design.test.ts) */}
+      <div className="flex h-full w-full items-center justify-end px-4">
         <PanelClose onClose={onClose} />
       </div>
     </div>
@@ -83,19 +123,32 @@ const TAB_LABEL: Record<'activity' | 'library', MessageDescriptor> = {
   library: msg`Libreria`
 }
 
+/**
+ * Fase design (DS4): una riga a filo che è un VERO <button>. FlatRow sa
+ * essere cliccabile da sé, ma come <div role="button">; le righe della
+ * Libreria e dei lavori restano <button> perché la sonda di fase pagine le
+ * cerca così (un «button» col titolo del documento). Il bottone è il
+ * contenitore neutro — largo quanto la lista, senza padding: il respiro lo
+ * porta la riga dentro, i filetti li mette FlatList fra un bottone e l'altro.
+ * `block` e non inline-block: in linea lascerebbe sotto di sé lo spazio della
+ * discesa del carattere, fra una riga e l'altra.
+ */
+function RowButton({ onClick, children }: { onClick(): void; children: React.ReactNode }) {
+  return (
+    <button type="button" className="block w-full cursor-pointer text-left transition hover:bg-muted/50" onClick={onClick}>
+      {children}
+    </button>
+  )
+}
+
 /** Riga chiave/valore senza bordi, come il mockup (S4). */
 function KvRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-2 text-sm">
+    <div className="flex items-center justify-between gap-3 py-2 text-body">
       <span className="shrink-0 text-muted-foreground">{label}</span>
       <span className="min-w-0 truncate text-right text-foreground">{children}</span>
     </div>
   )
-}
-
-/** Titoletto piccolo e grigio delle sezioni (mockup 7). */
-function SmallTitle({ children }: { children: React.ReactNode }) {
-  return <p className="mb-1 mt-4 text-xs font-semibold text-muted-foreground">{children}</p>
 }
 
 /** Profilo: descrizione, righe chiave/valore, Cambia aspetto, Ultimi lavori. */
@@ -134,9 +187,9 @@ function ProfileTab({ onAvatar }: { onAvatar(): void }) {
   const coordinates = groups.filter((g) => g.coordinatorId === agent.id)
   const recent = tasks.filter((tk) => tk.agentId === agent.id).slice(-5).reverse()
   return (
-    <div className="space-y-2">
-      <p className="text-sm leading-relaxed text-foreground/80">{agent.description || <Trans>Nessuna descrizione.</Trans>}</p>
-      <div className="mt-2">
+    <div className="flex flex-col gap-4">
+      <p className="text-body text-foreground/80">{agent.description || <Trans>Nessuna descrizione.</Trans>}</p>
+      <div>
         <KvRow label={i18n.t(msg`Modello`)}>
           {resolved
             ? `${providers.find((p) => p.id === resolved.providerId)?.name ?? resolved.providerId} · ${resolved.model}`
@@ -166,28 +219,27 @@ function ProfileTab({ onAvatar }: { onAvatar(): void }) {
               : <span className="text-muted-foreground">—</span>}
         </KvRow>
       </div>
-      <button className="mt-2 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent" onClick={onAvatar}>
-        <Trans>Cambia aspetto</Trans>
-      </button>
-      <div className="mt-4">
-        <p className="mb-1.5 text-[13px] text-muted-foreground"><Trans>Ultimi lavori</Trans></p>
-        {recent.length === 0 ? (
-          <p className="text-sm text-muted-foreground"><Trans>Nessun task.</Trans></p>
-        ) : (
-          <div className="space-y-1">
-            {recent.map((tk) => (
-              <button
-                key={tk.id}
-                className="flex w-full items-center gap-2 rounded-[12px] px-2.5 py-1.5 text-left text-sm transition hover:bg-muted/60"
-                onClick={() => openTask(tk.id)}
-              >
-                <span className="min-w-0 flex-1 truncate">{tk.title}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">{i18n.t(TASK_LABEL[tk.status] ?? msg`${tk.status}`)}</span>
-              </button>
-            ))}
-          </div>
-        )}
+      <div>
+        <Button variant="secondary" onClick={onAvatar}>
+          <Trans>Cambia aspetto</Trans>
+        </Button>
       </div>
+      <Section title={<Trans>Ultimi lavori</Trans>}>
+        {recent.length === 0 ? (
+          <p className="text-small text-muted-foreground"><Trans>Nessun task.</Trans></p>
+        ) : (
+          <FlatList>
+            {recent.map((tk) => (
+              <RowButton key={tk.id} onClick={() => openTask(tk.id)}>
+                <FlatRow
+                  title={tk.title}
+                  trailing={<span className="text-caption text-muted-foreground">{i18n.t(TASK_LABEL[tk.status] ?? msg`${tk.status}`)}</span>}
+                />
+              </RowButton>
+            ))}
+          </FlatList>
+        )}
+      </Section>
     </div>
   )
 }
@@ -207,38 +259,41 @@ function RoutinesTab() {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId])
-  if (routines === null) return <p className="text-xs text-muted-foreground"><Trans>caricamento…</Trans></p>
+  if (routines === null) return <p className="text-small text-muted-foreground"><Trans>caricamento…</Trans></p>
   return (
-    <div className="space-y-1">
-      <button
-        className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-dashed border-border py-2 text-xs text-muted-foreground transition hover:text-foreground"
+    <div className="flex flex-col gap-4">
+      <Button
+        variant="ghost"
+        className="w-full border border-dashed border-border"
         onClick={() => { setSettingsTab('routine'); setSettingsOpen(true) }}
       >
-        <Plus className="size-3.5" /> <Trans>Nuova routine</Trans>
-      </button>
+        <Plus className="size-4" /> <Trans>Nuova routine</Trans>
+      </Button>
       {routines.length === 0 ? (
-        <p className="text-sm text-muted-foreground"><Trans>Nessuna routine.</Trans></p>
+        <p className="text-small text-muted-foreground"><Trans>Nessuna routine.</Trans></p>
       ) : (
-        routines.map((r) => (
-          <div key={r.id} className="rounded-[14px] bg-muted/60 px-3 py-2">
-            <div className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-sm">{r.title}</span>
-              <button
-                className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-[11px] text-foreground transition hover:bg-accent"
-                onClick={() => { void api.updateRoutine(r.id, { enabled: r.enabled ? 0 : 1 }).then(load).catch(() => undefined) }}
-              >
-                {r.enabled ? <Trans>metti in pausa</Trans> : <Trans>riprendi</Trans>}
-              </button>
-            </div>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {r.enabled
+        <FlatList>
+          {routines.map((r) => (
+            <FlatRow
+              key={r.id}
+              title={r.title}
+              subtitle={r.enabled
                 ? (r.next_run
                     ? <Trans>prossima {formatDate(r.next_run, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</Trans>
                     : <Trans>attiva</Trans>)
                 : <Trans>in pausa</Trans>}
-            </p>
-          </div>
-        ))
+              trailing={(
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => { void api.updateRoutine(r.id, { enabled: r.enabled ? 0 : 1 }).then(load).catch(() => undefined) }}
+                >
+                  {r.enabled ? <Trans>metti in pausa</Trans> : <Trans>riprendi</Trans>}
+                </Button>
+              )}
+            />
+          ))}
+        </FlatList>
       )}
     </div>
   )
@@ -303,18 +358,22 @@ function BotModelRow({ agentId }: { agentId: string }) {
       ? (mainModel?.model ? t`Come gli altri · ${mainModel.model}` : t`Come gli altri`)
       : `${providerName} · ${resolved.model}`
     : t`Nessun modello`
+  // fase design (DS4): il bottone del sistema, «testo» (ghost) e tondo — è
+  // un'azione del profilo, non un'azione principale; il colore d'avviso del
+  // caso «Nessun modello» è l'ultima classe e vince sul grigio del ghost
   return (
-    <button
-      className={`mt-2 flex max-w-full items-center gap-1.5 rounded-full px-3 py-1 text-xs transition hover:bg-muted/60 focus-visible:ring-[3px] focus-visible:ring-ring/50 ${
-        resolved ? 'text-muted-foreground hover:text-foreground' : 'text-waiting'
-      }`}
+    <Button
+      variant="ghost"
+      size="sm"
+      shape="pill"
+      className={cn('mt-2 max-w-full', !resolved && 'text-waiting')}
       data-testid="bot-model-row"
       title={t`Cambia il modello di questo bot`}
       onClick={() => openBotModel()}
     >
       <span className="shrink-0">{t`Modello:`}</span>
-      <span className="truncate font-medium">{label} ›</span>
-    </button>
+      <span className="truncate">{label} ›</span>
+    </Button>
   )
 }
 
@@ -354,81 +413,90 @@ function AdvancedTab() {
       .catch(() => undefined)
   }
   return (
-    <div className="space-y-1 text-sm">
-      <SmallTitle><Trans>Notifiche</Trans></SmallTitle>
-      <button
-        className="flex w-full items-center justify-between rounded-[12px] px-2.5 py-2 transition hover:bg-muted/60"
-        onClick={() => toggleNotif(!notifOff)}
-      >
-        <span className="text-left"><Trans>Quando finisce o mi aspetta</Trans></span>
-        <span className={`relative h-6 w-10 rounded-full transition ${notifOff ? 'bg-muted' : 'bg-foreground'}`}>
-          <span className={`absolute top-0.5 size-5 rounded-full bg-card transition-all ${notifOff ? 'left-0.5' : 'right-0.5'}`} />
-        </span>
-      </button>
+    <div className="flex flex-col gap-4">
+      <Section title={<Trans>Notifiche</Trans>}>
+        {/* la riga è quella a filo del sistema (clic, Invio e spazio: FlatRow);
+            l'interruttore resta a mano finché ui/switch non passa ai token */}
+        <FlatRow
+          clickable
+          onClick={() => toggleNotif(!notifOff)}
+          title={<Trans>Quando finisce o mi aspetta</Trans>}
+          trailing={(
+            <span className={cn('relative h-6 w-10 rounded-full transition', notifOff ? 'bg-muted' : 'bg-foreground')} aria-hidden="true">
+              <span className={cn('absolute top-0.5 size-5 rounded-full bg-card transition-all', notifOff ? 'left-0.5' : 'right-0.5')} />
+            </span>
+          )}
+        />
+      </Section>
 
-      <SmallTitle><Trans>Modello e ragionamento</Trans></SmallTitle>
-      {/* fase impostazioni (I6): UN solo ModelSelect al posto di select dei
-          provider + ModelPicker; «Come gli altri · <modello principale>» è la
-          prima voce (salva null/null, come sempre) e il ragionamento sta nel
-          «⋯» della riga (I1.4). RV4: il selettore vive in BotModelSelect,
-          condiviso col foglio piccolo del pannello destro */}
-      <BotModelSelect agentId={agent.id} />
+      <Section title={<Trans>Modello e ragionamento</Trans>}>
+        {/* fase impostazioni (I6): UN solo ModelSelect al posto di select dei
+            provider + ModelPicker; «Come gli altri · <modello principale>» è la
+            prima voce (salva null/null, come sempre) e il ragionamento sta nel
+            «⋯» della riga (I1.4). RV4: il selettore vive in BotModelSelect,
+            condiviso col foglio piccolo del pannello destro */}
+        <BotModelSelect agentId={agent.id} />
+      </Section>
 
-      <SmallTitle><Trans>Istruzioni</Trans></SmallTitle>
-      <textarea
-        data-testid="bot-instructions"
-        className="min-h-24 w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none"
-        placeholder={t`Descrizione / ruolo del bot (va nel system prompt)`}
-        defaultValue={agent.description}
-        onBlur={(e) => { if (e.target.value !== agent.description) patch({ description: e.target.value }) }}
-      />
+      <Section title={<Trans>Istruzioni</Trans>}>
+        <textarea
+          data-testid="bot-instructions"
+          className={cn(FIELD, 'min-h-24')}
+          placeholder={t`Descrizione / ruolo del bot (va nel system prompt)`}
+          defaultValue={agent.description}
+          onBlur={(e) => { if (e.target.value !== agent.description) patch({ description: e.target.value }) }}
+        />
+      </Section>
 
-      <SmallTitle><Trans>Sezione</Trans></SmallTitle>
-      <input
-        className="w-full rounded-[10px] bg-muted px-3 py-2 text-sm outline-none"
-        placeholder={t`Progetto (titolo nella barra)`}
-        value={section}
-        onChange={(e) => setSection(e.target.value)}
-        onBlur={() => { if (section !== (agent.section ?? '')) patch({ section }) }}
-      />
+      <Section title={<Trans>Sezione</Trans>}>
+        <input
+          className={FIELD}
+          placeholder={t`Progetto (titolo nella barra)`}
+          value={section}
+          onChange={(e) => setSection(e.target.value)}
+          onBlur={() => { if (section !== (agent.section ?? '')) patch({ section }) }}
+        />
+      </Section>
 
-      <div className="mt-5 space-y-2">
+      <div className="flex flex-col gap-2">
         {agent.id !== effectiveMain && (
-          <button className="w-full rounded-[12px] bg-muted px-3 py-2 text-sm transition hover:bg-accent" onClick={() => void setMainAgent(agent.id)}>
+          <Button variant="secondary" className="w-full" onClick={() => void setMainAgent(agent.id)}>
             <Trans>Rendi principale</Trans>
-          </button>
+          </Button>
         )}
         {/* K2 (fase team-bot): il PRINCIPALE non si archivia né si elimina —
             qui come nel menu della barra, gli stessi percorsi */}
         {agent.id !== effectiveMain && (
-          <button
-            className="w-full rounded-[12px] bg-muted px-3 py-2 text-sm transition hover:bg-accent"
+          <Button
+            variant="secondary"
+            className="w-full"
             data-testid="bot-archive"
             onClick={() => void useStore.getState().archiveAgent(agent.id)}
           >
             <Trans>Archivia bot</Trans>
-          </button>
+          </Button>
         )}
         {agent.id !== effectiveMain && (confirmDelete ? (
-          <div className="space-y-1.5">
-            <p className="text-xs text-destructive"><Trans>Elimina {agent.name}? Si cancellano la sua chat, la memoria e le routine. I documenti nella Libreria restano.</Trans></p>
+          <div className="flex flex-col gap-2">
+            <p className="text-small text-destructive"><Trans>Elimina {agent.name}? Si cancellano la sua chat, la memoria e le routine. I documenti nella Libreria restano.</Trans></p>
             <div className="flex gap-2">
-              <button
-                className="flex-1 rounded-[12px] bg-destructive/10 px-3 py-2 text-sm text-destructive transition hover:bg-destructive/20"
+              <Button
+                variant="destructive"
+                className="flex-1"
                 data-testid="bot-delete-confirm"
                 onClick={() => void useStore.getState().deleteAgentWithUndo(agent.id)}
               >
                 <Trans>Elimina bot</Trans>
-              </button>
-              <button className="flex-1 rounded-[12px] bg-muted px-3 py-2 text-sm transition hover:bg-accent" onClick={() => setConfirmDelete(false)}>
+              </Button>
+              <Button variant="secondary" className="flex-1" onClick={() => setConfirmDelete(false)}>
                 <Trans>Annulla</Trans>
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
-          <button className="w-full rounded-[12px] bg-muted px-3 py-2 text-sm text-muted-foreground transition hover:text-destructive" onClick={() => setConfirmDelete(true)}>
+          <Button variant="ghost" className="w-full text-muted-foreground hover:text-destructive" onClick={() => setConfirmDelete(true)}>
             <Trans>Elimina bot</Trans>
-          </button>
+          </Button>
         ))}
       </div>
     </div>
@@ -580,27 +648,29 @@ function SuggestionsBlock({ agentId }: { agentId: string }) {
       : i18n.t(msg`Descrivi cosa fa questo bot`)
   }
   return (
-    <div data-testid="bot-suggestions" className="mb-4 space-y-1.5">
+    <div data-testid="bot-suggestions" className="flex flex-col gap-1.5">
       {suggestions.map((s) => {
         const Icon = SUGGESTION_ICON[s.icon] ?? Link2
         return (
-          <div key={s.id} className="flex items-center gap-2 rounded-[14px] bg-muted/60 py-2 pl-3 pr-1.5" data-testid="bot-suggestion">
+          <div key={s.id} className="flex items-center gap-2 rounded-surface bg-muted/60 p-1.5 pl-3" data-testid="bot-suggestion">
             <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <button
-              className="min-w-0 flex-1 truncate text-left text-sm transition hover:text-foreground"
-              onClick={() => run(s)}
-            >
-              {labelOf(s)}
-            </button>
-            <button
-              className="grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground/70 transition hover:bg-muted hover:text-foreground"
+            {/* l'etichetta è l'azione (ghost); cede lei se non c'è posto: il
+                bottone del sistema non si restringe da sé (shrink-0, senza a
+                capo), qui deve troncare come la riga di prima */}
+            <Button variant="ghost" size="sm" className="min-w-0 flex-1 shrink justify-start px-1" onClick={() => run(s)}>
+              <span className="truncate">{labelOf(s)}</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon
               aria-label={i18n.t(msg`Ignora il suggerimento`)}
               title={i18n.t(msg`Ignora il suggerimento`)}
               data-testid="bot-suggestion-dismiss"
               onClick={() => dismiss(s.id)}
             >
-              <X className="size-3.5" />
-            </button>
+              <X className="size-4" />
+            </Button>
           </div>
         )
       })}
@@ -656,7 +726,11 @@ function ComputerCard({ agentId }: { agentId: string }) {
     <div
       role="button"
       tabIndex={0}
-      className="group w-full cursor-pointer overflow-hidden rounded-[16px] bg-muted/60 text-left transition hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground/40"
+      // fase design (DS4): la card ha il raggio delle superfici e l'anello del
+      // sistema, SOLO da tastiera (quello del Button: qui non si può usare il
+      // pezzo — la card deve restare un div col ruolo, ci sono dentro l'anteprima
+      // e il suo bottone «Stacca»)
+      className="group w-full cursor-pointer overflow-hidden rounded-surface bg-muted/60 text-left transition outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       data-testid="bot-computer-card"
       onClick={() => openBotTab('computer')}
       onKeyDown={(e) => {
@@ -674,10 +748,11 @@ function ComputerCard({ agentId }: { agentId: string }) {
         browserRunning={(screenStatus?.browser ?? browser) === 'running'}
         onDetach={() => { void api.pipOpen(agentId).catch(() => undefined) }}
       />
-      <span className="flex items-center gap-2 px-3 py-2">
+      {/* la riga del titolo: icona · nome · stato (12 px fra icona e testo, come le righe del sistema) */}
+      <span className="flex items-center gap-row-gap px-3 py-2">
         <Monitor className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-sm"><Trans>Computer</Trans></span>
-        <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" data-testid="bot-computer-status">
+        <span className="min-w-0 flex-1 truncate text-body font-medium"><Trans>Computer</Trans></span>
+        <span className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground" data-testid="bot-computer-status">
           <span className={`size-2 rounded-full ${view.dot}`} aria-hidden="true" />
           {i18n.t(view.label)}
         </span>
@@ -685,7 +760,7 @@ function ComputerCard({ agentId }: { agentId: string }) {
       {/* la riga sotto: la frase dell'attività del computer (mai il testo di un
           comando) oppure «Browser aperto»; niente quando non c'è niente */}
       {view.line !== null && (
-        <span className="block truncate px-3 pb-2 text-xs text-muted-foreground" data-testid="bot-computer-line">
+        <span className="block truncate px-3 pb-3 text-small text-muted-foreground" data-testid="bot-computer-line">
           {i18n.t(view.line)}
         </span>
       )}
@@ -715,54 +790,57 @@ function ActivityTab({ agentId }: { agentId: string }) {
   const today = dayKeyOf(Date.now())
   const todayTasks = tasks.filter((t) => t.agentId === agentId && dayKeyOf(t.createdAt) === today).slice(-5).reverse()
   return (
-    <div>
+    <div className="flex flex-col gap-4">
       <SuggestionsBlock agentId={agentId} />
-      <ComputerCard agentId={agentId} />
-      {/* OB4: la preparazione del computer che prosegue fuori dalla guida */}
-      <ComputerPrepRow />
-      <div className="mt-4">
-        <div className="flex items-center justify-between">
-          <p className="text-[13px] text-muted-foreground"><Trans>Routine</Trans></p>
-          <button className="text-xs text-muted-foreground transition hover:text-foreground" onClick={() => openBotSheet('routines')}>
+      {/* la card e la riga della preparazione sono un blocco solo: la riga sta
+          ATTACCATO alla card (OB4: «sotto Computer»), 4 px, non a 16 come il resto */}
+      <div className="flex flex-col gap-1">
+        <ComputerCard agentId={agentId} />
+        {/* OB4: la preparazione del computer che prosegue fuori dalla guida */}
+        <ComputerPrepRow />
+      </div>
+      <Section
+        title={<Trans>Routine</Trans>}
+        action={(
+          // -mr-3: il bottone «testo» sporge del suo respiro laterale, così la
+          // scritta finisce sul bordo destro della colonna come le righe sotto
+          <Button variant="ghost" size="sm" className="-mr-3" onClick={() => openBotSheet('routines')}>
             <Trans>Tutte</Trans> ›
-          </button>
-        </div>
+          </Button>
+        )}
+      >
         {routines === null ? (
-          <p className="mt-1 text-xs text-muted-foreground"><Trans>caricamento…</Trans></p>
+          <p className="text-small text-muted-foreground"><Trans>caricamento…</Trans></p>
         ) : next3.length === 0 ? (
-          <p className="mt-1 text-sm text-muted-foreground"><Trans>Nessuna routine in programma.</Trans></p>
+          <p className="text-small text-muted-foreground"><Trans>Nessuna routine in programma.</Trans></p>
         ) : (
-          <div className="mt-1 space-y-1">
+          <FlatList>
             {next3.map((r) => (
-              <div key={r.id} className="rounded-[12px] px-2.5 py-1.5 text-sm transition hover:bg-muted/60">
-                <p className="truncate">{r.title}</p>
-                <p className="text-xs text-muted-foreground">
-                  <Trans>prossima {formatDate(r.next_run!, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</Trans>
-                </p>
-              </div>
+              <FlatRow
+                key={r.id}
+                title={r.title}
+                subtitle={<Trans>prossima {formatDate(r.next_run!, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</Trans>}
+              />
             ))}
-          </div>
+          </FlatList>
         )}
-      </div>
-      <div className="mt-4">
-        <p className="text-[13px] text-muted-foreground"><Trans>Ultimi lavori</Trans></p>
+      </Section>
+      <Section title={<Trans>Ultimi lavori</Trans>}>
         {todayTasks.length === 0 ? (
-          <p className="mt-1 text-sm text-muted-foreground"><Trans>Oggi ancora niente.</Trans></p>
+          <p className="text-small text-muted-foreground"><Trans>Oggi ancora niente.</Trans></p>
         ) : (
-          <div className="mt-1 space-y-1">
+          <FlatList>
             {todayTasks.map((tk) => (
-              <button
-                key={tk.id}
-                className="flex w-full items-center gap-2 rounded-[12px] px-2.5 py-1.5 text-left text-sm transition hover:bg-muted/60"
-                onClick={() => openTask(tk.id)}
-              >
-                <span className="min-w-0 flex-1 truncate">{tk.title}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">{i18n.t(TASK_LABEL[tk.status] ?? msg`${tk.status}`)}</span>
-              </button>
+              <RowButton key={tk.id} onClick={() => openTask(tk.id)}>
+                <FlatRow
+                  title={tk.title}
+                  trailing={<span className="text-caption text-muted-foreground">{i18n.t(TASK_LABEL[tk.status] ?? msg`${tk.status}`)}</span>}
+                />
+              </RowButton>
             ))}
-          </div>
+          </FlatList>
         )}
-      </div>
+      </Section>
     </div>
   )
 }
@@ -831,55 +909,65 @@ function BotLibraryTab({ agentId }: { agentId: string }) {
   const kindOf = (i: LibraryItemInfo): string =>
     i.kind === 'document' ? i18n.t(msg`Pagina`) : i.kind === 'chart' ? i18n.t(msg`Grafico`) : i18n.t(msg`File`)
   return (
-    <div data-testid="bot-library">
+    <div data-testid="bot-library" className="flex flex-col gap-4">
+      {/* il filtro è un interruttore a segmenti (non le schede a sottolineatura
+          della testa, subito sopra: due righe di schede uguali si leggerebbero
+          come una sola): la voce scelta è «secondary», le altre «ghost». Le
+          tre voci restano i figli diretti del contenitore: la sonda di fase
+          pagine le prende in ordine (button:nth-child) */}
       <div className="flex gap-1" data-testid="bot-library-filters">
         {(Object.keys(FILTER_LABEL) as BotLibraryFilter[]).map((f) => (
-          <button
+          <Button
             key={f}
-            className={`h-8 rounded-full px-3 text-sm transition ${filter === f ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            variant={filter === f ? 'secondary' : 'ghost'}
+            size="sm"
+            shape="pill"
             onClick={() => { setFilter(f); setMore({}) }}
           >
             {i18n.t(FILTER_LABEL[f])}
-          </button>
+          </Button>
         ))}
       </div>
       {items === null ? (
-        <p className="mt-3 text-xs text-muted-foreground"><Trans>caricamento…</Trans></p>
+        <p className="text-small text-muted-foreground"><Trans>caricamento…</Trans></p>
       ) : shown.length === 0 ? (
-        <p className="mt-3 text-sm text-muted-foreground">
+        <p className="text-small text-muted-foreground">
           <Trans>Le pagine, i grafici e i file di questo bot finiscono qui.</Trans>
         </p>
       ) : (
-        <div className="mt-3 space-y-4">
+        <div className="flex flex-col gap-4">
           {groups.map((g) => {
             const limit = 5 + (more[g.key] ?? 0)
             const rows = g.items.slice(0, limit)
             return (
-              <div key={g.key}>
-                <p className="mb-1 text-[13px] text-muted-foreground">{typeof g.label === 'string' ? g.label : i18n.t(g.label)}</p>
-                <div className="space-y-1">
+              // il ritmo di Section (titolo grigio, 12 px, contenuto) scritto a
+              // mano: il giorno resta un <p>, perché la sonda di fase pagine lo
+              // cerca così («Oggi»), e il titolo di Section è un <h2>
+              <div key={g.key} className="flex flex-col gap-section-head">
+                <p className="text-caption font-medium text-muted-foreground">{typeof g.label === 'string' ? g.label : i18n.t(g.label)}</p>
+                <FlatList>
                   {rows.map((i) => (
-                    <button
-                      key={i.id}
-                      className="flex w-full items-center gap-2 rounded-[12px] px-2.5 py-1.5 text-left text-sm transition hover:bg-muted/60"
-                      onClick={() => (i.kind === 'document' ? openPage(i.id, 'chat') : openLibrary(i.id))}
-                    >
-                      <span className="min-w-0 flex-1 truncate">
-                        {i.title}
-                        {i.kind === 'document' && <span className="ml-1.5 text-xs text-muted-foreground">v{i.currentVersion}</span>}
-                      </span>
-                      <span className="shrink-0 text-xs text-muted-foreground">{kindOf(i)}</span>
-                    </button>
+                    <RowButton key={i.id} onClick={() => (i.kind === 'document' ? openPage(i.id, 'chat') : openLibrary(i.id))}>
+                      <FlatRow
+                        title={i.kind === 'document' ? <>{i.title}<span className="ml-1.5 text-caption font-normal text-muted-foreground">v{i.currentVersion}</span></> : i.title}
+                        trailing={<span className="text-caption text-muted-foreground">{kindOf(i)}</span>}
+                      />
+                    </RowButton>
                   ))}
                   {g.items.length > limit && (
-                    <button
-                      className="w-full rounded-[12px] px-2.5 py-1 text-left text-xs text-muted-foreground transition hover:text-foreground"
+                    // flex w-fit: da solo in un contenitore a blocchi un
+                    // inline-flex lascerebbe sotto di sé lo spazio della
+                    // discesa del carattere; -ml-3 allinea la scritta alle righe
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-1 -ml-3 flex w-fit"
                       onClick={() => setMore((m) => ({ ...m, [g.key]: (m[g.key] ?? 0) + 5 }))}
                     >
                       <Trans>Mostra altro</Trans>
-                    </button>
+                    </Button>
                   )}
-                </div>
+                </FlatList>
               </div>
             )
           })}
@@ -920,19 +1008,21 @@ function BotSettingsSheet({ agentId, avatar, onClose }: { agentId: string; avata
       <DialogContent className="max-w-xl">
         <DialogTitle>{i18n.t(msg`Impostazioni del bot`)}</DialogTitle>
         <div ref={contentRef} className="max-h-[70vh] overflow-y-auto scroll-thin pr-1">
-          <p className="mb-2 font-display text-lg">{name}</p>
-          <section>
-            <p className="mb-1 text-xs font-semibold text-muted-foreground"><Trans>Profilo</Trans></p>
-            <ProfileTab onAvatar={() => setAvatarOpen(true)} />
-          </section>
-          <section data-testid="bot-sheet-routines" className="mt-4 scroll-mt-4">
-            <p className="mb-1 text-xs font-semibold text-muted-foreground"><Trans>Routine</Trans></p>
-            <RoutinesTab />
-          </section>
-          <section className="mt-4">
-            <p className="mb-1 text-xs font-semibold text-muted-foreground"><Trans>Avanzate</Trans></p>
-            <AdvancedTab />
-          </section>
+          {/* fase design (DS4): il nome è il titolo del foglio (text-title: i
+              titoli dei pannelli e dei dialoghi; Bricolage resta solo al titolo
+              di pagina) e le tre sezioni sono Section, a 16 px l'una dall'altra */}
+          <div className="flex flex-col gap-4">
+            <p className="text-title font-semibold">{name}</p>
+            <Section title={<Trans>Profilo</Trans>}>
+              <ProfileTab onAvatar={() => setAvatarOpen(true)} />
+            </Section>
+            <Section title={<Trans>Routine</Trans>} testId="bot-sheet-routines" className="scroll-mt-4">
+              <RoutinesTab />
+            </Section>
+            <Section title={<Trans>Avanzate</Trans>}>
+              <AdvancedTab />
+            </Section>
+          </div>
         </div>
         {avatarOpen && <ChangeAvatarDialog agentId={agentId} current={avatar} onClose={() => setAvatarOpen(false)} />}
       </DialogContent>
@@ -1008,21 +1098,28 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
     <aside
       ref={asideRef}
       data-testid="bot-panel"
-      className={
+      // @container: il margine laterale delle colonne dipende dalla larghezza
+      // del PANNELLO (lo legge PageColumn), non della finestra
+      className={cn(
+        '@container flex flex-col',
         overlay
           ? // Q1: il pannello galleggia sopra la chat — ombra morbida, nessun bordo
-            'absolute bottom-0 right-0 top-0 z-10 flex flex-col bg-card shadow-soft'
-          : 'relative flex shrink-0 flex-col border-l border-border/50 bg-card transition-[width]'
-      }
+            'absolute bottom-0 right-0 top-0 z-10 bg-card shadow-soft'
+          : 'relative shrink-0 border-l border-border/50 bg-card transition-[width]'
+      )}
       style={{ width: layout.panelWidth }}
     >
       <PanelTopBand onClose={onClose} />
-      {/* la mascotte grande sospesa e il nome: UN bottone, apre le
-          Impostazioni del bot (G3) */}
-      <div className="flex flex-col items-center px-6 pt-14">
-        <div className="flex flex-col items-center">
+      {/* la testa FERMA: px-1.5 (i 6 px del gutter che lo scorrimento riserva
+          per lato) e dentro la colonna col margine — la stessa ascissa del
+          contenuto che scorre sotto */}
+      <div className="shrink-0 px-1.5">
+        <PageColumn className="flex flex-col items-center pt-col-head">
+          {/* la mascotte grande sospesa e il nome: UN bottone, apre le
+              Impostazioni del bot (G3). L'anello è quello del sistema, solo da
+              tastiera; il nome è il titolo del pannello (text-title) */}
           <button
-            className="flex flex-col items-center"
+            className="flex flex-col items-center rounded-surface outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             data-testid="bot-settings-trigger"
             aria-label={i18n.t(msg`Impostazioni del bot`)}
             title={i18n.t(msg`Impostazioni del bot`)}
@@ -1030,35 +1127,42 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
           >
             <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={110} dimmed={info.dimmed} label={info.agent.name} />
             <span aria-hidden="true" className="mt-1 h-2 w-16 rounded-full bg-foreground/10" />
-            <h2 className="mt-3 font-display text-[26px] leading-tight">{info.agent.name}</h2>
+            <h2 className="mt-3 text-title font-semibold">{info.agent.name}</h2>
           </button>
-        </div>
-        {/* RV4 (fase beta.2): la riga del modello — sotto il nome, sopra le
-            schede: il modello è una proprietà del bot e questo è il suo profilo */}
-        <BotModelRow agentId={info.agent.id} />
-        {/* fase pagine (G3): le due schede — Attività · Libreria */}
-        <div role="tablist" className="mt-3 flex gap-1">
-          {(Object.keys(TAB_LABEL) as Array<'activity' | 'library'>).map((id) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={tab === id}
-              data-testid={`bot-tab-${id}`}
-              className={`h-8 rounded-full px-3 text-sm transition ${tab === id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-              onClick={() => setTab(id)}
-            >
-              {i18n.t(TAB_LABEL[id])}
-            </button>
-          ))}
-        </div>
+          {/* RV4 (fase beta.2): la riga del modello — sotto il nome, sopra le
+              schede: il modello è una proprietà del bot e questo è il suo profilo */}
+          <BotModelRow agentId={info.agent.id} />
+          {/* fase pagine (G3): le due schede — Attività · Libreria. Fase design
+              (DS4): il pezzo del sistema, testo con la sottolineatura su una
+              riga sola. w-full: in una colonna items-center l'involucro sarebbe
+              largo quanto le due etichette — così il suo filetto di base
+              attraversa la colonna e divide la testa dal corpo che scorre — e
+              justify-center-safe mette le schede al centro come la testa (se
+              non ci stanno, dalla riga che scorre si raggiungono lo stesso).
+              Il testid di ogni scheda sta sulla sua ETICHETTA, dentro il
+              bottone: il pezzo non ha un testid per scheda, e il clic
+              sull'etichetta arriva al bottone. Sulla scheda Computer nessuna
+              delle due è scelta, come prima */}
+          <UnderlineTabs<PanelTab>
+            className="mt-3 w-full [&>[role=tablist]]:justify-center-safe"
+            tabs={(Object.keys(TAB_LABEL) as Array<'activity' | 'library'>).map((id) => ({ id, label: <span data-testid={`bot-tab-${id}`}>{i18n.t(TAB_LABEL[id])}</span> }))}
+            value={tab}
+            onChange={setTab}
+          />
+        </PageColumn>
       </div>
-      <div className="flex-1 overflow-y-auto scroll-thin px-5 pb-5 pt-4">
-        {tab === 'activity' && activeId && <ActivityTab agentId={activeId} />}
-        {tab === 'library' && activeId && <BotLibraryTab agentId={activeId} />}
-        {tab === 'computer' && activeId && (
-          <ComputerPanel agentId={activeId} onClose={() => setTab('activity')} embedded />
-        )}
-      </div>
+      {tab === 'computer' && activeId ? (
+        // la scheda Computer non ha lo scorrimento di colonna: il suo pannello
+        // è un figlio diretto della radice e riempie lo spazio che resta
+        <ComputerPanel agentId={activeId} onClose={() => setTab('activity')} embedded />
+      ) : (
+        <div className={PANEL_SCROLL} data-testid="bot-panel-scroll">
+          <PageColumn width="reading" className="flex flex-col gap-4 pt-4 pb-6">
+            {tab === 'activity' && activeId && <ActivityTab agentId={activeId} />}
+            {tab === 'library' && activeId && <BotLibraryTab agentId={activeId} />}
+          </PageColumn>
+        </div>
+      )}
       {botSheetOpen && activeId && <BotSettingsSheet agentId={activeId} avatar={info.avatar} onClose={closeBotSheet} />}
       {botModelOpen && activeId && <BotModelSheet agentId={activeId} onClose={closeBotModel} />}
     </aside>
@@ -1086,13 +1190,13 @@ function TeamMemberRow({ m, activity }: {
     ...(m.subagents ? [`${m.subagents} ${i18n.t(msg`sottoagenti`)}`] : [])
   ].join(' · ')
   return (
-    <div className="rounded-[14px] bg-muted/50 px-3 py-2.5">
-      <p className="flex items-baseline gap-2 text-sm">
-        <span className="font-semibold" style={av ? { color: av } : undefined}>{m.name}</span>
-        <span className={m.state === 'aspetta-te' ? 'text-xs font-semibold text-waiting' : 'text-xs text-muted-foreground'}>{stateLabel}</span>
+    <div className="rounded-surface bg-muted/50 px-3 py-2">
+      <p className="flex items-baseline gap-2 text-body">
+        <span className="font-medium" style={av ? { color: av } : undefined}>{m.name}</span>
+        <span className={m.state === 'aspetta-te' ? 'text-caption font-medium text-waiting' : 'text-caption text-muted-foreground'}>{stateLabel}</span>
       </p>
-      {m.role && <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{m.role}</p>}
-      <p className="mt-0.5 text-xs text-muted-foreground/80">
+      {m.role && <p className="mt-0.5 text-small text-muted-foreground">{m.role}</p>}
+      <p className="mt-0.5 text-caption text-muted-foreground">
         {activity ? i18n.t(activity) : counters}
       </p>
     </div>
@@ -1135,144 +1239,149 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
   return (
     <aside
       ref={asideRef}
-      className={
+      // @container: come nel pannello del bot — il margine delle colonne
+      // dipende dalla larghezza del pannello
+      className={cn(
+        '@container flex flex-col',
         overlay
-          ? 'absolute bottom-0 right-0 top-0 z-10 flex flex-col bg-card shadow-soft'
-          : 'relative flex shrink-0 flex-col border-l border-border/50 bg-card transition-[width]'
-      }
+          ? 'absolute bottom-0 right-0 top-0 z-10 bg-card shadow-soft'
+          : 'relative shrink-0 border-l border-border/50 bg-card transition-[width]'
+      )}
       style={{ width: layout.panelWidth }}
     >
       <PanelTopBand onClose={onClose} />
-      <div className="flex-1 overflow-y-auto scroll-thin px-5 pb-5 pt-14">
-        <h2 className="font-display text-[22px]">{group.name}</h2>
-        {/* Q5 (fase squadra): la vista del team del disegno — stato, ruolo,
-            attività di adesso e contatori per ogni membro */}
-        <p className="mb-1 mt-4 text-[13px] font-semibold"><Trans>Il team</Trans></p>
-        <div className="space-y-2.5" data-testid="team-overview">
-          {groupOverview.members.map((m) => (
-            <TeamMemberRow key={m.agentId} m={m} activity={activityOf(m.agentId)} />
-          ))}
-        </div>
-        {/* Q5: «Prodotto dalla squadra» — i documenti creati nei turni della squadra */}
-        {groupOverview.produced.length > 0 && (
-          <div className="mt-4">
-            <p className="mb-1 text-[13px] font-semibold"><Trans>Prodotto dal team</Trans></p>
-            <div className="space-y-1" data-testid="team-produced">
-              {groupOverview.produced.map((it, i) => (
-                <button
-                  key={i}
-                  className="flex w-full items-center gap-2 rounded-[12px] px-2.5 py-1.5 text-left text-sm transition hover:bg-muted/60"
-                  onClick={() => it.kind === 'document' && it.id && openPage(it.id, 'library')}
-                >
-                  <span className="min-w-0 flex-1 truncate">{it.title}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">{it.authorName}</span>
-                </button>
+      {/* lo stesso corpo del pannello del bot (PANEL_SCROLL: largo quanto il
+          pannello, margine dentro); il titolo scorre col contenuto, com'era */}
+      <div className={PANEL_SCROLL}>
+        <PageColumn width="reading" className="flex flex-col gap-4 pt-col-head pb-6">
+          <h2 className="text-title font-semibold">{group.name}</h2>
+          {/* Q5 (fase squadra): la vista del team del disegno — stato, ruolo,
+              attività di adesso e contatori per ogni membro */}
+          <Section title={<Trans>Il team</Trans>} size="body">
+            <div className="flex flex-col gap-2" data-testid="team-overview">
+              {groupOverview.members.map((m) => (
+                <TeamMemberRow key={m.agentId} m={m} activity={activityOf(m.agentId)} />
               ))}
             </div>
-          </div>
-        )}
-        <p className="mb-1 mt-4 text-[13px] text-muted-foreground"><Trans>Membri</Trans></p>
-        <div className="mt-1 space-y-1">
-          {group.members.map((m) => {
-            const a = memberAgent(m.agentId)
-            const coord = m.agentId === group.coordinatorId
-            return (
-              <div key={m.agentId} className="flex items-center gap-2.5 rounded-[14px] px-2 py-1.5 text-sm transition hover:bg-muted/60">
-                <span className="min-w-0 flex-1 truncate">
-                  {m.name}
-                  {coord && <span className="ml-1.5 text-xs text-muted-foreground">· <Trans>coordinatore</Trans></span>}
-                </span>
-                {group.members.length > 1 && !coord && (
-                  <button
-                    className="shrink-0 text-xs text-muted-foreground transition hover:text-destructive"
-                    onClick={() => { setBusy(true); void groupUpdate(group.id, { removeMemberIds: [m.agentId] }).finally(() => setBusy(false)) }}
-                  >
-                    <Trans>Togli</Trans>
-                  </button>
-                )}
-              </div>
-            )
-          })}
-        </div>
-        <p className="mb-1 mt-4 text-[13px] text-muted-foreground"><Trans>Chi risponde</Trans></p>
-        <select
-          className="w-full rounded-[10px] bg-muted px-2.5 py-2 text-sm outline-none"
-          value={group.coordinatorId ?? ''}
-          disabled={busy}
-          aria-label={i18n.t(msg`Coordinatore`)}
-          onChange={(e) => { setBusy(true); void groupUpdate(group.id, { coordinatorId: e.target.value }).finally(() => setBusy(false)) }}
-        >
-          {group.members.map((m) => (
-            <option key={m.agentId} value={m.agentId}>{m.name}</option>
-          ))}
-        </select>
-        {notIn.length > 0 && group.members.length < 6 && (
-          <DropdownMenu>
-            <DropdownMenuTrigger className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-dashed border-border py-2 text-xs text-muted-foreground transition hover:text-foreground">
-              <Plus className="size-3.5" /> <Trans>Aggiungi un bot</Trans>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              {notIn.map((a) => (
-                <DropdownMenuItem key={a.id} onClick={() => { setBusy(true); void groupUpdate(group.id, { addMemberIds: [a.id] }).finally(() => setBusy(false)) }}>
-                  {a.name}
-                </DropdownMenuItem>
+          </Section>
+          {/* Q5: «Prodotto dalla squadra» — i documenti creati nei turni della squadra */}
+          {groupOverview.produced.length > 0 && (
+            <Section title={<Trans>Prodotto dal team</Trans>} size="body">
+              <FlatList testId="team-produced">
+                {groupOverview.produced.map((it, i) => (
+                  <RowButton key={i} onClick={() => it.kind === 'document' && it.id && openPage(it.id, 'library')}>
+                    <FlatRow title={it.title} trailing={<span className="text-caption text-muted-foreground">{it.authorName}</span>} />
+                  </RowButton>
+                ))}
+              </FlatList>
+            </Section>
+          )}
+          <Section title={<Trans>Membri</Trans>}>
+            <FlatList>
+              {group.members.map((m) => {
+                const a = memberAgent(m.agentId)
+                const coord = m.agentId === group.coordinatorId
+                return (
+                  <FlatRow
+                    key={m.agentId}
+                    title={<>{m.name}{coord && <span className="ml-1.5 text-caption font-normal text-muted-foreground">· <Trans>coordinatore</Trans></span>}</>}
+                    // -mr-3: la scritta di «Togli» finisce sul bordo destro della colonna
+                    trailing={group.members.length > 1 && !coord ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="-mr-3 text-destructive hover:text-destructive"
+                        onClick={() => { setBusy(true); void groupUpdate(group.id, { removeMemberIds: [m.agentId] }).finally(() => setBusy(false)) }}
+                      >
+                        <Trans>Togli</Trans>
+                      </Button>
+                    ) : undefined}
+                  />
+                )
+              })}
+            </FlatList>
+          </Section>
+          <Section title={<Trans>Chi risponde</Trans>}>
+            <select
+              className={FIELD}
+              value={group.coordinatorId ?? ''}
+              disabled={busy}
+              aria-label={i18n.t(msg`Coordinatore`)}
+              onChange={(e) => { setBusy(true); void groupUpdate(group.id, { coordinatorId: e.target.value }).finally(() => setBusy(false)) }}
+            >
+              {group.members.map((m) => (
+                <option key={m.agentId} value={m.agentId}>{m.name}</option>
               ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        <p className="mb-1 mt-4 text-[13px] text-muted-foreground"><Trans>Descrizione</Trans></p>
-        <textarea
-          className="min-h-20 w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          onBlur={() => { if (description !== group.description) void groupUpdate(group.id, { description }) }}
-        />
-        {/* Q1 (fase squadra): il riquadro Autonomia del disegno (tavola 1) —
-            apre la schermata 3 */}
-        <button
-          className="mt-4 block w-full rounded-[14px] bg-muted/60 px-3.5 py-3 text-left transition hover:bg-muted"
-          data-testid="team-autonomy-open"
-          onClick={() => setAutonomyOpen(true)}
-        >
-          <span className="text-sm font-medium"><Trans>Autonomia: {autonomyShortLabel(group.autonomy, i18n)}</Trans></span>
-          <span className="mt-0.5 block text-[12px] leading-snug text-muted-foreground">{autonomyBlurb(group.autonomy, i18n)}</span>
-        </button>
-        {autonomyOpen && <TeamAutonomySheet group={group} onClose={() => setAutonomyOpen(false)} />}
-        {/* K2 (fase team-bot): Archivia ed Elimina passano dagli stessi
-            percorsi del menu della barra (la casella per portare via anche
-            i bot creati per il team, spenta di default) */}
-        <button
-          className="mt-2 w-full rounded-[12px] bg-muted px-3 py-2 text-sm transition hover:bg-accent"
-          data-testid="team-archive"
-          onClick={() => void groupArchive(group.id)}
-        >
-          <Trans>Archivia team</Trans>
-        </button>
-        {confirmDelete ? (
-          <div className="mt-4 space-y-1.5">
-            <p className="text-xs text-destructive"><Trans>Eliminare il team «{group.name}»? Si cancellano la timeline del team e le sue impostazioni. I bot restano.</Trans></p>
-            <label className="flex cursor-pointer items-center gap-2 rounded-[10px] bg-muted px-3 py-2 text-[13px]">
-              <input type="checkbox" data-testid="team-delete-members" checked={deleteMembers} onChange={(e) => setDeleteMembers(e.target.checked)} />
-              <Trans>Elimina anche i bot creati per questo team</Trans>
-            </label>
-            <div className="flex gap-2">
-              <button
-                className="flex-1 rounded-[12px] bg-destructive/10 px-3 py-2 text-sm text-destructive transition hover:bg-destructive/20"
-                data-testid="team-delete-confirm"
-                onClick={() => void groupDeleteWithUndo(group.id, deleteMembers)}
-              >
-                <Trans>Elimina team</Trans>
-              </button>
-              <button className="flex-1 rounded-[12px] bg-muted px-3 py-2 text-sm transition hover:bg-accent" onClick={() => setConfirmDelete(false)}>
-                <Trans>Annulla</Trans>
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button className="mt-4 w-full rounded-[12px] bg-muted px-3 py-2 text-sm text-muted-foreground transition hover:text-destructive" onClick={() => setConfirmDelete(true)}>
-            <Trans>Elimina team</Trans>
+            </select>
+          </Section>
+          {notIn.length > 0 && group.members.length < 6 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="w-full border border-dashed border-border">
+                  <Plus className="size-4" /> <Trans>Aggiungi un bot</Trans>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {notIn.map((a) => (
+                  <DropdownMenuItem key={a.id} onClick={() => { setBusy(true); void groupUpdate(group.id, { addMemberIds: [a.id] }).finally(() => setBusy(false)) }}>
+                    {a.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <Section title={<Trans>Descrizione</Trans>}>
+            <textarea
+              className={cn(FIELD, 'min-h-20')}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              onBlur={() => { if (description !== group.description) void groupUpdate(group.id, { description }) }}
+            />
+          </Section>
+          {/* Q1 (fase squadra): il riquadro Autonomia del disegno (tavola 1) —
+              apre la schermata 3 */}
+          <button
+            className="block w-full rounded-surface bg-muted/60 px-4 py-3 text-left transition hover:bg-muted"
+            data-testid="team-autonomy-open"
+            onClick={() => setAutonomyOpen(true)}
+          >
+            <span className="block text-body font-medium"><Trans>Autonomia: {autonomyShortLabel(group.autonomy, i18n)}</Trans></span>
+            <span className="mt-0.5 block text-small text-muted-foreground">{autonomyBlurb(group.autonomy, i18n)}</span>
           </button>
-        )}
+          {autonomyOpen && <TeamAutonomySheet group={group} onClose={() => setAutonomyOpen(false)} />}
+          {/* K2 (fase team-bot): Archivia ed Elimina passano dagli stessi
+              percorsi del menu della barra (la casella per portare via anche
+              i bot creati per il team, spenta di default) */}
+          <Button variant="secondary" className="w-full" data-testid="team-archive" onClick={() => void groupArchive(group.id)}>
+            <Trans>Archivia team</Trans>
+          </Button>
+          {confirmDelete ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-small text-destructive"><Trans>Eliminare il team «{group.name}»? Si cancellano la timeline del team e le sue impostazioni. I bot restano.</Trans></p>
+              <label className="flex cursor-pointer items-center gap-2 rounded-control bg-muted px-3 py-2 text-body">
+                <input type="checkbox" data-testid="team-delete-members" checked={deleteMembers} onChange={(e) => setDeleteMembers(e.target.checked)} />
+                <Trans>Elimina anche i bot creati per questo team</Trans>
+              </label>
+              <div className="flex gap-2">
+                <Button
+                  variant="destructive"
+                  className="flex-1"
+                  data-testid="team-delete-confirm"
+                  onClick={() => void groupDeleteWithUndo(group.id, deleteMembers)}
+                >
+                  <Trans>Elimina team</Trans>
+                </Button>
+                <Button variant="secondary" className="flex-1" onClick={() => setConfirmDelete(false)}>
+                  <Trans>Annulla</Trans>
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button variant="ghost" className="w-full text-muted-foreground hover:text-destructive" onClick={() => setConfirmDelete(true)}>
+              <Trans>Elimina team</Trans>
+            </Button>
+          )}
+        </PageColumn>
       </div>
     </aside>
   )

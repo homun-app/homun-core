@@ -1,13 +1,22 @@
 // Fase 16b (S5): la squadra è una vista di prima classe — la selezioni nella
-// barra e occupa il posto della chat, col layout di S3 (etichetta sospesa,
-// niente testata). I messaggi dei bot: mascotte 34 px e nome nel colore del
-// bot, testo nudo come nel mockup; le @menzioni sono pillole colorate; il
-// riepilogo del coordinatore (S1.2) è una bolla tenue tinta col suo colore.
-// Mentre un membro lavora: la sua mascotte con la mezza riga d'attività.
-import { useEffect, useMemo, useRef, useState } from 'react'
+// barra e occupa il posto della chat, col layout di S3 (pillola sospesa). I
+// messaggi dei bot: mascotte 34 px e nome nel colore del bot; le @menzioni
+// sono pillole colorate; il riepilogo del coordinatore (S1.2) è una bolla
+// tenue tinta col suo colore. Mentre un membro lavora: la sua mascotte con
+// la mezza riga d'attività.
+//
+// Fase design (DS4): la timeline della squadra parla come la chat — la stessa
+// colonna di lettura (PageColumn reading: 720 px, l'area meno i margini se è
+// più stretta), i messaggi in text-reading, LO STESSO MARKDOWN di ogni
+// messaggio di bot (BotMarkdown: prima qui il testo era nudo), le righe di
+// sistema con Notice, il campo di scrittura alla larghezza della colonna, i
+// controlli di Button. Le @menzioni restano pillole nel colore del bot
+// menzionato, e si cercano DENTRO i pezzi di testo dell'albero reso
+// (lib/mentions.ts): prima il testo si spezzava a mano attorno a loro.
+import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
-import { ArrowUp, ArrowRight, PanelRight, FileText } from 'lucide-react'
+import { ArrowRight, ArrowUp, FileText, PanelRight } from 'lucide-react'
 import { api } from '../store'
 import { useStore } from '../store'
 import { avatarOf } from '../../../shared/avatar'
@@ -16,6 +25,8 @@ import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
 import { activityPhrase } from '../lib/activity'
 import { i18n } from '../lib/i18n'
+import { mapText, splitMentions } from '../lib/mentions'
+import { cn } from '../lib/utils'
 import { groupSystemText } from './Chat'
 // Q1 (fase squadra): la pillola dell'autonomia nella fascia alta (tavola 1)
 import { autonomyShortLabel } from './TeamAutonomySheet'
@@ -25,82 +36,99 @@ import { pendingWantsLine } from './ApprovalsQueue'
 import { ApprovalsBannerElsewhere } from './ApprovalsBanner'
 // Q6 (fase squadra): la pagina si apre a lato anche dentro la chat di squadra
 import { PageView } from './PageView'
-// M1 (fase beta12-correzioni): il raggio dinamico del composer (come Chat)
-import { composerFormRadius, composerMultiFromMeasure, composerLayout, nextComposerMulti, TEAM_COMPOSER_SINGLE_ROW_PX } from '../lib/composer'
+// fase design (DS4): il campo di scrittura è una superficie a una riga come a
+// dieci (niente più il raggio dinamico di M1: i raggi sono tre); resta il
+// LAYOUT a più righe, con la MISURA del textarea
+import { composerMultiFromMeasure, composerLayout, nextComposerMulti, TEAM_COMPOSER_SINGLE_ROW_PX } from '../lib/composer'
+import { BotMarkdown, proseWithText } from './DocumentMarkdown'
+import { Button } from './ui/button'
+import { Notice } from './ui/notice'
+import { PageColumn } from './ui/page-shell'
 
-/** Il testo col le @menzioni rese come pillole nel colore del bot menzionato. */
-function MentionedText({ text, members, agents, effectiveMain }: {
+// le due funzioni pure delle menzioni (lib/mentions.ts): da qui le importano i test
+export { mapText, splitMentions }
+
+/**
+ * Un componente per `tag` che rende lo stesso tag coi figli passati da
+ * mapText: è ciò che react-markdown dà a ogni elemento (`node` è il suo nodo
+ * dell'albero del markdown e NON va sul tag). `fn` fa di un pezzo di testo
+ * ciò che deve — la squadra: le @menzioni in pillole.
+ */
+export function withMentions(tag: string, fn: (text: string) => ReactNode): (props: Record<string, unknown>) => ReactNode {
+  const Menzionato = ({ node: _node, ...props }: Record<string, unknown>): ReactNode =>
+    createElement(tag, { ...props, children: mapText(props.children as ReactNode, fn) } as never)
+  return Menzionato
+}
+
+/** La pillola di una @menzione: nel colore del bot menzionato (@tutti: il primo membro). */
+function MentionPill({ text, members, agents, effectiveMain }: {
   text: string
   members: Array<{ agentId: string; name: string }>
   agents: Agent[]
   effectiveMain: string | null
 }) {
-  const parts = useMemo(() => {
-    // nomi ordinati per lunghezza decrescente: vince il più lungo («Ana Maria»)
-    const names = members.map((m) => m.name).filter((n) => n.trim()).sort((a, b) => b.length - a.length)
-    if (!names.length) return [text]
-    const re = new RegExp(`(@(?:${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}|tutti))`, 'g')
-    return text.split(re)
-  }, [text, members])
+  const name = text.slice(1)
+  const member = members.find((m) => m.name === name) ?? (name === 'tutti' ? members[0] : undefined)
+  const agent = member ? agents.find((a) => a.id === member.agentId) : undefined
+  const av = agent ? avatarOf(agent, agents, effectiveMain) : null
+  // la taglia è quella del testo intorno (prima 0.92 em scritto a mano)
   return (
-    <>
-      {parts.map((p, i) => {
-        if (!p) return null
-        if (p.startsWith('@')) {
-          const name = p.slice(1)
-          const member = members.find((m) => m.name === name) ?? (name === 'tutti' ? members[0] : undefined)
-          const agent = member ? agents.find((a) => a.id === member.agentId) : undefined
-          const av = agent ? avatarOf(agent, agents, effectiveMain) : null
-          return (
-            <span
-              key={i}
-              className="rounded-full px-1.5 py-px text-[0.92em]"
-              style={av ? { background: `var(--bot-${av.color})`, color: 'var(--bot-ink)' } : { background: 'var(--muted)' }}
-            >
-              {p}
-            </span>
-          )
-        }
-        return <span key={i}>{p}</span>
-      })}
-    </>
+    <span
+      className="rounded-full px-1.5 font-medium"
+      style={av ? { background: `var(--bot-${av.color})`, color: 'var(--bot-ink)' } : { background: 'var(--muted)' }}
+    >
+      {text}
+    </span>
   )
 }
 
-/** Il messaggio di un bot: mascotte, nome nel suo colore, testo nudo. */
+/** La bolla di ogni messaggio di bot: la stessa della chat (superficie, testo di lettura). */
+const BOLLA_BOT = 'min-w-0 rounded-surface bg-muted px-4 py-2 text-reading'
+/** La riga di un messaggio: mascotte e testo, larga quanto il testo fino all'85% della colonna. */
+const RIGA_BOT = 'flex w-fit max-w-[85%] gap-3'
+
+/** Il messaggio di un bot: mascotte, nome nel suo colore, il testo come markdown (con le menzioni). */
 function TeamBotMessage({ m, group }: { m: GroupMessageInfo; group: GroupInfo }) {
   const agents = useStore((s) => s.agents)
   const mainAgentId = useStore((s) => s.mainAgentId)
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
-  const agent = agents.find((a) => a.id === m.authorId)
   const info = useBotInfo(m.authorId)
+  // le @menzioni dentro il testo: pillole nel colore del bot menzionato
+  const members = group.members
+  const pill = useCallback((text: string): ReactNode => splitMentions(text, members.map((x) => x.name)).map((p, i) =>
+    p.startsWith('@') ? <MentionPill key={i} text={p} members={members} agents={agents} effectiveMain={effectiveMain} /> : p
+  ), [members, agents, effectiveMain])
+  // nel markdown le menzioni si cercano nei pezzi di testo di ogni elemento (le regole restano quelle di DS1)
+  const components = useMemo(() => proseWithText(pill), [pill])
+  const agent = agents.find((a) => a.id === m.authorId)
   if (!agent) return null
   const av = avatarOf(agent, agents, effectiveMain)
   const color = `var(--bot-${av.color})`
   const isCoord = group.coordinatorId === m.authorId
   // il riepilogo di chiusura (S1.2): bolla tenue tinta col colore del
-  // coordinatore (12% sul fondo), titolo «<Coordinatore> · riepilogo per te»
+  // coordinatore (12% sul fondo), titolo «<Coordinatore> · riepilogo per te».
+  // È testo piano, a capo compresi (non markdown): le menzioni ci sono lo stesso
   if (m.summary) {
     return (
-      <div className="flex max-w-[85%] gap-3">
+      <div className={RIGA_BOT}>
         {info && <Bot family={info.avatar.family} color={info.avatar.color} state="idle" size={34} track={false} />}
-        <div className="min-w-0 flex-1 rounded-[20px] px-4 py-3" style={{ background: `color-mix(in oklab, ${color} 12%, var(--muted))` }}>
-          <p className="text-xs font-medium" style={{ color }}>{m.authorName} · <Trans>riepilogo per te</Trans></p>
-          <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{m.text}</p>
+        <div className="min-w-0 rounded-surface px-4 py-3" style={{ background: `color-mix(in oklab, ${color} 12%, var(--muted))` }}>
+          <p className="text-caption font-medium" style={{ color }}>{m.authorName} · <Trans>riepilogo per te</Trans></p>
+          <p className="mt-1 whitespace-pre-wrap text-reading">{mapText(m.text, pill)}</p>
         </div>
       </div>
     )
   }
   return (
-    <div className="flex max-w-[85%] gap-3">
+    <div className={RIGA_BOT}>
       {info && <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={34} track={false} dimmed={info.dimmed} />}
       <div className="min-w-0">
-        <p className="text-sm font-medium" style={{ color }}>
-          {m.authorName}{isCoord ? <span className="ml-1 text-xs text-muted-foreground">· <Trans>coordinatore</Trans></span> : null}
+        <p className="mb-1 text-small font-medium" style={{ color }}>
+          {m.authorName}{isCoord ? <span className="ml-1 text-caption font-normal text-muted-foreground">· <Trans>coordinatore</Trans></span> : null}
         </p>
-        <p className="whitespace-pre-wrap text-[15px] leading-relaxed">
-          <MentionedText text={m.text} members={group.members} agents={agents} effectiveMain={effectiveMain} />
-        </p>
+        <div className={BOLLA_BOT}>
+          <BotMarkdown text={m.text} components={components} />
+        </div>
       </div>
     </div>
   )
@@ -115,9 +143,9 @@ function RelayRow({ m }: { m: GroupMessageInfo }) {
   let p: RelayPayload = {}
   try { p = JSON.parse(m.text) as RelayPayload } catch { p = { text: m.text } }
   return (
-    <p className="flex items-center gap-1.5 text-[13px] text-muted-foreground" data-testid="relay-row">
-      <ArrowRight className="size-3 shrink-0" aria-hidden />
-      <span className="truncate">
+    <p className="flex items-center gap-row-gap text-small text-muted-foreground" data-testid="relay-row">
+      <span className="grid size-4 shrink-0 place-items-center" aria-hidden="true"><ArrowRight className="size-4" /></span>
+      <span className="min-w-0 truncate">
         <span className="font-medium">{m.authorName}</span> → <span className="font-medium">{p.toName ?? '…'}</span>: {p.text}
       </span>
     </p>
@@ -133,25 +161,25 @@ function ArtifactCard({ m, agents }: { m: GroupMessageInfo; agents: Agent[] }) {
   const isDoc = p.kind === 'document' && !!p.id
   const info = useBotInfo(m.authorId ?? null)
   return (
-    <div className="flex max-w-[85%] items-center gap-3 rounded-[16px] bg-muted/60 px-3.5 py-2.5">
+    <div className="flex max-w-[85%] items-center gap-3 rounded-surface bg-muted/60 px-4 py-2">
       {info && <Bot family={info.avatar.family} color={info.avatar.color} state="idle" size={28} track={false} />}
       <div className="min-w-0">
         <button
-          className="flex min-w-0 items-center gap-1.5 text-left text-sm font-medium underline-offset-2 transition hover:underline"
+          className="flex min-w-0 items-center gap-1.5 text-left text-body font-medium underline-offset-2 transition hover:underline"
           data-testid="artifact-card"
           onClick={() => {
             if (isDoc) openPage(p.id!, 'library')
             else if (p.path) void api.filesRead(m.authorId ?? agents[0]?.id ?? '', p.path).then((r) => setPreview(r && r.kind === 'text' ? r.content : '(file binario)')).catch(() => setPreview(null))
           }}
         >
-          <FileText className="size-3.5 shrink-0" aria-hidden /> {p.title ?? 'file'}
+          <FileText className="size-4 shrink-0" aria-hidden /> {p.title ?? 'file'}
         </button>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           {m.authorName} · {isDoc ? <Trans>apri a lato</Trans> : <Trans>si apre qui</Trans>}
         </p>
       </div>
       {preview !== null && (
-        <pre className="max-h-40 flex-1 overflow-auto scroll-thin whitespace-pre-wrap rounded-[10px] bg-card px-3 py-2 text-xs">{preview}</pre>
+        <pre className="max-h-40 flex-1 overflow-auto scroll-thin whitespace-pre-wrap rounded-control bg-card px-3 py-2 text-caption">{preview}</pre>
       )}
     </div>
   )
@@ -161,25 +189,19 @@ function ArtifactCard({ m, agents }: { m: GroupMessageInfo; agents: Agent[] }) {
 function TimelineApprovalCard({ c }: { c: { agentId: string; agentName: string; approvalId: string; phrase: string; pending: boolean; fixed: boolean } }) {
   const resolveGroupApproval = useStore((s) => s.resolveGroupApproval)
   return (
-    <div className="max-w-[85%] rounded-[16px] bg-card px-4 py-3 shadow-soft" data-testid="timeline-approval">
-      <p className="text-xs text-muted-foreground">
+    <div className="w-fit max-w-[85%] rounded-surface bg-card px-4 py-3 shadow-soft" data-testid="timeline-approval">
+      <p className="text-caption text-muted-foreground">
         {c.agentName} · <Trans>chiede a te</Trans>{c.fixed ? <> · <Trans>sempre a te</Trans></> : null}
       </p>
-      <p className="mt-1 text-sm leading-relaxed">{c.phrase}</p>
+      <p className="mt-1 text-reading">{c.phrase}</p>
       {c.pending ? (
-        <div className="mt-2 flex gap-2">
-          <button
-            className="rounded-full bg-foreground px-3.5 py-1.5 text-[13px] text-background transition hover:opacity-90"
-            onClick={() => resolveGroupApproval(c.agentId, c.approvalId, 'allow', 'once')}
-          >
+        <div className="mt-3 flex gap-2">
+          <Button size="sm" onClick={() => resolveGroupApproval(c.agentId, c.approvalId, 'allow', 'once')}>
             <Trans>Consenti una volta</Trans>
-          </button>
-          <button
-            className="rounded-full px-3.5 py-1.5 text-[13px] text-muted-foreground transition hover:text-destructive"
-            onClick={() => resolveGroupApproval(c.agentId, c.approvalId, 'deny', 'once')}
-          >
+          </Button>
+          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => resolveGroupApproval(c.agentId, c.approvalId, 'deny', 'once')}>
             <Trans>Rifiuta</Trans>
-          </button>
+          </Button>
         </div>
       ) : null}
     </div>
@@ -199,7 +221,7 @@ function MemberActivity({ agentId }: { agentId: string }) {
         <Bot family={info.avatar.family} color={info.avatar.color} state={info.state === 'thinking' ? 'thinking' : 'speaking'} size={34} track={false} />
         <span aria-hidden="true" className="mt-1 h-1.5 w-7 rounded-full bg-foreground/10" />
       </span>
-      <span aria-live="polite" className="text-sm text-muted-foreground">
+      <span aria-live="polite" className="text-body text-muted-foreground">
         {info.agent.name}{' '}{i18n.t(d)}
       </span>
     </div>
@@ -227,8 +249,9 @@ export function TeamChat() {
     if (panelFocusRestore > 0) panelBtnRef.current?.focus()
   }, [panelFocusRestore])
   const [text, setText] = useState('')
-  // M1 (fase beta12-correzioni): come Chat — da due righe in su la pillola
-  // diventa un riquadro arrotondato, deciso dalla misura del textarea
+  // M1 (fase beta12-correzioni): come Chat — da due righe in su il campo va a
+  // tutta larghezza, deciso dalla misura del textarea (fase design: il raggio
+  // non cambia più, è sempre quello delle superfici)
   const [multiState, setMultiState] = useState({ multi: false, enteredAt: 0 })
   const multiRow = multiState.multi
   useEffect(() => {
@@ -273,7 +296,7 @@ export function TeamChat() {
     const openGroup = useStore.getState().openGroup
     return (
       <main className="flex flex-1 items-center justify-center text-muted-foreground">
-        <button className="transition hover:text-foreground" onClick={() => openGroup(null)}>
+        <button className="text-body transition hover:text-foreground" onClick={() => openGroup(null)}>
           <Trans>Team non più disponibile — chiudi</Trans>
         </button>
       </main>
@@ -302,16 +325,19 @@ export function TeamChat() {
           aperta (dalla Libreria, dalle card della timeline e da «Prodotto
           dalla squadra») — lo stesso componente della chat uno-a-uno */}
       <PageView />
-      {/* fase 16b correzioni 2 (Q3): la fascia alta come nella chat — pillola
-          della squadra (nome + chi risponde, che tronca) sulla riga in cima
-          e bottone del pannello a destra. Fase design (DS3): alta 52 come la
-          testata di OGNI colonna (h-col-head, letta dalla sonda), i controlli da 32 (size-control-sm).
+      {/* fase 16b correzioni 2 (Q3): la pillola della squadra (nome + chi
+          risponde, che tronca) sulla riga in cima e bottone del pannello a
+          destra. Fase design (DS3): alta 52 come la testata di OGNI colonna
+          (h-col-head, letta dalla sonda), i controlli da 32 (size-control-sm).
           G3 (fase 0.3.1001 grafica): la pillola è un BOTTONE che apre/chiude
           il pannello dei membri (no-drag; attorno resta il trascinamento).
           G2: a pannello APERTO il bottone PanelRight sparisce — resta la ✕ —
-          ma il posto w-9 resta occupato, così la pillola non salta */}
+          ma il posto w-8 resta occupato, così la pillola non salta.
+          La riga interna è larga quanto la testata (w-full): la testata è un
+          flex in RIGA e una figlia è larga quanto il suo contenuto — senza, lo
+          spazio che centra la pillola non c'è e la pillola resta a sinistra */}
       <div data-col-head="chat" className="drag-region absolute inset-x-0 top-0 z-10 flex h-col-head">
-        <div className="flex h-full min-w-0 items-center gap-3 px-4">
+        <div className="flex h-full w-full min-w-0 items-center gap-3 px-4">
           <span className="w-8 shrink-0" aria-hidden="true" />
           <span className="flex min-w-0 flex-1 justify-center">
             <button
@@ -322,12 +348,12 @@ export function TeamChat() {
               title={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
               onClick={() => setRightPanel(!rightPanel)}
             >
-              <span className="truncate text-[15px] font-medium">{group.name}</span>
+              <span className="truncate text-body font-medium">{group.name}</span>
               {coordinator && (
-                <span className="truncate text-[13px] text-muted-foreground">· <Trans>Risponde {coordinator.name}</Trans></span>
+                <span className="truncate text-small text-muted-foreground">· <Trans>Risponde {coordinator.name}</Trans></span>
               )}
               {/* Q1 (fase squadra): l'autonomia della squadra, come nel disegno */}
-              <span className="shrink-0 truncate text-[13px] text-muted-foreground">· <Trans>Autonomia:</Trans> {autonomyShortLabel(group.autonomy, i18n)}</span>
+              <span className="shrink-0 truncate text-small text-muted-foreground">· <Trans>Autonomia:</Trans> {autonomyShortLabel(group.autonomy, i18n)}</span>
             </button>
           </span>
           {rightPanel ? (
@@ -348,127 +374,151 @@ export function TeamChat() {
 
       {/* A3 (fase centro-autorizzazioni): sopra resta il riquadro GLOBALE,
           ridotto («+N altrove»), solo per richieste di altre squadre o bot —
-          la barra della squadra è quella di Q2, qui sotto */}
+          la barra della squadra è quella di Q2, dentro la colonna */}
       <ApprovalsBannerElsewhere />
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 pb-4 pt-16">
-        {/* Q2 (fase squadra): la barra in cima — quante azioni aspettano te e
-            chi le chiede, con «Rivedi tutte» (tavola 1) */}
-        {groupPending.length > 0 && (
-          <div className="mx-auto mb-4 mt-2 max-w-3xl rounded-[16px] bg-card px-4 py-3 shadow-soft" data-testid="team-pending-bar">
-            <p className="text-sm">
-              <span className="font-semibold"><Trans>{groupPending.length} azioni aspettano te</Trans></span>
-              <span className="text-muted-foreground"> · {groupPending.slice(0, 3).map((r) => pendingWantsLine(r, i18n)).join(' · ')}{groupPending.length > 3 ? ' · …' : ''}</span>
-            </p>
-            <button
-              className="mt-1.5 text-sm text-foreground underline-offset-2 transition hover:underline"
-              onClick={() => setApprovalsQueueOpen(true)}
-            >
-              <Trans>Rivedi tutte</Trans>
-            </button>
-          </div>
-        )}
-        {groupMessages.length === 0 && (
-          <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Nessun messaggio nel team.</Trans></p>
-        )}
-        <div className="mx-auto max-w-3xl space-y-4">
-          {/* Q4 (fase squadra): la timeline fonde i messaggi e le card di
-              approvazione nate nei turni della squadra, nel punto in cui sono
-              nate (ordine per tempo) */}
-          {(() => {
-            type Row = { key: string; at: number; node: React.ReactNode }
-            const rows: Row[] = []
-            for (const m of groupMessages) {
-              const node =
-                m.authorKind === 'system' ? (
-                  <p className="text-center text-xs text-muted-foreground">{groupSystemText(m.text)}</p>
-                ) : m.authorKind === 'user' ? (
-                  <div className="flex justify-end">
-                    {/* G1 (fase 0.3.1001 grafica): bolla utente NEUTRA, gli stessi
-                        token --bubble-user della chat uno-a-uno */}
-                    <div className="max-w-[75%] rounded-[20px] rounded-br-md bg-[var(--bubble-user)] px-4 py-2.5 text-sm whitespace-pre-wrap text-[var(--bubble-user-foreground)]">
-                      {m.text}
+      {/* Fase design (DS4): LA COLONNA DI LETTURA, come nella chat (fatta a
+          mano come fa PageShell: qui la testata è sospesa sul transcript). Il
+          contenitore che scorre è largo quanto l'AREA (niente respiro
+          laterale: la barra sta sul bordo destro) e riserva la sua barra su
+          tutti e due i lati (scrollbar-gutter: la barra di scroll-thin OCCUPA
+          6 px, riservati da un lato solo il contenuto sarebbe 3 px fuori
+          centro); DENTRO il contenuto è centrato alla larghezza di lettura
+          (PageColumn reading: min(720, area − 12 − 2·margine)). Il contenitore
+          di query è questo involucro, NON <main> (la containment di layout
+          farebbe di <main> il riferimento dei position:fixed) */}
+      <div className="@container flex min-h-0 flex-1 flex-col">
+        <div
+          ref={scrollRef}
+          className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable_both-edges]"
+        >
+          {/* pt-16 = 64: la testata sospesa (52) + il respiro di 12; pb-4: 16 prima del campo */}
+          <PageColumn width="reading" className="flex flex-col gap-3 pb-4 pt-16">
+            {/* Q2 (fase squadra): la barra in cima — quante azioni aspettano te e
+                chi le chiede, con «Rivedi tutte» (tavola 1) */}
+            {groupPending.length > 0 && (
+              <div className="rounded-surface bg-card px-4 py-3 shadow-soft" data-testid="team-pending-bar">
+                <p className="text-body">
+                  <span className="font-semibold"><Trans>{groupPending.length} azioni aspettano te</Trans></span>
+                  <span className="text-muted-foreground"> · {groupPending.slice(0, 3).map((r) => pendingWantsLine(r, i18n)).join(' · ')}{groupPending.length > 3 ? ' · …' : ''}</span>
+                </p>
+                <Button variant="ghost" size="sm" className="mt-1" onClick={() => setApprovalsQueueOpen(true)}>
+                  <Trans>Rivedi tutte</Trans>
+                </Button>
+              </div>
+            )}
+            {groupMessages.length === 0 && (
+              <p className="mt-16 text-center text-small text-muted-foreground"><Trans>Nessun messaggio nel team.</Trans></p>
+            )}
+            {/* Q4 (fase squadra): la timeline fonde i messaggi e le card di
+                approvazione nate nei turni della squadra, nel punto in cui sono
+                nate (ordine per tempo) */}
+            {(() => {
+              type Row = { key: string; at: number; node: ReactNode }
+              const rows: Row[] = []
+              for (const m of groupMessages) {
+                const node =
+                  m.authorKind === 'system' ? (
+                    // le righe di sistema con Notice (il testo tradotto: groupSystemText di Chat)
+                    <Notice className="justify-center"><span className="text-center">{groupSystemText(m.text)}</span></Notice>
+                  ) : m.authorKind === 'user' ? (
+                    <div className="flex justify-end">
+                      {/* G1 (fase 0.3.1001 grafica): bolla utente NEUTRA, gli stessi
+                          token --bubble-user della chat uno-a-uno. Fase design
+                          (DS4): text-reading, al massimo l'85% della colonna,
+                          il raggio delle superfici (prima 75% e l'angolo stretto) */}
+                      <div className="min-w-0 max-w-[85%] rounded-surface wrap-anywhere bg-[var(--bubble-user)] px-4 py-2 text-reading whitespace-pre-wrap text-[var(--bubble-user-foreground)]">
+                        {m.text}
+                      </div>
                     </div>
-                  </div>
-                ) : m.authorKind === 'relay' ? (
-                  <RelayRow m={m} />
-                ) : m.authorKind === 'artifact' ? (
-                  <ArtifactCard m={m} agents={agents} />
-                ) : (
-                  <TeamBotMessage m={m} group={group} />
-                )
-              rows.push({ key: `m${m.id}`, at: m.createdAt, node })
-            }
-            for (const c of groupCards) {
-              rows.push({ key: `c${c.id}`, at: c.when, node: <TimelineApprovalCard c={c} /> })
-            }
-            rows.sort((a, b) => a.at - b.at)
-            return rows.map((r) => <div key={r.key}>{r.node}</div>)
-          })()}
-          {working.length > 0 && (
-            <div className="space-y-2 pt-1">
-              {working.map((a) => (
-                <MemberActivity key={a.id} agentId={a.id} />
-              ))}
-            </div>
-          )}
+                  ) : m.authorKind === 'relay' ? (
+                    <RelayRow m={m} />
+                  ) : m.authorKind === 'artifact' ? (
+                    <ArtifactCard m={m} agents={agents} />
+                  ) : (
+                    <TeamBotMessage m={m} group={group} />
+                  )
+                rows.push({ key: `m${m.id}`, at: m.createdAt, node })
+              }
+              for (const c of groupCards) {
+                rows.push({ key: `c${c.id}`, at: c.when, node: <TimelineApprovalCard c={c} /> })
+              }
+              rows.sort((a, b) => a.at - b.at)
+              return rows.map((r) => <div key={r.key}>{r.node}</div>)
+            })()}
+            {working.length > 0 && (
+              <div className="flex flex-col gap-2 pt-1">
+                {working.map((a) => (
+                  <MemberActivity key={a.id} agentId={a.id} />
+                ))}
+              </div>
+            )}
+          </PageColumn>
         </div>
       </div>
 
       {/* il campo: segnaposto di S3.4, autocompletamento @ sui membri.
           correzioni 2 (Q2): @container sul footer, il campo non scende mai
-          sotto 120 px e il bottone Invia resta DENTRO la pillola; il popup @
-          non supera mai il bordo (Q4) */}
-      <footer className="@container px-6 pb-4">
-        <div className="relative mx-auto max-w-3xl">
-          {mentionOptions.length > 0 && (
-            <div className="absolute bottom-full left-4 mb-2 w-64 max-w-[calc(100vw-1.5rem)] rounded-[14px] bg-card p-1 shadow-soft">
-              {mentionOptions.map((m, i) => (
-                <button
-                  key={m.agentId}
-                  className={`flex w-full items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left text-sm ${i === mentionIdx ? 'bg-muted' : 'hover:bg-muted/60'}`}
-                  onClick={() => pickMention(m.name)}
+          sotto 120 px e il bottone Invia resta DENTRO; il popup @ non supera
+          mai il bordo (Q4). Fase design (DS4): il campo sta in una PageColumn
+          reading, la STESSA del transcript; px-1.5 sull'involucro della colonna
+          perché il corpo che scorre riserva 6 px di barra per lato. Il campo è
+          una superficie (rounded-surface) a una riga come a dieci, i controlli
+          di Button (Invia da 36, come il campo) */}
+      <footer className="@container shrink-0 pb-4">
+        <div className="px-1.5">
+          <PageColumn width="reading" className="flex flex-col">
+            <div className="relative">
+              {mentionOptions.length > 0 && (
+                <div className="absolute bottom-full left-4 z-10 mb-2 w-64 max-w-[calc(100vw-1.5rem)] rounded-surface bg-card p-1 shadow-soft">
+                  {mentionOptions.map((m, i) => (
+                    <button
+                      key={m.agentId}
+                      className={cn('flex h-control-sm w-full items-center gap-2 rounded-control px-3 text-left text-body transition', i === mentionIdx ? 'bg-muted' : 'hover:bg-muted/60')}
+                      onClick={() => pickMention(m.name)}
+                    >
+                      <span className="text-muted-foreground">@</span>{m.name}
+                      {group.coordinatorId === m.agentId && <span className="ml-auto text-caption text-muted-foreground"><Trans>coordinatore</Trans></span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <form
+                className={cn('flex items-end gap-2 rounded-surface bg-card py-2 pl-3 pr-2 shadow-soft', layoutCls.form)}
+                onSubmit={(e) => { e.preventDefault(); sendNow() }}
+              >
+                <textarea
+                  ref={taRef}
+                  className={cn('max-h-40 min-h-control min-w-30 flex-1 resize-none bg-transparent py-2 pr-5 pl-3 text-body outline-none placeholder:text-muted-foreground', layoutCls.field)}
+                  placeholder={placeholder}
+                  rows={Math.min(4, text.split('\n').length)}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (mentionOptions.length > 0 && ['ArrowDown', 'ArrowUp', 'Escape', 'Tab'].includes(e.key)) {
+                      e.preventDefault()
+                      if (e.key === 'Escape' || e.key === 'Tab') { setMentionIdx(0); setText(text) }
+                      else setMentionIdx((i) => (e.key === 'ArrowDown' ? (i + 1) % mentionOptions.length : (i - 1 + mentionOptions.length) % mentionOptions.length))
+                      return
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      if (mentionOptions.length > 0) pickMention(mentionOptions[mentionIdx]!.name)
+                      else sendNow()
+                    }
+                  }}
+                />
+                <Button
+                  type="submit"
+                  aria-label={t`Invia`}
+                  title={t`Invia`}
+                  disabled={!text.trim()}
+                  className={layoutCls.push}
                 >
-                  <span className="text-muted-foreground">@</span>{m.name}
-                  {group.coordinatorId === m.agentId && <span className="ml-auto text-[10px] text-muted-foreground"><Trans>coordinatore</Trans></span>}
-                </button>
-              ))}
+                  <ArrowUp className="size-4" />
+                </Button>
+              </form>
             </div>
-          )}
-          <form
-            className={`flex items-end gap-2 bg-card py-2 pl-5 pr-2 shadow-soft transition-[border-radius] duration-150 ${composerFormRadius(multiRow)} ${layoutCls.form}`}
-            onSubmit={(e) => { e.preventDefault(); sendNow() }}
-          >
-            <textarea
-              ref={taRef}
-              className={`max-h-40 min-h-11 min-w-[120px] flex-1 resize-none bg-transparent py-2.5 pr-5 text-sm outline-none placeholder:text-muted-foreground ${layoutCls.field}`}
-              placeholder={placeholder}
-              rows={Math.min(4, text.split('\n').length)}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (mentionOptions.length > 0 && ['ArrowDown', 'ArrowUp', 'Escape', 'Tab'].includes(e.key)) {
-                  e.preventDefault()
-                  if (e.key === 'Escape' || e.key === 'Tab') { setMentionIdx(0); setText(text) }
-                  else setMentionIdx((i) => (e.key === 'ArrowDown' ? (i + 1) % mentionOptions.length : (i - 1 + mentionOptions.length) % mentionOptions.length))
-                  return
-                }
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  if (mentionOptions.length > 0) pickMention(mentionOptions[mentionIdx]!.name)
-                  else sendNow()
-                }
-              }}
-            />
-            <button
-              type="submit"
-              className={`grid size-10 shrink-0 place-items-center rounded-full bg-foreground text-background transition hover:opacity-90 disabled:opacity-40 ${layoutCls.push}`}
-              aria-label={t`Invia`}
-              title={t`Invia`}
-              disabled={!text.trim()}
-            >
-              <ArrowUp className="size-4" />
-            </button>
-          </form>
+          </PageColumn>
         </div>
       </footer>
     </main>

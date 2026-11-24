@@ -5,8 +5,11 @@
 // placeholder «Fuso orario (es. Europe/Rome)»).
 import { useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
+import { Check } from 'lucide-react'
 import { api } from '../store'
 import { uiTextOf } from '../lib/ui-text'
+import { Button } from './ui/button'
+import { Notice } from './ui/notice'
 import type { TranscriptEntry } from '../../../shared/types'
 
 /**
@@ -23,9 +26,10 @@ export function RoutineTzAsk({ routineId, onDone }: { routineId: number; onDone(
   const [tz, setTz] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone)
   const [busy, setBusy] = useState(false)
   return (
-    <span className="mt-1 flex items-center gap-1.5">
+    // DS4: campo e bottone dei token (36 px, raggio di controllo; azione in un bottone da 32)
+    <span className="flex flex-wrap items-center gap-2">
       <input
-        className="w-44 rounded-lg bg-muted px-2 py-1 text-xs outline-none placeholder:text-muted-foreground"
+        className="h-control w-44 rounded-control bg-card px-3 text-body outline-none placeholder:text-muted-foreground"
         placeholder={t`Fuso orario (es. Europe/Rome)`}
         aria-label={t`Fuso orario (es. Europe/Rome)`}
         value={tz}
@@ -38,18 +42,18 @@ export function RoutineTzAsk({ routineId, onDone }: { routineId: number; onDone(
           }
         }}
       />
-      <button
-        type="button"
+      <Button
+        variant="secondary"
+        size="sm"
         data-testid="routine-tz-confirm"
         disabled={busy || !tz.trim()}
-        className="shrink-0 rounded-full bg-muted px-3 py-1 text-xs transition hover:bg-accent disabled:opacity-40"
         onClick={() => {
           setBusy(true)
           void api.updateRoutineTrigger(routineId, { enabled: 1, timezone: tz.trim() }).then(onDone, onDone)
         }}
       >
         <Trans>Conferma</Trans>
-      </button>
+      </Button>
     </span>
   )
 }
@@ -57,6 +61,8 @@ export function RoutineTzAsk({ routineId, onDone }: { routineId: number; onDone(
 /**
  * La riga «Routine creata (in pausa): …» col bottone «Attiva»: un clic e la
  * routine parte (il consenso è il clic, la routine resta in pausa senza).
+ * Fase design (DS4): è una riga di sistema (Notice); l'azione — «Attiva», la
+ * domanda del fuso, l'esito — sta al suo posto, a destra.
  */
 export function RoutineCreatedRow({ entry }: { entry: TranscriptEntry }) {
   const automation = (entry.meta as { automation?: { action?: unknown; id?: unknown } } | null)?.automation
@@ -65,7 +71,7 @@ export function RoutineCreatedRow({ entry }: { entry: TranscriptEntry }) {
   const [busy, setBusy] = useState(false)
   const [gone, setGone] = useState(false)
   if (automation?.action !== 'create' || !Number.isInteger(routineId) || routineId <= 0) {
-    return <p className="text-center text-xs text-muted-foreground">{uiTextOf(entry)}</p>
+    return <Notice>{uiTextOf(entry)}</Notice>
   }
   const activate = async (): Promise<void> => {
     if (busy) return
@@ -86,23 +92,24 @@ export function RoutineCreatedRow({ entry }: { entry: TranscriptEntry }) {
     }
   }
   return (
-    <p className="flex flex-wrap items-center justify-center gap-2 text-center text-xs text-muted-foreground">
+    <Notice
+      action={
+        gone ? (
+          // attivata: il segno di spunta in verde, come gli esiti felici dell'interfaccia
+          <span className="flex items-center gap-1 text-chart-2">
+            <Check className="size-4" aria-hidden="true" />
+            <Trans>attivata</Trans>
+          </span>
+        ) : askTz ? (
+          <RoutineTzAsk routineId={routineId} onDone={() => setGone(true)} />
+        ) : (
+          <Button variant="ghost" size="sm" data-testid="routine-activate" disabled={busy} onClick={() => activate()}>
+            <Trans>Attiva</Trans>
+          </Button>
+        )
+      }
+    >
       {uiTextOf(entry)}
-      {gone ? (
-        <Trans>attivata</Trans>
-      ) : askTz ? (
-        <RoutineTzAsk routineId={routineId} onDone={() => setGone(true)} />
-      ) : (
-        <button
-          type="button"
-          data-testid="routine-activate"
-          disabled={busy}
-          className="rounded-full bg-muted px-3 py-1 text-xs text-foreground transition hover:bg-accent disabled:opacity-40"
-          onClick={() => activate()}
-        >
-          <Trans>Attiva</Trans>
-        </button>
-      )}
-    </p>
+    </Notice>
   )
 }

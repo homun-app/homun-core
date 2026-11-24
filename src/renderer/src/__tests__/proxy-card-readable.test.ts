@@ -73,7 +73,8 @@ describe('RW4 — la card della richiesta diretta leggibile', () => {
   })
 
   it('il contenitore della card non può allargare la chat (min-w-0 + overflow-wrap)', () => {
-    const shellCls = html.match(/<div class="([^"]*rounded-\[18px\][^"]*)"/)?.[1] ?? ''
+    // fase design (DS4): la card è una superficie (rounded-surface p-4: CardShell), prima rounded-[18px]
+    const shellCls = html.match(/<div class="([^"]*rounded-surface p-4[^"]*)"/)?.[1] ?? ''
     expect(shellCls).toContain('min-w-0')
     expect(shellCls).toMatch(/overflow-wrap|anywhere/)
   })

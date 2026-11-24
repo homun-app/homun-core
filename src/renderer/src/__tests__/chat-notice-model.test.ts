@@ -74,9 +74,8 @@ function renderChat(over: Record<string, unknown>) {
 const chooseButton = () =>
   capture.els.find(
     (e) =>
-      e.type === 'button' &&
-      typeof e.props.className === 'string' &&
-      e.props.className.includes('bg-muted px-3') &&
+      // fase design (DS4): l'azione è il pezzo Button (testid need-model-choose), non più un <button> con le sue classi
+      e.props['data-testid'] === 'notice-choose-model' &&
       typeof e.props.onClick === 'function'
   ) ?? null
 

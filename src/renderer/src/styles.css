@@ -552,28 +552,31 @@
 }
 
 /*
- * Fase pagine (G2): la tipografia da documento della pagina aperta — colonna
- * di lettura dentro il componente, qui i ritmi di titoli, paragrafi ed elenchi
- * (i token del tema, niente colore nuovo). Vale per il Markdown reso da
- * DocumentBody con typography="page".
+ * Fase pagine (G2): la tipografia da documento della pagina aperta. Vale per
+ * il Markdown reso da DocumentBody con typography="page" (i token del tema,
+ * niente colore nuovo).
+ *
+ * Fase design (DS4): SOLO LE DIFFERENZE della pagina. Le regole del testo
+ * reso — le sei dimensioni, i tre raggi, i filetti delle tabelle, il codice
+ * che scorre dentro — stanno in UN posto, PROSE in DocumentMarkdown.tsx, e
+ * valgono per i messaggi di bot e per i documenti: finivano scritte due
+ * volte (qui in em e in px: 15px, .875em, .925em, raggi da 6 e 12) e nessuna
+ * delle due era una delle sei dimensioni. Qui resta ciò che la pagina ha di
+ * suo: i titoli col carattere dei documenti (font-display: SOLO il titolo di
+ * pagina e i titoli dei documenti), a misura piena — h1 text-page, h2
+ * text-title — mentre in chat entrambi sono text-title; e i blocchi a 12 px,
+ * letti dalle variabili dei token. Queste regole non stanno in un layer:
+ * vincono sulle utility degli elementi (è ciò che vogliono).
  */
-.page-prose { font-size: 15px; line-height: 1.75; color: var(--foreground); }
-.page-prose > :first-child { margin-top: 0; }
-.page-prose h1 { font-family: var(--font-display); font-size: 1.5rem; line-height: 1.3; margin: 1.6em 0 .5em; font-weight: 600; }
-.page-prose h2 { font-family: var(--font-display); font-size: 1.25rem; line-height: 1.35; margin: 1.8em 0 .5em; font-weight: 600; scroll-margin-top: 90px; }
-.page-prose h3 { font-family: var(--font-display); font-size: 1.05rem; line-height: 1.4; margin: 1.5em 0 .4em; font-weight: 600; scroll-margin-top: 90px; }
-.page-prose p { margin: .8em 0; }
-.page-prose ul, .page-prose ol { margin: .8em 0; padding-left: 1.4em; }
-.page-prose ul { list-style: disc; }
-.page-prose ol { list-style: decimal; }
-.page-prose li { margin: .3em 0; }
-.page-prose blockquote { margin: 1em 0; padding: .2em 1em; border-left: 3px solid var(--border); color: var(--muted-foreground); }
-.page-prose code { font-family: var(--font-mono, ui-monospace, monospace); font-size: .875em; background: var(--muted); border-radius: 6px; padding: .1em .35em; }
-.page-prose pre { background: var(--muted); border-radius: 12px; padding: .9em 1em; overflow-x: auto; margin: 1em 0; }
-.page-prose pre code { background: transparent; padding: 0; }
-.page-prose table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: .925em; }
-.page-prose th, .page-prose td { border: 1px solid var(--border); padding: .45em .7em; text-align: left; }
-.page-prose th { background: var(--muted); font-weight: 600; }
-.page-prose img { max-width: 100%; border-radius: 12px; }
-.page-prose a { color: var(--primary); text-underline-offset: 3px; }
-.page-prose hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
+.page-prose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-section-head);
+  font-size: var(--text-reading);
+  line-height: var(--text-reading--line-height);
+  color: var(--foreground);
+}
+.page-prose h1 { font-family: var(--font-display); font-size: var(--text-page); line-height: var(--text-page--line-height); font-weight: 600; scroll-margin-top: 90px; }
+.page-prose h2 { font-family: var(--font-display); font-size: var(--text-title); line-height: var(--text-title--line-height); font-weight: 600; scroll-margin-top: 90px; }
+.page-prose h3 { font-size: var(--text-reading); line-height: var(--text-reading--line-height); font-weight: 600; scroll-margin-top: 90px; }
+.page-prose a { color: var(--primary); }

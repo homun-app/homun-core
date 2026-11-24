@@ -10,6 +10,7 @@
 // a «Collegata» o «Non riuscito».
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
+import { Plug } from 'lucide-react'
 import { api, useStore } from '../store'
 import type { ConnectorInfo, TranscriptEntry } from '../../../shared/types'
 import { logoUrlForSlug } from '../lib/app-logos'
@@ -17,6 +18,7 @@ import { composioRouteFor } from '../lib/connector-route'
 // B3 (fase b20-bug): l'esito che il daemon pubblica per i flussi in background (stessa regola della riga)
 import { appConnectPublishedFailure } from '../lib/app-connect-flow'
 import { CardShell } from './DecidedRow'
+import { Button } from './ui/button'
 
 export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   const { t } = useLingui()
@@ -128,7 +130,8 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   const needsAuth = Boolean(entry.meta?.needsAuth)
   const liveError = route ? undefined : connectors.find((c) => c.id === message.connectorId)?.state.error
   // fase catalogo app (P7): il logo VERO del catalogo quando c'è (per le app
-  // Composio; le curate dirette restano con l'emoji del connettore)
+  // Composio; le curate dirette hanno il segno lucide di un collegamento —
+  // prima l'emoji del connettore: nell'interfaccia non ce ne sono, DS4)
   const catalogLogo = composioSlug ?? gatewaySlug ? logoUrlForSlug((composioSlug ?? gatewaySlug)!) : null
 
   const connect = async (): Promise<void> => {
@@ -210,85 +213,79 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   }
 
   return (
+    // DS4: l'anatomia di una card della chat — in cima il logo (32, come nelle
+    // righe) col titolo text-body in peso medio e i metadati (text-caption);
+    // le righe sotto text-small grigie; i bottoni sono quelli del sistema
     <CardShell testid="connector-card">
-      <div className="flex items-center gap-2 text-sm text-foreground">
+      <div className="flex min-w-8 items-center gap-2">
         {catalogLogo ? (
-          <img src={catalogLogo} alt="" className="size-5 shrink-0 rounded-[6px] object-cover dark:bg-white" />
+          <img src={catalogLogo} alt="" className="size-8 shrink-0 rounded-control object-cover dark:bg-white" />
         ) : (
-          <span className="text-base">{connectors.find((c) => c.id === message.connectorId)?.logo ?? '🔌'}</span>
+          // senza il logo del catalogo, il segno di un collegamento: un'icona
+          // lucide (il connettore curato portava un'emoji: nell'interfaccia non ce ne sono)
+          <span className="grid size-8 shrink-0 place-items-center text-muted-foreground">
+            <Plug className="size-4" />
+          </span>
         )}
         {isGatewayApp ? (
           // C5 punto 1: «Collega <app> tramite Composio» — il link NON sta nel testo
-          <span className="font-medium">{t`Collega ${message.name ?? ''} tramite Composio`}</span>
+          <span className="min-w-0 flex-1 wrap-anywhere text-body font-medium text-foreground">{t`Collega ${message.name ?? ''} tramite Composio`}</span>
         ) : (
-          <span className="font-medium">{message.name ?? message.connectorId}</span>
+          <span className="min-w-0 flex-1 wrap-anywhere text-body font-medium text-foreground">{message.name ?? message.connectorId}</span>
         )}
-        {needsAuth && <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-[10px] text-destructive">{t`token scaduto`}</span>}
+        {needsAuth && <span className="shrink-0 rounded-control bg-destructive/15 px-1.5 py-0.5 text-caption text-destructive">{t`token scaduto`}</span>}
       </div>
-      {message.reason && <p className="mt-1 text-sm text-foreground">{message.reason}</p>}
+      {message.reason && <p className="mt-2 wrap-anywhere text-body text-foreground">{message.reason}</p>}
       {(isComposio || isGatewayApp || route) && (
-        <p className="mt-1 text-[11px] text-muted-foreground"><Trans>Tramite Composio: login e azioni passano dai suoi server</Trans></p>
+        <p className="mt-1 text-small text-muted-foreground"><Trans>Tramite Composio: login e azioni passano dai suoi server</Trans></p>
       )}
       {needsAuth && !entry.meta?.connected && (
-        <p className="mt-1 text-xs text-muted-foreground"><Trans>Il bot ha provato a usare questa app ma la sessione è scaduta.</Trans></p>
+        <p className="mt-1 text-small text-muted-foreground"><Trans>Il bot ha provato a usare questa app ma la sessione è scaduta.</Trans></p>
       )}
       {isGatewayApp && (
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 text-small text-muted-foreground">
           <Trans>Il bottone apre la pagina di login dell'app nel browser: finisci lì, poi la card si aggiorna da sola.</Trans>
         </p>
       )}
       {status === 'connected' ? (
         // fase 16b: lo stato «collegato» è testo verde, non un badge
-        <p className="mt-2 text-sm text-chart-2"><Trans>✓ Collegata — il bot può usarla</Trans></p>
+        <p className="mt-3 text-body text-chart-2"><Trans>✓ Collegata — il bot può usarla</Trans></p>
       ) : status === 'failed' && isGatewayApp ? (
         // V6 (prova vera): l'attesa è finita male (timeout, errore) — Riprova
         // chiede un link NUOVO, perché quello vecchio è monouso
-        <div className="mt-2 flex items-center gap-3">
-          <span className="text-sm text-destructive"><Trans>Non riuscito</Trans></span>
-          <button
-            className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
-            onClick={() => void retryGateway()}
-          >
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <span className="text-body text-destructive"><Trans>Non riuscito</Trans></span>
+          <Button onClick={() => void retryGateway()}>
             <Trans>Riprova</Trans>
-          </button>
+          </Button>
         </div>
       ) : status === 'failed' ? (
         // verifica impostazioni: il motivo vero (dallo stato del connettore),
         // non solo «non riuscito»
-        <div className="mt-2 space-y-1.5">
-          <p className="text-sm text-destructive"><Trans>Non riuscito: chiedi al bot di riprovare il collegamento.</Trans></p>
-          {liveError && <p className="text-xs text-muted-foreground">{liveError}</p>}
+        <div className="mt-3 flex flex-col gap-1.5">
+          <p className="wrap-anywhere text-body text-destructive"><Trans>Non riuscito: chiedi al bot di riprovare il collegamento.</Trans></p>
+          {liveError && <p className="wrap-anywhere text-small text-muted-foreground">{liveError}</p>}
           {/* B3: sulla strada di Composio il motivo in parole (per esempio: l'app senza configurazione di accesso) */}
-          {routeError && <p className="text-xs text-muted-foreground" data-testid="connector-card-error">{routeError}</p>}
+          {routeError && <p className="wrap-anywhere text-small text-muted-foreground" data-testid="connector-card-error">{routeError}</p>}
         </div>
       ) : status === 'connecting' && route ? (
         // la strada della finestra App: anche qui Annulla durante l'attesa
-        <div className="mt-2.5 flex items-center gap-3">
-          <span className="text-sm text-muted-foreground"><Trans>In attesa del login nel browser…</Trans></span>
-          <button
-            className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
-            onClick={() => void cancelRoute()}
-          >
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <span className="text-body text-muted-foreground"><Trans>In attesa del login nel browser…</Trans></span>
+          <Button variant="ghost" onClick={() => void cancelRoute()}>
             <Trans>Annulla</Trans>
-          </button>
+          </Button>
         </div>
       ) : status === 'connecting' && isGatewayApp ? (
         // V6 (prova vera): durante l'attesa c'è ANNULLA — la card torna a «Collega»
-        <div className="mt-2.5 flex items-center gap-3">
-          <span className="text-sm text-muted-foreground"><Trans>In attesa del login nel browser…</Trans></span>
-          <button
-            className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
-            onClick={() => void cancelGateway()}
-          >
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <span className="text-body text-muted-foreground"><Trans>In attesa del login nel browser…</Trans></span>
+          <Button variant="ghost" onClick={() => void cancelGateway()}>
             <Trans>Annulla</Trans>
-          </button>
+          </Button>
         </div>
       ) : (
-        <button
-          className="mt-2.5 rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-50"
-          disabled={status === 'connecting'}
-          onClick={() => void connect()}
-        >
+        <Button className="mt-4" disabled={status === 'connecting'} onClick={() => void connect()}>
           {status === 'connecting'
             ? <Trans>In attesa del login nel browser…</Trans>
             : needsAuth
@@ -296,7 +293,7 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
               : isGatewayApp
                 ? <Trans>Collega</Trans>
                 : <Trans>Connetti</Trans>}
-        </button>
+        </Button>
       )}
     </CardShell>
   )

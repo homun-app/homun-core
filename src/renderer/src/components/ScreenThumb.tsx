@@ -132,7 +132,7 @@ export function ScreenThumb({
       {phase === 'idle' && (
         /* il riquadro di oggi: tre righe grigie, alto 96 px */
         <span className="block h-24 w-full px-3 pb-3 pt-2" aria-hidden="true">
-          <span className="flex h-full flex-col justify-end gap-1.5 rounded-[8px] bg-white/5 p-2">
+          <span className="flex h-full flex-col justify-end gap-1.5 rounded-control bg-white/5 p-2">
             <span className="h-1.5 w-3/5 rounded-full bg-white/20" />
             <span className="h-1.5 w-4/5 rounded-full bg-white/10" />
             <span className="h-1.5 w-2/5 rounded-full bg-white/10" />
@@ -142,20 +142,22 @@ export function ScreenThumb({
       {phase === 'last' && lastImage && (
         /* l'ultima immagine, VELATA, con l'etichetta: mai come se fosse dal vivo */
         <span className="relative block h-24 w-full px-3 pb-3 pt-2">
-          <img src={lastImage} alt="" className="h-full w-full rounded-[8px] object-cover opacity-40 grayscale" />
-          <span className="absolute bottom-4 left-5 text-[10px] font-medium text-white/70">
+          <img src={lastImage} alt="" className="h-full w-full rounded-control object-cover opacity-40 grayscale" />
+          <span className="absolute bottom-4 left-5 text-caption font-medium text-white/70">
             <Trans>Ultima immagine</Trans>
           </span>
         </span>
       )}
       {/* «Stacca»: apre la finestra PiP (SV4). Visibile al passaggio del mouse
-          e da tastiera; il clic NON apre anche la scheda Computer */}
+          e da tastiera; il clic NON apre anche la scheda Computer. Fase design
+          (DS4): un bottone da 32 e tondo, come le icone sole del sistema (sta
+          sull'anteprima scura, quindi col suo fondo e non col ghost) */}
       <button
         type="button"
         data-testid="bot-computer-thumb-detach"
         aria-label={t`Stacca`}
         title={t`Stacca in una finestra`}
-        className="absolute right-2 top-2 grid size-7 place-items-center rounded-lg bg-black/50 text-white opacity-0 transition focus-visible:opacity-100 group-hover:opacity-100"
+        className="absolute right-2 top-2 grid size-control-sm place-items-center rounded-full bg-black/50 text-white opacity-0 transition focus-visible:opacity-100 group-hover:opacity-100"
         onClick={(e) => {
           e.stopPropagation()
           onDetach?.()

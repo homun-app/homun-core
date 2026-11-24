@@ -6,8 +6,15 @@
 // limite temporaneo — «In coda per <bot> · parte alle HH:MM» con Annulla,
 // «Consegnato» quando parte — finché il risultato non arriva e la riga di
 // stato sparisce. Icone lucide, mai emoji.
+//
+// Fase design (DS4): è una riga di sistema come le altre — la riga che si
+// apre è SystemRow (Notice), il testo intero un blocco di codice, e anche lo
+// stato della delega è Notice (con la sua azione, il bottone del sistema).
 import { Trans } from '@lingui/react/macro'
-import { Clock, Check, X } from 'lucide-react'
+import { ArrowRight, Check, Clock, X } from 'lucide-react'
+import { Button } from './ui/button'
+import { Notice } from './ui/notice'
+import { SystemRow, SystemText } from './DecidedRow'
 
 /** Il tetto della sintesi nella riga (gli interi stanno nel dettaglio). */
 export const AGENT_SEND_ROW_CHARS = 100
@@ -41,36 +48,34 @@ export function AgentSendRow({ name, content, status, cancel, clock }: {
   clock?: string
 }) {
   return (
-    <div className="rounded-[14px] bg-muted/60 px-3 py-1.5">
+    <div>
       <details>
-        <summary className="cursor-pointer select-none text-xs text-muted-foreground">
+        <SystemRow icon={ArrowRight}>
           <Trans>Ha chiesto a {name}: {askedRowSummary(content)}</Trans>
-        </summary>
-        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
-          {content}
-        </pre>
+        </SystemRow>
+        <SystemText text={content} />
       </details>
       {status?.state === 'queued' && (
-        <div data-testid="delegation-status" className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Clock size={12} aria-hidden />
-          <span><Trans>In coda per {name} · parte alle {clock ?? ''}</Trans></span>
-          {cancel && (
-            <button
-              data-testid="delegation-cancel" type="button"
-              onClick={cancel}
-              className="ml-1 inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <X size={11} aria-hidden />
-              <Trans>Annulla</Trans>
-            </button>
-          )}
-        </div>
+        <Notice
+          icon={<Clock className="size-4" />}
+          testId="delegation-status"
+          className="mt-1"
+          action={
+            cancel ? (
+              <Button variant="ghost" size="sm" data-testid="delegation-cancel" onClick={cancel}>
+                <X className="size-4" aria-hidden="true" />
+                <Trans>Annulla</Trans>
+              </Button>
+            ) : undefined
+          }
+        >
+          <Trans>In coda per {name} · parte alle {clock ?? ''}</Trans>
+        </Notice>
       )}
       {status?.state === 'delivered' && (
-        <div data-testid="delegation-status" className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Check size={12} aria-hidden />
+        <Notice icon={<Check className="size-4" />} testId="delegation-status" className="mt-1">
           <Trans>Consegnato</Trans>
-        </div>
+        </Notice>
       )}
     </div>
   )

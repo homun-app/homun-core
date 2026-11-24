@@ -5,11 +5,27 @@
 // trascinamento dal Finder, aggiornamento ogni 5 s e a ogni evento
 // computer-activity di quel bot — senza perdere la selezione. Errori chiari,
 // mai uno stack.
+//
+// Fase design (DS4): lo schema del pannello (RightPanel), ripetuto nella
+// scheda. La barra (percorso + azioni) e le righe di messaggio stanno FERME,
+// alla larghezza del contenuto (px-1.5 + PageColumn: 6 + 24 px per lato);
+// l'ELENCO che scorre è largo quanto il pannello — la barra sta sul bordo —
+// col margine DENTRO (PageColumn), come il corpo del pannello. Le righe sono
+// FlatRow dentro un <button> (il clic, la tastiera e lo stato «scelto» sono
+// del bottone). L'anteprima, quando sta sotto l'elenco, prende i due quinti
+// dell'altezza e non più 224 px fissi: la scheda non ha più l'altezza minima
+// di 420 px (vedi ComputerPanel) e in una finestra bassa 224 px fissi non
+// lascerebbero all'elenco nemmeno una riga.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { Download, RefreshCw, Upload, Eye, EyeOff, Folder, FileText, Link2, AlertCircle } from 'lucide-react'
 import { api } from '../store'
 import { ipcErrorMessage } from '../lib/ipc-error'
+import { cn } from '../lib/utils'
+import { Button } from './ui/button'
+import { Notice } from './ui/notice'
+import { PageColumn } from './ui/page-shell'
+import { FlatList, FlatRow } from './ui/flat-list'
 import type { FileEntry, FilesListResult, FilesReadResult } from '../../../shared/types'
 
 /** L'aggiornamento automatico della cartella aperta (come Rakazo). */
@@ -201,51 +217,55 @@ export function ComputerFiles({ agentId, active }: { agentId: string; active: bo
   const visible = entries.filter((e) => showHidden || !e.name.startsWith('.'))
 
   const entryIcon = (kind: FileEntry['kind']) =>
-    kind === 'dir' ? <Folder className="size-3.5 shrink-0 text-muted-foreground" /> : kind === 'link' ? <Link2 className="size-3.5 shrink-0 text-muted-foreground" /> : <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+    kind === 'dir' ? <Folder className="size-4 shrink-0 text-muted-foreground" /> : kind === 'link' ? <Link2 className="size-4 shrink-0 text-muted-foreground" /> : <FileText className="size-4 shrink-0 text-muted-foreground" />
 
   const previewPane = (
-    <div className={`flex min-h-0 flex-col ${narrow ? 'h-56 border-t border-border' : 'w-1/2 border-l border-border'}`}>
-      <p className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs font-medium">
-        {preview?.name ?? selected ?? <Trans>Anteprima</Trans>}
-      </p>
-      <div className="min-h-0 flex-1 overflow-auto scroll-thin">
-        {previewError && <p className="px-3 py-2 text-xs text-destructive/90">{previewError}</p>}
-        {!previewError && preview === null && (
-          <p className="px-3 py-2 text-xs text-muted-foreground">
-            <Trans>Seleziona un file per vederne il contenuto.</Trans>
-          </p>
-        )}
-        {preview?.result.kind === 'text' && (
-          <pre className="px-2 py-1 font-mono text-[11px] leading-relaxed">
-            {preview.result.content
-              .split('\n')
-              .slice(0, PREVIEW_MAX_LINES)
-              .map((line, i) => (
-                <div key={i} className="whitespace-pre-wrap">
-                  <span className="mr-2 inline-block w-8 select-none text-right text-muted-foreground/60">{i + 1}</span>
-                  {line || ' '}
-                </div>
-              ))}
-            {preview.result.content.split('\n').length > PREVIEW_MAX_LINES && (
-              <div className="text-muted-foreground">…</div>
-            )}
-          </pre>
-        )}
-        {preview?.result.kind === 'image' && (
-          <div className="flex items-center justify-center p-3">
-            <img src={`data:${preview.result.mime};base64,${preview.result.base64}`} alt={preview.name} className="max-h-full max-w-full object-contain" />
-          </div>
-        )}
-        {preview?.result.kind === 'binary' && (
-          <p className="px-3 py-2 text-xs text-muted-foreground">
-            <Trans>File binario ({formatSize(preview.result.size)})</Trans>
-          </p>
-        )}
-        {preview?.result.kind === 'too-large' && (
-          <p className="px-3 py-2 text-xs text-muted-foreground">
-            <Trans>Troppo grande per l'anteprima ({formatSize(preview.result.size)})</Trans>
-          </p>
-        )}
+    <div className={cn('flex min-h-0 flex-col', narrow ? 'h-2/5 border-t border-border/50' : 'w-1/2 border-l border-border/50')}>
+      <div className="shrink-0 border-b border-border/50 px-1.5">
+        <PageColumn className="flex min-h-10 items-center truncate text-body font-medium">
+          {preview?.name ?? selected ?? <Trans>Anteprima</Trans>}
+        </PageColumn>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto scroll-thin [scrollbar-gutter:stable_both-edges]">
+        <PageColumn className="py-2">
+          {previewError && <Notice tone="destructive">{previewError}</Notice>}
+          {!previewError && preview === null && (
+            <Notice>
+              <Trans>Seleziona un file per vederne il contenuto.</Trans>
+            </Notice>
+          )}
+          {preview?.result.kind === 'text' && (
+            <pre className="py-1 font-mono text-caption">
+              {preview.result.content
+                .split('\n')
+                .slice(0, PREVIEW_MAX_LINES)
+                .map((line, i) => (
+                  <div key={i} className="whitespace-pre-wrap">
+                    <span className="mr-2 inline-block w-8 select-none text-right text-muted-foreground/60">{i + 1}</span>
+                    {line || ' '}
+                  </div>
+                ))}
+              {preview.result.content.split('\n').length > PREVIEW_MAX_LINES && (
+                <div className="text-muted-foreground">…</div>
+              )}
+            </pre>
+          )}
+          {preview?.result.kind === 'image' && (
+            <div className="flex items-center justify-center p-3">
+              <img src={`data:${preview.result.mime};base64,${preview.result.base64}`} alt={preview.name} className="max-h-full max-w-full object-contain" />
+            </div>
+          )}
+          {preview?.result.kind === 'binary' && (
+            <Notice>
+              <Trans>File binario ({formatSize(preview.result.size)})</Trans>
+            </Notice>
+          )}
+          {preview?.result.kind === 'too-large' && (
+            <Notice>
+              <Trans>Troppo grande per l'anteprima ({formatSize(preview.result.size)})</Trans>
+            </Notice>
+          )}
+        </PageColumn>
       </div>
     </div>
   )
@@ -256,101 +276,124 @@ export function ComputerFiles({ agentId, active }: { agentId: string; active: bo
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => void onDrop(e)}
     >
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
-        {/* percorso a briciole */}
-        <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-xs">
-          <button className="text-muted-foreground transition hover:text-foreground" onClick={() => { setPath(''); setSelected(null); setPreview(null); void load('') }}>
-            /
-          </button>
-          {crumbs.map((c, i) => (
-            <span key={i} className="flex items-center gap-1">
-              <span className="text-muted-foreground/60">›</span>
-              <button
-                className="max-w-40 truncate text-muted-foreground transition hover:text-foreground"
-                onClick={() => {
-                  const next = crumbs.slice(0, i + 1).join('/')
-                  setPath(next)
-                  setSelected(null)
-                  setPreview(null)
-                  void load(next)
-                }}
-              >
-                {c}
-              </button>
-            </span>
-          ))}
-        </nav>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <button
-            className={`rounded-md p-1.5 transition ${showHidden ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-            title={showHidden ? t`Nascondi i file nascosti` : t`Mostra i file nascosti`}
-            onClick={() => setShowHidden(!showHidden)}
-          >
-            {showHidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-          </button>
-          <button
-            className="rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            title={t`Aggiorna`}
-            onClick={() => void load(path)}
-          >
-            <RefreshCw className="size-3.5" />
-          </button>
-          <button
-            className="rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-40"
-            title={t`Scarica sul Mac`}
-            disabled={!selected || busy}
-            onClick={() => void download()}
-          >
-            <Download className="size-3.5" />
-          </button>
-          <button
-            className="flex items-center gap-1 rounded-lg bg-muted px-2 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-40"
-            disabled={busy}
-            onClick={() => void upload()}
-          >
-            <Upload className="size-3" />
-            <Trans>Carica qui</Trans>
-          </button>
-        </div>
+      {/* la barra (percorso + azioni): ferma, alta 40, alla larghezza del
+          contenuto del pannello — la stessa ascissa delle righe che scorrono sotto */}
+      <div className="shrink-0 border-b border-border/50 px-1.5">
+        <PageColumn className="flex items-center gap-2 py-1">
+          {/* percorso a briciole */}
+          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-body">
+            <button className="text-muted-foreground transition hover:text-foreground" onClick={() => { setPath(''); setSelected(null); setPreview(null); void load('') }}>
+              /
+            </button>
+            {crumbs.map((c, i) => (
+              <span key={i} className="flex items-center gap-1">
+                <span className="text-muted-foreground/60">›</span>
+                <button
+                  className="max-w-40 truncate text-muted-foreground transition hover:text-foreground"
+                  onClick={() => {
+                    const next = crumbs.slice(0, i + 1).join('/')
+                    setPath(next)
+                    setSelected(null)
+                    setPreview(null)
+                    void load(next)
+                  }}
+                >
+                  {c}
+                </button>
+              </span>
+            ))}
+          </nav>
+          <div className="flex shrink-0 items-center gap-1">
+            {/* l'interruttore dei nascosti: «premuto» = secondary, come le voci scelte */}
+            <Button
+              variant={showHidden ? 'secondary' : 'ghost'}
+              size="sm"
+              icon
+              title={showHidden ? t`Nascondi i file nascosti` : t`Mostra i file nascosti`}
+              onClick={() => setShowHidden(!showHidden)}
+            >
+              {showHidden ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </Button>
+            <Button variant="ghost" size="sm" icon title={t`Aggiorna`} onClick={() => void load(path)}>
+              <RefreshCw className="size-4" />
+            </Button>
+            <Button variant="ghost" size="sm" icon title={t`Scarica sul Mac`} disabled={!selected || busy} onClick={() => void download()}>
+              <Download className="size-4" />
+            </Button>
+            <Button variant="secondary" size="sm" disabled={busy} onClick={() => void upload()}>
+              <Upload className="size-4" />
+              <Trans>Carica qui</Trans>
+            </Button>
+          </div>
+        </PageColumn>
       </div>
 
+      {/* le righe di messaggio: ferme, sotto la barra */}
       {error && (
-        <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-xs text-destructive/90">
-          <AlertCircle className="size-3.5 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">{error}</span>
-          <button className="shrink-0 underline" onClick={() => void load(path)}>
-            <Trans>Riprova</Trans>
-          </button>
+        <div className="shrink-0 border-b border-border/50 px-1.5">
+          <PageColumn>
+            <Notice
+              tone="destructive"
+              icon={<AlertCircle className="size-4" aria-hidden="true" />}
+              action={<Button variant="ghost" size="sm" onClick={() => void load(path)}><Trans>Riprova</Trans></Button>}
+            >
+              {error}
+            </Notice>
+          </PageColumn>
         </div>
       )}
-      {toast && <p className="border-b border-border px-4 py-1.5 text-xs text-muted-foreground">{toast}</p>}
+      {toast && (
+        <div className="shrink-0 border-b border-border/50 px-1.5 py-1">
+          <PageColumn>
+            <Notice>{toast}</Notice>
+          </PageColumn>
+        </div>
+      )}
       {truncated && (
-        <p className="border-b border-border px-4 py-1.5 text-xs text-muted-foreground">
-          <Trans>Elencazione troncata a {entries.length} voci.</Trans>
-        </p>
+        <div className="shrink-0 border-b border-border/50 px-1.5 py-1">
+          <PageColumn>
+            <Notice>
+              <Trans>Elencazione troncata a {entries.length} voci.</Trans>
+            </Notice>
+          </PageColumn>
+        </div>
       )}
 
-      <div ref={holder} className={`flex min-h-0 flex-1 ${narrow ? 'flex-col' : 'flex-row'}`}>
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto scroll-thin">
-          {visible.length === 0 && !error && (
-            <p className="px-4 py-6 text-center text-xs text-muted-foreground">
-              <Trans>Cartella vuota.</Trans>
-            </p>
-          )}
-          {visible.map((e) => (
-            <button
-              key={e.name}
-              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-muted ${selected === e.name ? 'bg-muted' : ''}`}
-              onClick={() => (e.kind === 'dir' ? openDir(e.name) : void openFile(e))}
-            >
-              {entryIcon(e.kind)}
-              <span className="min-w-0 flex-1 truncate font-mono">{e.name}</span>
-              <span className="shrink-0 text-muted-foreground">{e.kind === 'dir' ? '—' : formatSize(e.size)}</span>
-              <span className="w-32 shrink-0 truncate text-right text-muted-foreground">
-                {e.mtime ? new Date(e.mtime).toLocaleString(i18n.locale) : ''}
-              </span>
-            </button>
-          ))}
+      <div ref={holder} className={cn('flex min-h-0 flex-1', narrow ? 'flex-col' : 'flex-row')}>
+        {/* l'elenco che scorre: largo quanto il pannello, la barra sul bordo,
+            il margine DENTRO (PageColumn) — lo schema del corpo del pannello */}
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto scroll-thin [scrollbar-gutter:stable_both-edges]">
+          <PageColumn>
+            {visible.length === 0 && !error && (
+              <p className="py-6 text-center text-small text-muted-foreground">
+                <Trans>Cartella vuota.</Trans>
+              </p>
+            )}
+            <FlatList>
+              {visible.map((e) => (
+                // il file scelto ha il fondo pieno (non quello del passaggio)
+                <button
+                  key={e.name}
+                  type="button"
+                  className={cn('block w-full cursor-pointer text-left transition', selected === e.name ? 'bg-muted' : 'hover:bg-muted/50')}
+                  onClick={() => (e.kind === 'dir' ? openDir(e.name) : void openFile(e))}
+                >
+                  <FlatRow
+                    leading={entryIcon(e.kind)}
+                    title={<span className="font-mono">{e.name}</span>}
+                    trailing={(
+                      <>
+                        <span className="shrink-0 text-caption text-muted-foreground">{e.kind === 'dir' ? '—' : formatSize(e.size)}</span>
+                        <span className="w-32 shrink-0 truncate text-right text-caption text-muted-foreground">
+                          {e.mtime ? new Date(e.mtime).toLocaleString(i18n.locale) : ''}
+                        </span>
+                      </>
+                    )}
+                  />
+                </button>
+              ))}
+            </FlatList>
+          </PageColumn>
         </div>
         {(selected !== null || preview !== null || previewError !== '') && previewPane}
       </div>
