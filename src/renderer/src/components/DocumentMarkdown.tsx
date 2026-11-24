@@ -73,12 +73,15 @@ const PROSE: Components = {
   ul: ({ node: _n, ...p }) => <ul {...p} className="list-disc pl-6" />,
   ol: ({ node: _n, ...p }) => <ol {...p} className="list-decimal pl-6" />,
   // la voce resta una voce di elenco: il pallino vive sul <li>, e su un
-  // elemento flex il marcatore sparisce. I blocchi dentro di lei (un elenco
-  // «largo»: due paragrafi per voce) stanno in un involucro che li distanzia
-  li: ({ node: _n, children, ...p }) => (
-    <li {...p} className="my-0.5">
-      <div className="flex flex-col gap-2">{children}</div>
-    </li>
+  // elemento flex il marcatore sparisce. R1 (b20-ritocchi): NESSUN involucro
+  // flex-col — in un elenco «stretto» i figli sono pezzi di testo e di
+  // elementi in riga, e la colonna li metteva ognuno su una riga sua
+  // («Ricavi:» / «in crescita» / «del 12%…»). La voce resta un BLOCCO: il
+  // testo in riga scorre come in un paragrafo, e i blocchi di una voce
+  // «larga» (due paragrafi, un elenco dentro) si distanziano con le regole
+  // sui figli BLOCCO — solo loro, il testo in riga non prende margini
+  li: ({ node: _n, ...p }) => (
+    <li {...p} className="my-0.5 [&>ol]:mt-1 [&>p+p]:mt-2 [&>ul]:mt-1" />
   ),
   blockquote: ({ node: _n, ...p }) => <blockquote {...p} className="border-l-2 border-border pl-3" />,
   // i pesi sono tre: il grassetto del browser (700) non esiste nella scala

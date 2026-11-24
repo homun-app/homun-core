@@ -161,12 +161,49 @@ describe('DS4: il markdown reso — le regole di DS1 su ogni elemento', () => {
     expect(li.tag).toBe('li')
     expect(has(li, 'flex')).toBe(false)
     expect(textOf(li)).toBe('primo')
-    // elenco «largo»: due paragrafi in una voce, distanziati
+    // elenco «largo»: due paragrafi in una voce, distanziati dalle regole sui
+    // figli BLOCCO della voce (R1 b20-ritocchi: l'involucro flex è uscito)
     const largo = render('- primo\n\n  secondo paragrafo')
     const voce = first(largo, (n) => n.tag === 'li')
-    expect(voce.children.map((c) => c.tag)).toEqual(['div'])
-    expect(has(voce.children[0]!, 'flex-col')).toBe(true)
+    expect(voce.children.map((c) => c.tag)).toEqual(['p', 'p'])
     expect(findAll(voce, (n) => n.tag === 'p')).toHaveLength(2)
+  })
+
+  describe('R1 (b20-ritocchi): il grassetto dentro un elenco NON spezza la riga', () => {
+    it('«- a **b** c»: i pezzi in riga sono figli DIRETTI della voce — nessun involucro che mette ognuno su una riga sua', () => {
+      const r = render('- a **b** c')
+      const li = first(r, (n) => n.tag === 'li')
+      expect(li.children.map((c) => c.tag), 'i figli della voce sono i pezzi in riga, senza div intorno').toEqual(['strong'])
+      // il testo DIRETTO della voce: ciò che sta prima e dopo il grassetto, sulla STESSA riga
+      expect(li.text.replace(/\s+/g, ' ').trim()).toBe('a c')
+      expect(li.children.map(textOf)).toEqual(['b'])
+    })
+
+    it('«- testo con `codice` e [link](x)»: codice e link in riga nella voce, stesso posto del testo', () => {
+      const r = render('- testo con `codice` e [link](x)')
+      const li = first(r, (n) => n.tag === 'li')
+      expect(li.children.map((c) => c.tag)).toEqual(['code', 'a'])
+      expect(li.text.replace(/\s+/g, ' ').trim()).toBe('testo con e')
+      expect(li.children.map(textOf)).toEqual(['codice', 'link'])
+    })
+
+    it('la voce larga distanzia i paragrafi con le regole sui figli blocco, non con un involucro flex', () => {
+      const r = render('- primo paragrafo\n\n  secondo paragrafo\n\n- altra voce')
+      const li = first(r, (n) => n.tag === 'li')
+      expect(li.children.map((c) => c.tag)).toEqual(['p', 'p'])
+      for (const cls of ['[&>p+p]:mt-2', '[&>ul]:mt-1', '[&>ol]:mt-1']) expect(has(li, cls), cls).toBe(true)
+      // niente colonna flex nella voce: è ciò che spezzava la riga
+      expect(has(li, 'flex')).toBe(false)
+      expect(li.children.some((c) => c.tag === 'div')).toBe(false)
+    })
+
+    it('l’elenco annidato sta nella voce che lo contiene, come un figlio blocco qualunque', () => {
+      const r = render('- voce\n  - annidata\n- altra')
+      const li = first(r, (n) => n.tag === 'li')
+      expect(li.children.map((c) => c.tag)).toEqual(['ul'])
+      expect(has(li, '[&>ul]:mt-1')).toBe(true)
+      expect(textOf(first(li, (n) => n.tag === 'ul'))).toBe('annidata')
+    })
   })
 
   it('ogni taglia che compare è una delle sei (la sonda misura ogni testo: tabelle e codice compresi)', () => {
