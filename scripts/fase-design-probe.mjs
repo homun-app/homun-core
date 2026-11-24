@@ -645,14 +645,22 @@ const MEASURE_JS = (rootExpr, { withSidebar }) => `(() => {
   // (b) RIGHE SPEZZATE: in ogni <li> del markdown il primo blocco di testo in
   // riga è UNA riga sola, se la larghezza lo consente (l'involucro flex-col
   // metteva «Ricavi:», «in crescita», «del 12%…» una sotto l'altra anche
-  // quando ci stavano insieme). Se non ci stanno, andare a capo è giusto:
-  // lo si decide misurando il contenuto in nowrap
+  // quando ci stavano insieme). L'involucro — un solo figlio BLOCCO senza
+  // testo suo — si ATTRAVERSA: il blocco di riga è quello che sta dentro. Se
+  // non ci stanno, andare a capo è giusto: lo si decide misurando il
+  // contenuto in nowrap
   const brokenListLines = []
   {
     const INLINE = new Set(['STRONG', 'EM', 'CODE', 'A', 'DEL', 'MARK', 'B', 'I', 'SPAN', 'SMALL', 'ABBR', 'SUB', 'SUP'])
     for (const li of scope.querySelectorAll('li')) {
       if (!inScope(li) || !vis(li) || skip(li)) continue
-      const kids = [...li.childNodes].filter((n) => (n.nodeType === 3 && (n.nodeValue ?? '').trim()) || (n.nodeType === 1 && INLINE.has(n.tagName)))
+      let box = li
+      for (let d = 0; d < 3; d++) {
+        const kids0 = [...box.childNodes].filter((n) => (n.nodeType === 1 && n.tagName !== 'BR') || (n.nodeType === 3 && (n.nodeValue ?? '').trim()))
+        if (kids0.length === 1 && kids0[0].nodeType === 1 && !INLINE.has(kids0[0].tagName)) { box = kids0[0]; continue }
+        break
+      }
+      const kids = [...box.childNodes].filter((n) => (n.nodeType === 3 && (n.nodeValue ?? '').trim()) || (n.nodeType === 1 && INLINE.has(n.tagName)))
       if (!kids.length) continue
       const range = document.createRange()
       range.setStartBefore(kids[0])
@@ -662,11 +670,11 @@ const MEASURE_JS = (rootExpr, { withSidebar }) => `(() => {
       const probeEl = document.createElement('span')
       probeEl.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap'
       for (const k of kids) probeEl.appendChild(k.cloneNode(true))
-      li.appendChild(probeEl)
+      box.appendChild(probeEl)
       const oneLine = probeEl.getBoundingClientRect().width
       probeEl.remove()
-      const csLi = getComputedStyle(li)
-      const available = li.clientWidth - parseFloat(csLi.paddingLeft) - parseFloat(csLi.paddingRight)
+      const csBox = getComputedStyle(box)
+      const available = box.clientWidth - parseFloat(csBox.paddingLeft) - parseFloat(csBox.paddingRight)
       if (oneLine <= available) brokenListLines.push({ ...describe(li), oneLine: round(oneLine), available: round(available) })
     }
   }
