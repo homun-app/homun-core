@@ -13,7 +13,7 @@
 //   larghezze   — reading 720, page 880, wide 1120.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { compileRenderer, CSS_PATH } from './tailwind-compile'
+import { compileRenderer, CSS_PATH, deadClasses } from './tailwind-compile'
 
 const CSS = readFileSync(CSS_PATH, 'utf8')
 
@@ -129,5 +129,38 @@ describe('DS1: le larghezze del contenuto', () => {
       expect(css).toMatch(new RegExp(`\\.max-w-${name}\\s*\\{[^}]*max-width:\\s*var\\(--container-${name}\\)`))
       expect(themeValue(css, `container-${name}`)).toBe(`var(--w-${name})`)
     }
+  })
+})
+
+/** Le classi di fabbrica che il sistema NON usa (DS6): nel CSS compilato non generano più nessuna regola. */
+export const FACTORY_CLASSES = [
+  // le taglie di testo di Tailwind
+  'text-xs', 'text-sm', 'text-base', 'text-lg', 'text-xl', 'text-2xl', 'text-3xl',
+  // i raggi di fabbrica
+  'rounded-sm', 'rounded-md', 'rounded-lg', 'rounded-xl', 'rounded-2xl', 'rounded-3xl', 'rounded-4xl',
+  // i pesi fuori da 400, 500, 600
+  'font-thin', 'font-light', 'font-bold', 'font-extrabold', 'font-black',
+  // le interlinee con nome e le spaziature delle lettere
+  'leading-tight', 'leading-snug', 'leading-relaxed', 'leading-loose', 'tracking-tight', 'tracking-wide', 'tracking-normal'
+]
+
+describe('DS6: le misure di fabbrica sono fuori dal tema', () => {
+  it('chi scrivesse una taglia, un raggio, un peso, un’interlinea o una spaziatura delle lettere di fabbrica non ottiene nulla', async () => {
+    const css = await compileRenderer(FACTORY_CLASSES)
+    // il sorgente le dichiara tutte morte: `initial` a ognuna delle cinque famiglie
+    expect(CSS).toMatch(/@theme\s*\{[^}]*--text-\*:\s*initial;[^}]*--radius-\*:\s*initial;[^}]*--font-weight-\*:\s*initial;[^}]*--leading-\*:\s*initial;[^}]*--tracking-\*:\s*initial;/)
+    // e il CSS compilato non ha nessuna regola per loro
+    expect(deadClasses(css, FACTORY_CLASSES).sort()).toEqual([...FACTORY_CLASSES].sort())
+  })
+  it('restano le sei dimensioni, i tre raggi, i tre pesi, i caratteri — e nessun quarto peso', async () => {
+    const vive = [...Object.keys(TEXT_SIZES).map((n) => `text-${n}`), 'rounded-control', 'rounded-surface', 'rounded-full', 'font-normal', 'font-medium', 'font-semibold', 'font-display', 'font-sans', 'font-mono']
+    const css = await compileRenderer(vive)
+    expect(deadClasses(css, vive)).toEqual([])
+    for (const [name, value] of [['normal', 400], ['medium', 500], ['semibold', 600]] as const) {
+      expect(themeValue(css, `font-weight-${name}`), `peso ${name}`).toBe(String(value))
+    }
+    const nomiDi = (variabile: string): string[] => [...new Set([...css.matchAll(new RegExp(`${variabile}-([a-z]+):`, 'g'))].map((m) => String(m[1])))].sort()
+    expect(nomiDi('--font-weight')).toEqual(['medium', 'normal', 'semibold'])
+    expect(nomiDi('--radius')).toEqual(['control', 'surface'])
   })
 })

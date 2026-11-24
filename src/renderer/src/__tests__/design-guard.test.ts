@@ -19,13 +19,14 @@
 //   p-2.5, gap-7, top-11…     — le spaziature dalla scala (0.5 1 1.5 2 3 4 5 6 8 10 12 16) o con un nome
 //   le icone lucide           — 16 px (size-4) o 20 px (size-5), sempre scritti
 // Le eccezioni vivono in UN file (lib/design-exceptions.ts), ognuna con il
-// motivo; qui si controlla che nessuna sia morta. Lì sta anche, provvisorio
-// fino a fine DS4, l'elenco delle aree non ancora migrate.
+// motivo; qui si controlla che nessuna sia morta. Nessuna area è esente: la
+// guardia guarda OGNI file del renderer (le aree provvisorie di DS4 sono
+// vuote a fine fase e sono uscite).
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DESIGN_EXCEPTIONS, MIGRATED, MIGRATION_PENDING, type DesignRule } from '../lib/design-exceptions'
+import { DESIGN_EXCEPTIONS, type DesignRule } from '../lib/design-exceptions'
 import { CSS_PATH, SRC, iconViolations, isClassList, rel, scan, sourceFiles, stringsOf, violationsOfString } from './design-scan'
 
 const CSS = readFileSync(CSS_PATH, 'utf8')
@@ -91,16 +92,6 @@ describe('DS6: la guardia sul sorgente del renderer', () => {
       }
     }
     const dead = DESIGN_EXCEPTIONS.filter((e) => !covered.has(e.id)).map((e) => e.id)
-    expect(dead).toEqual([])
-  })
-  it('ogni area «non ancora migrata» esiste davvero (nessuna voce morta nell’elenco provvisorio)', () => {
-    const files = sourceFiles(SRC).map(rel)
-    const dead = MIGRATION_PENDING.filter((prefix) => !files.some((f) => f.startsWith(prefix)))
-    expect(dead).toEqual([])
-  })
-  it('ogni file dichiarato migrato esiste davvero (la guardia lo guarda: un nome sbagliato sarebbe un buco)', () => {
-    const files = sourceFiles(SRC).map(rel)
-    const dead = MIGRATED.filter((m) => !files.some((f) => f === m || f.startsWith(`${m}/`)))
     expect(dead).toEqual([])
   })
 })

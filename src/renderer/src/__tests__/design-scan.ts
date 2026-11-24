@@ -20,13 +20,14 @@
 //   p-2.5, gap-7, top-11…     — le spaziature sono dalla scala (0.5 1 1.5 2 3 4 5 6 8 10 12 16) o con un nome
 //   le icone lucide           — 16 px (size-4) o 20 px (size-5), sempre scritti
 // Le eccezioni vivono in UN file (lib/design-exceptions.ts), ognuna con il
-// motivo; qui si controlla che nessuna sia morta. Lì sta anche, provvisorio
-// fino a fine DS4, l'elenco delle aree non ancora migrate.
+// motivo; qui si controlla che nessuna sia morta. Nessuna area è esente:
+// (finché le pagine passavano al sistema, DS4, c'era un elenco provvisorio
+// di aree non ancora migrate: a fine fase è vuoto ed è uscito).
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from '@babel/parser'
-import { DESIGN_EXCEPTIONS, MIGRATED, MIGRATION_PENDING, type DesignRule } from '../lib/design-exceptions'
+import { DESIGN_EXCEPTIONS, type DesignRule } from '../lib/design-exceptions'
 
 export const SRC = fileURLToPath(new URL('..', import.meta.url)) // src/renderer/src
 export const CSS_PATH = join(SRC, 'styles.css')
@@ -189,18 +190,10 @@ export function sourceFiles(dir: string, out: string[] = []): string[] {
 }
 
 export const rel = (p: string): string => relative(SRC, p).split(sep).join('/')
-/** Un file dichiarato migrato (o dentro una cartella dichiarata migrata). */
-export const isMigrated = (p: string): boolean => { const r = rel(p); return MIGRATED.some((m) => r === m || r.startsWith(`${m}/`)) }
-const isPending = (p: string): boolean => !isMigrated(p) && MIGRATION_PENDING.some((prefix) => rel(p).startsWith(prefix))
-
-/**
- * Tutto ciò che la guardia vede, per file. `pending: true` guarda anche le
- * aree non ancora migrate: serve a chi le sta migrando (la guardia vera no).
- */
-export function scan({ pending = false }: { pending?: boolean } = {}): Array<{ file: string; rule: DesignRule; token: string; text: string }> {
+/** Tutto ciò che la guardia vede, per file: OGNI file del renderer, nessuna area esente. */
+export function scan(): Array<{ file: string; rule: DesignRule; token: string; text: string }> {
   const out: Array<{ file: string; rule: DesignRule; token: string; text: string }> = []
   for (const file of sourceFiles(SRC)) {
-    if (!pending && isPending(file)) continue
     const source = readFileSync(file, 'utf8')
     const exempt = (rule: DesignRule, token: string): string => {
       let t = token

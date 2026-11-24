@@ -1,15 +1,15 @@
 // Fase design (DS6): le ECCEZIONI della guardia sul sorgente
-// (__tests__/design-guard.test.ts). Le regole valgono per tutto il renderer
-// (le prime otto sono quelle dell'elenco di DS6; le altre quattro chiudono
-// DS1: pesi 400/500/600, ogni dimensione con la sua interlinea, la scala
-// delle spaziature, le icone a 16 o 20 px);
+// (__tests__/design-guard.test.ts). Le regole valgono per TUTTO il renderer,
+// senza aree esenti (le prime otto sono quelle dell'elenco di DS6; le altre
+// quattro chiudono DS1: pesi 400/500/600, ogni dimensione con la sua
+// interlinea, la scala delle spaziature, le icone a 16 o 20 px).
 // OGNI eccezione vive qui, con il motivo. La guardia fallisce se un'esenzione
 // è morta (non copre più nulla): così l'elenco non marcisce.
 //
-// Sta qui anche, PROVVISORIO, l'elenco delle pagine non ancora migrate a DS4:
-// la guardia non le guarda finché non tocca a loro. A ogni commit di DS4 la
-// sua pagina esce dall'elenco; a fine DS4 l'elenco è vuoto (lo impone un test)
-// e da lì non ci sono più aree fuori dalla guardia.
+// (Mentre le pagine passavano al sistema, DS4, qui stavano due elenchi
+// provvisori — le aree non ancora migrate, che la guardia saltava, e i file
+// già migrati dentro di esse —: a fine fase sono vuoti e sono usciti. Una
+// regola vale per tutto o non vale.)
 
 export type DesignRule =
   | 'text-arbitrary'
@@ -43,39 +43,4 @@ export const DESIGN_EXCEPTIONS: readonly DesignException[] = [
     pattern: /\btext-\[var\(--[a-z0-9-]+\)\]/g,
     reason: 'text-[var(--…)] è un colore letto da una variabile del tema (per esempio il testo della bolla dell’utente), non una dimensione di testo.'
   }
-]
-
-/**
- * I file GIÀ migrati al sistema (relativi a src/renderer/src): la guardia li
- * guarda anche se stanno dentro un'area non ancora migrata. A ogni commit di
- * DS4 ci entrano i file della sua pagina; a fine DS4 l'elenco è superfluo
- * (nessuna area è più in attesa) e le aree provvisorie sono zero.
- */
-export const MIGRATED: readonly string[] = [
-  // DS2 — i pezzi del sistema
-  'components/ui/column-head.tsx',
-  'components/ui/page-shell.tsx',
-  'components/ui/page-header.tsx',
-  'components/ui/section.tsx',
-  'components/ui/flat-list.tsx',
-  'components/ui/underline-tabs.tsx',
-  'components/ui/data-table.tsx',
-  'components/ui/notice.tsx',
-  'components/ui/button.tsx',
-  'lib/utils.ts'
-]
-
-/**
- * Aree del renderer NON ancora migrate al sistema (relative a
- * src/renderer/src, con la barra finale): la guardia le salta, tranne i file
- * dichiarati migrati (MIGRATED). PROVVISORIO fino a fine DS4.
- */
-export const MIGRATION_PENDING: readonly string[] = [
-  'components/',
-  'lib/',
-  'App.tsx',
-  'main.tsx',
-  'sidebar-utils.ts',
-  'store.ts',
-  'theme.ts'
 ]

@@ -665,7 +665,7 @@ describe('DS4 Impostazioni: la Cassaforte', () => {
   })
 
   it('nel sorgente della Cassaforte non c\u2019è più nessuna emoji (le icone sono lucide) — e nessuna regola di DS6 è rotta', () => {
-    expect(scan({ pending: true }).filter((v) => v.file === 'components/VaultSettings.tsx')).toEqual([])
+    expect(scan().filter((v) => v.file === 'components/VaultSettings.tsx')).toEqual([])
   })
 })
 
