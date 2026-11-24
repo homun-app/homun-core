@@ -421,7 +421,22 @@ describe('fase 19a correzioni L3: computerActContextOf — cattura → doppio mo
     ])
   })
 
+  it('R7 (b20-ritocchi): SENZA iniezione la sonda non tocca MAI il Docker vero — errore chiaro, subito', async () => {
+    // qui NESSUN setDockerRunnerForTests: il runner di produzione, sotto
+    // vitest, rifiuta. È la guardia: senza di lei questi test si appendevano
+    // ai timeout del Docker Desktop dell'utente (32 s a comando) e la suite
+    // scadeva ROSSA anche se tutto il resto era a posto
+    await expect(computerActContextOf('agent_x', { kind: 'click', x: 300, y: 200 }, VIEW, {
+      challenge: false, userControl: false, desktop: DESKTOP,
+      probe: { evaluate: async () => null, sleep: async () => undefined }
+    })).rejects.toThrow('nei test docker va iniettato')
+  })
+
   it('SENZA evento e punto fuori dal viewport → outside (formula di L2)', async () => {
+    // R7 (b20-ritocchi): il Docker di questi test è SEMPRE iniettato — senza,
+    // la guardia di sandbox rifiuta (il Docker Desktop dell'utente può non
+    // rispondere: i comandi si appendono ai suoi timeout e il test scade)
+    setDockerRunnerForTests(async () => ({ stdout: '', stderr: '', exitCode: 0, signal: null }))
     const evaluate = async (_agentId: string, fn: string): Promise<unknown> =>
       isArm(fn) ? 1 : null
     const ctx = await computerActContextOf('agent_x', { kind: 'click', x: 600, y: 40 }, VIEW, {
@@ -432,6 +447,8 @@ describe('fase 19a correzioni L3: computerActContextOf — cattura → doppio mo
   })
 
   it('senza evento, punto DENTRO: un frame è frame, qualunque altra cosa è unknown', async () => {
+    // R7 (b20-ritocchi): Docker iniettato (vedi il test sopra)
+    setDockerRunnerForTests(async () => ({ stdout: '', stderr: '', exitCode: 0, signal: null }))
     const mkEvaluate = (element: unknown) => async (_agentId: string, fn: string): Promise<unknown> => {
       if (isArm(fn)) return 1
       if (isRead(fn)) return null
@@ -456,6 +473,8 @@ describe('fase 19a correzioni L3: computerActContextOf — cattura → doppio mo
   })
 
   it('senza evento e VIEW nulla → unknown; down e up passano dalla STESSA sonda, move no', async () => {
+    // R7 (b20-ritocchi): Docker iniettato (vedi i test sopra)
+    setDockerRunnerForTests(async () => ({ stdout: '', stderr: '', exitCode: 0, signal: null }))
     const evaluate = async (_agentId: string, fn: string): Promise<unknown> =>
       isArm(fn) ? 1 : null
     const opts = { challenge: false, userControl: false, desktop: DESKTOP, probe: { evaluate, sleep: async () => undefined } }

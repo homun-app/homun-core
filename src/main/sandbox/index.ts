@@ -384,11 +384,34 @@ const runWithEngine = (engine: import('./engine').BoxEngine) =>
   (argv: string[], opts: SpawnOptions = {}) =>
     runProcess(engine.command(), argv, { ...opts, env: engine.childEnv(opts?.env ? { ...process.env, ...opts.env } : process.env) })
 
-let dockerRunner: DockerRunner = (argv, opts, engine) => runWithEngine(engine ?? activeBoxEngine())(argv, opts)
+/**
+ * R7 (b20-ritocchi): la GUARDIA dei test. Sotto vitest NESSUN comando docker
+ * o container parte davvero: il runner di produzione rifiuta con un errore
+ * chiaro («nei test docker va iniettato»), a meno che un test lo chieda in
+ * modo ESPLICITO (allowRealDockerForTests). Così un test che dimentica
+ * l'iniezione fallisce SUBITO col perché, invece di appendersi ai timeout
+ * del Docker Desktop della macchina (32 s a comando quando il daemon non
+ * risponde: la suite scadeva ROSSA con tutto il resto a posto). La CLI
+ * `container` è già fuori dai test per altra via (test-setup.ts manda
+ * HOMUN_CONTAINER_PATH su un percorso inesistente).
+ */
+let realDockerAllowed = false
+/** Solo per i test: l'unico modo di chiedere il Docker VERO sotto vitest. */
+export function allowRealDockerForTests(): void {
+  realDockerAllowed = true
+}
+const dockerRunnerDefault: DockerRunner = (argv, opts, engine) => {
+  if (process.env.VITEST && !realDockerAllowed) {
+    throw new Error(`nei test docker va iniettato: setDockerRunnerForTests(…) — o allowRealDockerForTests() se il Docker vero serve davvero (argv: ${argv.join(' ')})`)
+  }
+  return runWithEngine(engine ?? activeBoxEngine())(argv, opts)
+}
+
+let dockerRunner: DockerRunner = dockerRunnerDefault
 
 /** Solo per i test: sostituisce (o ripristina) il runner dei comandi del box. */
 export function setDockerRunnerForTests(runner: DockerRunner | null): void {
-  dockerRunner = runner ?? ((argv, opts, engine) => runWithEngine(engine ?? activeBoxEngine())(argv, opts))
+  dockerRunner = runner ?? dockerRunnerDefault
 }
 
 /** Solo per i test: azzera la memoria delle home assicurate (container fresco). */

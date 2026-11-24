@@ -6,8 +6,13 @@
 // test), MAI la CLI `container` installata sul Mac.
 import { describe, expect, it, afterEach } from 'vitest'
 
-const { runDockerRaw, setDockerRunnerForTests } = await import('../index')
+const { runDockerRaw, setDockerRunnerForTests, allowRealDockerForTests } = await import('../index')
 const { setActiveEngineForTests } = await import('../engine')
+
+// R7 (b20-ritocchi): questo file SPAWNA DAVVERO un processo (il node di
+// prova, come CLI del motore: mai docker, mai la CLI container installata).
+// La guardia dei test lo lascia fare SOLO a chi lo chiede in modo esplicito
+allowRealDockerForTests()
 
 // la CLI del motore Apple diventa il node di prova: runDockerRaw spawna il
 // comando del motore attivo con l'argv che gli passo. Il valore di prova
