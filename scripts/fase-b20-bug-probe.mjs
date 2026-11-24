@@ -785,14 +785,15 @@ try {
         flow: el?.getAttribute('data-flow') ?? null, reason: el?.getAttribute('data-flow-reason') ?? null,
         row: (document.querySelector('[data-testid="app-row-spotify"]')?.textContent ?? '').replace(/\\s+/g, ' ').trim().slice(0, 160),
         status: text('[data-testid="app-status-spotify"]'), error: text('[data-testid="app-error-spotify"]'), detail: text('[data-testid="app-error-detail-spotify"]'),
-        retry: !!document.querySelector('[data-testid="app-retry-spotify"]'), cancel: !!document.querySelector('[data-testid="app-cancel-spotify"]'), connect: !!document.querySelector('[data-testid="app-connect-spotify"]')
+        retry: !!document.querySelector('[data-testid="app-retry-spotify"]'), cancel: !!document.querySelector('[data-testid="app-cancel-spotify"]'), connect: !!document.querySelector('[data-testid="app-connect-spotify"]'),
+        howto: !!document.querySelector('[data-testid="app-howto-spotify"]')
       }
     `)
     /** Il clic su «Connetti» (o «Riprova»): gli stati visti dalla riga, in ordine, e quanto tempo passa fino a quello stabile. */
     const clickAndSettle = async () => {
       const before = composio.calls.length
       const t0 = Date.now()
-      const clicked = await pageEval(cdp, `const b = document.querySelector('[data-testid="app-retry-spotify"]') ?? document.querySelector('[data-testid="app-connect-spotify"]'); if (!b) return false; b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1 })); b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 1 })); b.click(); return true`)
+      const clicked = await pageEval(cdp, `const b = document.querySelector('[data-testid="app-retry-spotify"]') ?? document.querySelector('[data-testid="plugin-card-connect-spotify"]') ?? document.querySelector('[data-testid="app-connect-spotify"]'); if (!b) return false; b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1 })); b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 1 })); b.click(); return true`)
       // lo stato STABILE: non più «starting» (o il tempo massimo della riga, 25 s, come tetto)
       const deadline = Date.now() + 27_000
       const seen = []
@@ -813,16 +814,26 @@ try {
     log('B3 stati visti dalla riga (non collegabile):', JSON.stringify(s1.seen))
     check('B3: dal clic la riga non resta mai muta: passa da «Avvio del collegamento…» all’esito', s1.clicked && s1.seen.length >= 2 && s1.seen[0].flow === 'starting', JSON.stringify(s1.seen).slice(0, 240))
     check('B3: il Composio finto ha ricevuto l’«add» di Spotify (nessuna finestra: il login non è partito)', s1.calls.some((c) => c.actions.includes('add')), JSON.stringify(s1.calls))
-    check('B3: app NON collegabile → la riga si sblocca: «Non si può collegare», il motivo in parole e «Riprova»', s1.state.flow === 'failed' && s1.state.reason === 'not-connectable' && /Non si può collegare/.test(s1.state.status) && /non gestisce il login di Spotify/.test(s1.state.error) && s1.state.retry && !s1.state.cancel, JSON.stringify(s1.state).slice(0, 300))
+    check('B3: app NON collegabile → la riga si sblocca: «Non si può collegare», il motivo in parole e «Come si risolve» (R6: PERMANENTE, niente «Riprova»)', s1.state.flow === 'failed' && s1.state.reason === 'not-connectable' && /Non si può collegare/.test(s1.state.status) && /non gestisce il login di Spotify/.test(s1.state.error) && s1.state.howto && !s1.state.retry && !s1.state.cancel, JSON.stringify(s1.state).slice(0, 300))
     check('B3: l’errore di apps:connect è arrivato alla riga in fretta (stato «failed» in meno di 5 secondi)', s1.state.flow === 'failed' && s1.ms < 5_000, `${s1.state.flow} in ${s1.ms} ms`)
     await shot(cdp, '9-b3-spotify-non-si-puo-collegare-1280x800-chiaro')
     await setDark(cdp, true)
     await shot(cdp, '9-b3-spotify-non-si-puo-collegare-1280x800-scuro')
     await setDark(cdp, false)
 
-    // ---- 2. «Riprova» e il Composio fallisce in generale ----
+    // R6 (b20-ritocchi): dopo l'esito PERMANENTE la riga non ha più «Riprova»:
+    // «Come si risolve» apre la scheda dell'app, e dalla scheda riparte il
+    // collegamento (per gli errori temporanei «Riprova» resta in riga)
+    const howtoClicked = await pageEval(cdp, `const b = document.querySelector('[data-testid="app-howto-spotify"]'); if (!b) return false; b.click(); return true`)
+    const cardOpened = await waitDom(cdp, `!!document.querySelector('[data-testid="plugin-card-connect-spotify"]')`, 5_000).catch(() => false)
+    check('B3 (R6): «Come si risolve» apre la scheda dell\'app', howtoClicked === true && cardOpened === true, `howto ${howtoClicked} scheda ${cardOpened}`)
+
+    // ---- 2. «Riprova» (dalla scheda) e il Composio fallisce in generale ----
     composioScenario = 'failed'
     const s2 = await clickAndSettle()
+    // la scheda si richiude: le catture tornano sulla riga
+    await pageEval(cdp, `document.querySelector('button[aria-label="Torna ai plugin"]')?.click(); return true`)
+    await sleep(300)
     check('B3: «Riprova» con un errore qualunque → «Non riuscito», il motivo e «Riprova» (mai bloccata)', s2.clicked && s2.state.flow === 'failed' && s2.state.reason === 'connect-failed' && /Non riuscito/.test(s2.state.status) && /non ha aperto il login di Spotify/.test(s2.state.error) && s2.state.retry && !s2.state.cancel, JSON.stringify(s2.state).slice(0, 300))
     await shot(cdp, '10-b3-spotify-non-riuscito-1280x800-chiaro')
 
