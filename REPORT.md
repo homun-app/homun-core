@@ -1,3 +1,133 @@
+# REPORT FASE DESIGN (DS1–DS6): una UI sola, con regole sue, impeccabile
+
+Base: il tag `fase-b20-bug` (main a 9da9811c al momento di partire; verifica fatta: HEAD era esattamente lì). 30 commit più questo REPORT. La fase non aggiunge funzioni: cambia come si vede ciò che c'è, e toglie ciò che non serve più. Il movimento in breve: DS1 mette i token in un posto solo (styles.css), DS2 ne fa i pezzi (components/ui), DS3 allinea la cornice della finestra, DS4 porta le sette pagine al sistema (una per commit), DS5 toglie il morto, DS6 chiude a chiave (guardia sul sorgente + sonda che misura + misure di fabbrica fuori dal tema).
+
+**Cose da sapere prima di tutto.**
+
+1. **Le pagine di DS4 le ho fatte fare in parallelo a sette agenti**, ciascuno nel proprio worktree temporaneo sotto /var/folders/.../T/ (rami ds4-chat, ds4-pannello, ds4-barra, ds4-plugin, ds4-impostazioni, ds4-libreria, ds4-approvazioni, più ds4-resto per i dialoghi, che ho fatto io). Stessa spec, stessi vincoli. Io ho riguardato i diff, misurato ogni ramo con la sonda PRIMA di farlo atterrare (e due difetti trovati dal vivo li ho corretti: sotto), poi cherry-pick su main nell'ordine della spec. Gli unici conflitti erano i cataloghi compilati: risolti prendendo la versione di main, rifacendo `lingui extract` e ricompilando.
+2. **Cinque agenti sono stati fermati a metà dal limite d'uso del servizio** (reset alle 07:45). Ho ripreso i due rimasti indietro (chat e approvazioni) facendo finire a mano il lavoro nel loro worktree: la chat mancava delle tre funzioni pure delle menzioni e del TeamChat nuovo; le approvazioni del typecheck del test. Poi misura, correzioni e cherry-pick come per gli altri. Nessun lavoro perso.
+3. **`cn()` non conosceva i token di DS1** (trovato da un agente): il twMerge di fabbrica scambia `text-small` per un COLORE — `cn('text-small text-muted-foreground')` toglieva la taglia — e non riconosceva `rounded-control` né `h-control`. Corretto in lib/utils.ts (626750e2) con un test che legge i nomi da @theme: un token nuovo che cn non conosce diventa rosso. Sull'invarianza: sulle classi usate dal renderer prima di quel commit (786 nomi, 617.796 coppie) l'esito non cambia.
+4. **Tre difetti trovati misurando dal vivo, corretti nelle pagine:** (a) la riga interna delle testate era larga quanto il suo contenuto — la pillola del bot restava a sinistra, la ✕ del pannello pure — perché la fascia è un flex in riga: `w-full` sulla riga interna, e una guardia nuova lo impone (d3e2f754); (b) la barra di scroll-thin OCCUPA 6 px: riservata su un lato solo, il contenuto era 3 px fuori centro — `scrollbar-gutter: stable both-edges` sul corpo che scorre e `px-1.5` sulle righe ferme (c23411b9); (c) la finestra si spostava da sola: la radice dell'app era scorribile nonostante `overflow: hidden` (focus e scrollIntoView la muovono, e il suo scrollHeight è alto quanto il transcript) — `overflow: clip` sulla radice e sul body (a3403d92).
+5. **Un mio difetto nella sonda, perso mezz'ora:** la composizione delle catture affiancate scriveva il file composto e POI lo cancellava (`rmSync(after)` cancellava il file appena scritto: il nome è lo stesso). Corretto (prima si tolgono le due grezze, poi si scrive la composta) e corse rifatte. L'ho visto perché la cartella delle catture è uscita vuota.
+6. **Un file scritto per sbaglio in /tmp** (un log di comandi della shell, /tmp/.x, 4 KB): cancellato entro un minuto, stessa ora in cui l'ho scritto (08:47). Era l'unica eccezione ai vincoli sui temporanei; nessun dato dentro.
+7. **La suite è diventata sensibile allo spazio disco del Mac** (questa fase non c'entra: il prodotto chiede ~6,5 GB liberi prima di costruire l'immagine del box e 2 GB prima di scaricare il modello integrato; il disco oggi ha ~2–4 GB liberi). I test fingevano tutto tranne quello. Due commit (4a2e5b80, 962a47ea) iniettano i probe che il prodotto GIÀ esportava per i test (setDiskSpaceProbeForTests, setLocalModelEligibilityFactsForTest) nei nove file che leggevano il disco vero. Il test che prova il disco vero continua a farlo.
+8. Nell'albero di lavoro restano i NON tracciati di sempre: `out-review/` e `scripts/vetrina/` (non miei, mai toccati).
+
+Vincoli rispettati: niente Docker né container vero né eval col modello né dist firmata, niente Composio vero (la sonda usa AS e server MCP finti su 127.0.0.1), nessun pacchetto nuovo (solo `npm test`, `npm run test:ci-sim`, `node_modules/.bin/tsc`, `lingui extract/compile`, `electron-vite build` diretto senza hook), rete solo su 127.0.0.1, mai le porte 11434 e 1234, mai `open`/`osascript`/`sudo`/`screencapture` (catture solo via CDP), temporanei solo in /var/folders/.../T/ con mktemp -d e cancellati a fine corsa, mai l'Application Support vero né i file delle altre app, migrazioni DB nessuna, nessun push e nessun tag v*.
+
+## Numeri
+
+Typecheck 0 errori. Suite intera 1 giro (`npm test`) VERDE: **532 file / 6.831 test** (base: 513 file / 6.450 test — +19 file, +381 test: 18 file di test nuovi più un modulo di ausilio, e 31 file di test esistenti toccati dove il cambio era voluto). `npm run test:ci-sim` VERDE: **530 file pass + 2 skip / 6.827 test pass + 4 skip** (gli skip sono i soliti due: modello locale e embed-lane).
+
+**La misura.** Sonda `fase-design` sull'app vera (dati finti, HOME finta, modello finto su 127.0.0.1), 35 pagine e schede × 3 misure × 2 temi = 210 combinazioni:
+- **PRIMA** (base `fase-b20-bug`, build 6865076421cda0ea): **4.116 violazioni**. Pagina per pagina sotto, nel capitolo DS6.
+- **DOPO** (build della fase): **0 violazioni**, 8/8 controlli (arrivo in fondo, zero violazioni, tutte le pagine, tutte le combinazioni, catture affiancate 154/154, pulizia).
+Le 154 catture prima/dopo affiancate (1280×800 chiaro e scuro per ogni pagina; anche 900 e 1680 per Chat, Plugin e Libreria) stanno in `docs/catture/fase-design/`; i numeri in `docs/misure/fase-design/{prima,dopo}.json`. Le ho guardate tutte (sotto, cosa ho visto).
+
+**La guardia sul sorgente** (12 regole, DS6): sulla base **2.364 violazioni in 77 file** (con le quattro regole di chiusura DS1: interlinee 89, spaziature fuori scala 257, icone 49, pesi 11); sulla fase **0**, senza aree esenti. **Il censimento degli export** (DS5): 42 inutilizzati e 8 file mai importati sulla base → 0 e 0 sulla fase (38 tolti; il resto erano falsi positivi del censimento, corretti).
+
+Codice (senza catture, misure e REPORT): 176 file, +16.982 / −6.554.
+
+## DS1 — i token (styles.css, @theme)
+
+Sei dimensioni di testo ognuna con la sua interlinea (`text-caption` 12/16 · `text-small` 13/18 · `text-body` 14/20, il default, messo sul body · `text-reading` 16/26 · `text-title` 20/28 · `text-page` 28/34), Figtree per tutto e Bricolage Grotesque (`font-display`) SOLO per il titolo di pagina e i titoli dei documenti; pesi 400/500/600. Le distanze con un nome (`--spacing-*`: margine della pagina 32/24 sotto i 900 px di AREA, fra sezioni 32, dal titolo al contenuto 12, fra blocchi 16, riga 52/40, respiro 12, icona→testo 12, controlli 36/32, la riga in cima alle colonne 52), la scala di Tailwind per il resto. Tre raggi (control 8, surface 14, full). Tre larghezze (`--w-reading` 720, `--w-page` 880, `--w-wide` 1120, anche come `max-w-*`). Il margine stretto è una CONTAINER QUERY sull'area (a finestra 900 con la barra di sinistra l'area è ben sotto 900: una media query sulla finestra l'avrebbe sbagliato). Test design-tokens sul CSS compilato con l'API `compile` di Tailwind (la stessa del plugin Vite), 9 → 11 test.
+
+## DS2 — i pezzi (components/ui, ognuno con test di rendering)
+
+`PageShell`/`PageColumn` (l'invaso di ogni pagina a tutta area: il contenitore che scorre è largo quanto l'AREA — la barra di scorrimento sta sul bordo della finestra, era il difetto della pagina Plugin — e DENTRO il contenuto è centrato alla larghezza scelta; testata e barra degli strumenti ferme), `PageHeader` (indietro · icona · titolo `text-page` · azioni; il bottone indietro porta il testid che gli dà la pagina: `page-close`, `approvals-center-close`…), `ColumnHead` (la riga dei 52, fascia di trascinamento, `data-col-head` per la sonda), `Section`, `FlatList`/`FlatRow` riallineati ai token, `UnderlineTabs` su UNA riga mai a capo (scorre in orizzontale con le sfumature ai bordi quando c'è altro; il filetto di base sta sull'involucro, più esterno, perché la tablist ritaglia), `DataTable` (intestazioni `text-caption` grigie, celle `text-body`, seconde righe `text-small`, righe da 52, filetti, niente a capo — `table-fixed` con la `<col>` per colonna e `truncate` col titolo intero al passaggio —, scorrimento orizzontale DENTRO), `Notice` (la riga di sistema della chat: icona · testo `text-small` · «· N volte» · azione, con il tono della severità), `Button` (primary/secondary/ghost/destructive, 32/36, pill per le azioni principali). Con `cn` che conosce i token (punto 3 sopra). Lo strumento della migrazione meccanica (scripts/design-migrazione.mjs, classi lette dall'AST: testo, raggi, spaziature, pesi, misura delle icone) ha fatto il primo passo di ogni pagina: da solo portava le violazioni della guardia da 1.962 a 31.
+
+## DS3 — la cornice della finestra
+
+`titleBarStyle: hiddenInset` con `trafficLightPosition` ESPLICITO `{x:12, y:19}` (shared/window-frame.ts, le stesse costanti per il main e il renderer): i semafori (bottoni da 14, passo 20) hanno il centro a 26 = il centro della riga di 52. `SIDEBAR_HEAD_PAD` = 12+54+12: la prima icona della barra a 12 px dai semafori. La testata di OGNI colonna è quella riga, marcata `data-col-head` (barra piena e rotaia, chat e squadra, pannello destro, documento, guida, pagine), ed è la fascia di trascinamento con i controlli `no-drag`. Il bottone «apri/chiudi la barra» a barra aperta sta DENTRO la testata come prima icona; da rotaia resta sopra le colonne alle stesse coordinate. La riga «Homun è stato rinnovato» non sta più sopra le colonne (le spostava tutte giù e i semafori uscivano dalla riga): è una scheda sospesa in alto a destra. Test window-frame 6 → 9 (costanti coerenti, il main legge le stesse, ogni fascia è una testata alta 52 e viceversa, e la riga interna di una testata in riga è larga quanto lei — visto ROSSO togliendo `w-full`).
+
+## DS4 — le sette pagine (una per commit)
+
+1. **Chat** (8d13663e, col pannello del bot nello stesso commit): colonna di lettura `reading` centrata; messaggi `text-reading`; bolla utente all'85% (prima 75%); UN solo markdown per ogni testo di bot (PROSE in DocumentMarkdown: prima due renderer, e quello della chat era nudo — i titoli e le tabelle prendevano quelli del browser); righe di sistema con `Notice`; campo di scrittura alla larghezza della colonna (via il raggio dinamico di M1: i raggi sono tre); le card con `CardShell` all'85%; la squadra parla come la chat e le @menzioni sono pillole DENTRO il testo reso (`splitMentions`/`mapText` pure, `proseWithText`); le emoji → icone lucide. Il pannello destro: schede `UnderlineTabs`, righe a filo, computer e memoria ai token.
+2. **Barra di sinistra** (5a8e309d): righe `text-body` con lo slot da 32 davanti al nome (52/40), metadati `text-caption`, titoli di gruppo `text-caption` grigi; in rotaia le voci in bottoni da 32; riga dell'account da 60 a 52. Emendata dopo la misura: il NOME vince sul metadato («Weekend Torino» intero a 264 px di barra, «adesso» sparisce), e i bottoni dentro le righe («›», «⋯», «+») occupano 16 px di layout pur restando bersagli da 32.
+3. **Plugin** (1cfdbf0e): `PluginShell` SPARISCE, ogni vista usa `PageShell`+`PageHeader`; «Collegati» con `DataTable` alla larghezza `wide`; «Connettori» con `UnderlineTabs` su una riga (era «Posta e / calendario» su due); il menu «Aggiungi» ai token; i loghi 32/40.
+4. **Libreria** (c50b68e5): guscio e testata; le schede della griglia ALL'ALTEZZA UGUALE con l'anteprima su 4 righe (`previewLines`, pura); la lista a righe a filo; il documento aperto nella colonna `reading`, il titolo in `text-page` `font-display` e nella testata una riga d'orientamento compatta (due titoli grandi a 60 px di distanza si facevano concorrenza); i glifi «⚠ ↩ ← ★» → icone lucide (7 testi dei cataloghi senza più il glifo).
+5. **Da approvare, Attività e Registro** (d234422f): guscio `page`/`wide`, schede `UnderlineTabs` (via `approvals-center-tabs` scritto a mano), gruppi `Section`, card `rounded-surface` con `Button` (Consenti pillola, Rifiuta destructive); il Registro in `DataTable`; il riquadro «+N altrove» in `Notice`.
+6. **Impostazioni** (a4d4d1bf): il dialogo non scorre più per intero — navigazione ferma a sinistra, riga ferma col titolo di sezione e la ✕, sotto la colonna che scorre col margine dentro; `SettingsGroup`/`SettingsRow` ai token (etichetta `text-caption`, niente maiuscoletto); Cassaforte a `UnderlineTabs` e «Dei plugin» a righe a filo; «Uso e costi» in `DataTable`; l'interruttore con il bersaglio da 32 (sta bene anche in testata); 🔑 👤 ✨ → lucide.
+7. **Dialoghi, menu, popover e guida** (a221e8d7): il menu con voci da 32 e il punto «radio» disegnato (non più un'icona da 8 px); il dialogo con titolo `text-title` e descrizione `text-small`; la guida coi titoli di passo a `text-page` senza la spaziatura delle lettere scritta a mano, la nuvoletta `text-title` e la punta da 16.
+
+## DS5 — togliere ciò che non serve più (ef1d7bc8)
+
+Il censimento (scripts/esporta-inutilizzati.mjs: tsc emette i .d.ts di tutto il prodotto, i nomi letti da lì, gli import letti dai sorgenti — statici, di tipo, dinamici, ri-esportazioni, a stella): sulla base 3.817 export, **42 inutilizzati** e **8 file mai importati**; sulla fase **0 e 0**. Tolti 38 export (BotTogglesForApp, ProvenanceTag, FilterPill, botsToggleState, decisionTime, connectorOf, docHeadingIds, HEAD_BUTTON… nel renderer e nello shared; 24 in main/daemon) e sei pezzi di components/ui mai importati (progress, scroll-area, switch, tabs, textarea, tooltip); Input e Select, che le Impostazioni usano, passano ai token. RESTANO e perché: i 645 esportati per i test, i 6 per eval, i 627 «solo locali» (tipi e costanti esportati per chiarezza del modulo) e tre parametri mai letti dentro firme più grandi. Stili senza utilizzatori: i token `--radius-sm…4xl`, `--radius`, `--container-pill`, le regole della vecchia mascotte (bot-ring, bot-antenna, bot-puff, bot-draw, la famiglia «cloud») con cinque keyframes. I msgid orfani: 13 fuori dai cataloghi con `lingui extract --clean` (i dodici col glifo davanti alle parole e «ti aspetta», mai mostrato), inglese completo. Nessun testo dell'interfaccia nomina più la finestra «App» o «App e skill». Lungo la strada il censimento aveva due difetti che davano per morti export VIVI (la destructuring di un import dinamico partiva da una graffa aperta molto prima; `a as b` contava l'alias locale): corretti, con i casi di prova — li ho scoperto perché tsc protestava per gli export che avevo già tolto.
+
+## DS6 — le guardie
+
+**La guardia sul sorgente** (design-guard, 12 regole, le eccezioni in UN file: lib/design-exceptions.ts): `text-[…]` e le taglie di Tailwind, spaziature e raggi liberi, i raggi di fabbrica, le larghezze in px, il maiuscoletto (anche `tracking-[-0.01em]`), le emoji, i pesi fuori da 400/500/600, le interlinee, le spaziature fuori scala, le icone lucide senza misura o fuori da 16/20 (dall'AST). Le stringhe si leggono dall'AST: i commenti non contano. Sulla base, a elenco delle aree vuoto: **2.364 violazioni in 77 file**; sulla fase **0**, senza aree esenti (gli elenchi provvisori di DS4 sono usciti vuoti). **Un'unica eccezione**: `text-[var(--…)]` è un colore letto da una variabile del tema (la bolla dell'utente), non una dimensione. **Il tema è chiuso**: le misure di fabbrica escono da @theme con `initial` (taglie, raggi, pesi, interlinee, spaziature delle lettere) — chi le scrivesse non otterrebbe nessuna regola CSS, visto ROSSO senza il blocco. **La sonda di misura** (scripts/fase-design-probe.mjs, 1.233 righe): l'app vera su out/, dati finti, HOME finta, modello finto su 127.0.0.1, catture solo via CDP alla scala 1; per OGNI pagina e scheda di DS4 a 900×640/1280×800/1680×1050 in chiaro e scuro misura: dimensione di ogni testo visibile (i campi e i placeholder compresi), emoji, misura delle icone lucide, niente più largo della finestra, il contenitore che scorre che arriva al bordo e il contenuto centrato alla larghezza giusta (l'AREA utile è quella DENTRO la barra di scorrimento), niente a capo dove è vietato, le testate alte 52 in cima con le icone in bottoni da 32 centrati e la riga dei semafori letta dal BUNDLE del main, nessun anello di fuoco dopo un clic del mouse. La chat di squadra viene seminata nel DB con due risposte di bot in markdown e il riepilogo del coordinatore; ogni combinazione riapre la pagina da capo. Le catture: 1280×800 chiaro e scuro per ogni pagina, anche 900 e 1680 per Chat, Plugin e Libreria; con `--affiancate` ogni coppia prima/dopo diventa UNA immagine (le grezze escono).
+
+## Violazioni prima/dopo, pagina per pagina
+
+| Pagina | PRIMA | DOPO |
+|---|---:|---:|
+| Guida iniziale | 30 | 0 |
+| Chat | 360 | 0 |
+| Chat con 4 avvisi | 360 | 0 |
+| Chat di un bot | 216 | 0 |
+| Chat di una squadra | 44 | 0 |
+| Chat col pannello del bot | 12 | 0 |
+| Pannello del bot › Attività | 12 | 0 |
+| Pannello del bot › Libreria | 12 | 0 |
+| Chiedi al volo (⌘K) | 6 | 0 |
+| Barra di sinistra | 62 | 0 |
+| Menu dell’account | 6 | 0 |
+| Dialogo «Nuovo bot» | 12 | 0 |
+| Plugin › lista | 174 | 0 |
+| Plugin › Connettori | 1040 | 0 |
+| Plugin › Skill | 276 | 0 |
+| Plugin › Collegati | 552 | 0 |
+| Scheda del plugin › Panoramica | 30 | 0 |
+| Scheda del plugin › Autorizzazioni (24 strumenti) | 36 | 0 |
+| Scheda del plugin › Account e bot | 66 | 0 |
+| Plugin › Server MCP | 222 | 0 |
+| Plugin › Importa skill | 36 | 0 |
+| Plugin › Crea una skill | 30 | 0 |
+| Libreria › griglia | 18 | 0 |
+| Libreria › lista | 18 | 0 |
+| Documento aperto | 12 | 0 |
+| Da approvare | 18 | 0 |
+| Registro | 30 | 0 |
+| Attività | 30 | 0 |
+| Impostazioni › Generali | 108 | 0 |
+| Impostazioni › Modelli | 48 | 0 |
+| Impostazioni › Approvazioni | 36 | 0 |
+| Impostazioni › Cassaforte | 36 | 0 |
+| Impostazioni › Cassaforte › Dei plugin | 30 | 0 |
+| Impostazioni › Routine | 36 | 0 |
+| Impostazioni › Uso e costi | 102 | 0 |
+
+Per categoria, sulla base: testi fuori dalle sei dimensioni 2.766 · icone lucide fuori misura 542 · scorrimento (barra lontana dal bordo, contenuto non centrato o alla larghezza sbagliata) 386 · testate fuori riga/altezza 210 · testi andati a capo dove è vietato 206 · emoji 18. Sulla fase: zero in ogni categoria, in ogni combinazione.
+
+## Le catture (le ho guardate tutte)
+
+154 immagini prima/dopo affiancate in `docs/catture/fase-design/` (a sinistra la base `fase-b20-bug`, a destra la fase): 1280×800 chiaro e scuro per ognuna delle 35 pagine e schede, più 900×640 e 1680×1050 per Chat, Plugin e Libreria. Le ho guardate una per una (con il modello di visione, via via che le leggevo). Cosa si vede, oltre ai numeri:
+- il POSTO DELLA BARRETTA DI SCORRIMENTO: sulla base staccata dal bordo (la pagina Plugin era il caso da manuale), sulla fase sul bordo con il contenuto centrato;
+- il MAIUSCOLETTO che sparisce (le intestazioni di «Collegati» e di «Uso e costi» erano l'esempio della spec), le taglie che si uniformano, le icone tutte a 16/20;
+- la testata unica a 52 px con i semafori in riga (sulla base ogni colonna aveva la sua altezza: 48, 60, 44);
+- le schede di «Connettori» su una riga, la tabella «Collegati» senza a capo, la chat con la colonna di lettura e il markdown uniforme.
+Le uniche coppie di catture identiche: «Chat col pannello del bot» e «Pannello del bot › Attività» a 900×640 (il pannello in overlay copre la stessa scena nelle due pagine: è la stessa vista, ed è giusto). Nient'altro è duplicato.  Le pagine Plugin e i popover/registro, guardate nei fogli a sei, sono pulite; le due uniche segnalazioni ricontrollate a piena risoluzione (menu dell'account «staccato dal bottone», pannello Libreria «tagliato») erano letture errate del modello di visione: il menu è agganciato al bottone e dentro la barra, il «taglio» era il bordo del mio stesso ritaglio di verifica.
+
+## Le altre sonde
+
+Le sonde delle fasi precedenti, una alla volta, uscita su file:
+- **fase-b20-bug: 75/75** (due corse: la prima 74/75 per una sola attesa aggiornata al design — la riga d'apertura «Avvio automatico» ha DUE icone lucide ora, la sua e il chevron del richiudibile, e il controllo chiedeva «un solo <svg>» — poi verde);
+- **fase-plugin-pulita: 113/113** (la sonda riconosce anche il guscio nuovo: data-page-shell accanto a data-plugin-shell);
+- **fase-centro: 55/55**;
+- **fase-squadra: 32/32**.
+Typecheck 0 errori. Suite intera 532 file / 6.831 test VERDI; `npm run test:ci-sim` 530+2 skip / 6.827+4 skip (gli skip di sempre: modello locale e embed-lane).
+
+## Chiusura
+
+Pulizia: nessun processo Electron o `--homun-daemon` del repo (contati per eseguibile con `ps -axo pid=,comm=`: 0 e 0), nessuna cartella temporanea residua in /var/folders/.../T/ (le sonde contano le loro a ogni corsa; il lavoro e la base della misura cancellati a mano alla fine). CHANGELOG invariato (verificato: nessun commit lo tocca). Tag annotato `fase-design`. Nessun push, nessun tag v*.
+
+**Dichiarazioni.**
+1. Un file scritto per sbaglio in /tmp (un log della shell, /tmp/.x, 4 KB): cancellato entro un minuto, ore 08:47. Unica eccezione ai vincoli sui temporanei; dentro non c'era nulla.
+2. Tre difetti miei nella sonda, trovati e corretti lungo la strada (ognuno ha comportato una corsa in più): la composizione delle catture scriveva il file e POI lo cancellava (rmSync del file appena scritto: cartella uscita vuota); le 154 composizioni partivano tutte INSIEME sulla stessa pagina (viewport e div sovrapposti: la stessa immagine ripetuta); la «lista» della Libreria non si misurava mai (l'interruttore si chiama «Elenco», la sonda cercava /lista/i) — me ne sono accorto GUARDANDO le catture (due identiche).
+3. La suite è diventata sensibile allo spazio disco del Mac (il prodotto chiede ~6,5 GB liberi prima di costruire l'immagine del box e 2 GB prima del modello integrato; il disco oggi ne ha 1,7–4): i test fingevano tutto tranne quello. Due commit iniettano i probe che il prodotto GIÀ esportava per i test, nei dieci file che leggevano il disco vero. Un momento di disco pieno (ENOSPC, ore ~10:35) è passato da solo senza danni.
+4. I resti dei glifi tipografici (✓, →, ⋯) NON sono emoji (fuori da Extended_Pictographic): restano dove la sonda b20-bug li cerca.
+
 # REPORT FASE B20-BUG (B1–B6): i difetti visti dal vivo sulla beta.19
 
 Base `main` a ee2b0d3b (verificata: HEAD era esattamente lì su `main`, il tag `fase-b20-bug` non esisteva); 9 commit più questo REPORT (10 in tutto). Sei, uno per punto — B1, B2, B6, B5, B4, B3: in quest'ordine sono entrati su `main` — più tre che la spec non elencava: un ritocco di B2 (visto dalla sonda dal vivo), una voce d'allowlist per la guardia dei letterali italiani (B1) e la sonda. Tag di chiusura `fase-b20-bug` (annotato). CHANGELOG invariato, nessun push, nessun tag `v*`.
