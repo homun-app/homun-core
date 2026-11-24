@@ -10,6 +10,12 @@
 //   a-capo      — nessuna scheda (UnderlineTabs) né intestazione o cella breve di tabella va a capo
 //   testate     — le testate delle colonne sono alte 52 px e le icone della barra hanno il centro sulla riga dei semafori (dalla trafficLightPosition configurata)
 //   fuoco       — dopo la pressione del mouse nessun anello di fuoco visibile
+//   R8 (b20-ritocchi) — LA DISPOSIZIONE, ciò che le misure di dimensione non vedevano:
+//   sovrapposizioni  — nessun testo visibile sotto una testata (data-col-head) senza sfondo, a scorrimento a metà
+//   righe-spezzate   — in ogni <li> del markdown il primo blocco di testo in riga è una riga sola, se la larghezza lo consente
+//   pillole          — nessuna pillola o badge schiacciata (scrollWidth ≤ clientWidth + 1)
+//   contrasto-puntini— i puntini dei bot hanno contrasto ≥ 3:1 col fondo della riga, in chiaro e in scuro
+//   altezza-barra    — le voci della barra di navigazione stanno fra 32 e 36 px
 // Le catture (solo CDP, alla scala 1) vanno in docs/catture/fase-design/:
 // 1280×800 chiaro e scuro per ogni pagina, più 900 e 1680 per Chat, Plugin e
 // Libreria; i numeri in docs/misure/fase-design/<prima|dopo>.json. Con
@@ -598,7 +604,119 @@ const MEASURE_JS = (rootExpr, { withSidebar }) => `(() => {
     heads.push({ name: el.dataset.colHead ?? 'barra', height: round(r.height), top: round(r.top), left: round(r.left), right: round(r.right), icons: icons.slice(0, 12) })
   }
   const sideRect = side?.getBoundingClientRect() ?? null
-  return { root: rootInfo, rail: sideRect ? sideRect.width < 160 : false, texts, bySize, textSamples, emojis, emojiSamples, iconSizes, iconSamples, pageScrollX, wide: wide.slice(0, 12), wideCount: wide.length, scroll, tabs: tabs.filter((t) => inScope(t) && vis(t)).length, wrappedTabs, wrappedLists, wrappedHeads, wrappedCells, heads }
+
+  // ---- R8 (b20-ritocchi): LA DISPOSIZIONE — come le cose si mettono ----
+  // (a) SOVRAPPOSIZIONI: nessun testo visibile sotto una testata senza
+  // sfondo. Si scorre a metà, si nascondono le testate e al punto centrale
+  // di ogni riga di testo caduta nella fascia dei 52 si chiede che cosa ci
+  // si vede: se è il testo stesso, la testata (di nuovo visibile) deve
+  // COPRIRLO (sfondo velato o sfocatura) — altrimenti il testo le scorre
+  // sotto e resta leggibile in cima alla colonna
+  const overlapped = []
+  {
+    const bands = [...document.querySelectorAll('[data-col-head]')].filter(vis).map((el) => ({ el, r: el.getBoundingClientRect() }))
+    if (bands.length) {
+      const savedScroll = sc ? sc.scrollTop : 0
+      if (sc && sc.scrollHeight > sc.clientHeight) sc.scrollTop = Math.floor((sc.scrollHeight - sc.clientHeight) / 2)
+      const pieces = [...scope.querySelectorAll('*')].filter((el) => inScope(el) && !skip(el) && [...el.childNodes].some((n) => n.nodeType === 3 && (n.nodeValue ?? '').trim()))
+      const hidden = []
+      for (const b of bands) { hidden.push([b.el, b.el.style.visibility]); b.el.style.visibility = 'hidden' }
+      for (const el of pieces) {
+        if (!vis(el)) continue
+        const er = el.getBoundingClientRect()
+        if (er.width === 0 || er.height === 0) continue
+        const band = bands.find((b) => er.top < b.r.bottom - 1 && er.bottom > b.r.top + 1 && er.right > b.r.left && er.left < b.r.right)
+        if (!band) continue
+        const cx = Math.min(Math.max((er.left + er.right) / 2, band.r.left + 1), band.r.right - 1)
+        const cy = Math.min(Math.max((er.top + er.bottom) / 2, band.r.top + 1), band.r.bottom - 1)
+        const hit = document.elementFromPoint(cx, cy)
+        if (!hit || !(hit === el || el.contains(hit) || hit.contains(el))) continue
+        const csHead = getComputedStyle(band.el)
+        const a = /rgba?\\((?:[\\d.]+, ){2}[\\d.]+,\\s*([\\d.]+)\\)/.exec(csHead.backgroundColor)
+        const alpha = a ? Number(a[1]) : 1
+        const copre = alpha > 0 || csHead.backdropFilter !== 'none'
+        if (!copre) overlapped.push({ ...describe(el), head: band.el.dataset.colHead })
+      }
+      for (const [el, v] of hidden) el.style.visibility = v
+      if (sc && sc.scrollHeight > sc.clientHeight) sc.scrollTop = savedScroll
+    }
+  }
+
+  // (b) RIGHE SPEZZATE: in ogni <li> del markdown il primo blocco di testo in
+  // riga è UNA riga sola, se la larghezza lo consente (l'involucro flex-col
+  // metteva «Ricavi:», «in crescita», «del 12%…» una sotto l'altra anche
+  // quando ci stavano insieme). Se non ci stanno, andare a capo è giusto:
+  // lo si decide misurando il contenuto in nowrap
+  const brokenListLines = []
+  {
+    const INLINE = new Set(['STRONG', 'EM', 'CODE', 'A', 'DEL', 'MARK', 'B', 'I', 'SPAN', 'SMALL', 'ABBR', 'SUB', 'SUP'])
+    for (const li of scope.querySelectorAll('li')) {
+      if (!inScope(li) || !vis(li) || skip(li)) continue
+      const kids = [...li.childNodes].filter((n) => (n.nodeType === 3 && (n.nodeValue ?? '').trim()) || (n.nodeType === 1 && INLINE.has(n.tagName)))
+      if (!kids.length) continue
+      const range = document.createRange()
+      range.setStartBefore(kids[0])
+      range.setEndAfter(kids[kids.length - 1])
+      const tops = new Set([...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0).map((r) => Math.round(r.top / 6)))
+      if (tops.size <= 1) continue
+      const probeEl = document.createElement('span')
+      probeEl.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap'
+      for (const k of kids) probeEl.appendChild(k.cloneNode(true))
+      li.appendChild(probeEl)
+      const oneLine = probeEl.getBoundingClientRect().width
+      probeEl.remove()
+      const csLi = getComputedStyle(li)
+      const available = li.clientWidth - parseFloat(csLi.paddingLeft) - parseFloat(csLi.paddingRight)
+      if (oneLine <= available) brokenListLines.push({ ...describe(li), oneLine: round(oneLine), available: round(available) })
+    }
+  }
+
+  // (c) PILLOLE SCHIACCIATE: ogni pillola o badge sta larga quanto il suo
+  // contenuto (la «Strada» si vedeva come una «s» in un cerchio: scrollWidth
+  // molto oltre clientWidth)
+  const squashed = []
+  for (const el of scope.querySelectorAll('[class*="rounded-full"]')) {
+    if (!inScope(el) || !vis(el) || skip(el)) continue
+    if (![...el.childNodes].some((n) => n.nodeType === 3 && (n.nodeValue ?? '').trim())) continue
+    if (el.scrollWidth > el.clientWidth + 1) squashed.push({ ...describe(el), clientWidth: el.clientWidth, scrollWidth: el.scrollWidth })
+  }
+
+  // (d) CONTRASTO dei puntini di stato: ≥ 3:1 col fondo della riga (il primo
+  // antenato con uno sfondo), in entrambi i temi
+  const dotIssues = []
+  {
+    const chan = (v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) }
+    const lum = (bg) => 0.2126 * chan(bg[0]) + 0.7152 * chan(bg[1]) + 0.0722 * chan(bg[2])
+    const parse = (s) => { const m = /rgba?\\(([\\d.]+), ([\\d.]+), ([\\d.]+)(?:, ([\\d.]+))?\\)/.exec(s ?? ''); return m ? { c: [Number(m[1]), Number(m[2]), Number(m[3])], a: m[4] === undefined ? 1 : Number(m[4]) } : null }
+    for (const dot of scope.querySelectorAll('[data-testid="bot-dot-color"]')) {
+      if (!inScope(dot) || !vis(dot)) continue
+      const d = parse(getComputedStyle(dot).backgroundColor)
+      if (!d || d.a === 0) continue
+      let row = null
+      for (let a = dot.parentElement; a; a = a.parentElement) { const p = parse(getComputedStyle(a).backgroundColor); if (p && p.a > 0) { row = p; break } }
+      if (!row) row = parse(getComputedStyle(document.body).backgroundColor) ?? { c: [255, 255, 255], a: 1 }
+      const l1 = lum(d.c)
+      const l2 = lum(row.c)
+      const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)
+      if (ratio < 3) dotIssues.push({ sel: sel(dot.parentElement ?? dot).slice(0, 60), ratio: round(ratio) })
+    }
+  }
+
+  // (e) LE ALTEZZE DELLA BARRA: le voci della navigazione stanno fra 32 e
+  // 36 px (R3: erano 52, un errore della spec di fase-design)
+  const navRowBad = []
+  {
+    const navEl = document.querySelector('aside nav')
+    if (navEl) {
+      for (const el of navEl.querySelectorAll('*')) {
+        if (typeof el.className !== 'string' || !(/(^|\\s)h-row(-nav)?(\\s|$)/.test(el.className))) continue
+        if (!vis(el)) continue
+        const h = Math.round(el.getBoundingClientRect().height)
+        if (h < 32 || h > 36) navRowBad.push({ sel: sel(el).slice(0, 60), height: h })
+      }
+    }
+  }
+  return { root: rootInfo, rail: sideRect ? sideRect.width < 160 : false, texts, bySize, textSamples, emojis, emojiSamples, iconSizes, iconSamples, pageScrollX, wide: wide.slice(0, 12), wideCount: wide.length, scroll, tabs: tabs.filter((t) => inScope(t) && vis(t)).length, wrappedTabs, wrappedLists, wrappedHeads, wrappedCells, heads, overlappedCount: overlapped.length, overlapped: overlapped.slice(0, 6), brokenListLines: brokenListLines.slice(0, 6), brokenListCount: brokenListLines.length, squashed: squashed.slice(0, 6), squashedCount: squashed.length, dotIssues: dotIssues.slice(0, 6), dotIssueCount: dotIssues.length, navRowBad: navRowBad.slice(0, 6), navRowBadCount: navRowBad.length }
 })()`
 
 /** L'anello di fuoco dell'elemento che ha il focus. */
@@ -616,7 +734,7 @@ const ringShown = (r) => r !== null && ((r.outline.startsWith('none') === false 
  * la pagina non ha un contenitore che scorre da misurare.
  */
 export const violationsOf = (m, { width = null, heads = true, edges = true } = {}) => {
-  const out = { testo: 0, icone: 0, larghezza: 0, scorrimento: 0, 'a-capo': 0, testate: 0, fuoco: 0, emoji: 0, dettaglio: [] }
+  const out = { testo: 0, icone: 0, larghezza: 0, scorrimento: 0, 'a-capo': 0, testate: 0, fuoco: 0, emoji: 0, sovrapposizioni: 0, 'righe-spezzate': 0, pillole: 0, 'contrasto-puntini': 0, 'altezza-barra': 0, dettaglio: [] }
   if (!m || m.missing) { out.mancante = 1; out.dettaglio.push('PAGINA NON TROVATA (radice assente)'); return out }
   for (const [size, n] of Object.entries(m.bySize ?? {})) {
     if (!ALLOWED_SIZES.includes(Number(size))) { out.testo += n; out.dettaglio.push(`testo ${size}px ×${n}`) }
@@ -650,6 +768,17 @@ export const violationsOf = (m, { width = null, heads = true, edges = true } = {
   if (out['a-capo']) out.dettaglio.push(...[...(m.wrappedTabs ?? []).map((w) => `  scheda a capo: «${w.text}»`), ...(m.wrappedLists ?? []).map((w) => `  schede su due righe: ${w.sel}`), ...(m.wrappedHeads ?? []).map((w) => `  intestazione a capo: «${w.text}»`), ...(m.wrappedCells ?? []).map((w) => `  cella breve a capo: «${w.text}»`)].slice(0, 4))
   out.emoji = m.emojis ?? 0
   if (out.emoji) out.dettaglio.push(...(m.emojiSamples ?? []).map((e) => `  emoji ${e.chars} in ${e.sel} «${e.text}»`))
+  // ---- R8 (b20-ritocchi): la disposizione ----
+  out.sovrapposizioni = m.overlappedCount ?? 0
+  if (out.sovrapposizioni) out.dettaglio.push(...(m.overlapped ?? []).map((o) => `  «${o.text}» (${o.sel}) visibile sotto la testata ${o.head} senza sfondo`))
+  out['righe-spezzate'] = m.brokenListCount ?? 0
+  if (out['righe-spezzate']) out.dettaglio.push(...(m.brokenListLines ?? []).map((b) => `  voce di elenco spezzata: «${b.text}» (${b.oneLine}px in ${b.available}px disponibili)`))
+  out.pillole = m.squashedCount ?? 0
+  if (out.pillole) out.dettaglio.push(...(m.squashed ?? []).map((p) => `  pillola schiacciata: «${p.text}» (${p.clientWidth}px per ${p.scrollWidth}px di testo)`))
+  out['contrasto-puntini'] = m.dotIssueCount ?? 0
+  if (out['contrasto-puntini']) out.dettaglio.push(...(m.dotIssues ?? []).map((d) => `  puntino a contrasto ${d.ratio}:1 (servono 3:1): ${d.sel}`))
+  out['altezza-barra'] = m.navRowBadCount ?? 0
+  if (out['altezza-barra']) out.dettaglio.push(...(m.navRowBad ?? []).map((n) => `  voce della barra alta ${n.height} (fra 32 e 36): ${n.sel}`))
   if (heads) {
     if (!m.heads?.length) { out.testate += 1; out.dettaglio.push('nessuna testata misurata') }
     for (const h of m.heads ?? []) {
@@ -682,7 +811,7 @@ const lightsRowOf = (m, lights) => {
   if (first && Math.abs(first.left - (lights.x + TRAFFIC_LIGHTS_WIDTH + HEAD_FIRST_ICON_GAP)) > 1) out.push(`la prima icona («${first.label}») comincia a ${first.left} (atteso ${lights.x + TRAFFIC_LIGHTS_WIDTH + HEAD_FIRST_ICON_GAP}: ${HEAD_FIRST_ICON_GAP} px dai semafori)`)
   return out
 }
-const totalOf = (v) => v.testo + v.icone + v.larghezza + v.scorrimento + v['a-capo'] + v.testate + v.fuoco + v.emoji + (v.mancante ?? 0)
+const totalOf = (v) => v.testo + v.icone + v.larghezza + v.scorrimento + v['a-capo'] + v.testate + v.fuoco + v.emoji + v.sovrapposizioni + v['righe-spezzate'] + v.pillole + v['contrasto-puntini'] + v['altezza-barra'] + (v.mancante ?? 0)
 
 // ---- le pagine ----
 const CHAT = `document.querySelector('main')`
@@ -952,7 +1081,7 @@ const measurePage = async (cdp, page, ctx) => {
       if (LIGHTS) for (const d of lightsRowOf(raw, LIGHTS)) { v.testate += 1; v.dettaglio.push(d) }
       const total = totalOf(v)
       rows.push({ page: page.id, width: w, height: h, theme, total, ...Object.fromEntries(Object.entries(v).filter(([k]) => k !== 'dettaglio')), dettaglio: v.dettaglio, raw: { texts: raw?.texts, bySize: raw?.bySize, scroll: raw?.scroll, tabs: raw?.tabs, heads: raw?.heads } })
-      log(`MISURA ${page.id} ${w}×${h} ${theme}: ${total} violazioni · testo ${v.testo} · icone ${v.icone} · larghezza ${v.larghezza} · scorrimento ${v.scorrimento} · a-capo ${v['a-capo']} · testate ${v.testate} · fuoco ${v.fuoco} · emoji ${v.emoji}${v.dettaglio.length ? '\n    ' + v.dettaglio.slice(0, 8).join('\n    ') : ''}`)
+      log(`MISURA ${page.id} ${w}×${h} ${theme}: ${total} violazioni · testo ${v.testo} · icone ${v.icone} · larghezza ${v.larghezza} · scorrimento ${v.scorrimento} · a-capo ${v['a-capo']} · testate ${v.testate} · fuoco ${v.fuoco} · emoji ${v.emoji} · sovrapposizioni ${v.sovrapposizioni} · righe-spezzate ${v['righe-spezzate']} · pillole ${v.pillole} · contrasto-puntini ${v['contrasto-puntini']} · altezza-barra ${v['altezza-barra']}${v.dettaglio.length ? '\n    ' + v.dettaglio.slice(0, 8).join('\n    ') : ''}`)
       // le catture: 1280×800 chiaro e scuro per OGNI pagina; anche 900 e 1680 per Chat, Plugin e Libreria
       const capture = (w === 1280 && h === 800) || CAPTURE_GROUPS.includes(page.group)
       if (capture && !NO_SHOTS) await shot(cdp, `${page.id}-${w}x${h}-${theme}`)
@@ -1175,7 +1304,7 @@ try {
   // ---- la tabella: violazioni per pagina (prima/dopo nel REPORT) ----
   const perPage = {}
   for (const m of measurements) {
-    perPage[m.page] ??= { label: PAGES.find((p) => p.id === m.page)?.label ?? m.page, combos: 0, total: 0, by: { testo: 0, icone: 0, larghezza: 0, scorrimento: 0, 'a-capo': 0, testate: 0, fuoco: 0, emoji: 0, mancante: 0 } }
+    perPage[m.page] ??= { label: PAGES.find((p) => p.id === m.page)?.label ?? m.page, combos: 0, total: 0, by: { testo: 0, icone: 0, larghezza: 0, scorrimento: 0, 'a-capo': 0, testate: 0, fuoco: 0, emoji: 0, sovrapposizioni: 0, 'righe-spezzate': 0, pillole: 0, 'contrasto-puntini': 0, 'altezza-barra': 0, mancante: 0 } }
     perPage[m.page].combos++
     perPage[m.page].total += m.total
     for (const k of Object.keys(perPage[m.page].by)) perPage[m.page].by[k] += m[k] ?? 0
