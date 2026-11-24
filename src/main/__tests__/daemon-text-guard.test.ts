@@ -43,6 +43,10 @@ function walk(dir: string, out: string[] = []): string[] {
 // SCOMPARSE (testi corretti): restano solo errori di avvio per lo sviluppatore
 // e codici invarianti.
 const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
+  // R7 (b20-ritocchi): l'errore chiaro della guardia dei test docker è in
+  // ITALIANO di proposito — lo chiede la fase: è per chi scrive i test, non
+  // testo che l'utente vede
+  { file: 'src/main/sandbox/index.ts', text: 'nei test docker va iniettato' },
   // marcatori invarianti del prompt: <evento> (fase 6) non si traduce
   { file: 'src/shared/triggers.ts', text: 'evento' },
   { file: 'src/shared/triggers.ts', text: '<evento>' },

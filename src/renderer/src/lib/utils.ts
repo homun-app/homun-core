@@ -26,7 +26,7 @@ const merge = extendTailwindMerge({
       // i due raggi con nome (il terzo, rounded-full, è di fabbrica)
       radius: ['control', 'surface'],
       // le distanze con nome, e le tre larghezze del contenuto (le legge max-w-)
-      spacing: ['page-margin', 'page-margin-narrow', 'section', 'section-head', 'row', 'row-text', 'row-pad', 'row-gap', 'control', 'control-sm', 'col-head', 'reading', 'page', 'wide']
+      spacing: ['page-margin', 'page-margin-narrow', 'section', 'section-head', 'row', 'row-nav', 'row-text', 'row-pad', 'row-gap', 'control', 'control-sm', 'col-head', 'reading', 'page', 'wide']
     }
   }
 })
