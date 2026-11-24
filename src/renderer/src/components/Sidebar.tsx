@@ -112,23 +112,23 @@ const writeLS = (key: string, value: string): void => {
 }
 
 /**
- * Fase design (DS4): LE RIGHE della barra. Le misure sono i token di DS1
- * (styles.css); qui si decide l'ANATOMIA, che è sempre la stessa:
+ * Fase design (DS4), R3 (b20-ritocchi): LE RIGHE della barra. Le misure sono
+ * i token di DS1 (styles.css); qui si decide l'ANATOMIA, che è sempre la
+ * stessa:
  *
- *   [respiro 8] [slot 32: il segno] [12] [nome …] [metadati] [azioni]
+ *   [respiro 8] [slot 20: il segno] [8] [nome …] [metadati] [azioni]
  *
- * LO SLOT DA 32 è la regola che tiene i NOMI sulla stessa ascissa. Davanti a
- * un nome può esserci un'icona di 16, la mascotte di 22, il robottino di 16 o
- * il pallino di 8: prima ognuno era una misura sua, e «Nuovo» e il nome di un
- * bot non stavano in colonna. Ora ogni segno sta nel rettangolo di 32 e il
- * testo parte sempre a 12 px dal suo bordo (gap-row-gap): cambia il segno,
- * non dove comincia a leggere l'occhio.
+ * LO SLOT DA 20 è la regola che tiene i NOMI sulla stessa ascissa. Davanti a
+ * un nome può esserci un'icona di 20, la mascotte di 20, il robottino di 20 o
+ * il pallino di 8: ogni segno sta nel rettangolo di 20 e il testo parte
+ * sempre a 8 px dal suo bordo (gap-2): cambia il segno, non dove comincia a
+ * leggere l'occhio.
  *
- * L'ALTEZZA la decide la FAMIGLIA, non il contenuto: una riga con lo slot è
- * alta 52 (h-row), una di solo testo 40 (h-row-text). Fisse, senza respiro
- * verticale — il contenuto sta centrato. Prima era «minimo 30, più il
- * padding»: bastava un nome lungo o un metadato perché due righe vicine
- * avessero passo diverso.
+ * L'ALTEZZA la decide la FAMIGLIA, non il contenuto: la voce della barra è
+ * alta 36 (h-row-nav — R3: era 52, un errore della spec di fase-design: i 52
+ * valgono per le righe delle LISTE nelle pagine, con icona grande e due righe
+ * di testo, non per una barra di navigazione; Claude, ChatGPT e Linear stanno
+ * fra 32 e 36). Fissa, senza respiro verticale — il contenuto sta centrato.
  *
  * Il NOME VINCE SUL TEMPO: il tempo non si tronca mai — o c'è intero o
  * sparisce — e il nome tronca solo quando resta solo (NameLine, più sotto).
@@ -136,11 +136,11 @@ const writeLS = (key: string, value: string): void => {
  * conteggi — text-caption: si leggono come informazioni accanto al nome, non
  * come nomi.
  */
-const ROW = 'flex h-row w-full items-center gap-row-gap rounded-control px-2 text-left text-body transition'
-/** La riga di SOLO testo («Mostra tutti (N)», «Altri N»): 40, grigia, e lo stesso andamento della riga con lo slot. */
-const ROW_TEXT = 'flex h-row-text w-full items-center gap-row-gap rounded-control px-2 text-left text-body text-muted-foreground transition hover:bg-muted/60'
-/** Il posto del segno davanti al nome: 32 per 32, col segno centrato dentro. */
-const SLOT = 'grid size-8 shrink-0 place-items-center'
+const ROW = 'flex h-row-nav w-full items-center gap-2 rounded-control px-2 text-left text-body transition'
+/** La riga di SOLO testo («Mostra tutti (N)», «Altri N»): 36 come le altre, grigia, e lo stesso andamento della riga con lo slot. */
+const ROW_TEXT = 'flex h-row-nav w-full items-center gap-2 rounded-control px-2 text-left text-body text-muted-foreground transition hover:bg-muted/60'
+/** Il posto del segno davanti al nome: 20 per 20, col segno centrato dentro. */
+const SLOT = 'grid size-5 shrink-0 place-items-center'
 /**
  * Le righe che hanno ANCHE bottoni a destra (la squadra con la freccia e il
  * «⋯», i bot e i membri col «⋯») sono in TRE parti:
@@ -151,8 +151,8 @@ const SLOT = 'grid size-8 shrink-0 place-items-center'
  *    la striscia del testo;
  *  - la casella delle azioni (ROW_ACTIONS): i bottoni in coda.
  */
-const ROW_SHELL = 'group flex h-row items-center gap-1 rounded-control px-2 transition'
-const ROW_BODY = 'flex min-w-0 flex-1 self-stretch items-center gap-row-gap text-left text-body'
+const ROW_SHELL = 'group flex h-row-nav items-center gap-1 rounded-control px-2 transition'
+const ROW_BODY = 'flex min-w-0 flex-1 self-stretch items-center gap-2 text-left text-body'
 /**
  * La casella dei bottoni in coda a una riga. VISTO DAL VIVO (barra da 264):
  * «›» e «⋯» da 32 occupavano 72 px, e col tempo fisso al nome di «Weekend
@@ -245,7 +245,7 @@ function NewRow({ onNewBot }: { onNewBot(): void }) {
       onClick={onNewBot}
     >
       <span className={SLOT}>
-        <Plus className="size-4" />
+        <Plus className="size-5" />
       </span>
       <span className="min-w-0 flex-1 truncate"><Trans>Nuovo</Trans></span>
     </button>
@@ -275,8 +275,8 @@ function ApprovalsRow() {
       <span className={SLOT}>
         {/* il pallino sta sull'angolo dell'ICONA (16), non dello slot (32):
             per questo l'icona ha la sua casella, di 16, relativa */}
-        <span className="relative grid size-4 place-items-center">
-          <ShieldCheck className="size-4" />
+        <span className="relative grid size-5 place-items-center">
+          <ShieldCheck className="size-5" />
           {count > 0 && <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-waiting" aria-hidden="true" />}
         </span>
       </span>
@@ -290,26 +290,27 @@ function ApprovalsRow() {
 }
 
 /**
- * Il robottino piccolo della squadra: 16 px, famiglia e colore del
- * coordinatore — e lo stato AGGREGATO della squadra (R2): respira ~2 s e ha
- * i tre puntini blu se lavora; occhi più grandi e pallino arancio con l'onda
- * se aspetta te (lo stato waiting del Bot); un saltello solo se finito;
- * respiro lento se fermo. Tutto con i keyframes che la mascotte usa già.
+ * Il robottino piccolo della squadra: famiglia e colore del coordinatore — e
+ * lo stato AGGREGATO della squadra (R2): respira ~2 s e ha i tre puntini blu
+ * se lavora; occhi più grandi e pallino arancio con l'onda se aspetta te (lo
+ * stato waiting del Bot); un saltello solo se finito; respiro lento se fermo.
+ * Tutto con i keyframes che la mascotte usa già. Nella barra LARGA è alto 20
+ * come ogni avatar di riga (R3 b20-ritocchi); nella ROTAIa resta 16.
  */
-function TeamRobot({ team }: { team: SidebarTeam }) {
+function TeamRobot({ team, size = 20 }: { team: SidebarTeam; size?: number }) {
   const { i18n } = useLingui()
   const coordInfo = useBotInfo(team.coordinator?.id ?? null)
   if (!coordInfo) {
     // senza il coordinatore non c'è mascotte: al suo posto un cerchio neutro
-    // con l'iniziale. 24, non 16: la lettera è text-caption (12 px), la
-    // misura più piccola che l'interfaccia concede, e in 16 non ci starebbe
-    return <span className="grid size-6 shrink-0 place-items-center rounded-full bg-muted text-caption font-medium text-muted-foreground">{team.group.name.slice(0, 1)}</span>
+    // con l'iniziale. 20, non meno: la lettera è text-caption (12 px), la
+    // misura più piccola che l'interfaccia concede, e in 14 non ci starebbe
+    return <span className="grid size-5 shrink-0 place-items-center rounded-full bg-muted text-caption font-medium text-muted-foreground">{team.group.name.slice(0, 1)}</span>
   }
   const botState: BotState =
     team.state === 'aspetta-te' ? 'waiting' : team.state === 'finito' ? 'happy' : 'idle'
   return (
     <span className={`side-robot side-robot--${team.state}`} role="img" aria-label={i18n.t(rowStateName(team.state))}>
-      <Bot family={coordInfo.avatar.family} color={coordInfo.avatar.color} state={botState} size={16} track={false} dimmed={coordInfo.dimmed} />
+      <Bot family={coordInfo.avatar.family} color={coordInfo.avatar.color} state={botState} size={size} track={false} dimmed={coordInfo.dimmed} />
       {team.state === 'lavora' && (
         <span className="side-robot-dots" aria-hidden="true">
           <span className="side-robot-dot" style={{ animationDelay: '0s' }} />
@@ -358,7 +359,7 @@ function MainRow({ agent, childWaiting, preview, state }: { agent: Agent; childW
       title={tip}
     >
       <span className={SLOT}>
-        <Bot family={info.avatar.family} color={info.avatar.color} state={state} size={22} track={false} dimmed={info.dimmed} label={agent.name} />
+        <Bot family={info.avatar.family} color={info.avatar.color} state={state} size={20} track={false} dimmed={info.dimmed} label={agent.name} />
       </span>
       <NameLine time={<span className={META}><Trans>la tua chat</Trans></span>}>
         <span className="min-w-0 flex-1 truncate font-medium">{agent.name}</span>
@@ -818,7 +819,7 @@ function BotRow({ bot, now }: { bot: SidebarBot; now: number }) {
  * sono nella scala) è lo stesso slot delle altre righe, vuoto.
  */
 function TextRowSlot(): React.ReactNode {
-  return <span className="grid size-8 shrink-0" aria-hidden="true" />
+  return <span className="grid size-5 shrink-0" aria-hidden="true" />
 }
 
 /** «Mostra tutti (N)» / «Mostra tutte (N)» — l'espansione della sezione
@@ -859,7 +860,7 @@ function ArchivedSection({ model }: { model: SidebarModel }) {
   // nome dove comincia il testo del titolo sotto cui stanno (48 px dal bordo
   // della barra: 32 di rientro più il respiro di 8 della riga)
   const restoreRow = (kind: 'agent' | 'group', id: string | number, name: string, deleted: boolean): React.ReactNode => (
-    <div key={`${kind}-${id}`} className="flex h-row-text items-center gap-2 rounded-control px-2 text-left text-body text-muted-foreground">
+    <div key={`${kind}-${id}`} className="flex h-row-nav items-center gap-2 rounded-control px-2 text-left text-body text-muted-foreground">
       <span className="min-w-0 flex-1 truncate">{name}</span>
       <Button variant="ghost" size="sm" data-testid={`archived-restore-${kind}-${id}`}
         onClick={() => {
@@ -995,7 +996,7 @@ function PluginRow() {
       onClick={() => openPlugin()}
     >
       <span className={SLOT}>
-        <Puzzle className="size-4" />
+        <Puzzle className="size-5" />
       </span>
       <span className="min-w-0 flex-1 truncate"><Trans>Plugin</Trans></span>
     </button>
@@ -1226,7 +1227,7 @@ function CollapsedColumn({
             }}
           >
             {v.kind === 'team' ? (
-              <TeamRobot team={model.teams.find((t) => `g${t.group.id}` === v.key)!} />
+              <TeamRobot team={model.teams.find((t) => `g${t.group.id}` === v.key)!} size={16} />
             ) : (
               <RailBotCircle agent={model.bots.find((b) => b.agent.id === v.key)!.agent} state={states[v.key] ?? 'idle'} />
             )}
@@ -1484,7 +1485,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
               onClick={() => { setActivityOpen(!activityOpen); if (!activityOpen) openLibrary(null) }}
             >
               <span className={SLOT}>
-                <ActivityIcon className="size-4" />
+                <ActivityIcon className="size-5" />
               </span>
               <span className="min-w-0 flex-1 truncate"><Trans>Attività</Trans></span>
             </button>
@@ -1495,7 +1496,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
               onClick={() => { openLibraryId === null ? openLibrary('') : openLibrary(null); if (openLibraryId === null) setActivityOpen(false) }}
             >
               <span className={SLOT}>
-                <LibraryIcon className="size-4" />
+                <LibraryIcon className="size-5" />
               </span>
               <span className="min-w-0 flex-1 truncate"><Trans>Libreria</Trans></span>
             </button>

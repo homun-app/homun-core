@@ -76,6 +76,8 @@
  *   page-margin 32 (page-margin-narrow 24 sotto i 900 px di area)   il margine laterale della pagina
  *   section 32 · section-head 12 · block 16                            fra sezioni · dal titolo di sezione al contenuto · fra blocchi
  *   row 52 (row-text 40) · row-pad 12 · row-gap 12                     riga di elenco: altezza minima (con logo / solo testo), respiro verticale, icona→testo
+ *   row-nav 36                                                           la voce della BARRA di navigazione (R3 b20-ritocchi:
+ *                                                                        i 52 valgono per le liste nelle pagine, non per una barra)
  *   control 36 · control-sm 32                                        controlli: default (bottoni, campi, ricerca) / piccoli (toolbar, menu)
  *   col-head 52                                                        la riga in cima a OGNI colonna: la fascia di trascinamento (DS3)
  *
@@ -137,6 +139,10 @@
   --spacing-block: 16px;
   --spacing-row: 52px;
   --spacing-row-text: 40px;
+  /* R3 (b20-ritocchi): la voce della barra di navigazione — 36, come le
+     barre di Claude, ChatGPT e Linear (32–36); i 52 sono delle righe delle
+     LISTE nelle pagine, con icona grande e due righe di testo */
+  --spacing-row-nav: 36px;
   --spacing-row-pad: 12px;
   --spacing-row-gap: 12px;
   --spacing-control: 36px;

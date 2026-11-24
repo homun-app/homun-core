@@ -248,18 +248,19 @@ describe('R1 render: la barra larga — righe sobrie, niente anteprima, suggerim
     expect(idx('Da approvare')).toBeGreaterThan(idx('Nuovo'))
     expect(idx('Attività')).toBeGreaterThan(idx('Da approvare'))
     expect(idx('Libreria')).toBeGreaterThan(idx('Attività'))
-    // la riga del principale: mascotte 22 px e «la tua chat» a destra
+    // la riga del principale: mascotte 20 px e «la tua chat» a destra
     const main = texts.find((t) => t.includes('Bot') && t.includes('la tua chat'))
     expect(main).toBeTruthy()
   })
 
-  it('NESSUNA mascotte nelle righe dei bot e dei membri: solo il principale (22) e i robottini delle squadre (16)', () => {
+  it('NESSUNA mascotte nelle righe dei bot e dei membri: solo il principale (20) e i robottini delle squadre (20)', () => {
     const tree = renderSidebar(layoutFull)
     const bots = mascots(tree)
-    // il principale + il robottino dell\'unica squadra
+    // il principale + il robottino dell\'unica squadra — R3 (b20-ritocchi):
+    // nella barra larga avatar e robottini a 20, l'altezza della riga è 36
     expect(bots.length).toBe(2)
     const sizes = bots.map((b) => b.attrs.width ?? b.attrs['data-size'])
-    expect(sizes).toEqual(['22', '16'])
+    expect(sizes).toEqual(['20', '20'])
   })
 
   it('niente anteprima sotto il nome: il testo della riga è SOLO il nome; l\'anteprima sta nel title', () => {

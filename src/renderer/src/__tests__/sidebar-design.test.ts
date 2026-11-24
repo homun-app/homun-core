@@ -3,11 +3,13 @@
 // gruppo text-caption grigi, stesse altezze; la testata di DS3». Qui si
 // fissano le scelte con cui quella frase è stata tradotta, sul render VERO
 // della barra (larga e rotaia), così non tornano indietro:
-//   - l'ANATOMIA della riga: [respiro 8] [slot 32] [12] [nome] [metadati]
-//     [azioni]. Lo slot da 32 è ciò che tiene i nomi sulla stessa ascissa
-//     davanti a un'icona di 16, alla mascotte di 22 o a un pallino di 8;
-//   - l'ALTEZZA la decide la famiglia: 52 con lo slot (h-row), 40 il solo
-//     testo (h-row-text). Fissa, senza respiro verticale;
+//   - l'ANATOMIA della riga: [respiro 8] [slot 20] [8] [nome] [metadati]
+//     [azioni]. Lo slot da 20 è ciò che tiene i nomi sulla stessa ascissa
+//     davanti a un'icona di 20, alla mascotte di 20 o a un pallino di 8;
+//   - l'ALTEZZA la decide la famiglia: la voce della barra è alta 36
+//     (h-row-nav — R3 b20-ritocchi: era 52, un errore della spec di
+//     fase-design; i 52 valgono per le liste nelle PAGINE). Fissa, senza
+//     respiro verticale;
 //   - i METADATI a destra: text-caption grigio. NELLE RIGHE IL NOME VINCE
 //     SUL TEMPO (dal vivo: «Weeken…» accanto a «adesso» intero): il tempo
 //     non si tronca mai, o c'è intero o sparisce — sta in una riga che va a
@@ -135,21 +137,21 @@ const svgIn = (n: HtmlNode): HtmlNode => findAll(n, (s) => s.tag === 'svg')[0]!
 describe('DS4 barra: le righe — anatomia, altezze, testo', () => {
   const FIXED = ['Nuovo', 'Da approvare', 'Plugin', 'Attività', 'Libreria']
 
-  it('le voci fisse: alte 52 e FISSE (nessun respiro verticale), lo slot da 32 con l’icona di 16, il nome a 12 dallo slot, text-body, raggio dei controlli', () => {
+  it('le voci fisse: alte 36 e FISSE (nessun respiro verticale), lo slot da 20 con l’icona di 20, il nome a 8 dallo slot, text-body, raggio dei controlli', () => {
     const tree = renderSidebar(layoutFull)
     for (const name of FIXED) {
       const rows = byText(tree, name)
       expect(rows.length, `la voce «${name}»`).toBe(1)
       const row = rows[0]!
-      expect(has(row, 'h-row'), `${name}: h-row`).toBe(true)
+      expect(has(row, 'h-row-nav'), `${name}: h-row-nav`).toBe(true)
       // l'altezza è la riga, non padding + testo: niente py-, pt-, pb-, min-h-
       expect(cls(row).filter((c) => /^(min-h|py|pt|pb)-/.test(c)), `${name}: respiro verticale`).toEqual([])
-      for (const c of ['rounded-control', 'px-2', 'gap-row-gap', 'text-body']) expect(has(row, c), `${name}: ${c}`).toBe(true)
-      // lo slot: 32 per 32, che non si restringe; dentro l'icona di 16
+      for (const c of ['rounded-control', 'px-2', 'gap-2', 'text-body']) expect(has(row, c), `${name}: ${c}`).toBe(true)
+      // lo slot: 20 per 20, che non si restringe; dentro l'icona di 20 (R3)
       const slot = row.children[0]!
-      expect(has(slot, 'size-8'), `${name}: lo slot`).toBe(true)
+      expect(has(slot, 'size-5'), `${name}: lo slot`).toBe(true)
       expect(has(slot, 'shrink-0'), `${name}: lo slot non si restringe`).toBe(true)
-      expect(has(svgIn(slot), 'size-4'), `${name}: l'icona`).toBe(true)
+      expect(has(svgIn(slot), 'size-5'), `${name}: l'icona`).toBe(true)
       // il nome: cede lui, e tronca
       const label = row.children[1]!
       expect(textOf(label)).toBe(name)
@@ -157,13 +159,13 @@ describe('DS4 barra: le righe — anatomia, altezze, testo', () => {
     }
   })
 
-  it('il principale: la mascotte (22) sta nello slot da 32; il nome text-body 500; «la tua chat» è un metadato', () => {
+  it('il principale: la mascotte (20) sta nello slot da 20; il nome text-body 500; «la tua chat» è un metadato', () => {
     const tree = renderSidebar(layoutFull)
     const row = findAll(tree, (n) => n.tag === 'button' && textOf(n).includes('la tua chat'))[0]!
-    expect(has(row, 'h-row')).toBe(true)
+    expect(has(row, 'h-row-nav')).toBe(true)
     const slot = row.children[0]!
-    expect(has(slot, 'size-8')).toBe(true)
-    expect(findAll(slot, (n) => (n.attrs.class ?? '').includes('bot-svg'))[0]!.attrs.width).toBe('22')
+    expect(has(slot, 'size-5')).toBe(true)
+    expect(findAll(slot, (n) => (n.attrs.class ?? '').includes('bot-svg'))[0]!.attrs.width).toBe('20')
     const name = findAll(row, (n) => n.tag === 'span' && n.children.length === 0 && textOf(n) === 'Bot')[0]!
     expect(has(name, 'font-medium'), 'il nome del principale pesa come un titolo di riga (500)').toBe(true)
     expect(has(name, 'font-semibold')).toBe(false)
@@ -171,7 +173,7 @@ describe('DS4 barra: le righe — anatomia, altezze, testo', () => {
     for (const c of ['text-caption', 'text-muted-foreground', 'shrink-0']) expect(has(meta, c), `«la tua chat»: ${c}`).toBe(true)
   })
 
-  it('bot, membri e squadre hanno la STESSA riga: 52, il segno nello slot da 32, il nome a 12 dallo slot, text-body', () => {
+  it('bot, membri e squadre hanno la STESSA riga: 36, il segno nello slot da 20, il nome a 8 dallo slot, text-body', () => {
     const tree = renderSidebar(layoutFull)
     // i bot e i membri: il pallino del colore sta nello slot
     const dots = findAll(tree, (n) => n.attrs['data-testid'] === 'bot-dot-color')
@@ -179,23 +181,23 @@ describe('DS4 barra: le righe — anatomia, altezze, testo', () => {
     expect(dots.length).toBeGreaterThanOrEqual(7)
     for (const dot of dots) {
       const slot = dot.parent!
-      expect(has(slot, 'size-8')).toBe(true)
+      expect(has(slot, 'size-5')).toBe(true)
       const body = slot.parent!
       expect(body.tag, 'il corpo della riga è il bottone del nome').toBe('button')
-      for (const c of ['gap-row-gap', 'text-body', 'min-w-0', 'flex-1']) expect(has(body, c), c).toBe(true)
+      for (const c of ['gap-2', 'text-body', 'min-w-0', 'flex-1']) expect(has(body, c), c).toBe(true)
       const names = findAll(body, (n) => n.tag === 'span' && n.children.length === 0 && has(n, 'truncate'))
       expect(names.length, 'il nome tronca').toBeGreaterThan(0)
       const shell = body.parent!
-      expect(has(shell, 'h-row'), 'la riga è alta 52').toBe(true)
+      expect(has(shell, 'h-row-nav'), 'la riga è alta 36').toBe(true)
       expect(has(shell, 'rounded-control'), 'il fondo della riga ha il raggio dei controlli').toBe(true)
       expect(cls(shell).filter((c) => /^(min-h|py|pt|pb)-/.test(c))).toEqual([])
     }
-    // la squadra: il robottino di 16 nello stesso slot, nella stessa riga
+    // la squadra: il robottino di 20 nello stesso slot, nella stessa riga
     // (il nome esatto: side-robot, non side-robot-dots né side-robot-dot)
     for (const robot of findAll(tree, (n) => has(n, 'side-robot'))) {
       const slot = robot.parent!
-      expect(has(slot, 'size-8')).toBe(true)
-      expect(has(slot.parent!.parent!, 'h-row')).toBe(true)
+      expect(has(slot, 'size-5')).toBe(true)
+      expect(has(slot.parent!.parent!, 'h-row-nav')).toBe(true)
     }
   })
 
@@ -205,7 +207,7 @@ describe('DS4 barra: le righe — anatomia, altezze, testo', () => {
     const names = ['Competitoor', 'Fatture marzo', 'Gara Lecco', 'Newsletter', 'Extra 0', 'Anna']
     for (const name of names) {
       const row = rowOf(tree, name)
-      const body = row.tag === 'button' && has(row, 'gap-row-gap') ? row : row.children[0]!
+      const body = row.tag === 'button' && has(row, 'gap-2') ? row : row.children[0]!
       expect(has(body, 'text-body'), `${name}: il corpo della riga`).toBe(true)
     }
   })
@@ -271,9 +273,9 @@ describe('DS4 barra: nelle righe il NOME vince sul tempo (visto dal vivo: «Week
       expect(has(line, 'overflow-hidden'), 'la riga del nome taglia').toBe(true)
       expect(has(line, 'h-5'), 'alta una riga di text-body').toBe(true)
       for (const c of ['min-w-0', 'flex-1', 'items-center']) expect(has(line, c), `la riga del nome: ${c}`).toBe(true)
-      // sta nel bottone del nome, dentro la riga da 52: è parte del clic
+      // sta nel bottone del nome, dentro la riga da 36: è parte del clic
       expect(line.parent!.tag, 'la riga del nome sta nel bottone del nome').toBe('button')
-      expect(has(line.parent!.parent!, 'h-row')).toBe(true)
+      expect(has(line.parent!.parent!, 'h-row-nav')).toBe(true)
     }
   })
 
@@ -341,7 +343,7 @@ describe('DS4 barra: nelle righe il NOME vince sul tempo (visto dal vivo: «Week
       const actions = chevron.parent!
       for (const c of ['flex', 'shrink-0', 'items-center', 'gap-4']) expect(has(actions, c), `la casella delle azioni: ${c}`).toBe(true)
       expect(moresOf(actions).length, 'il «⋯» della stessa riga').toBe(1)
-      expect(has(actions.parent!, 'h-row'), 'la casella sta nella riga da 52').toBe(true)
+      expect(has(actions.parent!, 'h-row-nav'), 'la casella sta nella riga da 36').toBe(true)
     }
     // le righe col solo «⋯» (bot e membri) hanno la stessa casella
     for (const m of findAll(tree, (n) => n.attrs['data-testid'] === 'row-more')) {
@@ -394,7 +396,7 @@ describe('DS4 barra: i titoli di gruppo', () => {
     expect(has(toggle.parent!, 'mt-block')).toBe(true)
   })
 
-  it('le righe di «Archiviati» aperto: 40, col «Ripristina» che è un bottone da 32', () => {
+  it('le righe di «Archiviati» aperto: 36 come ogni voce della barra, col «Ripristina» che è un bottone da 32', () => {
     const tree = renderSidebar(layoutFull, { sidebarArchivedOpen: true })
     const restores = findAll(tree, (n) => n.attrs['data-testid']?.startsWith('archived-restore-'))
     expect(restores).toHaveLength(2)
@@ -402,7 +404,7 @@ describe('DS4 barra: i titoli di gruppo', () => {
       expect(has(r, 'h-control-sm'), 'Ripristina').toBe(true)
       expect(has(r, 'rounded-control')).toBe(true)
       expect(has(r, 'text-body')).toBe(true)
-      expect(has(r.parent!, 'h-row-text'), 'la riga dell’archiviato è di solo testo').toBe(true)
+      expect(has(r.parent!, 'h-row-nav'), 'la riga dell’archiviato è alta come le voci della barra').toBe(true)
       // il nome dell'archiviato comincia dove comincia il testo di «Archiviati»: 8 (elenco) + 32 (rientro) + 8 (respiro) = 48
       expect(has(r.parent!.parent!, 'pl-8'), 'le righe rientrate sotto il testo del titolo').toBe(true)
     }
@@ -410,18 +412,25 @@ describe('DS4 barra: i titoli di gruppo', () => {
 })
 
 describe('DS4 barra: le righe di solo testo e le azioni in riga', () => {
-  it('«Mostra tutti (N)» e «Altri N»: alte 40, col testo dove partono i nomi (lo slot c’è, vuoto)', () => {
+  it('«Mostra tutti (N)» e «Altri N»: alte 36, col testo dove partono i nomi (lo slot c’è, vuoto)', () => {
     const tree = renderSidebar(layoutFull)
     const mostra = findAll(tree, (n) => n.tag === 'button' && /^Mostra tutti \(\d+\)$/.test(textOf(n)))[0]!
-    expect(has(mostra, 'h-row-text')).toBe(true)
+    expect(has(mostra, 'h-row-nav')).toBe(true)
     expect(has(mostra, 'text-body')).toBe(true)
-    expect(has(mostra, 'size-8'), 'una riga di solo testo non ha lo slot da 32: è alta 40').toBe(false)
+    expect(has(mostra, 'size-5'), 'una riga di solo testo non ha lo slot da 20: è alta come le altre').toBe(false)
     const slot = mostra.children[0]!
-    expect(has(slot, 'size-8') && slot.children.length === 0, 'lo slot vuoto: il testo parte a 52 dal bordo, come i nomi').toBe(true)
+    expect(has(slot, 'size-5') && slot.children.length === 0, 'lo slot vuoto: il testo parte a 36 dal bordo, come i nomi').toBe(true)
     expect(has(mostra.children[1]!, 'truncate')).toBe(true)
     const altri = findAll(tree, (n) => n.tag === 'button' && textOf(n) === 'Altri 1')[0]!
-    expect(has(altri, 'h-row-text')).toBe(true)
+    expect(has(altri, 'h-row-nav')).toBe(true)
     expect(altri.children[0]!.children).toHaveLength(0)
+  })
+
+  it('il token della voce della barra: --spacing-row-nav 36 px, e h-row-nav la usa (R3)', async () => {
+    const { compileRenderer } = await import('./tailwind-compile')
+    const css = await compileRenderer(['h-row-nav'])
+    expect(css).toMatch(/--spacing-row-nav:\s*36px/)
+    expect(css).toMatch(/\.h-row-nav\s*\{[^}]*height:\s*var\(--spacing-row-nav\)/)
   })
 
   it('la freccia della squadra e il «⋯»: bottoni tondi da 32 (le icone di 16), come i controlli di DS1', () => {
