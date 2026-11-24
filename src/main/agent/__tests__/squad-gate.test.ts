@@ -75,7 +75,7 @@ describe('Q1: write-file nei turni di squadra', () => {
   })
 
   it('FUORI dal box la card resta come oggi', async () => {
-    const v = await check('write-file', { path: '/Users/fabio/Desktop/colpo.md' }, 'agent_x', squadBox)
+    const v = await check('write-file', { path: '/Users/test/Desktop/colpo.md' }, 'agent_x', squadBox)
     expect(v.kind).toBe('ask')
   })
 
@@ -118,7 +118,7 @@ describe('P2: nel box il write-file dentro la radice passa per OGNI bot e sottoa
   })
 
   it('fuori dal box (~/... del Mac) la card resta come oggi', async () => {
-    const v = await check('write-file', { path: '/Users/fabio/Desktop/colpo.md' }, 'agent_x')
+    const v = await check('write-file', { path: '/Users/test/Desktop/colpo.md' }, 'agent_x')
     expect(v.kind).toBe('ask')
   })
 
@@ -145,7 +145,7 @@ describe('P2: nel box il write-file dentro la radice passa per OGNI bot e sottoa
   it('la squadra resta COM\'ERA: box passa, autonomy ask chiede, fuori dal box chiede', async () => {
     expect((await check('write-file', { path: '/workspace/x.md' }, 'agent_x', squadBox)).kind).toBe('allow')
     expect((await check('write-file', { path: '/workspace/x.md' }, 'agent_x', squadAsk)).kind).toBe('ask')
-    expect((await check('write-file', { path: '/Users/fabio/Desktop/colpo.md' }, 'agent_x', squadBox)).kind).toBe('ask')
+    expect((await check('write-file', { path: '/Users/test/Desktop/colpo.md' }, 'agent_x', squadBox)).kind).toBe('ask')
   })
 })
 
@@ -192,7 +192,7 @@ describe('Q1: l\'insieme FISSO nel gate — nemmeno le regole e le grant lo tolg
     for (const [tool, input] of [
       ['use-app', { action: 'click', app: 'Safari' }],
       ['delete_agent', { agentId: 'agent_y' }],
-      ['copy_to_box', { path: '/Users/fabio/x.txt' }]
+      ['copy_to_box', { path: '/Users/test/x.txt' }]
     ] as const) {
       const v = await check(tool, input, 'agent_x', squadBox)
       expect(v.kind, tool).toBe('ask')

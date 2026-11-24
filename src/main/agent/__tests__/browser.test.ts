@@ -8,10 +8,10 @@
 // blocco evidenza. Nessun Docker, nessuna rete reale.
 import { describe, expect, it, beforeAll, afterAll, afterEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join, resolve } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-browser-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-browser-test-'))
 const { setDataDir } = await import('../../store/db')
 setDataDir(TMP)
 

@@ -38,7 +38,7 @@ function fakeFs(existing: Record<string, { size: number; content: string }> = {}
   return { deps, files, ops }
 }
 
-const DIR = '/Users/prova/Library/Logs/Homun'
+const DIR = '/Users/test/Library/Logs/Homun'
 const FILE = `${DIR}/main.log`
 
 describe('U6: mainLogDir — il registro del main', () => {

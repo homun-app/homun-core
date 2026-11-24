@@ -6,12 +6,12 @@
 // (pid ed exit file scritti da lui): la chiusura NON dipende dal daemon.
 import { describe, expect, it, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-shells-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-shells-test-'))
 const { setDataDir, db } = await import('../../store/db')
 setDataDir(TMP)
 

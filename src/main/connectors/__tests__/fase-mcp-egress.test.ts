@@ -6,14 +6,14 @@
 // mai una stringa da far interpretare a una shell. Tutto con deps finti.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { buildMcpServerCard, installMcpServer, type InstallDeps } from '../install'
 import { parseNpmServerId, npmPackumentUrl, npmDownloadsUrl } from '../npm-registry'
 import type { McpServerConfig } from '../../mcp'
 
 let DATA: string
-beforeAll(() => { DATA = mkdtempSync(join(tmpdir(), 'sandbot-fase-mcp-egress-')) })
+beforeAll(() => { DATA = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-fase-mcp-egress-')) })
 afterAll(() => { rmSync(DATA, { recursive: true, force: true }) })
 
 const NPM_INFO = {

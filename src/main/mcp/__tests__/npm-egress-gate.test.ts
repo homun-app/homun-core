@@ -6,10 +6,10 @@
 // server parte come oggi.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-npmegress-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-npmegress-'))
 const { setDataDir, setSetting, getSetting } = await import('../../store/db')
 setDataDir(TMP)
 const mcp = await import('../index')

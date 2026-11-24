@@ -1,7 +1,7 @@
 import { describe, expect, it, afterEach, onTestFinished, vi } from 'vitest'
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import {
   dockerBrowserPidBootReadArgv,
@@ -582,7 +582,7 @@ describe('DOCKER_BG_WRAPPER_SH col vero /bin/sh (F1)', () => {
     spawnSync('/bin/sh', ['-c', DOCKER_BG_WRAPPER_SH, 'sh', command, log, exit, pid], { cwd, encoding: 'utf8' })
 
   it('un comando con spazi e && : gira con sh -c, scrive log ed exit 0, e CREA la cartella dei file', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'sandbot-wrap-'))
+    const tmp = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-wrap-'))
     try {
       // la cartella .sandbot/shells NON esiste: la crea il wrapper
       const r = runWrapper(tmp, 'echo "parte 1" && echo "parte 2"', '.sandbot/shells/sh-t.log', '.sandbot/shells/sh-t.exit', '.sandbot/shells/sh-t.pid')
@@ -598,7 +598,7 @@ describe('DOCKER_BG_WRAPPER_SH col vero /bin/sh (F1)', () => {
   })
 
   it('un exit 3 scrive 3 nel file dell\'exit code', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'sandbot-wrap-'))
+    const tmp = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-wrap-'))
     try {
       const r = runWrapper(tmp, 'echo boom >&2; exit 3', '.sandbot/shells/sh-e.log', '.sandbot/shells/sh-e.exit', '.sandbot/shells/sh-e.pid')
       expect(r.status).toBe(0) // il wrapper finisce bene: è il COMANDO che è fallito
@@ -610,7 +610,7 @@ describe('DOCKER_BG_WRAPPER_SH col vero /bin/sh (F1)', () => {
   })
 
   it('il pid scritto è quello del GRUPPO: kill -TERM -- -<pgid> termina anche i FIGLI', async () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'sandbot-wrap-'))
+    const tmp = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-wrap-'))
     // detached: il wrapper è un gruppo suo; il comando (sleep 30 & wait) ha
     // un FIGLIO che deve morire col gruppo, non solo la shell
     const child = spawn('/bin/sh', ['-c', DOCKER_BG_WRAPPER_SH, 'sh', 'sleep 30 & wait', '.sandbot/shells/sh-k.log', '.sandbot/shells/sh-k.exit', '.sandbot/shells/sh-k.pid'], {

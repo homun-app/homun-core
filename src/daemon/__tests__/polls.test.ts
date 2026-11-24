@@ -6,7 +6,7 @@
 // su directory temporanea, orologio controllato dal test.
 import { describe, expect, it, beforeAll, beforeEach, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
 // toolsOfServer finto (per la validazione readOnly in api.ts)
@@ -58,7 +58,7 @@ const mkPollRoutine = (trigger: Partial<Extract<RoutineTrigger, { type: 'connect
 }
 
 beforeAll(() => {
-  const dir = mkdtempSync(join(tmpdir(), 'sandbot-polls-test-'))
+  const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-polls-test-'))
   setDataDir(dir)
   // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
   setSetting('ui.activeLanguage', 'it')

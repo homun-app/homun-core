@@ -7,10 +7,10 @@
 // spostano in <dataDir>/memory-legacy-<data>/.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-mem-migrate-'))
+const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-mem-migrate-'))
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
 // file di memoria nel formato della fase 4 (frontmatter + corpo)

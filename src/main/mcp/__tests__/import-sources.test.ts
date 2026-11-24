@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { importSourcePaths, scanImportedSources, buildImportedServer, parseSourceFile, type ImportedFileJson } from '../import-sources'
 
-const HOME = '/Users/prova'
+const HOME = '/Users/test'
 
 const CURSOR_JSON: ImportedFileJson = {
   mcpServers: {

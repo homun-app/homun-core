@@ -11,6 +11,7 @@ import { ROUTINE_RUNS_DDL } from '../../main/store/routine-runs'
 import { makeJobRunner } from '../run-job'
 import type { RunTurnOptions } from '../../main/agent/loop'
 import type { SandbotEvent } from '../../shared/types'
+import { TEST_TMP_BASE } from '../../test-tmp'
 
 const emit = (_e: SandbotEvent): void => undefined
 
@@ -416,7 +417,7 @@ describe('makeJobRunner: memory-index-story e memory-story-backfill', () => {
     const { mkdtempSync, rmSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
     const { join } = await import('node:path')
-    const dir = mkdtempSync(join(tmpdir(), 'sandbot-runjob-story-'))
+    const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-runjob-story-'))
     const e = await import('../../main/memory/engine')
     await e.openMemoryEngine({ dataDir: dir })
     try {
@@ -445,7 +446,7 @@ describe('makeJobRunner: memory-index-story e memory-story-backfill', () => {
     const { mkdtempSync, rmSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
     const { join } = await import('node:path')
-    const dir = mkdtempSync(join(tmpdir(), 'sandbot-runjob-backfill-'))
+    const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-runjob-backfill-'))
     const store = await import('../../main/store/db')
     store.setDataDir(dir)
     const e = await import('../../main/memory/engine')
@@ -471,7 +472,7 @@ describe('makeJobRunner: memory-forget-agent', () => {
     const { mkdtempSync, rmSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
     const { join } = await import('node:path')
-    const dir = mkdtempSync(join(tmpdir(), 'sandbot-runjob-forget-'))
+    const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-runjob-forget-'))
     const e = await import('../../main/memory/engine')
     await e.openMemoryEngine({ dataDir: dir })
     try {

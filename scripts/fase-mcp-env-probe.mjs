@@ -725,7 +725,7 @@ try {
   mkdirSync(join(FAKE_HOME, 'Library', 'Application Support', 'Code', 'User'), { recursive: true })
   writeFileSync(claudeCodeFile, JSON.stringify({
     mcpServers: { 'claude-code-utente': { command: 'npx', args: ['-y', 'cc-u'] } },
-    projects: { '/Users/prova/lavoro': { mcpServers: { 'claude-code-progetto': { command: 'node', args: ['srv.js'] } } } },
+    projects: { '/Users/test/lavoro': { mcpServers: { 'claude-code-progetto': { command: 'node', args: ['srv.js'] } } } },
     history: ['dati', 'privati', 'che', 'non', 'si', 'leggono']
   }, null, 2))
   writeFileSync(codexFile, [

@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import { dockerCandidatePaths, gitCandidatePaths, pickExecutable, dockerHostDefault, invalidateToolCache, resolveTool, DOCKER_INSTALL_URL } from '../tool-paths'
 
-const HOME = '/Users/fabio'
+const HOME = '/Users/test'
 const fsProbe = (existing: string[]): ((p: string) => boolean) => (p) => existing.includes(p)
 
 describe('fase rilascio (A7): candidati di docker, in ordine', () => {

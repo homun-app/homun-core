@@ -13,7 +13,7 @@ import {
 } from '../updater'
 import { findLegacyHomun2Dir, isLegacyHomun2DataDir, legacyNoticeMarkerPath } from '../legacy-homun2'
 
-const APP_DATA = '/Users/fabio/Library/Application Support'
+const APP_DATA = '/Users/test/Library/Application Support'
 
 describe('fase rilascio (A8): quando si controlla il feed (puro)', () => {
   it('mai in sviluppo (non impacchettata)', () => {
@@ -21,7 +21,7 @@ describe('fase rilascio (A8): quando si controlla il feed (puro)', () => {
   })
 
   it('sì nell\'app impacchettata, senza variabili di test', () => {
-    expect(shouldAutoCheckUpdates(true, { HOME: '/Users/fabio' })).toBe(true)
+    expect(shouldAutoCheckUpdates(true, { HOME: '/Users/test' })).toBe(true)
   })
 
   it('MAI quando c\'è una variabile SANDBOT_TEST_* (le prove non toccano la rete)', () => {
@@ -31,12 +31,12 @@ describe('fase rilascio (A8): quando si controlla il feed (puro)', () => {
   })
 
   it('K6: MAI quando manca Resources/app-update.yml (build --dir), senza errore', () => {
-    expect(shouldAutoCheckUpdates(true, { HOME: '/Users/fabio' }, false)).toBe(false)
+    expect(shouldAutoCheckUpdates(true, { HOME: '/Users/test' }, false)).toBe(false)
     // anche l'ordine non conta: sviluppo o prove restano comunque fuori
     expect(shouldAutoCheckUpdates(false, {}, false)).toBe(false)
     expect(shouldAutoCheckUpdates(true, { SANDBOT_TEST_USER_DATA: '/tmp/x' }, false)).toBe(false)
     // col file presente, il giudizio di prima resta
-    expect(shouldAutoCheckUpdates(true, { HOME: '/Users/fabio' }, true)).toBe(true)
+    expect(shouldAutoCheckUpdates(true, { HOME: '/Users/test' }, true)).toBe(true)
   })
 
   it('K6: hasUpdateConfig guarda Resources/app-update.yml (puro, esistenza iniettata)', () => {
@@ -83,8 +83,8 @@ describe('fase rilascio (A8): la cartella di Homun 2 (solo existsSync)', () => {
   })
 
   it('il marker della «riga già mostrata» sta nell\'userData', () => {
-    expect(legacyNoticeMarkerPath('/Users/fabio/Library/Application Support/sandbot')).toBe(
-      '/Users/fabio/Library/Application Support/sandbot/legacy-homun2-noticed'
+    expect(legacyNoticeMarkerPath('/Users/test/Library/Application Support/sandbot')).toBe(
+      '/Users/test/Library/Application Support/sandbot/legacy-homun2-noticed'
     )
   })
 })

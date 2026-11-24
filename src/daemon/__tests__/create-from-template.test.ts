@@ -7,7 +7,7 @@
 // con la capability "tools" verificata (providers mockato, niente rete).
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
 vi.mock('../../main/agent/permissions', () => ({
@@ -46,7 +46,7 @@ let dir: string
 let api: Record<string, (p: unknown[]) => unknown>
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sandbot-tmpl-'))
+  dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-tmpl-'))
   setDataDir(dir)
   // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
   setSetting('ui.activeLanguage', 'it')

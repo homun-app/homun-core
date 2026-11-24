@@ -17,7 +17,7 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../src/test-tmp'
 import { join, resolve } from 'node:path'
 
 const REPO = join(import.meta.dirname, '..', '..')
@@ -25,7 +25,7 @@ const SCRIPT = join(REPO, 'scripts', 'verify-release.mjs')
 // la versione attesa dalla CLI è quella del package.json del repo (default)
 const VERSION = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')).version
 
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-verify-release-cli-'))
+const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-verify-release-cli-'))
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
 /**

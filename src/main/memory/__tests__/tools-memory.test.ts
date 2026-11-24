@@ -5,10 +5,10 @@
 // (contaminated, userTurn, turnEntryId) come lo passa il loop.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-mem-tools-'))
+const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-mem-tools-'))
 const DATA = join(ROOT, 'data')
 const AGENT = 'agent_t00l5'
 

@@ -4,6 +4,7 @@
 import { describe, expect, it, beforeAll, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import type { TranscriptEntry, Agent, PermissionsConfig } from '../../../shared/types'
 import { TurnHeldForModel } from '../turn-held'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 
 // ---- stato condiviso coi mock (hoisted: disponibile dentro le factory) ----
 const h = vi.hoisted(() => {
@@ -845,7 +846,7 @@ const unstamped = (content: string): string => content.replace(/^\[Sent: [^\]\n]
 const { mkdtempSync, rmSync } = await import('node:fs')
 const { tmpdir } = await import('node:os')
 const { join } = await import('node:path')
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-loop-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-loop-test-'))
 h.db.dataDir = TMP
 // M6: la cartella si cancella a FINE corsa — prima restava in $TMPDIR per
 // ogni `vitest run` (il revisore ne contava ~50 a volta)
@@ -9714,7 +9715,7 @@ describe('SV8: show_images mostra le foto catturate nel computer del bot', () =>
 
   it('un path del Mac viene rifiutato IN PAROLE e non si legge NIENTE dal Mac', async () => {
     h.llm.queue = [
-      { toolCalls: [{ id: 'si2', name: 'show_images', arguments: JSON.stringify({ paths: ['/Users/fabio/Desktop/foto.png'] }) }] },
+      { toolCalls: [{ id: 'si2', name: 'show_images', arguments: JSON.stringify({ paths: ['/Users/test/Desktop/foto.png'] }) }] },
       { text: 'non posso' }
     ]
     await runTurn(AGENT, 'mostra quella del Desktop', emit)

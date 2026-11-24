@@ -4,7 +4,7 @@
 // Store reale su directory temporanea, come in fase8-rpc.
 import { describe, expect, it, beforeAll, beforeEach, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -20,7 +20,7 @@ const api: Record<string, (p: unknown[]) => unknown> = buildApiMethods(emit, { p
 let dir: string
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sandbot-avatar-test-'))
+  dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-avatar-test-'))
 })
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 

@@ -9,7 +9,7 @@
 // Store reale su directory temporanea, come queue.test.ts.
 import { describe, expect, it, beforeAll, beforeEach, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 import {
   setDataDir, dataDir, db, createAgent, getEntries, appendEntry, updateEntryMeta
@@ -38,7 +38,7 @@ const turnEndEntry = (turnEnd: string): Parameters<typeof appendEntry>[0] => ({
 })
 
 beforeAll(() => {
-  const dir = mkdtempSync(join(tmpdir(), 'sandbot-cardanswer-test-'))
+  const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-cardanswer-test-'))
   setDataDir(dir)
   dataDir()
   db()

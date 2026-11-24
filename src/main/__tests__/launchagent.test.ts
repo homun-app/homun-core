@@ -5,9 +5,9 @@ import { buildLaunchAgentPlist, LAUNCH_AGENT_LABEL } from '../launchagent'
 const OPTS: Parameters<typeof buildLaunchAgentPlist>[0] = {
   label: LAUNCH_AGENT_LABEL,
   program: '/Applications/SandBot.app/Contents/MacOS/SandBot',
-  args: ['/Applications/SandBot.app/Contents/Resources/app.asar.unpacked/main/daemon.js', '--data', '/Users/fabio/data'],
-  env: { ELECTRON_RUN_AS_NODE: '1', SANDBOT_DATA_DIR: '/Users/fabio/data' },
-  logPath: '/Users/fabio/data/daemon.log'
+  args: ['/Applications/SandBot.app/Contents/Resources/app.asar.unpacked/main/daemon.js', '--data', '/Users/test/data'],
+  env: { ELECTRON_RUN_AS_NODE: '1', SANDBOT_DATA_DIR: '/Users/test/data' },
+  logPath: '/Users/test/data/daemon.log'
 }
 
 function plistOf(over: Record<string, unknown> = {}): string {

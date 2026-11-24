@@ -5,11 +5,11 @@
 // flag SANDBOT_WEB_FETCH_ALLOW_LOOPBACK=1 (verifica d'integrazione).
 import { describe, expect, it, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-webtools-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-webtools-test-'))
 // lo store dei settings (dove vive il campo CIFRATO della chiave) su temporanea
 vi.mock('../../store/db', () => ({
   getSetting: vi.fn(<T>(_key: string, fallback: T): T => fallback),

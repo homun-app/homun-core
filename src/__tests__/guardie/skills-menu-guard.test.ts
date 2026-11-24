@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const SIDEBAR = fileURLToPath(new URL('../components/Sidebar.tsx', import.meta.url))
+const SIDEBAR = fileURLToPath(new URL('../../renderer/src/components/Sidebar.tsx', import.meta.url))
 
 /** Il blocco DropdownMenuContent dell'AccountMenu (il menu in fondo). */
 function accountMenuContent(): string {
@@ -28,11 +28,11 @@ describe("B1 → PL1: «Skill» non sta più nel menu: la casa è la pagina Plug
   })
 
   it('la pagina Plugin ha il segmento Skill e riusa l\'editor di SkillsWindow', () => {
-    const panel = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
+    const panel = readFileSync(fileURLToPath(new URL('../../renderer/src/components/PluginPanel.tsx', import.meta.url)), 'utf8')
     expect(panel).toMatch(/seg === 'skills'/)
     expect(panel).toMatch(/import \{ SkillEditor, PluginDetail, CatalogPreview \} from '\.\/SkillsWindow'/)
     // il rimando del pannello del bot filtra sul bot (skillsFilterAgent)
-    const right = readFileSync(fileURLToPath(new URL('../components/RightPanel.tsx', import.meta.url)), 'utf8')
+    const right = readFileSync(fileURLToPath(new URL('../../renderer/src/components/RightPanel.tsx', import.meta.url)), 'utf8')
     expect(right).toMatch(/setSkillsFilterAgent\(activeId\); openPlugin\(\{ kind: 'segment', seg: 'skills'/)
   })
 

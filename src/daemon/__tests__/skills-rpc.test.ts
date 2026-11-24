@@ -6,10 +6,10 @@
 //       con l'errore umano e SENZA toccare il filesystem (HOME finta).
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-skillsrpc-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-skillsrpc-test-'))
 const { setDataDir, dataDir, setSetting } = await import('../../main/store/db')
 const { buildApiMethods } = await import('../api')
 const { libraryItemsForUi } = await import('../../main/agent/skills')

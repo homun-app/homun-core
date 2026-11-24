@@ -37,9 +37,9 @@ describe('fase rilascio (A2): daemon.json porta version e build', () => {
   const dir = mkdtempSync(join(TMP_BASE, 'sandbot-a2-'))
 
   it('scrittura e rilettura complete (0600, campi compresi)', () => {
-    writeDaemonInfo(dir, { pid: 42, port: 1234, token: 't', startedAt: 1, version: '0.3.0', build: 'xyz' })
+    writeDaemonInfo(dir, { pid: 42, port: 43121, token: 't', startedAt: 1, version: '0.3.0', build: 'xyz' })
     const info = readDaemonInfo(dir)
-    expect(info).toEqual({ pid: 42, port: 1234, token: 't', startedAt: 1, version: '0.3.0', build: 'xyz' })
+    expect(info).toEqual({ pid: 42, port: 43121, token: 't', startedAt: 1, version: '0.3.0', build: 'xyz' })
   })
 
   it('i file vecchi (senza version/build) si leggono lo stesso', () => {

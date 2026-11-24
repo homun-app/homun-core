@@ -75,7 +75,7 @@ describe('newAgentModel (C3.3/C7): il bot nuovo nasce «Come gli altri»?', () =
 describe('assignFirstMainModel (C3.3): il primo provider diventa il principale', () => {
   // kind ollama: MODEL_DEFAULTS_BY_KIND ha default (kimi-k3:cloud), riserva
   // (glm-5.3:cloud) e revisore (glm-5.3-flash:cloud)
-  const savedProvider = { id: 'p1', name: 'Ollama', kind: 'ollama' as const, baseUrl: 'http://127.0.0.1:11434', apiKey: '', enabled: true }
+  const savedProvider = { id: 'p1', name: 'Ollama', kind: 'ollama' as const, baseUrl: 'http://127.0.0.1:41134', apiKey: '', enabled: true }
 
   it('senza models.main, il default del provider salvato diventa il principale (tools verificati)', async () => {
     let set: MainModel | null | undefined

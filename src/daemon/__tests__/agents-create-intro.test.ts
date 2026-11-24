@@ -5,7 +5,7 @@
 // directory temporanea, providers mockati, nessun LLM, nessuna rete.
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
 vi.mock('../../main/agent/permissions', () => ({
@@ -37,7 +37,7 @@ let dir: string
 let api: Record<string, (p: unknown[]) => unknown>
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sandbot-intro-'))
+  dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-intro-'))
   setDataDir(dir)
   setSetting('ui.activeLanguage', 'it')
   db()

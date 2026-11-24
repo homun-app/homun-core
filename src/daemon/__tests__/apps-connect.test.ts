@@ -6,7 +6,7 @@
 // chiave di progetto attiva risponde conflict (C6). Dipendenze TUTTE finte.
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
 vi.mock('../../main/agent/tools', () => ({
@@ -26,7 +26,7 @@ const fakeWorker = { poke: () => undefined, drain: async () => undefined, start:
 
 let dir: string
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sandbot-appsconnect-'))
+  dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-appsconnect-'))
   setDataDir(dir)
   db()
 })

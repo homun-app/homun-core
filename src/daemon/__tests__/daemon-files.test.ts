@@ -3,7 +3,7 @@
 // token non è mai leggibile ad altri utenti, nemmeno per un istante.
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, readdirSync, statSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
 // si osserva il rename per dimostrare che il file NASCE già 0600 (il chmod
@@ -24,7 +24,7 @@ const { writeDaemonInfo, acquireDaemonLock, readDaemonInfo } = await import('../
 
 let dir: string
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sandbot-daemonfiles-'))
+  dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-daemonfiles-'))
   renames.length = 0
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))

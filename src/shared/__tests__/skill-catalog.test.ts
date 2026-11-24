@@ -12,7 +12,7 @@ const { isValidSkillName } = await import('../skill-md')
 const entries = loadSkillCatalog()
 
 /** La bozza curata nella cartella SandBot (fuori dal repo). */
-const DRAFT = '/Users/fabio/SandBot/analisi/skill-catalog-bozza.json'
+const DRAFT = '/Users/test/SandBot/analisi/skill-catalog-bozza.json'
 /** Il file del catalogo copiato nel repo, così com'è. */
 const REPO_FILE = fileURLToPath(new URL('../skill-catalog/skill-catalog.json', import.meta.url))
 

@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { compile } from 'tailwindcss'
 
-const SRC = fileURLToPath(new URL('..', import.meta.url)) // src/renderer/src
+const SRC = fileURLToPath(new URL('../../renderer/src', import.meta.url)) // src/renderer/src (il sorgente guardato, dal nuovo posto delle guardie)
 
 export const CSS_PATH = join(SRC, 'styles.css')
 

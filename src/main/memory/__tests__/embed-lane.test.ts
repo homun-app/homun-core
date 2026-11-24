@@ -10,7 +10,7 @@
 // modelStatus lo trova già lì.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, mkdirSync, symlinkSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { hasLocalEmbedModel, LOCAL_EMBED_MODEL } from '../../../test-local-model'
 
@@ -27,7 +27,7 @@ describe.skipIf(!hasLocalEmbedModel())('fase memoria-engramma · correzioni C7: 
   let ROOT = ''
   let DATA = ''
   beforeAll(async () => {
-    ROOT = mkdtempSync(join(tmpdir(), 'sandbot-mem-embed-'))
+    ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-mem-embed-'))
     DATA = join(ROOT, 'data')
     const { setDataDir } = await import('../../store/db')
     setDataDir(DATA)

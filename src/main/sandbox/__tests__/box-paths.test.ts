@@ -2,11 +2,11 @@
 // filesystem iniettato — nessuna directory reale, nessuna home dell'utente.
 import { describe, expect, it, afterAll } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { resolveBoxPath, WORKSPACE_ALIAS } from '../box-paths'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-boxpath-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-boxpath-test-'))
 const ROOT = join(TMP, 'box')
 const HOME = join(ROOT, 'home', 'agent_x')
 mkdirSync(join(ROOT, 'workspace'), { recursive: true })

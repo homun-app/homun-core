@@ -9,11 +9,11 @@
 // Nessun tool per cancellare (la cancellazione è della UI).
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-lib-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-lib-test-'))
 const { setDataDir, dataDir, getSetting } = await import('../../store/db')
 setDataDir(TMP)
 
@@ -402,7 +402,7 @@ describe('punto 5: esportazione', () => {
     const bad = lib.prepareLibraryExport({ id, format: 'svg' })
     expect(bad.ok).toBe(false)
     // il nome non in conflitto: destinazione di prova
-    const dest = mkdtempSync(join(tmpdir(), 'sandbot-export-test-'))
+    const dest = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-export-test-'))
     try {
       const p1 = ok.ok ? ok.value : null
       expect(p1).not.toBeNull()
@@ -424,7 +424,7 @@ describe('punto 5: esportazione', () => {
     expect(plan.ok).toBe(true)
     await expect(lib.runLibraryExport(plan.ok ? plan.value : null as never, {})).rejects.toThrow(/Homun window|html/)
     // con il generatore finto (la "UI"): pdf scritto davvero
-    const dest = mkdtempSync(join(tmpdir(), 'sandbot-pdf-test-'))
+    const dest = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-pdf-test-'))
     try {
       const out = await lib.runLibraryExport(plan.ok ? plan.value : null as never, {
         targetDir: dest,

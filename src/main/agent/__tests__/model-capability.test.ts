@@ -79,7 +79,7 @@ describe('liveModelsUrl / liveModelsHeaders (H5.2)', () => {
   })
 
   it('ollama: /api/tags (le capability arrivano da /api/show, a parte)', () => {
-    expect(liveModelsUrl({ kind: 'ollama', baseUrl: 'http://localhost:11434' })).toBe('http://localhost:11434/api/tags')
+    expect(liveModelsUrl({ kind: 'ollama', baseUrl: 'http://localhost:41134' })).toBe('http://localhost:41134/api/tags')
   })
 
   it('gli altri: {base OpenAI-compatible}/models con Bearer se c\'è la chiave', () => {

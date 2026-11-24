@@ -140,7 +140,7 @@ describe('providers:list non contiene MAI la chiave', () => {
   })
 
   it('un provider senza chiave: hasKey false, niente keyHint', async () => {
-    await saveProvider({ id: 'p4', name: 'Loco', kind: 'ollama', baseUrl: 'http://127.0.0.1:11434', enabled: true })
+    await saveProvider({ id: 'p4', name: 'Loco', kind: 'ollama', baseUrl: 'http://127.0.0.1:41134', enabled: true })
     const p = (await (api['providers:list']!([]) as ReturnType<typeof publicProviders>)).find((x) => x.id === 'p4')!
     expect(p.hasKey).toBe(false)
     expect(p.keyHint).toBeUndefined()

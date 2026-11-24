@@ -7,7 +7,7 @@
 // src/main/memory/__tests__/memory-store.test.ts e tools-memory.test.ts.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
 const { setDataDir, dataDir } = await import('../../store/db')
@@ -18,7 +18,7 @@ const {
 
 let root: string
 beforeAll(async () => {
-  root = mkdtempSync(join(tmpdir(), 'sandbot-memory-test-'))
+  root = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-memory-test-'))
   setDataDir(root)
   dataDir()
   const { openMemoryEngine } = await import('../../memory/engine')

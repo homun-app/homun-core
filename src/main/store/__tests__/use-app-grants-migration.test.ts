@@ -5,10 +5,10 @@
 // aggiunge expires_at per i permessi a 10 minuti.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-useapp-grants-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-useapp-grants-'))
 const { setDataDir, db, listGrants, addGrant, migrateUseAppActionGrants } = await import('../db')
 beforeAll(() => { setDataDir(TMP) })
 afterAll(() => { rmSync(TMP, { recursive: true, force: true }) })

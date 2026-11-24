@@ -4,7 +4,7 @@
 // db.ts non dipende più da electron.app.
 import { describe, expect, it, beforeAll, beforeEach, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 import { setDataDir, dataDir, db, createAgent, createRoutine, listRoutines, getEntries, appendEntry, createTask, type Routine , setSetting } from '../../main/store/db'
 import { claimDueJobs, activeJobForAgent, enqueueJob, pendingAgentPairJobs, pendingUserMessages } from '../../main/store/jobs'
@@ -19,7 +19,7 @@ let events: SandbotEvent[]
 const emit: (e: SandbotEvent) => void = (e) => events.push(e)
 
 beforeAll(() => {
-  const dir = mkdtempSync(join(tmpdir(), 'sandbot-queue-test-'))
+  const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-queue-test-'))
   setDataDir(dir)
   // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
   setSetting('ui.activeLanguage', 'it')

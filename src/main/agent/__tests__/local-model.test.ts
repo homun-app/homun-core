@@ -8,14 +8,14 @@
 // sono arrivati sul .part (poll sul file).
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, statSync, createReadStream, readFileSync } from 'node:fs'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { createHash } from 'node:crypto'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { LocalCatalogEntry } from '../local-catalog'
 
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-local-model-'))
+const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-local-model-'))
 const MODELS_DIR = join(ROOT, 'models')
 mkdirSync(MODELS_DIR, { recursive: true })
 

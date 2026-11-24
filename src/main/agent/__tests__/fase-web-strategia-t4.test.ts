@@ -6,10 +6,10 @@
 // il clic dopo in timeout. Server MCP browser FINTO (nessuna rete).
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join, resolve } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-t4-combo-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-t4-combo-'))
 const { setDataDir } = await import('../../store/db')
 setDataDir(TMP)
 

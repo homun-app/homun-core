@@ -6,7 +6,7 @@
 // INIETTABILI su un bundle finto in mkdtemp: niente firma vera, niente rete.
 import { afterAll, describe, expect, it } from 'vitest'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../src/test-tmp'
 import { join, relative } from 'node:path'
 
 const REPO = join(import.meta.dirname, '..', '..')
@@ -26,7 +26,7 @@ const {
   }) => Promise<{ binaries: Array<{ path: string; arch: string; team: string | null; runtime: boolean | null }> }>
 }
 
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-verify-release-vendor-'))
+const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-verify-release-vendor-'))
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
 /** Un bundle finto: Resources/vendor con llama-server, una dylib e il .node. */

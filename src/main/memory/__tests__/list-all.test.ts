@@ -7,10 +7,10 @@
 // slice in JS.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-mem-listall-'))
+const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-mem-listall-'))
 const DATA = join(ROOT, 'data')
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 

@@ -3,7 +3,7 @@
 // su directory temporanea, permessi e tool finti come in draft-actions.
 import { describe, expect, it, beforeAll, beforeEach, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
 const h = vi.hoisted(() => ({
@@ -40,7 +40,7 @@ const emit: (e: SandbotEvent) => void = (e) => events.push(e)
 const api: Record<string, (p: unknown[]) => unknown> = buildApiMethods(emit, { poke: () => undefined } as unknown as JobWorker)
 
 beforeAll(() => {
-  const dir = mkdtempSync(join(tmpdir(), 'sandbot-fase8-test-'))
+  const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-fase8-test-'))
   setDataDir(dir)
   dataDir()
   db()

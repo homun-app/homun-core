@@ -44,6 +44,6 @@ describe('fase rilascio — correzioni (K3): il nome dell app', () => {
 
   it('la cartella dati resta sandbot qualunque sia il nome dell\'app (paths.ts la fissa)', async () => {
     const { userDataDir } = await import('../paths')
-    expect(userDataDir('Homun', '/Users/x/Library/Application Support')).toBe('/Users/x/Library/Application Support/sandbot')
+    expect(userDataDir('Homun', '/Users/test/Library/Application Support')).toBe('/Users/test/Library/Application Support/sandbot')
   })
 })

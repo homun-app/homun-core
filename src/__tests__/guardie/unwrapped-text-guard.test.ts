@@ -26,7 +26,7 @@ import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from '@babel/parser'
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url))
+const ROOT = fileURLToPath(new URL('../../renderer/src', import.meta.url))
 
 function walkTsxD(dir: string, out: string[] = []): string[] {
   for (const f of readdirSync(dir)) {
@@ -169,8 +169,12 @@ describe('fase 17a (L3): guardia contro i testi non avvolti', () => {
   it('nessun .tsx del renderer ha testo visibile fuori da <Trans>/t', () => {
     const files = walkTsxD(ROOT)
     expect(files.length).toBeGreaterThan(20)
+    // la pagina dei COMPONENTI (F2) è solo di sviluppo e di test: i suoi testi
+    // NON entrano nei cataloghi (non sono testi dell'utente) e non si avvolgono
+    const galleria = join(ROOT, 'galleria', 'componenti.tsx')
     const failures: string[] = []
     for (const f of files) {
+      if (f === galleria) continue
       for (const p of check(f)) failures.push(`${relative(process.cwd(), f)}: ${p}`)
     }
     expect(failures).toEqual([])

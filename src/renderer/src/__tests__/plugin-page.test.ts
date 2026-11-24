@@ -420,7 +420,7 @@ describe('DS4 (fase design): «Collegati» è la tabella unica, e lì la pagina 
             // R4 (b20-ritocchi): il comando di un server può arrivare come PERCORSO
             // ASSOLUTO (node di fnm, script locale): la riga mostra il NOME, il
             // percorso intero resta nel suggerimento
-            { id: 'srv-fake', name: 'Plugin Pulita', transport: 'stdio', command: '/Users/fabio/.local/share/fnm/node-versions/v24.22.1/installation/bin/node', args: ['/Users/fabio/Projects/Bot/sandbot/scripts/fake-plugin-pulita-mcp.mjs'], enabled: true, enabledFor: ['*'], stateStatus: 'ok' }
+            { id: 'srv-fake', name: 'Plugin Pulita', transport: 'stdio', command: '/Users/test/.local/share/fnm/node-versions/v24.22.1/installation/bin/node', args: ['/Users/test/Projects/Bot/sandbot/scripts/fake-plugin-pulita-mcp.mjs'], enabled: true, enabledFor: ['*'], stateStatus: 'ok' }
           ], plugins: [] },
           usage: [
             { tool: 'mcp__mattermost__post_message', last: Date.now() - 3 * 24 * 3600 * 1000, week: 4 },
@@ -469,7 +469,7 @@ describe('DS4 (fase design): «Collegati» è la tabella unica, e lì la pagina 
     const texts = findAll(table, () => true).map((n) => textOf(n)).join('\n')
     for (const valore of ['npx @donach/mattermost-mcp', 'node fake-plugin-pulita-mcp.mjs', '1 sempre · 1 blocca', '31 questa settimana', 'fabio', 'Tutti i bot', 'mai', 'non parte']) expect(texts).toContain(valore)
     // il PERCORSO ASSOLUTO non si vede: nella riga c'è il nome del comando
-    expect(texts).not.toContain('/Users/fabio')
+    expect(texts).not.toContain('/Users/test')
   }, 20_000)
 
   it('niente a capo: il badge della strada è una pillola su una riga (se non entra si tronca LEI); ogni cella tronca, e il valore intero sta nel suggerimento', async () => {
@@ -496,7 +496,7 @@ describe('DS4 (fase design): «Collegati» è la tabella unica, e lì la pagina 
     expect(command.attrs.title).toBe('npx @donach/mattermost-mcp')
     // R4: il nome del comando nella riga, il PERCORSO INTERO nel suggerimento
     const brief = findAll(table, (n) => textOf(n) === 'node fake-plugin-pulita-mcp.mjs')[0]!
-    expect(brief.attrs.title).toBe('/Users/fabio/.local/share/fnm/node-versions/v24.22.1/installation/bin/node /Users/fabio/Projects/Bot/sandbot/scripts/fake-plugin-pulita-mcp.mjs')
+    expect(brief.attrs.title).toBe('/Users/test/.local/share/fnm/node-versions/v24.22.1/installation/bin/node /Users/test/Projects/Bot/sandbot/scripts/fake-plugin-pulita-mcp.mjs')
     // chi va bene è grigio, chi non va è rosso (PP4: un solo segnale di stato)
     const stato = findAll(table, (n) => textOf(n) === 'non parte' && n.attrs.title === 'non parte')[0]!
     expect(has(stato, 'text-destructive')).toBe(true)

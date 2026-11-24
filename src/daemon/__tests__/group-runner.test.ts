@@ -11,7 +11,7 @@
 // né depth); D3 — l'attesa del coordinatore conta da inizio catena.
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 import { setDataDir, db, createAgent, updateAgent, appendEntry, setSetting, getAgent } from '../../main/store/db'
 import { enqueueJob, getJobById, listJobs } from '../../main/store/jobs'
@@ -29,7 +29,7 @@ let dir: string
 const emit = (_e: SandbotEvent): void => undefined
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sandbot-grouprunner-'))
+  dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-grouprunner-'))
   setDataDir(dir)
   db()
 })

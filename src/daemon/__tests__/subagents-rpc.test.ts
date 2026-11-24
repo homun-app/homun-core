@@ -4,7 +4,7 @@
 // permessi/tool finti come fase8-rpc: niente loop, niente modello.
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
 vi.mock('../../main/agent/permissions', () => ({
@@ -33,7 +33,7 @@ const emit: (e: SandbotEvent) => void = (e) => events.push(e)
 const api: Record<string, (p: unknown[]) => unknown> = buildApiMethods(emit, { poke: () => undefined } as unknown as JobWorker)
 
 beforeAll(() => {
-  const dir = mkdtempSync(join(tmpdir(), 'sandbot-f12rpc-test-'))
+  const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-f12rpc-test-'))
   setDataDir(dir)
   // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
   setSetting('ui.activeLanguage', 'it')

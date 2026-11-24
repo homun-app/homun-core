@@ -10,13 +10,13 @@ import { TEST_TMP_BASE } from '../../test-tmp'
 
 describe('fase 16 (U0b): userDataDir', () => {
   it('con nome app "Homun" (impacchettata) restituisce <appData>/sandbot', () => {
-    expect(userDataDir('Homun', '/Users/fabio/Library/Application Support')).toBe(
-      join('/Users/fabio/Library/Application Support', 'sandbot')
+    expect(userDataDir('Homun', '/Users/test/Library/Application Support')).toBe(
+      join('/Users/test/Library/Application Support', 'sandbot')
     )
   })
   it('con nome app "sandbot" (sviluppo) è la stessa cartella', () => {
-    expect(userDataDir('sandbot', '/Users/fabio/Library/Application Support')).toBe(
-      userDataDir('Homun', '/Users/fabio/Library/Application Support')
+    expect(userDataDir('sandbot', '/Users/test/Library/Application Support')).toBe(
+      userDataDir('Homun', '/Users/test/Library/Application Support')
     )
   })
   it('è in minuscolo (il nome esatto della cartella esistente)', () => {
@@ -29,16 +29,16 @@ describe('fase rilascio (A8): override e confine con Homun 2', () => {
     // CB1 (fase ci-beta5): il valore di prova passa da TEST_TMP_BASE — il
     // percorso letterale del Mac di sviluppo è vietato nel codice dei test
     const override = join(TEST_TMP_BASE, 'sb-test')
-    expect(userDataDir('Homun', '/Users/fabio/Library/Application Support', { SANDBOT_TEST_USER_DATA: override }))
+    expect(userDataDir('Homun', '/Users/test/Library/Application Support', { SANDBOT_TEST_USER_DATA: override }))
       .toBe(override)
   })
   it('senza la variabile il percorso è quello storico', () => {
-    expect(userDataDir('Homun', '/Users/fabio/Library/Application Support', {})).toBe(
-      join('/Users/fabio/Library/Application Support', 'sandbot')
+    expect(userDataDir('Homun', '/Users/test/Library/Application Support', {})).toBe(
+      join('/Users/test/Library/Application Support', 'sandbot')
     )
   })
   it('la cartella dati non coincide mai con …/Homun né …/Homun2, maiuscole comprese', () => {
-    const appData = '/Users/fabio/Library/Application Support'
+    const appData = '/Users/test/Library/Application Support'
     expect(isSafeUserDataDir(join(appData, 'sandbot'), appData)).toBe(true)
     expect(isSafeUserDataDir(join(appData, 'Homun'), appData)).toBe(false)
     expect(isSafeUserDataDir(join(appData, 'Homun2'), appData)).toBe(false)

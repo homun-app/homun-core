@@ -3,7 +3,7 @@
 // C5 (read-file/list-directory fuori dalla box in modalità host).
 import { describe, expect, it, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import type { PermissionRule } from '../../../shared/types'
 
@@ -23,7 +23,7 @@ const state = {
   agents: [] as Array<{ id: string; parentId: string | null }>
 }
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-permissions-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-permissions-test-'))
 const BOX = join(TMP, 'box')
 const OUTSIDE = join(TMP, 'outside')
 

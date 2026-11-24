@@ -5,14 +5,14 @@
 import { describe, expect, it, afterAll } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../src/test-tmp'
 import { join } from 'node:path'
 
 const ROOT = join(import.meta.dirname, '..', '..')
 const PKGUTIL = join(ROOT, 'scripts', 'fake-pkgutil.mjs')
 const SPCTL = join(ROOT, 'scripts', 'fake-spctl.mjs')
 const OPEN = join(ROOT, 'scripts', 'fake-open.mjs')
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-fake-installer-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-fake-installer-test-'))
 
 afterAll(() => rmSync(TMP, { recursive: true, force: true }))
 

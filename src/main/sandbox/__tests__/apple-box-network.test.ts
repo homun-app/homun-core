@@ -8,12 +8,12 @@
 import { describe, expect, it, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..')
 const FAKE = join(ROOT, 'scripts', 'fake-container.mjs')
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-apple-box-network-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-apple-box-network-test-'))
 
 /** I settings pilotabili dal test (sandbox.mode/network/engine). */
 const settings = vi.hoisted(() => ({ value: {} as Record<string, unknown> }))

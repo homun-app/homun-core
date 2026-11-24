@@ -5,10 +5,10 @@
 // Modalità host su directory temporanea (mai la home reale), store mockato.
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-boxowner-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-boxowner-test-'))
 const agents = vi.hoisted(() => new Map<string, { id: string; parentId: string | null }>())
 vi.mock('../../store/db', () => ({
   getSetting: (_key: string, fallback: unknown) => 'host',

@@ -8,7 +8,7 @@ import { callsOf, stubApiMethod } from './render-helper-install'
 import type { ProviderPublic, MainModel, SandbotEvent } from '../../../shared/types'
 
 const PROVIDERS: ProviderPublic[] = [
-  { id: 'ollama', name: 'Ollama', kind: 'ollama', baseUrl: 'http://localhost:11434', enabled: true, apiKey: '', hasKey: false }
+  { id: 'ollama', name: 'Ollama', kind: 'ollama', baseUrl: 'http://localhost:41134', enabled: true, apiKey: '', hasKey: false }
 ]
 const MAIN: MainModel = { providerId: 'ollama', model: 'glm-5.3-flash:cloud', thinking: null }
 

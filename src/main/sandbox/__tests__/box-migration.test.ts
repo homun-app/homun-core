@@ -4,10 +4,10 @@
 // home reale, niente docker reale.
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, readdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-boxmig-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-boxmig-test-'))
 const DATA = join(TMP, 'data') // directory dati (radice del box condiviso)
 const LEGACY = join(TMP, 'legacySandBot') // la vecchia ~/SandBot (fake)
 let sandboxMode = 'host'

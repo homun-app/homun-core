@@ -9,7 +9,7 @@ describe('fase rilascio (A1): modalità di avvio', () => {
   it('--homun-daemon accende la modalità daemon, senza resta la UI', () => {
     expect(isDaemonMode(['/Applications/Homun.app/Contents/MacOS/Homun', DAEMON_FLAG])).toBe(true)
     expect(isDaemonMode(['/Applications/Homun.app/Contents/MacOS/Homun'])).toBe(false)
-    expect(isDaemonMode(['/usr/local/bin/electron', '/Users/x/sandbot', DAEMON_FLAG])).toBe(true)
+    expect(isDaemonMode(['/usr/local/bin/electron', '/Users/test/sandbot', DAEMON_FLAG])).toBe(true)
     // il flag si cerca OVUNQUE in argv: in dev l'app path viene prima
     expect(isDaemonMode(['electron', '.', DAEMON_FLAG, '--other'])).toBe(true)
   })
@@ -22,7 +22,7 @@ describe('fase rilascio (A1): modalità di avvio', () => {
 
   it('riconoscere il processo del daemon dalla riga di comando (per le sonde E2E)', () => {
     expect(isDaemonCommandLine('/Applications/Homun.app/Contents/MacOS/Homun --homun-daemon')).toBe(true)
-    expect(isDaemonCommandLine('/opt/electron/Electron.app/Contents/MacOS/Electron /Users/fabio/Projects/Bot/sandbot --homun-daemon')).toBe(true)
+    expect(isDaemonCommandLine('/opt/electron/Electron.app/Contents/MacOS/Electron /Users/test/Projects/Bot/sandbot --homun-daemon')).toBe(true)
     expect(isDaemonCommandLine('/usr/local/bin/node out/main/daemon.js --data /tmp/x')).toBe(false)
   })
 
@@ -40,8 +40,8 @@ describe('fase rilascio (A1): riga di comando del spawn', () => {
   })
 
   it('sviluppo: l\'app path PRIMA del flag (electron <repo> --homun-daemon)', () => {
-    const spec = daemonSpawnSpec({ execPath: '/opt/electron/bin/Electron', isPackaged: false, appPath: '/Users/fabio/sandbot', env: {} })
-    expect(spec.args).toEqual(['/Users/fabio/sandbot', DAEMON_FLAG])
+    const spec = daemonSpawnSpec({ execPath: '/opt/electron/bin/Electron', isPackaged: false, appPath: '/Users/test/sandbot', env: {} })
+    expect(spec.args).toEqual(['/Users/test/sandbot', DAEMON_FLAG])
   })
 
   it('MAI ELECTRON_RUN_AS_NODE: né negli argomenti né nell\'env', () => {

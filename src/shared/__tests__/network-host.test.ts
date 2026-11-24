@@ -54,7 +54,7 @@ describe('R5.1 — predicati adattati da Rakazo', () => {
 
 describe('R5.1 — providerPlace (decide l\'HOST, non il kind né discovered)', () => {
   it('Ollama scoperto → mac', () => {
-    expect(providerPlace({ baseUrl: 'http://localhost:11434', discovered: true, kind: 'ollama' })).toBe('mac')
+    expect(providerPlace({ baseUrl: 'http://localhost:41134', discovered: true, kind: 'ollama' })).toBe('mac')
   })
 
   it('openai-compatible su 127.0.0.1 e su 127.0.0.2 → mac (un server remoto NON è «gratis e privato»)', () => {
@@ -71,8 +71,8 @@ describe('R5.1 — providerPlace (decide l\'HOST, non il kind né discovered)', 
   })
 
   it('http://192.168.1.5 e nas.local → rete', () => {
-    expect(providerPlace({ baseUrl: 'http://192.168.1.5:11434' })).toBe('rete')
-    expect(providerPlace({ baseUrl: 'http://nas.local:11434' })).toBe('rete')
+    expect(providerPlace({ baseUrl: 'http://192.168.1.5:41134' })).toBe('rete')
+    expect(providerPlace({ baseUrl: 'http://nas.local:41134' })).toBe('rete')
   })
 
   it('169.254.169.254 → internet, MAI rete', () => {
@@ -85,15 +85,15 @@ describe('R5.1 — providerPlace (decide l\'HOST, non il kind né discovered)', 
 
   it('discovered e kind NON cambiano il posto: decide l\'host', () => {
     // uno scoperto è comunque su localhost
-    expect(providerPlace({ baseUrl: 'http://127.0.0.1:11434', discovered: true })).toBe('mac')
-    expect(providerPlace({ baseUrl: 'http://127.0.0.1:11434', discovered: false })).toBe('mac')
+    expect(providerPlace({ baseUrl: 'http://127.0.0.1:41134', discovered: true })).toBe('mac')
+    expect(providerPlace({ baseUrl: 'http://127.0.0.1:41134', discovered: false })).toBe('mac')
     // un openai-compatible REMOTO resta internet anche se il kind è «locale» di facciata
     expect(providerPlace({ baseUrl: 'https://api.example.com', kind: 'openai-compatible', discovered: true })).toBe('internet')
   })
 
   it('baseUrl senza scheme o rotto: host se leggibile, internet altrimenti', () => {
-    expect(hostOfBaseUrl('127.0.0.1:11434')).toBe('127.0.0.1')
-    expect(providerPlace({ baseUrl: '127.0.0.1:11434' })).toBe('mac')
+    expect(hostOfBaseUrl('127.0.0.1:41134')).toBe('127.0.0.1')
+    expect(providerPlace({ baseUrl: '127.0.0.1:41134' })).toBe('mac')
     expect(providerPlace({ baseUrl: '' })).toBe('internet')
     expect(providerPlace({ baseUrl: '---' })).toBe('internet')
   })
@@ -117,7 +117,7 @@ describe("U6 (fase prima-release): isLocalProvider — locale lo decide l'INDIRI
   })
 
   it('ollama, lmstudio e homun-local restano locali PER TIPO', () => {
-    expect(isLocalProvider({ kind: 'ollama', baseUrl: 'http://localhost:11434' })).toBe(true)
+    expect(isLocalProvider({ kind: 'ollama', baseUrl: 'http://localhost:41134' })).toBe(true)
     expect(isLocalProvider({ kind: 'lmstudio', baseUrl: '' })).toBe(true)
     expect(isLocalProvider({ kind: 'homun-local' })).toBe(true)
   })

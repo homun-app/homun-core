@@ -6,18 +6,19 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createMarketplaceManager, MARKETPLACE_CACHE_MS, marketplaceCacheDir, marketplaceCacheName, type RegisteredMarketplace } from '../marketplace-manager'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-mkmgr-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-mkmgr-test-'))
 let REPO: string
 const { setDataDir } = await import('../../store/db')
 
 beforeAll(() => {
   setDataDir(TMP)
   // il marketplace finto: repo git locale con .claude-plugin/marketplace.json
-  REPO = mkdtempSync(join(tmpdir(), 'sandbot-mp-repo-'))
+  REPO = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-mp-repo-'))
   mkdirSync(join(REPO, '.claude-plugin'), { recursive: true })
   writeFileSync(join(REPO, '.claude-plugin', 'marketplace.json'), JSON.stringify({
     name: 'mp-di-test',

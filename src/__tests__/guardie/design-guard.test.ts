@@ -26,7 +26,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DESIGN_EXCEPTIONS, type DesignRule } from '../lib/design-exceptions'
+import { DESIGN_EXCEPTIONS, type DesignRule } from '../../renderer/src/lib/design-exceptions'
 import { CSS_PATH, SRC, iconViolations, isClassList, rel, scan, sourceFiles, stringsOf, violationsOfString } from './design-scan'
 
 const CSS = readFileSync(CSS_PATH, 'utf8')

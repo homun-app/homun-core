@@ -5,7 +5,7 @@
 // dei widget no, il testo libero sì.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 
@@ -19,7 +19,7 @@ let agentId: string
 const noop = (): void => {}
 
 beforeAll(() => {
-  root = mkdtempSync(join(tmpdir(), 'sandbot-enqueue-lang-test-'))
+  root = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-enqueue-lang-test-'))
   setDataDir(root)
   agentId = createAgent('Bot', 'assistente').id
 })

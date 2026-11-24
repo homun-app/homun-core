@@ -6,7 +6,7 @@
 // Store reale su directory temporanea, orologio controllato.
 import { describe, expect, it, beforeAll, beforeEach, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
 const { setDataDir, dataDir, db, appendEntry, setSetting, getSetting, updateEntryMeta } = await import('../../main/store/db')
@@ -30,7 +30,7 @@ let events: SandbotEvent[]
 const emit: (e: SandbotEvent) => void = (e) => events.push(e)
 
 beforeAll(() => {
-  const dir = mkdtempSync(join(tmpdir(), 'sandbot-outbox-test-'))
+  const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-outbox-test-'))
   setDataDir(dir)
   // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
   setSetting('ui.activeLanguage', 'it')

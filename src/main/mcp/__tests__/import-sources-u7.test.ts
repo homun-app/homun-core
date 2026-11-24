@@ -15,7 +15,7 @@ import {
   parseTomlSubset
 } from '../import-sources'
 
-const HOME = '/Users/prova'
+const HOME = '/Users/test'
 
 describe('U7: le VIE delle otto app (solo al clic, mai altrove)', () => {
   it('cursor, claude, zcode, claude-code, codex, windsurf, gemini e vscode nei loro posti', () => {
@@ -86,8 +86,8 @@ describe('U7: parseSourceFile — la forma di ogni app', () => {
     const cc = parseSourceFile('claude-code', JSON.stringify({
       mcpServers: { utente: { command: 'npx', args: ['-y', 'u'] } },
       projects: {
-        '/Users/prova/lavoro': { mcpServers: { lavoro: { command: 'node', args: ['s.js'] } } },
-        '/Users/prova/casa': { mcpServers: { casa: { url: 'https://casa.example/mcp' } } }
+        '/Users/test/lavoro': { mcpServers: { lavoro: { command: 'node', args: ['s.js'] } } },
+        '/Users/test/casa': { mcpServers: { casa: { url: 'https://casa.example/mcp' } } }
       },
       history: ['roba', 'privata', 'che', 'non', 'si', 'toca']
     }))

@@ -6,7 +6,7 @@
 // dei fatti è SOSTITUIBILE: nessun spawn nei test.
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
 vi.mock('../../main/agent/permissions', () => ({
@@ -41,7 +41,7 @@ import type { JobWorker } from '../worker'
 const api: Record<string, (p: unknown[]) => unknown> = buildApiMethods(() => undefined, { poke: () => undefined } as unknown as JobWorker)
 
 beforeAll(() => {
-  const dir = mkdtempSync(join(tmpdir(), 'sandbot-box-engine-test-'))
+  const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-box-engine-test-'))
   setDataDir(dir)
   dataDir()
   db()

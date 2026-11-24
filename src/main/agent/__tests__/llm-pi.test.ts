@@ -4,7 +4,7 @@
 // del test della chiave). Le chiavi sono FINTIE (sk-test-…).
 import { describe, expect, it, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
 import {
@@ -183,7 +183,7 @@ describe('fase 18a (E2.5): lo stato HTTP non si perde (fallback e limite d\'uso)
   })
 
   it('ECONNREFUSED senza stato → riserva (il messaggio resta com\'è)', async () => {
-    const e = await errOf('fetch failed: connect ECONNREFUSED 127.0.0.1:11434') as LlmProviderError
+    const e = await errOf('fetch failed: connect ECONNREFUSED 127.0.0.1:41134') as LlmProviderError
     expect(e.status).toBeUndefined()
     expect(e.message).toContain('ECONNREFUSED')
     expect(fallbackEligible(e)).toBe(true)
@@ -207,14 +207,14 @@ describe('fase 18a (E2.1): zai MAI su /coding/ e i base URL dei compatibili', ()
   })
 
   it('ollama/custom: /v1 si appende SOLO se non c\'è già un /v<n> o /api/paas/v4', () => {
-    expect(openAiCompatBase({ baseUrl: 'http://localhost:11434' })).toBe('http://localhost:11434/v1')
-    expect(openAiCompatBase({ baseUrl: 'http://localhost:11434/' })).toBe('http://localhost:11434/v1')
+    expect(openAiCompatBase({ baseUrl: 'http://localhost:41134' })).toBe('http://localhost:41134/v1')
+    expect(openAiCompatBase({ baseUrl: 'http://localhost:41134/' })).toBe('http://localhost:41134/v1')
     expect(openAiCompatBase({ baseUrl: 'http://127.0.0.1:9999/v1' })).toBe('http://127.0.0.1:9999/v1')
     expect(openAiCompatBase({ baseUrl: 'http://127.0.0.1:9999/v2' })).toBe('http://127.0.0.1:9999/v2')
     expect(openAiCompatBase({ baseUrl: 'https://api.z.ai/api/paas/v4' })).toBe('https://api.z.ai/api/paas/v4')
     // lo stesso vale per il modello sintetico di un provider custom/ollama
-    const ollama: ProviderConfig = { id: 'o1', name: 'Ollama', kind: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '', enabled: true }
-    expect(piModelFor(ollama, 'kimi-k3:cloud').baseUrl).toBe('http://localhost:11434/v1')
+    const ollama: ProviderConfig = { id: 'o1', name: 'Ollama', kind: 'ollama', baseUrl: 'http://localhost:41134', apiKey: '', enabled: true }
+    expect(piModelFor(ollama, 'kimi-k3:cloud').baseUrl).toBe('http://localhost:41134/v1')
     const custom: ProviderConfig = { id: 'c1', name: 'Custom', kind: 'custom', baseUrl: 'http://127.0.0.1:8080/v1', apiKey: '', enabled: true }
     expect(piModelFor(custom, 'm').baseUrl).toBe('http://127.0.0.1:8080/v1')
   })
@@ -234,7 +234,7 @@ describe('fase 18a (E2.1): zai MAI su /coding/ e i base URL dei compatibili', ()
     expect(caps.fromCatalog).toBe(true)
     expect(caps.contextWindow).toBeGreaterThan(0)
     expect(caps.cost).toBeTruthy()
-    const ollama: ProviderConfig = { id: 'o2', name: 'Ollama', kind: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '', enabled: true }
+    const ollama: ProviderConfig = { id: 'o2', name: 'Ollama', kind: 'ollama', baseUrl: 'http://localhost:41134', apiKey: '', enabled: true }
     const local = modelCapabilities(ollama, 'kimi-k3:cloud')
     expect(local.fromCatalog).toBe(false)
     expect(local.cost).toBeNull() // locale: costo sconosciuto
@@ -437,7 +437,7 @@ describe('fase 18a G1: le immagini NON spariscono sui modelli fuori catalogo', (
   })
 
   it('modelCapabilities: sintetico → vision null (sconosciuta); catalogo → il flag vero', () => {
-    const ollama: ProviderConfig = { id: 'g1-caps', name: 'Ollama', kind: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '', enabled: true }
+    const ollama: ProviderConfig = { id: 'g1-caps', name: 'Ollama', kind: 'ollama', baseUrl: 'http://localhost:41134', apiKey: '', enabled: true }
     expect(modelCapabilities(ollama, 'kimi-k3:cloud').vision).toBeNull()
     const groq: ProviderConfig = { id: 'g1-capsg', name: 'Groq', kind: 'groq', baseUrl: 'https://api.groq.com/openai', apiKey: 'sk-test-groq', enabled: true }
     expect(modelCapabilities(groq, 'qwen/qwen3.6-27b').vision).toBe(true)
@@ -508,7 +508,7 @@ describe('fase 18a (E4): uso registrato (model_usage) — un turno VERO col faux
   }
 
   beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'sandbot-usage-'))
+    dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-usage-'))
     const mod = await import('../../store/db')
     Object.assign(store, mod)
     store.setDataDir(dir)

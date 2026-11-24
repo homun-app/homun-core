@@ -4,7 +4,7 @@
 // marcano meta.connected (niente doppie notifiche).
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
 const { setDataDir, dataDir, createAgent, appendEntry, updateEntryMeta, getEntries, setSetting, db } = await import('../../main/store/db')
@@ -12,7 +12,7 @@ const { notifyConnectorConnected, notifyMcpServerConnected, notifyComposioAppCon
 
 let root: string
 beforeAll(() => {
-  root = mkdtempSync(join(tmpdir(), 'sandbot-connnotify-test-'))
+  root = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-connnotify-test-'))
   setDataDir(root)
   dataDir()
 })

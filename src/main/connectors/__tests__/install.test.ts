@@ -6,7 +6,7 @@
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import { execSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import type { SendMessagePayload } from '../../../shared/types'
 import fixture from './fixtures/registry-notion.json'
@@ -81,7 +81,7 @@ function mkSettings(): [GetSetting, SetSetting] {
 
 let DATA: string
 beforeAll(() => {
-  DATA = mkdtempSync(join(tmpdir(), 'sandbot-install-test-'))
+  DATA = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-install-test-'))
 })
 afterAll(() => {
   rmSync(DATA, { recursive: true, force: true })
@@ -640,7 +640,7 @@ describe('plugin: card, installazione, disinstallazione', () => {
   let STG: string
 
   beforeAll(() => {
-    REPO = mkdtempSync(join(tmpdir(), 'sandbot-plugin-repo-'))
+    REPO = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-plugin-repo-'))
     const run = (cmd: string): string => execSync(cmd, { cwd: REPO }).toString()
     mkdirSync(join(REPO, 'skills', 'helper'), { recursive: true })
     writeFileSync(join(REPO, 'skills', 'helper', 'SKILL.md'), '---\nname: helper\ndescription: una skill di aiuto\n---\nIstruzioni della skill.')
@@ -661,7 +661,7 @@ describe('plugin: card, installazione, disinstallazione', () => {
   })
   beforeEach(() => {
     settings = new Map()
-    STG = mkdtempSync(join(tmpdir(), 'sandbot-install-stg-'))
+    STG = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-install-stg-'))
     const saved = new Map<string, Map<string, unknown>>()
     const servers: McpServerConfig[] = []
     deps = {
@@ -925,7 +925,7 @@ describe('L5: copia del plugin nel box — sequenza, esiti, ripristino', () => {
   let STG: string
 
   beforeAll(() => {
-    REPO = mkdtempSync(join(tmpdir(), 'sandbot-plugin-repo-'))
+    REPO = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-plugin-repo-'))
     const run = (cmd: string): string => execSync(cmd, { cwd: REPO }).toString()
     // plugin con UN SERVER STDIO + una skill
     mkdirSync(join(REPO, 'skills', 'helper'), { recursive: true })
@@ -942,7 +942,7 @@ describe('L5: copia del plugin nel box — sequenza, esiti, ripristino', () => {
   afterAll(() => rmSync(REPO, { recursive: true, force: true }))
   beforeEach(() => {
     settings = new Map()
-    STG = mkdtempSync(join(tmpdir(), 'sandbot-install-stg-'))
+    STG = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-install-stg-'))
   })
   afterEach(() => rmSync(STG, { recursive: true, force: true }))
   const cloneDeps = (): { allowFileUrlsForTests: boolean; mkdtemp: (prefix: string) => string } => ({
@@ -1047,7 +1047,7 @@ describe('L5: copia del plugin nel box — sequenza, esiti, ripristino', () => {
   })
 
   it('plugin a SOLE skill con cp fallito → installato lo stesso, e il messaggio lo dice', async () => {
-    const skillOnly = mkdtempSync(join(tmpdir(), 'sandbot-plugin-repo-'))
+    const skillOnly = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-plugin-repo-'))
     try {
       const run = (cmd: string): string => execSync(cmd, { cwd: skillOnly }).toString()
       mkdirSync(join(skillOnly, 'skills', 'helper'), { recursive: true })
@@ -1096,7 +1096,7 @@ describe('M1/M2/M3: linear, github, terraform — i .mcp.json veri del marketpla
   let opened: number
   beforeEach(() => {
     settings = new Map()
-    STG = mkdtempSync(join(tmpdir(), 'sandbot-install-stg-'))
+    STG = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-install-stg-'))
     opened = 0
   })
   afterEach(() => rmSync(STG, { recursive: true, force: true }))
@@ -1110,7 +1110,7 @@ describe('M1/M2/M3: linear, github, terraform — i .mcp.json veri del marketpla
   })
   /** Un repo git locale col .mcp.json VOLUTO: un plugin ufficiale in miniatura. */
   const repoWith = (mcpJson: string): { repo: string; sha: string } => {
-    const repo = mkdtempSync(join(tmpdir(), 'sandbot-plugin-repo-'))
+    const repo = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-plugin-repo-'))
     writeFileSync(join(repo, '.mcp.json'), mcpJson)
     execSync('git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init', { cwd: repo })
     return { repo, sha: execSync('git rev-parse HEAD', { cwd: repo }).toString().trim() }

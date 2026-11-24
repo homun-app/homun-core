@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const DIALOG = fileURLToPath(new URL('../components/ui/dialog.tsx', import.meta.url))
+const DIALOG = fileURLToPath(new URL('../../renderer/src/components/ui/dialog.tsx', import.meta.url))
 
 function baseClasses(): string {
   const src = readFileSync(DIALOG, 'utf8')

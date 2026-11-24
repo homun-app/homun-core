@@ -12,7 +12,7 @@ import { describe, expect, it, afterAll } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import { buildMcpAuthResolver } from '../wiring'
@@ -328,7 +328,7 @@ async function startFakeMcp(asUrl: string): Promise<{ url: string; server: Serve
 }
 
 describe('L1.3: OAuth end-to-end di un server del registro (AS + MCP finti in-process)', () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'sandbot-wiring-test-'))
+  const tmp = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-wiring-test-'))
   const serversToClose: Server[] = []
   afterAll(() => {
     for (const s of serversToClose) {
@@ -428,7 +428,7 @@ async function startHeaderMcp(token: string): Promise<{ url: string; server: Ser
 }
 
 describe('M2/M3: server di PLUGIN — Connetti dalla scheda Installati e ${VAR} negli header', () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'sandbot-wiring-m23-'))
+  const tmp = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-wiring-m23-'))
   const serversToClose: Server[] = []
   afterAll(() => {
     for (const s of serversToClose) {

@@ -5,10 +5,10 @@
 // senza note arriva al modello IDENTICA a oggi.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-sknotes-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-sknotes-test-'))
 const { setDataDir, dataDir, setSetting } = await import('../../store/db')
 const { readSkillFor, invocableSkillsOf, skillInvocationExpansion, libraryItemsForUi, skillsLibrary } = await import('../skills')
 

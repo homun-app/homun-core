@@ -20,7 +20,7 @@ const fakeFs = (existing: Set<string>) => ({
   readdirSync: (p: string) => { throw new Error('non usato: ' + p) }
 })
 
-const HOME = '/Users/prova'
+const HOME = '/Users/test'
 
 describe('E1: resolveServerCommand — il PATH ridotto del Finder non ferma il server', () => {
   it('«npx» risolto dal PATH finto quando c\'è', () => {

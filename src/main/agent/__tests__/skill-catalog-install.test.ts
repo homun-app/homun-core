@@ -7,10 +7,10 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-skcat-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-skcat-test-'))
 let REPO = ''
 let A = '' // il commit fissato dal catalogo
 let B = '' // il repository è andato avanti
@@ -77,7 +77,7 @@ beforeAll(() => {
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k]
   setDataDir(join(TMP, 'data'))
   dataDir()
-  REPO = mkdtempSync(join(tmpdir(), 'sandbot-skcat-repo-'))
+  REPO = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-skcat-repo-'))
   // 1. la skill alla RADICE (come humanizer): il name del frontmatter è
   //    DIVERSO dall'id del catalogo (si allinea come nell'import di oggi)
   writeFileSync(join(REPO, 'SKILL.md'), '---\nname: umanizza\ndescription: toglie i tic da IA\nlicense: MIT\n---\nRiscrivi il testo come una persona.')

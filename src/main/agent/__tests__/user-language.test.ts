@@ -3,12 +3,12 @@
 // del main che pubblica 'ui.activeLanguage' (payload della chiamata).
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
 let root: string
 beforeAll(() => {
-  root = mkdtempSync(join(tmpdir(), 'sandbot-user-language-test-'))
+  root = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-user-language-test-'))
 })
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 

@@ -6,10 +6,10 @@
 // di ciò che il resolver ha risolto, e il proprietario della workdir.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-boxloader-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-boxloader-'))
 const { setDataDir, setSetting } = await import('../../store/db')
 setDataDir(TMP)
 const mcp = await import('../index')

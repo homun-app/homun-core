@@ -4,7 +4,7 @@
 // 'agent', cron non valido → errore leggibile, evento automation).
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { formatUi } from '../../../shared/ui-text'
 
@@ -15,7 +15,7 @@ const { executeTool } = await import('../tools')
 let root: string
 const AGENT = 'agent_us'
 beforeAll(async () => {
-  root = mkdtempSync(join(tmpdir(), 'sandbot-upstate-test-'))
+  root = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-upstate-test-'))
   setDataDir(root)
   dataDir()
   // fase memoria-engramma (M3): le memorie vivono nel motore Engramma

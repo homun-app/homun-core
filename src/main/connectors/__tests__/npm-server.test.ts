@@ -7,7 +7,7 @@
 // rete) e le regole del prompt per il bot.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { buildMcpServerCard, installMcpServer, parseMcpServerId, serverIdFor, type InstallDeps } from '../install'
 import type { McpServerConfig } from '../../mcp'
@@ -15,7 +15,7 @@ import { connectorsSection } from '../../agent/prompts'
 import { toolDefs } from '../../agent/tools'
 
 let DATA: string
-beforeAll(() => { DATA = mkdtempSync(join(tmpdir(), 'sandbot-npm-server-test-')) })
+beforeAll(() => { DATA = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-npm-server-test-')) })
 afterAll(() => { rmSync(DATA, { recursive: true, force: true }) })
 
 const NPM_INFO = {

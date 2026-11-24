@@ -4,7 +4,7 @@
 // conferma non serve. Store reale su directory temporanea, client MCP finto.
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
 // server MCP finti: uno del catalogo (catalogId) e uno manuale
@@ -44,7 +44,7 @@ const fakeWorker = { poke: () => undefined, drain: async () => undefined, start:
 let dir: string
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sandbot-triggerval-'))
+  dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-triggerval-'))
   setDataDir(dir)
   // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
   setSetting('ui.activeLanguage', 'it')

@@ -17,7 +17,7 @@ const INDEX = readFileSync(fileURLToPath(new URL('../index.ts', import.meta.url)
 
 describe('P3.1: la cartella di Chromium del daemon', () => {
   it('è una cartella sua DENTRO userData: userData resta dov\'è (i dati di Homun non si spostano)', () => {
-    const userData = join('/Users/prova', 'Library', 'Application Support', 'sandbot')
+    const userData = join('/Users/test', 'Library', 'Application Support', 'sandbot')
     const sessionData = daemonSessionDataDir(userData)
     expect(sessionData).not.toBe(userData)
     expect(dirname(sessionData)).toBe(userData)
@@ -25,7 +25,7 @@ describe('P3.1: la cartella di Chromium del daemon', () => {
   })
 
   it('vale anche nelle prove (SANDBOT_TEST_USER_DATA): la cartella del daemon sta nella temporanea', () => {
-    const userData = userDataDir('Homun', '/Users/prova/Library/Application Support', { SANDBOT_TEST_USER_DATA: '/T/sonda' } as NodeJS.ProcessEnv)
+    const userData = userDataDir('Homun', '/Users/test/Library/Application Support', { SANDBOT_TEST_USER_DATA: '/T/sonda' } as NodeJS.ProcessEnv)
     expect(daemonSessionDataDir(userData)).toBe(join('/T/sonda', DAEMON_SESSION_DIR))
   })
 })

@@ -7,7 +7,7 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { createConnectorsSecretStore, type ConnectorsSecretStore } from '../sealed-store'
 import { createComposioManager, setActiveComposio, COMPOSIO_CACHE_TTL_MS } from '../composio'
@@ -76,7 +76,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 let envKey = randomBytes(32)
 
 beforeEach(() => {
-  DATA = mkdtempSync(join(tmpdir(), 'sandbot-composio-test-'))
+  DATA = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-composio-test-'))
   now.value = 1_000_000
   events.length = 0
   settings = new Map()

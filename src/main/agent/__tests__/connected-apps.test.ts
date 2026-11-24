@@ -8,7 +8,7 @@
 // proporne un'altra.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
 const { connectionsNowSection, connectedAppMatch, CONNECTIONS_NOW_MAX_APPS } = await import('../connected-apps')
@@ -16,7 +16,7 @@ const { systemPrompt } = await import('../prompts')
 
 let root: string
 beforeAll(async () => {
-  root = mkdtempSync(join(tmpdir(), 'sandbot-connapps-test-'))
+  root = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-connapps-test-'))
   const { setDataDir, dataDir } = await import('../../store/db')
   setDataDir(root)
   dataDir()

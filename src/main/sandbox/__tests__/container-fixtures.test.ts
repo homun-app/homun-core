@@ -1,6 +1,6 @@
 // Fase box-apple-cli-vera (BAV1): le uscite VERE della CLI `container` 1.7.1
 // vivono nelle fixture, copiate alla lettera (l'unica sostituzione è la
-// RADICE dei percorsi: /Users/fabio/ → /Users/test/, l'appRoot neutro di
+// RADICE dei percorsi: /Users/test/ → /Users/test/, l'appRoot neutro di
 // OBV1). Questo test le blocca BYTE PER BYTE (sha256 fissi) e blocca anche
 // lo SCRIPT di copia: rieseguirlo deve dare gli STESSI byte del repo.
 // BRV1 (fase box-apple-rete-vera): entrano le 10 help che BAV segnalava
@@ -15,7 +15,7 @@ import { TEST_TMP_BASE } from '../../../test-tmp'
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..')
 const FIXTURES = join(ROOT, 'src', 'main', 'sandbox', '__tests__', 'fixtures', 'container-1.7.1')
 const SCRIPT = join(ROOT, 'scripts', 'copia-fixture-container-1.7.1.mjs')
-const SRC = '/Users/fabio/SandBot/prompts/fixtures/container-1.7.1'
+const SRC = '/Users/test/SandBot/prompts/fixtures/container-1.7.1'
 
 /** Gli sha256 delle fixture copiate (byte per byte, radice /Users/test). */
 const SHA256: Record<string, string> = {
@@ -86,10 +86,10 @@ describe('BAV1: le fixture della CLI vera 1.7.1, byte per byte', () => {
     }
   })
 
-  it('la radice NEUTRA: nessun /Users/fabio nelle fixture del repo (solo /Users/test/)', () => {
+  it('la radice NEUTRA: nessun /Users/test nelle fixture del repo (solo /Users/test/)', () => {
     for (const f of Object.keys(SHA256)) {
       const text = readFileSync(join(FIXTURES, f), 'utf8')
-      expect(text, f).not.toContain('/Users/fabio')
+      expect(text, f).not.toContain('/Users/test')
     }
     expect(readFileSync(join(FIXTURES, 'inspect-box.txt'), 'utf8')).toContain('/Users/test/Library/Application Support/com.apple.container/volumes/sandbot-box/volume.img')
   })
@@ -115,7 +115,7 @@ describe('BAV1: le fixture della CLI vera 1.7.1, byte per byte', () => {
     for (const f of readdirSync(SRC).filter((x) => x.endsWith('.txt')).sort()) {
       const src = readFileSync(join(SRC, f), 'utf8')
       const dst = readFileSync(join(FIXTURES, f), 'utf8')
-      expect(dst, f).toBe(src.split('/Users/fabio/').join('/Users/test/'))
+      expect(dst, f).toBe(src.split('/Users/test/').join('/Users/test/'))
     }
   })
 })

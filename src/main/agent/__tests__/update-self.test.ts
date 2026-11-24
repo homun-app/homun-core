@@ -7,7 +7,7 @@
 // su directory temporanea, nessun LLM.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
 const { setDataDir, dataDir, createAgent, getAgent, getEntries, updateAgent } = await import('../../store/db')
@@ -17,7 +17,7 @@ let root: string
 const SELF = 'agent_self'
 const OTHER = 'agent_other'
 beforeAll(async () => {
-  root = mkdtempSync(join(tmpdir(), 'sandbot-updself-test-'))
+  root = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-updself-test-'))
   setDataDir(root)
   dataDir()
   const { openMemoryEngine } = await import('../../memory/engine')

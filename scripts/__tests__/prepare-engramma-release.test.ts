@@ -7,8 +7,8 @@
 // (ENGRAMMA_RELEASE_BASE / baseUrl iniettabile): nessun download vero.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs'
+import { TEST_TMP_BASE } from '../../src/test-tmp'
 import { createServer, type Server } from 'node:http'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const REPO = join(import.meta.dirname, '..', '..')
@@ -26,7 +26,7 @@ const { prepareEngramma, sha256File, ENGRAMMA_FILES, releaseAssetUrls, resolveBa
   resolveBaseUrl: (env?: Record<string, string | undefined>) => string
 }
 
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-engramma-release-'))
+const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-engramma-release-'))
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
 const FILES: Record<string, string> = {

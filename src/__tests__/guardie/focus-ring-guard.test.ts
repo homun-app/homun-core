@@ -38,8 +38,8 @@ import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { compile } from 'tailwindcss'
 
-const SRC = fileURLToPath(new URL('..', import.meta.url)) // src/renderer/src
-const RENDERER = fileURLToPath(new URL('../..', import.meta.url)) // src/renderer
+const SRC = fileURLToPath(new URL('../../renderer/src', import.meta.url)) // src/renderer/src (il sorgente guardato, dal nuovo posto delle guardie)
+const RENDERER = fileURLToPath(new URL('../../renderer', import.meta.url)) // src/renderer
 const CSS_PATH = join(SRC, 'styles.css')
 const CSS = readFileSync(CSS_PATH, 'utf8')
 const MAIN_SRC = readFileSync(join(SRC, 'main.tsx'), 'utf8')

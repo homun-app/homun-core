@@ -5,7 +5,7 @@
 // 127.0.0.1 con ENGRAMMA_PULL_BASE: nessuna rete.
 import { describe, expect, it, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, statSync, createReadStream } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -51,7 +51,7 @@ describe.skipIf(!hasLocalEmbedModel())('fase memoria-engramma · correzioni C8: 
   // dentro sono su EVENTI (finished) e STATO (present), mai su tempi fissi;
   // il tetto esplicito è solo un limite di sicurezza
   it('present passa a true e la ricerca diventa ibrida SENZA riapertura (la cella di prima continua a vivere)', async () => {
-    const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-mem-pull-'))
+    const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-mem-pull-'))
     ROOTS.push(ROOT)
     const DATA = join(ROOT, 'data')
     const { setDataDir } = await import('../../main/store/db')

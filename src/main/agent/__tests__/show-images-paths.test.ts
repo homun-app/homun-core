@@ -105,7 +105,7 @@ describe('SV8: resolveBoxPath — solo la home del bot o /workspace', () => {
   })
 
   it('un path ASSOLUTO del Mac è rifiutato in parole (mai file del Mac)', async () => {
-    const r = await resolveBoxPath('agent_p', '/Users/fabio/Desktop/foto.png')
+    const r = await resolveBoxPath('agent_p', '/Users/test/Desktop/foto.png')
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toMatch(/bot's computer|Mac/i)
   })

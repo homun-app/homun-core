@@ -6,10 +6,10 @@
 // dei testi (la scansione di privacy.test.ts).
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join, basename } from 'node:path'
 
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-mem-forget-'))
+const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-mem-forget-'))
 const DATA = join(ROOT, 'data')
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 

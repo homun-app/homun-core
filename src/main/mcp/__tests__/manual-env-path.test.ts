@@ -91,7 +91,7 @@ describe('U4: la cartella del comando risolto va IN TESTA al PATH del figlio', (
   })
 
   it('il PATH dell\'utente nelle variabili del server si rispetta, con la cartella risolta comunque IN TESTA', async () => {
-    setMcpAuthResolver(async () => ({ stdioEnv: { MATTERMOST_URL: 'mm.example', PATH: '/Users/prova/bin:/opt/altro' } }))
+    setMcpAuthResolver(async () => ({ stdioEnv: { MATTERMOST_URL: 'mm.example', PATH: '/Users/test/bin:/opt/altro' } }))
     const id = 'mcp_u4_user_path'
     saveServers([{
       id, name: 'mattermost finto path utente', transport: 'stdio',

@@ -11,9 +11,9 @@
 // LC_RPATH @loader_path, /usr/lib/librdma.dylib weak).
 import { afterAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync, chmodSync, readdirSync, lstatSync, symlinkSync } from 'node:fs'
+import { TEST_TMP_BASE } from '../../src/test-tmp'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const { fetchLlamaBundle, ensureLlamaNotice } = (await import('../fetch-llama.mjs')) as {
@@ -26,7 +26,7 @@ const { fetchLlamaBundle, ensureLlamaNotice } = (await import('../fetch-llama.mj
   ensureLlamaNotice: (noticesPath: string) => boolean
 }
 
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-fetch-llama-'))
+const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-fetch-llama-'))
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
 /** Un tar.gz FINTO con llama-server, due dylib collegate e un file che NON serve. */

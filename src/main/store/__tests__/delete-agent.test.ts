@@ -5,7 +5,7 @@
 // Store reale su directory temporanea.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import {
@@ -17,7 +17,7 @@ import {
 let dir: string
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sandbot-delagent-'))
+  dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-delagent-'))
   setDataDir(dir)
   db()
 })

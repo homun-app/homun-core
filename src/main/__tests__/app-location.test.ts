@@ -27,7 +27,7 @@ describe('RV1: la decisione è una funzione pura', () => {
   })
 
   it('macOS impacchettata FUORI Applicazioni (Downloads, dmg) → ask-move', () => {
-    expect(appLocationAction({ ...DARWIN, inAppsFolder: false, execPath: '/Users/fabio/Downloads/Homun.app/Contents/MacOS/Homun' })).toBe('ask-move')
+    expect(appLocationAction({ ...DARWIN, inAppsFolder: false, execPath: '/Users/test/Downloads/Homun.app/Contents/MacOS/Homun' })).toBe('ask-move')
   })
 
   it('percorso di App Translocation → ask-move, anche se inAppsFolder dicesse sì (copia read-only)', () => {

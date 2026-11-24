@@ -5,10 +5,10 @@
 // pronta e il box è ripartito) — col runner finto, senza Docker.
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-disk-space-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-disk-space-test-'))
 const FIXTURES = join(import.meta.dirname, 'fixtures', 'container-1.7.1')
 /** Il corpo di una fixture: senza la riga `$ container…` e senza `[exit N]`. */
 const fixture = (name: string): string => {

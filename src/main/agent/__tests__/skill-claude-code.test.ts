@@ -11,10 +11,10 @@
 // tranne quelle «solo con /».
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-skcc-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-skcc-test-'))
 const { setDataDir, dataDir, setSetting } = await import('../../store/db')
 const {
   buildSkillsSection, readSkillFor, invocableSkillsOf, skillInvocationExpansion, libraryItemsForUi,

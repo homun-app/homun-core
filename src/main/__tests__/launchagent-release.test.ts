@@ -13,9 +13,9 @@ import {
 const devOpts: LaunchAgentOptions = {
   label: LAUNCH_AGENT_LABEL,
   program: '/opt/electron/bin/Electron',
-  args: ['/Users/fabio/sandbot', '--homun-daemon'],
+  args: ['/Users/test/sandbot', '--homun-daemon'],
   env: {},
-  logPath: '/Users/fabio/Library/Application Support/sandbot/data/daemon.log'
+  logPath: '/Users/test/Library/Application Support/sandbot/data/daemon.log'
 }
 
 describe('fase rilascio (A3): il plist del servizio DENTRO il bundle', () => {
@@ -72,9 +72,9 @@ describe('fase rilascio (A3): pulizia del vecchio LaunchAgent di SandBot', () =>
   it('bootout + unload + unlink di SOLO quel file esatto', async () => {
     const cmds: string[][] = []
     const unlinked: string[] = []
-    const files = new Set(['/Users/x/Library/LaunchAgents/com.fabio.sandbot.daemon.plist'])
+    const files = new Set(['/Users/test/Library/LaunchAgents/com.fabio.sandbot.daemon.plist'])
     const done = await cleanupLegacyLaunchAgent(501, {
-      plistPath: '/Users/x/Library/LaunchAgents/com.fabio.sandbot.daemon.plist',
+      plistPath: '/Users/test/Library/LaunchAgents/com.fabio.sandbot.daemon.plist',
       existsSync: (p) => files.has(p),
       unlink: (p) => {
         unlinked.push(p)
@@ -87,25 +87,25 @@ describe('fase rilascio (A3): pulizia del vecchio LaunchAgent di SandBot', () =>
     expect(done).toBe(true)
     expect(cmds).toEqual([
       ['bootout', 'gui/501/com.fabio.sandbot.daemon'],
-      ['unload', '/Users/x/Library/LaunchAgents/com.fabio.sandbot.daemon.plist']
+      ['unload', '/Users/test/Library/LaunchAgents/com.fabio.sandbot.daemon.plist']
     ])
-    expect(unlinked).toEqual(['/Users/x/Library/LaunchAgents/com.fabio.sandbot.daemon.plist'])
+    expect(unlinked).toEqual(['/Users/test/Library/LaunchAgents/com.fabio.sandbot.daemon.plist'])
     // idempotente: senza il file non fa NIENTE
-    expect(await cleanupLegacyLaunchAgent(501, { plistPath: '/Users/x/Library/LaunchAgents/com.fabio.sandbot.daemon.plist', existsSync: () => false, unlink: () => { throw new Error('mai') }, launchctl: async () => undefined })).toBe(false)
+    expect(await cleanupLegacyLaunchAgent(501, { plistPath: '/Users/test/Library/LaunchAgents/com.fabio.sandbot.daemon.plist', existsSync: () => false, unlink: () => { throw new Error('mai') }, launchctl: async () => undefined })).toBe(false)
   })
 
   it('senza uid (contesto strano) si salta solo il bootout, il file resta l\'unico toccato', async () => {
     const cmds: string[][] = []
-    const files = new Set(['/Users/x/Library/LaunchAgents/com.fabio.sandbot.daemon.plist'])
+    const files = new Set(['/Users/test/Library/LaunchAgents/com.fabio.sandbot.daemon.plist'])
     await cleanupLegacyLaunchAgent(undefined, {
-      plistPath: '/Users/x/Library/LaunchAgents/com.fabio.sandbot.daemon.plist',
+      plistPath: '/Users/test/Library/LaunchAgents/com.fabio.sandbot.daemon.plist',
       existsSync: (p) => files.has(p),
       unlink: (p) => files.delete(p),
       launchctl: async (args) => {
         cmds.push(args)
       }
     })
-    expect(cmds).toEqual([['unload', '/Users/x/Library/LaunchAgents/com.fabio.sandbot.daemon.plist']])
+    expect(cmds).toEqual([['unload', '/Users/test/Library/LaunchAgents/com.fabio.sandbot.daemon.plist']])
   })
 
   it('il nome del vecchio label è quello esatto della fase ≤16c', () => {

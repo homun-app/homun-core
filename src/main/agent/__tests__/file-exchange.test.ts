@@ -3,10 +3,10 @@
 // directory temporanee (nessuna home reale) e card SEMPRE nel loop.
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, symlinkSync, realpathSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-copy-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-copy-test-'))
 const MAC = join(TMP, 'macHome') // la home del Mac (fake)
 const DATA = join(TMP, 'data') // la directory dati di SandBot (fake)
 

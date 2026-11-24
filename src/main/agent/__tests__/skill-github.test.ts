@@ -6,10 +6,10 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-skgit-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-skgit-test-'))
 let REPO: string
 const { setDataDir, dataDir } = await import('../../store/db')
 const {
@@ -21,7 +21,7 @@ const { skillsLibrary, libraryDir, deleteLibrarySkill } = await import('../skill
 beforeAll(() => {
   setDataDir(TMP)
   dataDir()
-  REPO = mkdtempSync(join(tmpdir(), 'sandbot-skill-repo-'))
+  REPO = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-skill-repo-'))
   // una skill valida con references/
   mkdirSync(join(REPO, 'skills', 'riassunto-riunione', 'references'), { recursive: true })
   writeFileSync(join(REPO, 'skills', 'riassunto-riunione', 'SKILL.md'), '---\nname: riassunto-riunione\ndescription: come riassumere una riunione\nlicense: MIT\n---\nRispondi con punti elenco.')
@@ -179,7 +179,7 @@ describe('S6.2: findSkillDirs (puro sul fs)', () => {
 
 /** Un repository LOCALE con UNA skill (file:// SOLO col flag di test). */
 function makeRepo(withFakeVersions = false): string {
-  const repo = mkdtempSync(join(tmpdir(), 'sandbot-skill-repo-k6-'))
+  const repo = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-skill-repo-k6-'))
   mkdirSync(join(repo, 'skills', 'stile-readme'), { recursive: true })
   writeFileSync(join(repo, 'skills', 'stile-readme', 'SKILL.md'),
     '---\nname: stile-readme\ndescription: come sistemare un README\n---\n# Regole del README\nTitolo breve, sezioni Obiettivi, Installazione, Uso.')

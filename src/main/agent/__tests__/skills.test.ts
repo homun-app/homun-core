@@ -5,7 +5,7 @@
 // esatti, versioni in .versions/, espansione del `/nome` (S7).
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readdirSync, symlinkSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
 const { setDataDir, dataDir, createAgent, deleteAgent, setSetting } = await import('../../store/db')
@@ -19,7 +19,7 @@ const {
 
 let root: string
 beforeAll(() => {
-  root = mkdtempSync(join(tmpdir(), 'sandbot-skills-test-'))
+  root = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-skills-test-'))
   setDataDir(root)
   dataDir()
 })

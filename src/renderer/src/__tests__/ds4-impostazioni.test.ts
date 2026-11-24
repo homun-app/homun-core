@@ -764,7 +764,7 @@ describe('DS4 Impostazioni: Approvazioni', () => {
 
 describe('DS4 Impostazioni: Modelli', () => {
   const PROVIDERS = [
-    { id: 'ollama', name: 'Ollama (locale)', kind: 'ollama', baseUrl: 'http://127.0.0.1:11434', apiKey: '', enabled: true, hasKey: false },
+    { id: 'ollama', name: 'Ollama (locale)', kind: 'ollama', baseUrl: 'http://127.0.0.1:41134', apiKey: '', enabled: true, hasKey: false },
     { id: 'custom_1', name: 'Finto locale', kind: 'custom', baseUrl: 'http://127.0.0.1:8000/v1', apiKey: '', enabled: false, hasKey: true }
   ]
   beforeEach(() => { setStoreStateForRender(useStore, { providers: PROVIDERS } as never) })

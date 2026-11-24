@@ -1,6 +1,6 @@
 import { describe, expect, it, afterAll } from 'vitest'
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { targetKey, commandKey, commandRuleMatches, runCommandVerdict, isNeverAuto, NEVER_AUTO, isInsideBox, serverReadGrantCovers, mcpServerReadGrantKey, grantActive, useAppAlwaysAsk, LEGACY_USE_APP_GRANT_TARGETS } from '../permission-rules'
 import { analyzeCommand } from '../shell-ast'
@@ -402,7 +402,7 @@ describe('C4: comandi che usano segreti (§5.6)', () => {
 })
 
 describe('C5: isInsideBox (puro, realpath reale)', () => {
-  const TMP = mkdtempSync(join(tmpdir(), 'sandbot-insidebox-test-'))
+  const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-insidebox-test-'))
   const BOX = join(TMP, 'box')
   const OUTSIDE = join(TMP, 'outside')
   mkdirSync(BOX)
@@ -427,7 +427,7 @@ describe('C5: isInsideBox (puro, realpath reale)', () => {
     // ../ riporta sopra la box: il resolve lo neutralizza e il path finisce fuori
     expect(isInsideBox('../outside/id_rsa', BOX, realpathSync)).toBe(false)
     expect(isInsideBox(join(BOX + '-evil', 'x'), BOX, realpathSync)).toBe(false)
-    expect(isInsideBox('/Users/x/.ssh/id_rsa', BOX, realpathSync)).toBe(false)
+    expect(isInsideBox('/Users/test/.ssh/id_rsa', BOX, realpathSync)).toBe(false)
   })
 
   it('symlink dentro la box che punta fuori → false', () => {

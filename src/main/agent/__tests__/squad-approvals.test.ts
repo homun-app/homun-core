@@ -90,7 +90,7 @@ describe('S1 (fase squadra-sicurezza): il target del grant di missione ha SEMPRE
     expect(missionGrantTarget('browser_click', {}, 'http://booking.example')).toBe('site:booking.example')
     expect(missionGrantTarget('browser_type', {}, 'about:blank')).toBeNull()
     expect(missionGrantTarget('browser_click', {}, 'data:text/html,<h1>ciao</h1>')).toBeNull()
-    expect(missionGrantTarget('browser_click', {}, 'file:///Users/fabio/x.html')).toBeNull()
+    expect(missionGrantTarget('browser_click', {}, 'file:///Users/test/x.html')).toBeNull()
     expect(missionGrantTarget('browser_click', {}, 'non una url')).toBeNull()
     expect(missionGrantTarget('browser_click', {}, '')).toBeNull()
     expect(missionGrantTarget('browser_click', {}, null)).toBeNull()

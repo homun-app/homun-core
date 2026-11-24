@@ -1,9 +1,9 @@
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-host-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-host-test-'))
 // fase 11 (residuo 0d): la radice del box viene dalla directory DATI, che il
 // test inietta su una temporanea — la home reale non viene MAI toccata
 vi.mock('../../store/db', () => ({

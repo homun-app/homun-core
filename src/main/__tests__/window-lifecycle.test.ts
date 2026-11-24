@@ -132,7 +132,7 @@ describe('P1: urlOriginForLog — dell\'URL resta solo l\'origine dell\'app', ()
 
   it('qualsiasi altra cosa diventa «other»: niente host, percorsi o token nel registro', () => {
     expect(urlOriginForLog('https://utente.example/via/di/casa?token=segreto')).toBe('other')
-    expect(urlOriginForLog('file:///Users/qualcuno/Documenti/x.html')).toBe('other')
+    expect(urlOriginForLog('file:///Users/test/Documenti/x.html')).toBe('other')
     expect(urlOriginForLog('homun://altro/x')).toBe('other')
     expect(urlOriginForLog('non è un url')).toBe('other')
   })

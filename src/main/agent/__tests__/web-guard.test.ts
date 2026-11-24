@@ -66,7 +66,7 @@ describe('isForbiddenIp (puro)', () => {
       '2002:7f00:1::', // 6to4 2002::/16 con 127.0.0.1 incorporato
       '::ffff:a9fe:a9fe', // metadati cloud 169.254.169.254 in forma mapped
       '198.18.0.1', // benchmark 198.18.0.0/15
-      '2001:0:1234::1' // Teredo 2001::/32
+      '2001:0:1235::1' // Teredo 2001::/32
     ]) {
       expect(isForbiddenIp(ip), ip).toBe(true)
     }

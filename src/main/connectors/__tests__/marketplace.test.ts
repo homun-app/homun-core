@@ -6,7 +6,7 @@
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import { execSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import {
   parseMarketplace, inspectPlugin, pluginSkillName, sourceSupported, substitutePluginRoot,
@@ -93,7 +93,7 @@ describe('parseMarketplace (puro) — voci reali', () => {
 
 let FIX: string
 beforeAll(() => {
-  FIX = mkdtempSync(join(tmpdir(), 'sandbot-plugin-fix-'))
+  FIX = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-plugin-fix-'))
   // plugin completo: manifest, skill valide e non, .mcp.json, componenti ignorate
   const full = join(FIX, 'full')
   mkdirSync(join(full, '.claude-plugin'), { recursive: true })
@@ -334,7 +334,7 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
   let STG: string
   let sha: string
   beforeAll(() => {
-    REPO = mkdtempSync(join(tmpdir(), 'sandbot-plugin-repo-'))
+    REPO = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-plugin-repo-'))
     const run = (cmd: string): string => execSync(cmd, { cwd: REPO }).toString()
     mkdirSync(join(REPO, 'skills', 'demo'), { recursive: true })
     writeFileSync(join(REPO, 'skills', 'demo', 'SKILL.md'), '---\nname: demo\ndescription: skill del plugin\n---\nCorpo.')
@@ -365,7 +365,7 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
     rmSync(REPO, { recursive: true, force: true })
   })
   beforeEach(() => {
-    STG = mkdtempSync(join(tmpdir(), 'sandbot-staging-test-'))
+    STG = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-staging-test-'))
   })
   afterEach(() => {
     rmSync(STG, { recursive: true, force: true })
@@ -511,7 +511,7 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
   }, 60_000)
 
   it('sorgente relativa: copia dalla cartella del marketplace e registra lo sha del marketplace', async () => {
-    const mpClone = mkdtempSync(join(tmpdir(), 'sandbot-mp-clone-'))
+    const mpClone = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-mp-clone-'))
     try {
       mkdirSync(join(mpClone, 'plugins', 'demo'), { recursive: true })
       writeFileSync(join(mpClone, 'plugins', 'demo', 'README.md'), 'plugin')

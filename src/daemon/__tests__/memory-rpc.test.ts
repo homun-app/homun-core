@@ -6,10 +6,10 @@
 // solo: il download parte solo dal click dell'utente).
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-mem-rpc-'))
+const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-mem-rpc-'))
 const DATA = join(ROOT, 'data')
 const AGENT = 'agent_rpc1'
 

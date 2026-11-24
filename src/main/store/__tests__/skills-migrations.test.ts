@@ -5,7 +5,7 @@
 // runner col flag.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 
 const { setDataDir, dataDir, createAgent, setSetting, getSetting, listAgents } = await import('../db')
@@ -14,7 +14,7 @@ const { skillsLibrary, libraryDir, librarySkillsVisibleTo } = await import('../.
 
 let root: string
 beforeAll(() => {
-  root = mkdtempSync(join(tmpdir(), 'sandbot-skills-mig-'))
+  root = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-skills-mig-'))
   setDataDir(root)
   dataDir()
 })
@@ -80,7 +80,7 @@ describe('S2.4: la migrazione alla libreria unica', () => {
   })
 
   it('errore a metà: le copie già fatte si tolgono, gli ORIGINALI restano, niente flag', () => {
-    const root2 = mkdtempSync(join(tmpdir(), 'sandbot-skills-mig-err-'))
+    const root2 = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-skills-mig-err-'))
     try {
       const mkSkill2 = (agentId: string, name: string, body: string): void => {
         mkdirSync(join(root2, 'agents', agentId, 'skills', name), { recursive: true })

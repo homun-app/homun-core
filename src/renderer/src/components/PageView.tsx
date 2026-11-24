@@ -20,7 +20,7 @@
 // Fase design (DS4) — la pagina passa al sistema:
 //  · il guscio è PageShell alla larghezza «reading» (720): il corpo che scorre
 //    largo quanto l'area, il contenuto centrato. Prima la colonna era una
-//    max-w-[720px] scritta qui, dentro un corpo con 76 px di aria in testa
+//    max-w-[var(--w-reading)] scritta qui, dentro un corpo con 76 px di aria in testa
 //    per non passare sotto la testata.
 //  · la testata è PageHeader (indietro · titolo · azioni a destra), sulla
 //    riga dei 52 di OGNI colonna. DS3: la riga dentro la testata è LARGA

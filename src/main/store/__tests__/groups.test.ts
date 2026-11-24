@@ -3,7 +3,7 @@
 // scheduleTurnsForMessage (job accodati, righe di sistema una volta sola).
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 import { join } from 'node:path'
 import { setDataDir, db, createAgent } from '../db'
 import { listJobs } from '../jobs'
@@ -19,7 +19,7 @@ import { memberOfNonce } from '../../agent/group-turns'
 let dir: string
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sandbot-groups-'))
+  dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-groups-'))
   setDataDir(dir)
   db()
 })

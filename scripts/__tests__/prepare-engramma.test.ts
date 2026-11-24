@@ -4,7 +4,7 @@
 // (cartelle fixture in una temporanea): niente crate vero, niente cargo.
 import { afterAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../src/test-tmp'
 import { join } from 'node:path'
 
 const REPO = join(import.meta.dirname, '..', '..')
@@ -19,7 +19,7 @@ const { prepareEngramma, sha256File, ENGRAMMA_FILES } = (await import('../prepar
   ENGRAMMA_FILES: string[]
 }
 
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-engramma-prepare-'))
+const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-engramma-prepare-'))
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
 
 const BASE: Record<string, string> = {

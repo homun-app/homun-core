@@ -45,7 +45,7 @@ describe('fallbackEligible', () => {
   it('timeout e errori di rete del provider → sì (il principale non risponde)', () => {
     expect(fallbackEligible(new Error('Request timed out'))).toBe(true)
     expect(fallbackEligible(new Error('fetch failed'))).toBe(true)
-    expect(fallbackEligible(new Error('ECONNREFUSED 127.0.0.1:11434'))).toBe(true)
+    expect(fallbackEligible(new Error('ECONNREFUSED 127.0.0.1:41134'))).toBe(true)
     expect(fallbackEligible(new Error('socket hang up'))).toBe(true)
   })
 

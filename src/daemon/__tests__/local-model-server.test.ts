@@ -5,14 +5,14 @@
 // Nessun processo vero, nessuna porta aperta, nessun file fuori da mkdtemp.
 import { describe, expect, it, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 import {
   createLocalModelServer, childEnvFor, LOCAL_MODEL_CRASHED_ERROR, IDLE_SHUTDOWN_MS, HEALTH_TIMEOUT_MS,
   type LocalModelServerDeps, type LocalModelServer
 } from '../local-model-server'
 
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-local-model-'))
+const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-local-model-'))
 const SERVER_BIN = join(ROOT, 'llama-server') // finto: non parte mai davvero
 const MODEL_FILE = join(ROOT, 'models', 'Qwen3.5-4B-Q4_K_M.gguf')
 const PID_FILE = join(ROOT, 'llama-server.pid')
@@ -240,7 +240,7 @@ describe('fase locale (L2.3): pidfile orfano all\'avvio del daemon', () => {
   it('un pid il cui eseguibile è ALTRO (per esempio l\'Homebrew) NON si tocca', async () => {
     const d = makeDeps()
     const s = makeServer(d)
-    d.files.set(PID_FILE, JSON.stringify({ pid: 4243, port: 11434 }))
+    d.files.set(PID_FILE, JSON.stringify({ pid: 4243, port: 41134 }))
     d.pathsByPid.set(4243, '/opt/homebrew/bin/llama-server')
     expect(await s.killOrphanIfOurs()).toBe(false)
     expect(d.killedPids).toEqual([])
@@ -360,8 +360,8 @@ describe('fase locale correzioni 2 (LD4): l\'env del figlio è SOLO quello che s
   })
 
   it('childEnvFor è una funzione pura sulla lista ammessa (LANG assente non compare)', () => {
-    const env = childEnvFor('k', { PATH: '/bin', HOME: '/Users/x', SANDBOT_FAKE_SECRET: 'no', LC_ALL: 'C' } as NodeJS.ProcessEnv)
-    expect(env).toEqual({ LLAMA_API_KEY: 'k', PATH: '/bin', HOME: '/Users/x', LC_ALL: 'C' })
+    const env = childEnvFor('k', { PATH: '/bin', HOME: '/Users/test', SANDBOT_FAKE_SECRET: 'no', LC_ALL: 'C' } as NodeJS.ProcessEnv)
+    expect(env).toEqual({ LLAMA_API_KEY: 'k', PATH: '/bin', HOME: '/Users/test', LC_ALL: 'C' })
     expect('TMPDIR' in env).toBe(false) // assente nell'env di partenza → non compare
   })
 })

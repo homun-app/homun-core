@@ -6,12 +6,12 @@
 import { describe, expect, it, afterAll } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, chmodSync, mkdirSync, readlinkSync, statSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../src/test-tmp'
 import { join } from 'node:path'
 
 const ROOT = join(import.meta.dirname, '..', '..')
 const FAKE = join(ROOT, 'scripts', 'fake-container.mjs')
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-fake-container-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-fake-container-test-'))
 
 /** Lancia la CLI finta con env di prova; log su un file del TMP (uno per chiamata). */
 let runSeq = 0

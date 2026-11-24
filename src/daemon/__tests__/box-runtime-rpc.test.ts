@@ -4,7 +4,7 @@
 // risponde. Il runner è finto, la CLI `container` non viene MAI chiamata.
 import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../test-tmp'
 import { join } from 'node:path'
 
 vi.mock('../../main/agent/permissions', () => ({
@@ -32,7 +32,7 @@ const api: Record<string, (p: unknown[]) => unknown> = buildApiMethods(() => und
 const events: SandbotEvent[] = []
 
 beforeAll(() => {
-  const dir = mkdtempSync(join(tmpdir(), 'sandbot-box-runtime-rpc-'))
+  const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-box-runtime-rpc-'))
   setDataDir(dir)
   dataDir()
   db()
