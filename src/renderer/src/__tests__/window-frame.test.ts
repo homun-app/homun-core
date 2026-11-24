@@ -113,4 +113,35 @@ describe('DS3: ogni fascia di trascinamento è una testata (e ogni testata è un
     const noBand = all.filter((e) => e.head !== null && !(has(e.cls, 'drag-region') && has(e.cls, 'h-col-head'))).map((e) => `${e.file} [${e.head}]: ${e.cls}`)
     expect({ noHead, noBand }).toEqual({ noHead: [], noBand: [] })
   })
+  it('dentro una testata in riga (flex), la riga interna alta quanto la testata (h-full) è anche larga quanto lei (w-full)', () => {
+    // Il difetto visto dal vivo dopo DS3, in tre colonne: la fascia è un flex in RIGA e una sua
+    // figlia è larga quanto il suo contenuto — lo spazio che centra la pillola del bot, o che
+    // spinge la ✕ del pannello e «Esporta» a destra, non c'è, e tutto resta a sinistra.
+    const bad: string[] = []
+    for (const file of sourceFiles(SRC)) {
+      const visit = (node: unknown): void => {
+        if (!node || typeof node !== 'object') return
+        const n = node as Node
+        if (n.type === 'JSXElement') {
+          const open = n.openingElement as Node | undefined
+          const cls = open ? classTextOf(open) : null
+          if (open && attrText(open, 'data-col-head') !== null && has(cls, 'flex') && !has(cls, 'flex-col')) {
+            for (const child of (n.children ?? []) as Node[]) {
+              if (child.type !== 'JSXElement') continue
+              const c = classTextOf(child.openingElement as Node)
+              if (has(c, 'h-full') && !has(c, 'w-full')) bad.push(`${rel(file)} [${attrText(open, 'data-col-head')}]: ${c}`)
+            }
+          }
+        }
+        for (const key of Object.keys(n)) {
+          if (key === 'loc' || key === 'start' || key === 'end' || key === 'extra' || key === 'errors' || key === 'tokens' || key === 'comments') continue
+          const child = n[key]
+          if (Array.isArray(child)) for (const c of child) visit(c)
+          else if (child && typeof child === 'object') visit(child)
+        }
+      }
+      visit(parse(readFileSync(file, 'utf8'), { sourceType: 'module', plugins: ['typescript', 'jsx'] }).program)
+    }
+    expect(bad).toEqual([])
+  })
 })
