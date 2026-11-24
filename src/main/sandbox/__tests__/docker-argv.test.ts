@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, vi } from 'vitest'
+import { describe, expect, it, afterEach, onTestFinished, vi } from 'vitest'
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -611,34 +611,43 @@ describe('DOCKER_BG_WRAPPER_SH col vero /bin/sh (F1)', () => {
 
   it('il pid scritto è quello del GRUPPO: kill -TERM -- -<pgid> termina anche i FIGLI', async () => {
     const tmp = mkdtempSync(join(tmpdir(), 'sandbot-wrap-'))
-    try {
-      // detached: il wrapper è un gruppo suo; il comando (sleep 30 & wait) ha
-      // un FIGLIO che deve morire col gruppo, non solo la shell
-      const child = spawn('/bin/sh', ['-c', DOCKER_BG_WRAPPER_SH, 'sh', 'sleep 30 & wait', '.sandbot/shells/sh-k.log', '.sandbot/shells/sh-k.exit', '.sandbot/shells/sh-k.pid'], {
-        cwd: tmp,
-        detached: true,
-        stdio: 'ignore'
-      })
-      child.unref()
-      const pidFile = join(tmp, '.sandbot/shells/sh-k.pid')
-      let pgid = 0
-      await vi.waitFor(() => {
-        try { pgid = Number(readFileSync(pidFile, 'utf8').trim()) } catch { throw new Error('il pid file non è ancora comparso') }
-        expect(pgid).toBeGreaterThan(0)
-      }, { timeout: 5000, interval: 50 })
-      // come il wrapper docker: TERM all'INTERO gruppo (pid negativo)
-      process.kill(-pgid, 'SIGTERM')
-      // il gruppo muore: shell E figlio (pieno di grazia, poi si controlla)
-      const groupAlive = (pg: number): boolean => {
-        try { process.kill(-pg, 0); return true } catch { return false }
+    // detached: il wrapper è un gruppo suo; il comando (sleep 30 & wait) ha
+    // un FIGLIO che deve morire col gruppo, non solo la shell
+    const child = spawn('/bin/sh', ['-c', DOCKER_BG_WRAPPER_SH, 'sh', 'sleep 30 & wait', '.sandbot/shells/sh-k.log', '.sandbot/shells/sh-k.exit', '.sandbot/shells/sh-k.pid'], {
+      cwd: tmp,
+      detached: true,
+      stdio: 'ignore'
+    })
+    child.unref()
+    // la pulizia NON dipende dal finire in tempo: sotto carico il test può
+    // scadere PRIMA dei due waitFor e il finally verrebbe abbandonato a metà
+    // corsa — qui il gruppo (leader child.pid, nato detached) muore di SIGKILL
+    // comunque e la temporanea sparisce: nessun «sleep 30» orfano per
+    // test-tmp-guard, in verde come in rosso
+    const wrapperPgid = child.pid ?? 0
+    onTestFinished(() => {
+      if (wrapperPgid > 0) {
+        try { process.kill(-wrapperPgid, 'SIGKILL') } catch { /* il gruppo è già morto */ }
       }
-      await vi.waitFor(() => expect(groupAlive(pgid)).toBe(false), { timeout: 5000, interval: 50 })
-      // il wrapper ucciso NON ha scritto l'exit file (nessuna chiusura spuria)
-      expect(existsSync(join(tmp, '.sandbot/shells/sh-k.exit'))).toBe(false)
-    } finally {
       rmSync(tmp, { recursive: true, force: true })
+    })
+    const pidFile = join(tmp, '.sandbot/shells/sh-k.pid')
+    let pgid = 0
+    await vi.waitFor(() => {
+      try { pgid = Number(readFileSync(pidFile, 'utf8').trim()) } catch { throw new Error('il pid file non è ancora comparso') }
+      expect(pgid).toBeGreaterThan(0)
+    }, { timeout: 5000, interval: 50 })
+    // come il wrapper docker: TERM all'INTERO gruppo (pid negativo)
+    process.kill(-pgid, 'SIGTERM')
+    // il gruppo muore: shell E figlio (pieno di grazia, poi si controlla)
+    const groupAlive = (pg: number): boolean => {
+      try { process.kill(-pg, 0); return true } catch { return false }
     }
-  })
+    await vi.waitFor(() => expect(groupAlive(pgid)).toBe(false), { timeout: 5000, interval: 50 })
+    // il wrapper ucciso NON ha scritto l'exit file (nessuna chiusura spuria)
+    expect(existsSync(join(tmp, '.sandbot/shells/sh-k.exit'))).toBe(false)
+    // timeout = somma dei DUE waitFor (5 s + 5 s) + margine
+  }, 15000)
 
   it('la forma del wrapper è quella attesa (sh -c, mkdir, gruppo proprio, pid e exit file)', () => {
     expect(DOCKER_BG_WRAPPER_SH).toContain('mkdir -p "$(dirname "$2")"')
