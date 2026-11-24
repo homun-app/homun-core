@@ -7,6 +7,9 @@
 // Fase pagine · ritocchi (P2): pageBody — il corpo da rendere nella pagina
 // aperta, dove il primo `# ` uguale al titolo NON si riduplica (il titolo lo
 // mostra già la pagina con la sua riga dedicata).
+// Fase design (DS4): previewLines — le righe dell'anteprima della scheda di
+// un documento (Libreria, griglia): le prime righe utili come testo, senza
+// il `# ` che è già il titolo della scheda.
 
 export interface PagePreview {
   /** il titolo dal primo `# ` (null se non c'è) */
@@ -223,4 +226,20 @@ export function pageBody(markdown: string, title: string): string {
     return markdown // la prima riga non vuota non è il titolo: tutto resta
   }
   return markdown
+}
+
+/**
+ * Fase design (DS4): le righe dell'ANTEPRIMA DELLA SCHEDA di un documento —
+ * le prime `count` righe utili, ognuna già TESTO (previewLineText: mai
+ * markdown grezzo, mai `|---|---|`). La scheda ha il titolo SOPRA e
+ * l'anteprima sotto, quindi il primo `# ` uguale al titolo non si ripete:
+ * lo toglie pageBody, lo stesso criterio della pagina aperta (un `# `
+ * diverso resta: è contenuto). Pura: stesso Markdown → stesse righe.
+ */
+export function previewLines(markdown: string, title: string, count = 4): string[] {
+  return pageBody(markdown, title)
+    .split(/\n+/)
+    .map(previewLineText)
+    .filter(Boolean)
+    .slice(0, count)
 }

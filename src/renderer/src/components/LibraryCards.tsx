@@ -1,31 +1,60 @@
 // Le card della fase 14 in chat, rese pulite (fase 16b, S6): la card PAGINA
-// del documento (fase pagine G1: anteprima, indice, «Pagina»; il clic apre la
-// pagina), il grafico salvato in libreria (icona, titolo, sottotitolo, Apri),
-// la card del fill di un login (ambra, con la riga dopo la decisione), il
-// modulo SICURO (i campi sono password e salvano via RPC nel vault: mai in
-// chat) e la card del contatto da salvare. Niente bordi: fondi tenui, angoli
-// 18 px.
-import { useEffect, useState } from 'react'
+// del documento (fase pagine G1: il clic apre la pagina), il grafico salvato
+// in libreria (icona, titolo, sottotituto, Apri), la card del fill di un login
+// (ambra, con la riga dopo la decisione), il modulo SICURO (i campi sono
+// password e salvano via RPC nel vault: mai in chat) e la card del contatto da
+// salvare. CardShell (DecidedRow) dà il fondo tenue delle card di approvazione.
+//
+// Fase design (DS4) — le schede in chat passano al sistema:
+//  · la card del documento È la scheda della Libreria (le righe di DOC_CARD,
+//    da LibraryPanel): rounded-surface col bordo, il titolo in due righe,
+//    l'anteprima su quattro, l'etichetta in fondo. Prima era una scheda a
+//    parte — titolo grande, l'indice in piccolo, la sfumatura, angoli di 18 px
+//    e una max-w-3xl scritti qui —: una scheda sola in tutto l'app, e la
+//    larghezza la decide la colonna della chat.
+//  · i «⚠» degli avvisi (la richiesta nata dopo letture dal web, i dati di
+//    una fonte esterna) sono un'icona lucide in una riga del sistema (Notice:
+//    icona · testo text-small).
+//  · i campi sono il campo di DS1 (36 px, il raggio dei campi, text-body), le
+//    azioni sono Button: la principale è una pillola.
+import { useEffect, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
-import { FileText, BarChart3, KeyRound, UserRound } from 'lucide-react'
+import { BarChart3, FileText, KeyRound, TriangleAlert, UserRound } from 'lucide-react'
 import { api, useStore } from '../store'
 import { fillFieldLabel } from '../lib/fill-fields'
 import { i18n } from '../lib/i18n'
 // fase pagine (G1): l'anteprima della card è la funzione pura della pagina
 import { pagePreview, type PagePreview } from '../lib/page-view'
+import { cn } from '../lib/utils'
 import type { TranscriptEntry, SendMessagePayload } from '../../../shared/types'
 import { DecidedRow, CardShell } from './DecidedRow'
+import { DOC_CARD } from './LibraryPanel'
+import { Button } from './ui/button'
+import { Notice } from './ui/notice'
 
 const metaOf = (entry: TranscriptEntry) => (entry.meta ?? {}) as { approvalId?: string; status?: string; message?: SendMessagePayload }
 
+/** Il campo delle card: il campo di DS1 (36 px, il raggio dei campi, text-body), con l'anello del fuoco solo da tastiera. */
+const FIELD = 'h-control w-full rounded-control px-3 text-body outline-none transition focus-visible:ring-2 focus-visible:ring-ring'
+
+/** La riga d'avviso dentro una card (la richiesta nata dopo letture dal web): la riga del sistema, in rosso e con il suo fondo tenue. */
+function WarnRow({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <Notice tone="destructive" icon={<TriangleAlert className="size-4" aria-hidden="true" />} className={className}>
+      {children}
+    </Notice>
+  )
+}
+
 /**
- * Fase pagine (G1): la card del documento diventa la CARD DELLA PAGINA —
- * sopra l'anteprima (titolo grande, primo paragrafo, i primi 6 titoli come
- * indice in piccolo, sfumata in fondo), sotto una riga con icona, titolo ed
- * etichetta «Pagina» («Pagina · versione N» se N > 1). Il clic APRE LA
- * PAGINA (G2), non più la libreria globale. L'anteprima viene dalla funzione
- * pura pagePreview sul contenuto della versione corrente.
+ * Fase pagine (G1): la card del documento diventa la CARD DELLA PAGINA — il
+ * clic APRE LA PAGINA (G2), non più la libreria globale. L'anteprima viene
+ * dalla funzione pura pagePreview sul contenuto della versione corrente (il
+ * primo paragrafo, mai markdown grezzo: R2).
+ * Fase design (DS4): è la scheda della Libreria (DOC_CARD) — titolo, anteprima
+ * su quattro righe, etichetta «Pagina» («Pagina · versione N» se N > 1) in
+ * fondo, con l'icona del documento.
  */
 export function DocumentCard({ entry }: { entry: TranscriptEntry }) {
   const openPage = useStore((s) => s.openPage)
@@ -42,43 +71,23 @@ export function DocumentCard({ entry }: { entry: TranscriptEntry }) {
     return () => { alive = false }
   }, [doc?.id, doc?.version]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!doc) return null
-  const headings = preview?.headings.slice(0, 6) ?? []
   return (
-    <div data-testid="page-card" className="w-full max-w-3xl">
+    <div data-testid="page-card" className="w-full">
       <button
-        className="w-full rounded-[18px] bg-muted p-4 text-left transition hover:bg-muted/80"
+        type="button"
+        className={cn('flex w-full flex-col gap-2 rounded-surface border bg-card p-4 text-left transition hover:bg-muted/50', DOC_CARD.focus)}
         onClick={() => openPage(doc.id, 'chat')}
       >
-        {/* l'anteprima: alta al massimo ~260 px, sfumata in fondo */}
-        <div className="relative max-h-[260px] overflow-hidden rounded-[14px] bg-card/60 px-5 pb-5 pt-4" data-testid="page-card-preview">
-          <p className="font-display text-[22px] leading-snug">{preview?.title ?? doc.title}</p>
-          {preview?.intro && <p className="mt-2 line-clamp-3 text-[13px] leading-relaxed text-muted-foreground">{preview.intro}</p>}
-          {headings.length > 0 && (
-            <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
-              {headings.map((h, i) => (
-                <li key={i} className="flex gap-1.5">
-                  <span aria-hidden="true" className="text-muted-foreground/50">·</span>
-                  <span className="truncate">{h}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-muted" />
-        </div>
-        {/* la riga sotto: icona, titolo, etichetta */}
-        <div className="mt-3 flex items-center gap-3">
-          <span className="grid size-9 shrink-0 place-items-center rounded-[12px] bg-card">
-            <FileText className="size-4.5 text-muted-foreground" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[15px] font-medium">{doc.title}</span>
-            <span className="block text-[13px] text-muted-foreground" data-testid="page-card-label">
-              {doc.version > 1
-                ? <Trans>Pagina · versione {doc.version}</Trans>
-                : <Trans>Pagina</Trans>}
-            </span>
-          </span>
-        </div>
+        {/* il titolo: quello del primo `# ` del documento, se c'è */}
+        <span className={DOC_CARD.title}>{preview?.title ?? doc.title}</span>
+        {/* l'anteprima: il primo paragrafo, quattro righe al massimo */}
+        <span data-testid="page-card-preview" className={DOC_CARD.preview}>{preview?.intro}</span>
+        <span data-testid="page-card-label" className={cn(DOC_CARD.meta, 'flex items-center gap-1.5')}>
+          <FileText className="size-4 shrink-0" aria-hidden="true" />
+          {doc.version > 1
+            ? <Trans>Pagina · versione {doc.version}</Trans>
+            : <Trans>Pagina</Trans>}
+        </span>
       </button>
     </div>
   )
@@ -92,20 +101,18 @@ export function ChartCard({ entry }: { entry: TranscriptEntry }) {
   if (!chart) return null
   return (
     <CardShell>
-      <div className="flex items-center gap-3.5">
-        <span className="grid size-11 shrink-0 place-items-center rounded-[12px] bg-card">
-          <BarChart3 className="size-5 text-muted-foreground" />
+      {/* la riga a filo del sistema (il respiro lo dà già CardShell): icona nello slot da 32, titolo, seconda riga grigia */}
+      <div className="flex items-center gap-row-gap">
+        <span className="grid size-8 shrink-0 place-items-center text-muted-foreground">
+          <BarChart3 className="size-4" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[15px] font-medium">{chart.title}</span>
-          <span className="block text-[13px] text-muted-foreground"><Trans>Grafico · in Libreria</Trans></span>
+          <span className="block truncate text-body font-medium">{chart.title}</span>
+          <span className="mt-0.5 block truncate text-small text-muted-foreground"><Trans>Grafico · in Libreria</Trans></span>
         </span>
-        <button
-          className="shrink-0 rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
-          onClick={() => openLibrary(chart.id)}
-        >
+        <Button variant="secondary" size="sm" onClick={() => openLibrary(chart.id)}>
           <Trans>Apri</Trans>
-        </button>
+        </Button>
       </div>
     </CardShell>
   )
@@ -131,30 +138,29 @@ export function FillCard({ entry }: { entry: TranscriptEntry }) {
   }
   const content = (
     <>
-      <p className="text-[15px] font-semibold">
-        <Trans>Compilo il login «{fill.label}» su <span className="font-mono text-[13px]">{fill.origin}</span>?</Trans>
+      <p className="text-body font-medium">
+        <Trans>Compilo il login «{fill.label}» su <span className="font-mono text-small">{fill.origin}</span>?</Trans>
       </p>
-      <p className="mt-1 text-xs text-muted-foreground"><Trans>Campi: {fill.fields.map(fieldText).join(', ')}</Trans></p>
+      <p className="mt-1 text-small text-muted-foreground"><Trans>Campi: {fill.fields.map(fieldText).join(', ')}</Trans></p>
       {!done && (
         <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
+          <Button
             onClick={() => resolveApproval(entry.agentId, m.approvalId!, 'allow', 'turn')}
           >
             <Trans>Consenti</Trans>
-          </button>
-          <button
-            className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
+          </Button>
+          <Button
+            variant="secondary"
             onClick={() => resolveApproval(entry.agentId, m.approvalId!, 'allow', 'always')}
           >
             <Trans>Sempre per questo sito</Trans>
-          </button>
-          <button
-            className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-card hover:text-foreground"
+          </Button>
+          <Button
+            variant="ghost"
             onClick={() => resolveApproval(entry.agentId, m.approvalId!, 'deny', 'once')}
           >
             <Trans>Rifiuta</Trans>
-          </button>
+          </Button>
         </div>
       )}
     </>
@@ -214,55 +220,55 @@ export function SecureInputCard({ entry }: { entry: TranscriptEntry }) {
   }
   const content = (
     <>
-      <div className="flex items-center gap-2 text-sm">
+      <div className="flex items-center gap-2 text-body">
         <KeyRound className="size-4 text-muted-foreground" />
         <span className="font-medium"><Trans>Modulo sicuro — {card.kind === 'login' ? 'login' : 'secret'}</Trans></span>
       </div>
-      <p className="mt-1 text-sm">{card.reason}</p>
+      <p className="mt-1 text-body">{card.reason}</p>
       {/* P5: la richiesta nata dopo contenuti letti dal web — origine in evidenza */}
       {card.untrusted && (
-        <p className="mt-2 rounded-[10px] bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
-          <Trans>⚠ Richiesta nata dopo contenuti letti dal web: controlla che l'origine sia davvero quella del sito.</Trans>
-        </p>
+        <WarnRow className="mt-2 rounded-control bg-destructive/10 px-3 py-2">
+          <Trans>Richiesta nata dopo contenuti letti dal web: controlla che l'origine sia davvero quella del sito.</Trans>
+        </WarnRow>
       )}
       {!done && (
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 flex flex-col gap-2">
           {card.kind === 'login' ? (
             <>
-              <input className="w-full rounded-[10px] bg-card px-3 py-1.5 text-sm outline-none" placeholder={t`Etichetta (es. Portale ASPI)`} value={label} onChange={(e) => setLabel(e.target.value)} />
+              <input className={cn(FIELD, 'bg-card')} placeholder={t`Etichetta (es. Portale ASPI)`} value={label} onChange={(e) => setLabel(e.target.value)} />
               <input
-                className={`w-full rounded-[10px] px-3 py-1.5 text-sm outline-none ${card.untrusted ? 'bg-destructive/10 text-destructive' : 'bg-card'}`}
+                // l'origine di una richiesta nata dal web si nota: lo stesso rosso dell'avviso
+                className={cn(FIELD, card.untrusted ? 'bg-destructive/10 text-destructive' : 'bg-card')}
                 placeholder={t`Origine https://…`}
                 value={origin}
                 onChange={(e) => setOrigin(e.target.value)}
               />
-              <input type="password" autoComplete="off" className="w-full rounded-[10px] bg-card px-3 py-1.5 text-sm outline-none" placeholder={t`Nome utente`} value={username} onChange={(e) => setUsername(e.target.value)} />
-              <input type="password" autoComplete="new-password" className="w-full rounded-[10px] bg-card px-3 py-1.5 text-sm outline-none" placeholder={t`Password`} value={password} onChange={(e) => setPassword(e.target.value)} />
-              <input type="password" autoComplete="off" className="w-full rounded-[10px] bg-card px-3 py-1.5 text-sm outline-none" placeholder={t`Segreto TOTP (opzionale)`} value={totp} onChange={(e) => setTotp(e.target.value)} />
+              <input type="password" autoComplete="off" className={cn(FIELD, 'bg-card')} placeholder={t`Nome utente`} value={username} onChange={(e) => setUsername(e.target.value)} />
+              <input type="password" autoComplete="new-password" className={cn(FIELD, 'bg-card')} placeholder={t`Password`} value={password} onChange={(e) => setPassword(e.target.value)} />
+              <input type="password" autoComplete="off" className={cn(FIELD, 'bg-card')} placeholder={t`Segreto TOTP (opzionale)`} value={totp} onChange={(e) => setTotp(e.target.value)} />
             </>
           ) : (
             <>
-              <input className="w-full rounded-[10px] bg-card px-3 py-1.5 text-sm outline-none" placeholder={t`Nome (es. API_KEY)`} value={name} onChange={(e) => setName(e.target.value)} />
-              <input type="password" autoComplete="new-password" className="w-full rounded-[10px] bg-card px-3 py-1.5 text-sm outline-none" placeholder={t`Valore`} value={value} onChange={(e) => setValue(e.target.value)} />
+              <input className={cn(FIELD, 'bg-card')} placeholder={t`Nome (es. API_KEY)`} value={name} onChange={(e) => setName(e.target.value)} />
+              <input type="password" autoComplete="new-password" className={cn(FIELD, 'bg-card')} placeholder={t`Valore`} value={value} onChange={(e) => setValue(e.target.value)} />
             </>
           )}
-          {err && <p className="text-xs text-destructive">{err}</p>}
+          {err && <p className="text-small text-destructive">{err}</p>}
           <div className="flex gap-2">
-            <button
-              className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-40"
+            <Button
               disabled={busy || (card.kind === 'login' ? !origin || !username || !password : !name || !value)}
               onClick={() => void submit()}
             >
               <Trans>Salva nel vault</Trans>
-            </button>
-            <button
-              className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-card hover:text-foreground"
+            </Button>
+            <Button
+              variant="ghost"
               onClick={() => useStore.getState().resolveApproval(entry.agentId, m.approvalId!, 'deny', 'once')}
             >
               <Trans>Annulla</Trans>
-            </button>
+            </Button>
           </div>
-          <p className="text-[11px] text-muted-foreground"><Trans>Cifrato sul Mac. Il bot non vedrà mai la password.</Trans></p>
+          <p className="text-caption text-muted-foreground"><Trans>Cifrato sul Mac. Il bot non vedrà mai la password.</Trans></p>
         </div>
       )}
     </>
@@ -290,30 +296,33 @@ export function ContactCard({ entry }: { entry: TranscriptEntry }) {
   const done = m.status && m.status !== 'pending'
   const content = (
     <>
-      <div className="flex items-center gap-2 text-sm">
+      <div className="flex items-center gap-2 text-body">
         <UserRound className="size-4 text-muted-foreground" />
         <span className="font-medium"><Trans>Contatto da salvare nel vault</Trans></span>
       </div>
-      {card.untrusted && <p className="mt-1 text-xs text-destructive/90"><Trans>⚠ dati letti da una fonte esterna</Trans></p>}
-      <p className="mt-1.5 text-[15px] font-medium">{card.name}</p>
-      {card.emails.length > 0 && <p className="text-xs text-muted-foreground">{card.emails.join(', ')}</p>}
-      {card.phones.length > 0 && <p className="text-xs text-muted-foreground">{card.phones.join(', ')}</p>}
-      {card.address && <p className="text-xs text-muted-foreground">{card.address}</p>}
-      {card.notes && <p className="text-xs text-muted-foreground">{card.notes}</p>}
+      {card.untrusted && (
+        <WarnRow className="mt-1">
+          <Trans>dati letti da una fonte esterna</Trans>
+        </WarnRow>
+      )}
+      <p className="mt-1.5 text-body font-medium">{card.name}</p>
+      {card.emails.length > 0 && <p className="text-small text-muted-foreground">{card.emails.join(', ')}</p>}
+      {card.phones.length > 0 && <p className="text-small text-muted-foreground">{card.phones.join(', ')}</p>}
+      {card.address && <p className="text-small text-muted-foreground">{card.address}</p>}
+      {card.notes && <p className="text-small text-muted-foreground">{card.notes}</p>}
       {!done && (
         <div className="mt-3 flex gap-2">
-          <button
-            className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
+          <Button
             onClick={() => resolveApproval(entry.agentId, m.approvalId!, 'allow', 'once')}
           >
             <Trans>Salva</Trans>
-          </button>
-          <button
-            className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-card hover:text-foreground"
+          </Button>
+          <Button
+            variant="ghost"
             onClick={() => resolveApproval(entry.agentId, m.approvalId!, 'deny', 'once')}
           >
             <Trans>Non salvare</Trans>
-          </button>
+          </Button>
         </div>
       )}
     </>

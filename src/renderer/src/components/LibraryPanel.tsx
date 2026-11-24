@@ -1,13 +1,13 @@
 // La LIBRERIA (fase 14, punti 1-5 → fase 16c C6, tavola 4 destra): la vista
-// globale con filtri «Tutti i bot ▾» e «Tutti i tipi ▾», la scelta griglia ▦ /
-// elenco ☰ (ricordata in localStorage con try/catch), card senza bordo su
-// bg-muted con anteprima (mini grafico dai dati salvati, prime righe dei
-// documenti, badge dell'estensione per i file), titolo e «Tipo · Bot ·
-// quando». Fase pagine (G5): le righe di DOCUMENTO aprono la PAGINA (G2) con
-// la ✕ che torna qui, e l'etichetta dice «Pagina» (nei filtri pure); lo
-// storico con versioni, esporta, rinomina e «Ripristina» resta la vista di
-// oggi (ci porta la riga della versione della pagina). Il corpo del documento
-// (Markdown + blocchi grafico, Vega-Lite e Mermaid SEMPRE <img>) vive in
+// globale con i filtri «Tutti i bot ▾» e «Tutti i tipi ▾», la ricerca per
+// titolo, la scelta griglia ▦ / elenco ☰ (ricordata in localStorage con
+// try/catch), le schede con l'anteprima (le prime righe dei documenti, la
+// miniatura dei grafici, l'estensione dei file), il titolo e «Tipo · Bot ·
+// quando». Fase pagine (G5): le righe di DOCUMENTO aprono la PAGINA (G2) che
+// torna qui, e l'etichetta dice «Pagina» (nei filtri pure); lo storico con
+// versioni, esporta, rinomina e «Ripristina» resta la vista di oggi (ci porta
+// la riga della versione della pagina). Il corpo del documento (Markdown +
+// blocchi grafico, Vega-Lite e Mermaid SEMPRE <img>) vive in
 // DocumentMarkdown, condiviso con la pagina aperta.
 //
 // B4 (fase b20-bug) — Elimina, Archivia, anteprime pulite:
@@ -29,12 +29,31 @@
 //    casella in lista; da DUE selezionate la barra «N selezionati» con
 //    Archivia (Ripristina, tra gli archiviati) ed Elimina — UNA conferma che
 //    dice quanti. Le funzioni pure stanno in lib/library-view.
-import { useEffect, useMemo, useState } from 'react'
+//
+// Fase design (DS4) — la Libreria passa al sistema, con una scheda sola:
+//  · il guscio è PageShell (larghezza «page»): la testata di PageHeader —
+//    indietro · icona · titolo · griglia/elenco — sulla riga dei 52 di OGNI
+//    colonna; la ricerca e i filtri nella barra degli strumenti, ferma sotto
+//    (prima stavano in testa e andavano a capo, la ricerca su una riga sua);
+//    il corpo che scorre largo quanto l'area, col contenuto centrato. Addio
+//    alla colonna max-w-4xl scritta a mano.
+//  · la scheda (rounded-surface, bordo, bg-card): titolo, la zona
+//    dell'anteprima ALTA QUATTRO RIGHE (LibraryPreview: il perché sta lì),
+//    i metadati in fondo. Le righe sono quelle di DOC_CARD, le STESSE della
+//    scheda in chat (LibraryCards): una scheda sola in tutto l'app.
+//  · la lista è FlatList/FlatRow: l'icona del tipo nello slot da 32, il
+//    titolo, i metadati come seconda riga, la data a destra.
+//  · i «⋯», «Riprova», «Esci dalla selezione» e le azioni dei dialoghi sono
+//    Button (il bottone unico); nella testata i controlli sono da 32.
+//  · il «★» dei fissati e i glifi «⚠» e «↩» diventano icone lucide (DS1:
+//    solo icone lucide nell'interfaccia). I testi perdono il glifo, non il
+//    senso: «⚠ esterno» è l'icona dell'avviso e «esterno».
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { formatDate } from '../lib/i18n'
-import { ChevronLeft, LayoutGrid, List, MoreHorizontal, X } from 'lucide-react'
+import { BarChart3, File as FileIcon, FileText, LayoutGrid, Library, List, MoreHorizontal, Search, Star, TriangleAlert, Undo2, X } from 'lucide-react'
 import { api, useStore } from '../store'
 // fase pagine (G2): il corpo del documento, condiviso con la pagina aperta
 import { DocumentBody, InlineChart, svgDataUrl } from './DocumentMarkdown'
@@ -43,14 +62,19 @@ import {
   libraryRows, libraryListArgs, libraryClickIntent, librarySelectionAfter, librarySelectionVisible,
   LIBRARY_SELECTION_EMPTY, type LibraryKindFilter, type LibrarySelection
 } from '../lib/library-view'
-// R2 (fase ritocchi-beta18): il testo dell'anteprima dei documenti — la
-// STESSA funzione pura delle card della Libreria (mai markdown grezzo)
-import { previewLineText } from '../lib/page-view'
+// fase design (DS4): le righe di TESTO dell'anteprima di una scheda (mai
+// markdown grezzo; il `# ` che è già il titolo non si ripete)
+import { previewLines } from '../lib/page-view'
+import { cn } from '../lib/utils'
+import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub,
   DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger
 } from './ui/dropdown-menu'
+import { FlatList, FlatRow } from './ui/flat-list'
+import { PageHeader } from './ui/page-header'
+import { PageShell } from './ui/page-shell'
 import type { LibraryItemInfo, LibraryContentInfo, SandbotApi } from '../../../shared/types'
 
 /** La scelta griglia/elenco resta nel localStorage (try/catch: può mancare). */
@@ -77,6 +101,46 @@ const KIND_LABEL: Record<LibraryItemInfo['kind'], MessageDescriptor> = {
   document: msg`Pagina`,
   chart: msg`Grafico`,
   file: msg`File`
+}
+
+/**
+ * Fase design (DS4): LE RIGHE DELLA SCHEDA DI UN DOCUMENTO — titolo, anteprima,
+ * metadati — scritte UNA volta sola. La scheda della Libreria (la griglia,
+ * qui sotto) e quella della chat (LibraryCards, DocumentCard) sono la stessa:
+ * cambiare una riga qui le cambia insieme. `focus` è l'anello del fuoco della
+ * superficie che si apre (solo da tastiera).
+ */
+export const DOC_CARD = {
+  /** il titolo: due righe al massimo, il titolo di riga di DS1 (text-body, peso medio) */
+  title: 'line-clamp-2 text-body font-medium break-words',
+  /** l'anteprima: quattro righe al massimo, grigia; una riga del documento resta sulla sua riga (pre-line) */
+  preview: 'line-clamp-4 whitespace-pre-line text-small text-muted-foreground',
+  /** i metadati, in fondo alla scheda */
+  meta: 'text-caption text-muted-foreground',
+  /** l'anello del fuoco VERSO L'INTERNO: la scheda sta in una griglia che ritaglia, uno fuori dal bordo ai lati sparirebbe */
+  focus: 'outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring'
+} as const
+
+/**
+ * Il CAMPO di DS1 (la ricerca e i filtri della barra degli strumenti, il campo
+ * della finestra di Rinomina): 36 px, il raggio dei campi, fondo tenue,
+ * text-body.
+ */
+const FIELD = 'h-control shrink-0 rounded-control bg-muted px-3 text-body transition'
+
+/**
+ * L'anello del fuoco del campo, SOLO da tastiera (focus-visible: la variante è
+ * quella di B5, che non scatta dopo un clic del mouse). Aderente, senza lo
+ * stacco di 2 px che hanno i bottoni: nella barra degli strumenti la riga è
+ * alta 40 e il campo 36, e l'anello con lo stacco finirebbe sotto la testata.
+ */
+const FIELD_FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-ring'
+
+/** L'icona del tipo di una voce, da 16 px: va nello slot da 32 della riga (FlatRow). */
+function kindIcon(kind: LibraryItemInfo['kind']): ReactNode {
+  if (kind === 'chart') return <BarChart3 className="size-4" />
+  if (kind === 'file') return <FileIcon className="size-4" />
+  return <FileText className="size-4" />
 }
 
 /** I formati di esportazione di una voce (come prepareLibraryExport del daemon). */
@@ -142,64 +206,68 @@ export interface LibraryPanelInitial {
 export function LibraryPanel({ initial }: { initial?: LibraryPanelInitial } = {}) {
   const openLibraryId = useStore((s) => s.openLibraryId)
   if (openLibraryId === null) return null
-  // verifica impostazioni: la vista sta SOPRA la fascia di trascinamento della
-  // chat, che Electron calcola ignorando lo z-index — no-drag, o la freccia ‹
-  // in alto cade dentro la fascia e il clic trascina la finestra
-  return (
-    <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background" data-testid="library-panel">
-      {openLibraryId === '' ? <LibraryList initial={initial} /> : <LibraryItemView id={openLibraryId} />}
-    </div>
-  )
+  // fase design (DS4): ogni vista è un guscio intero, e tutte e due portano il
+  // testid della radice (lo cercano le sonde). La radice di PageShell è
+  // no-drag: la vista sta SOPRA la fascia di trascinamento della chat, che
+  // Electron calcola ignorando lo z-index — senza, la freccia ‹ in alto cade
+  // dentro la fascia e il clic trascina la finestra. «» è la lista; un id,
+  // la vista di quella voce.
+  return openLibraryId === '' ? <LibraryList initial={initial} /> : <LibraryItemView id={openLibraryId} />
 }
 
-/** L'anteprima di una card: mini grafico se lo si può disegnare, prime righe, o badge. */
+/** Le larghezze delle righe spente dell'anteprima (in %), mentre il testo arriva. */
+const PREVIEW_SKELETON = [70, 90, 80, 50]
+
+/**
+ * La zona dell'anteprima nella scheda (quattro righe: la misura la mette la
+ * scheda, con h-18). PERCHÉ una zona di misura fissa: le schede di una riga
+ * della griglia hanno così i metadati sulla STESSA linea, qualunque cosa
+ * mostrino — un documento di quattro righe o di una sola, la miniatura di un
+ * grafico, l'estensione di un file — e l'occhio le scorre senza saltare.
+ * (L'altezza uguale fra sorelle la dà la griglia, che allunga ogni scheda
+ * alla più alta: qui si allineano le righe DENTRO.)
+ * Documenti: le prime righe di TESTO (previewLines), lette una volta per
+ * voce; grafici Vega-Lite: la miniatura; file: l'estensione. Il contenuto è
+ * aria-hidden: è un'anteprima, il titolo e i metadati dicono già tutto.
+ */
 function LibraryPreview({ item }: { item: LibraryItemInfo }) {
-  const [doc, setDoc] = useState<string | null>(null)
+  const [lines, setLines] = useState<string[] | null>(null)
   const [svg, setSvg] = useState<string | null>(null)
   useEffect(() => {
     let alive = true
-    setDoc(null)
+    setLines(null)
     setSvg(null)
     if (item.kind === 'document') {
-      void api.libraryGet(item.id).then((c) => { if (alive) setDoc((c.content ?? '').slice(0, 400)) }).catch(() => undefined)
+      // B4: ogni riga passa da previewLineText — anche quelle di tabella (mai |---|---| né | Ricetta | Data |)
+      void api.libraryGet(item.id).then((c) => { if (alive) setLines(previewLines(c.content ?? '', item.title)) }).catch(() => undefined)
     } else if (item.kind === 'chart' && item.chartKind === 'vega-lite') {
       void api.libraryGet(item.id).then((c) => { if (alive) setSvg(c.svg ?? null) }).catch(() => undefined)
     }
     return () => { alive = false }
-  }, [item.id, item.kind, item.chartKind, item.updatedAt])
+  }, [item.id, item.kind, item.chartKind, item.updatedAt, item.title])
 
   if (item.kind === 'chart') {
-    if (svg) {
-      return <img className="h-full w-full object-contain p-4" src={svgDataUrl(svg)} alt="" aria-hidden="true" />
-    }
+    if (svg) return <img className="h-full w-full rounded-control object-contain p-2" src={svgDataUrl(svg)} alt="" aria-hidden="true" />
     return (
-      <div className="grid h-full w-full place-items-center" aria-hidden="true">
-        <svg width="72" height="48" viewBox="0 0 80 56"><path d="M4 48 L22 30 L36 38 L54 14 L76 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="text-muted-foreground/60" /></svg>
+      <div className="grid h-full w-full place-items-center text-muted-foreground/60" aria-hidden="true">
+        <svg width="72" height="48" viewBox="0 0 80 56"><path d="M4 48 L22 30 L36 38 L54 14 L76 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" /></svg>
       </div>
     )
   }
   if (item.kind === 'document') {
     return (
-      <div className="flex h-full w-full flex-col justify-center gap-2 px-6" aria-hidden="true">
-        {doc === null
-          ? [70, 90, 80].map((w, i) => <span key={i} className="h-2 rounded-full bg-muted-foreground/20" style={{ width: `${w}%` }} />)
-          // B4: ogni riga passa da previewLineText — anche quelle di tabella (mai |---|---| né | Ricetta | Data |)
-          : doc.split(/\n+/).map(previewLineText).filter(Boolean).slice(0, 4).map((line, i) => (
-            <span key={i} className="line-clamp-1 text-[11px] leading-4 text-muted-foreground">{line.slice(0, 90)}</span>
-          ))}
-      </div>
+      <span className="flex h-full w-full flex-col gap-1.5" aria-hidden="true">
+        {lines === null
+          // in attesa del testo: quattro righe spente, alte quanto quelle vere
+          ? PREVIEW_SKELETON.map((w, i) => <span key={i} className="h-3 rounded-full bg-muted-foreground/20" style={{ width: `${w}%` }} />)
+          : <span className={DOC_CARD.preview}>{lines.join('\n')}</span>}
+      </span>
     )
   }
-  // file: il badge dell'estensione
+  // file: l'estensione
   const ext = (item.fileName ?? '').split('.').pop()?.toUpperCase() || 'FILE'
-  return <div className="grid h-full w-full place-items-center text-2xl font-bold text-chart-2/80" aria-hidden="true">.{ext.toLowerCase()}</div>
+  return <span className="grid h-full w-full place-items-center text-title font-semibold text-chart-2/80" aria-hidden="true">.{ext.toLowerCase()}</span>
 }
-
-/**
- * Il «⋯» del menu di una voce. `no-drag` sta sul bottone: nella pagina aperta
- * la testata è la fascia che trascina la finestra (come la ✕ e «Esporta»).
- */
-const MENU_TRIGGER_CLASS = 'no-drag grid size-7 shrink-0 place-items-center rounded-full bg-card/80 text-muted-foreground shadow-soft transition hover:text-foreground'
 
 function LibraryList({ initial }: { initial?: LibraryPanelInitial }) {
   const { t, i18n } = useLingui()
@@ -305,21 +373,62 @@ function LibraryList({ initial }: { initial?: LibraryPanelInitial }) {
     clearSelection()
   }
 
+  // fase design (DS4): l'interruttore griglia/elenco sta nella testata, a
+  // destra — due bottoni tondi da 32 dentro una rotaia tonda, come le altre
+  // icone delle testate. Stanno nella fascia che trascina la finestra: ognuno
+  // porta no-drag, o il clic servirebbe a trascinarla.
+  const viewToggle = (
+    <div role="group" aria-label={t`Vista`} className="flex items-center rounded-full bg-muted p-0.5">
+      <Button
+        variant="ghost"
+        icon
+        size="sm"
+        aria-label={t`Griglia`}
+        className={cn('no-drag', view === 'grid' && 'bg-card text-foreground hover:text-foreground')}
+        onClick={() => { setView('grid'); writeLibraryView('grid') }}
+      >
+        <LayoutGrid className="size-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        icon
+        size="sm"
+        aria-label={t`Elenco`}
+        className={cn('no-drag', view === 'list' && 'bg-card text-foreground hover:text-foreground')}
+        onClick={() => { setView('list'); writeLibraryView('list') }}
+      >
+        <List className="size-4" />
+      </Button>
+    </div>
+  )
+
   return (
-    <div className="flex-1 overflow-y-auto scroll-thin px-8 py-6">
-      <div className="mx-auto max-w-4xl space-y-4">
-        {/* la testa della vista (tavola 4): titolo, filtri, griglia/elenco */}
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            className="grid size-8 place-items-center rounded-[10px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            aria-label={t`Torna alla chat`}
-            onClick={() => openLibrary(null)}
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          <h1 className="flex-1 font-display text-2xl"><Trans>Libreria</Trans></h1>
+    <PageShell
+      width="page"
+      testId="library-panel"
+      header={
+        <PageHeader
+          back={{ onClick: () => openLibrary(null), label: t`Torna alla chat` }}
+          icon={<Library className="size-5" />}
+          title={<Trans>Libreria</Trans>}
+          actions={viewToggle}
+        />
+      }
+      // la riga va a capo da sola dove l'area è stretta (il pannello del bot
+      // agganciato accanto): la ricerca resta intera, i filtri passano sotto
+      toolbar={
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+          <div className="relative min-w-48 flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <input
+              className={cn(FIELD, FIELD_FOCUS, 'w-full pl-10 placeholder:text-muted-foreground')}
+              placeholder={t`Cerca per titolo…`}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
           <select
-            className="h-9 rounded-[10px] bg-muted px-3 text-sm outline-none"
+            className={cn(FIELD, FIELD_FOCUS, 'max-w-48')}
             value={author}
             aria-label={t`Tutti i bot`}
             data-testid="library-filter-bot"
@@ -329,7 +438,7 @@ function LibraryList({ initial }: { initial?: LibraryPanelInitial }) {
             {authors.map((a) => <option key={a} value={a}>{nameOf(a)}</option>)}
           </select>
           <select
-            className="h-9 rounded-[10px] bg-muted px-3 text-sm outline-none"
+            className={cn(FIELD, FIELD_FOCUS)}
             value={kind}
             aria-label={t`Tutti i tipi`}
             onChange={(e) => setKind(e.target.value as LibraryKindFilter)}
@@ -339,205 +448,206 @@ function LibraryList({ initial }: { initial?: LibraryPanelInitial }) {
             <option value="chart">{i18n.t(msg`Grafico`)}</option>
             <option value="file">{i18n.t(msg`File`)}</option>
           </select>
-          {/* B4: il filtro «Archiviati» — un interruttore; acceso, la vista mostra solo le archiviate */}
+          {/* B4: il filtro «Archiviati» — un interruttore; acceso, la vista mostra solo le archiviate.
+              Il bordo c'è sempre (trasparente, da spento): così acceso e spento hanno la stessa misura */}
           <button
             type="button"
             aria-pressed={archived}
             data-testid="library-filter-archived"
-            className={`h-9 rounded-[10px] px-3 text-sm transition ${archived ? 'bg-card text-foreground ring-1 ring-border' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+            className={cn(FIELD, FIELD_FOCUS, 'border', archived ? 'border-border bg-card text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
             onClick={toggleArchived}
           >
             <Trans>Archiviati</Trans>
           </button>
-          <div role="group" aria-label={t`Vista`} className="flex rounded-[10px] bg-muted p-0.5">
-            <button
-              className={`grid size-8 place-items-center rounded-lg transition ${view === 'grid' ? 'bg-card text-foreground' : 'text-muted-foreground'}`}
-              aria-label={t`Griglia`}
-              onClick={() => { setView('grid'); writeLibraryView('grid') }}
-            >
-              <LayoutGrid className="size-4" />
-            </button>
-            <button
-              className={`grid size-8 place-items-center rounded-lg transition ${view === 'list' ? 'bg-card text-foreground' : 'text-muted-foreground'}`}
-              aria-label={t`Elenco`}
-              onClick={() => { setView('list'); writeLibraryView('list') }}
-            >
-              <List className="size-4" />
-            </button>
-          </div>
         </div>
-        <input
-          className="h-10 w-full rounded-full bg-muted px-4 text-sm outline-none"
-          placeholder={t`Cerca per titolo…`}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        {/* B4: le azioni sulle voci selezionate — da DUE in su */}
-        {bulkIds.length >= 2 && (
-          <div
-            role="region"
-            aria-label={t`Azioni sulle voci selezionate`}
-            data-testid="library-bulk-bar"
-            className="flex flex-wrap items-center gap-2 rounded-[14px] bg-card px-3 py-2 shadow-soft"
+      }
+      contentClassName="flex flex-col gap-block pt-4 pb-6"
+    >
+      {/* B4: le azioni sulle voci selezionate — da DUE in su */}
+      {bulkIds.length >= 2 && (
+        <div
+          role="region"
+          aria-label={t`Azioni sulle voci selezionate`}
+          data-testid="library-bulk-bar"
+          className="flex items-center gap-3 rounded-control border bg-card px-3 py-1.5"
+        >
+          <span className="text-body font-medium"><Trans>{bulkIds.length} selezionati</Trans></span>
+          <span className="min-w-2 flex-1" />
+          <Button
+            variant="secondary"
+            size="sm"
+            data-testid={archived ? 'library-bulk-restore' : 'library-bulk-archive'}
+            onClick={() => void runBulk(archived ? 'restore' : 'archive')}
           >
-            <span className="text-sm font-medium"><Trans>{bulkIds.length} selezionati</Trans></span>
-            <span className="min-w-2 flex-1" />
-            <button
-              type="button"
-              className="rounded-[10px] bg-muted px-3 py-1.5 text-sm transition hover:bg-accent"
-              data-testid={archived ? 'library-bulk-restore' : 'library-bulk-archive'}
-              onClick={() => void runBulk(archived ? 'restore' : 'archive')}
+            {archived ? <Trans>Ripristina</Trans> : <Trans>Archivia</Trans>}
+          </Button>
+          <Button variant="destructive" size="sm" data-testid="library-bulk-delete" onClick={() => setBulkConfirm({ ids: bulkIds })}>
+            <Trans>Elimina</Trans>
+          </Button>
+          <Button
+            variant="ghost"
+            icon
+            size="sm"
+            aria-label={t`Esci dalla selezione`}
+            title={t`Esci dalla selezione`}
+            data-testid="library-selection-clear"
+            onClick={clearSelection}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </Button>
+        </div>
+      )}
+      {/* B4: l'errore di un'azione (una voce che non c'è più, …): si mostra, non si ignora */}
+      {actionError !== null && (
+        <p role="alert" className={ALERT_ROW} data-testid="library-error">{actionError}</p>
+      )}
+      {stats?.warn && (
+        <p className={ALERT_ROW}>
+          <Trans>La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico).</Trans>
+        </p>
+      )}
+      {failed ? (
+        <div className={cn('flex items-center gap-2 text-body text-muted-foreground', !items.length && 'justify-center pt-16')}>
+          <Trans>Non riesco a leggere la libreria</Trans>
+          <Button variant="ghost" size="sm" onClick={() => { void refresh() }}><Trans>Riprova</Trans></Button>
+        </div>
+      ) : shown.length === 0 && (
+        <p className="pt-16 text-center text-body text-muted-foreground">
+          {/* B4: tra gli archiviati la frase è sua — la libreria è vuota, non c'è niente di archiviato */}
+          {archived
+            ? <Trans>Nessun documento archiviato.</Trans>
+            : <Trans>La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui.</Trans>}
+        </p>
+      )}
+      {/* la griglia: schede alte uguali (la griglia allunga ognuna alla più alta della sua riga).
+          Due colonne, tre quando l'AREA passa i 768 px (una query sul contenitore di PageShell):
+          il minimo dell'area è 520, e lì due colonne restano sopra i 220 px */}
+      {view === 'grid' ? (
+        <div className="grid grid-cols-2 gap-4 @3xl:grid-cols-3">
+          {shown.map((i) => (
+            <div
+              key={i.id}
+              data-testid="library-card"
+              data-id={i.id}
+              className={cn('relative flex flex-col rounded-surface border bg-card p-4 transition hover:bg-muted/50', live.selected.has(i.id) && 'ring-2 ring-primary')}
             >
-              {archived ? <Trans>Ripristina</Trans> : <Trans>Archivia</Trans>}
-            </button>
-            <button
-              type="button"
-              className="rounded-[10px] bg-destructive/10 px-3 py-1.5 text-sm font-medium text-destructive transition hover:bg-destructive/20"
-              data-testid="library-bulk-delete"
-              onClick={() => setBulkConfirm({ ids: bulkIds })}
-            >
-              <Trans>Elimina</Trans>
-            </button>
-            <button
-              type="button"
-              className="grid size-7 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              aria-label={t`Esci dalla selezione`}
-              title={t`Esci dalla selezione`}
-              data-testid="library-selection-clear"
-              onClick={clearSelection}
-            >
-              <X className="size-4" aria-hidden="true" />
-            </button>
-          </div>
-        )}
-        {/* B4: l'errore di un'azione (una voce che non c'è più, …): si mostra, non si ignora */}
-        {actionError !== null && (
-          <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive" data-testid="library-error">{actionError}</p>
-        )}
-        {stats?.warn && (
-          <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            <Trans>La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico).</Trans>
-          </p>
-        )}
-        {failed ? (
-          <div className={`flex items-center gap-2 text-sm text-muted-foreground ${items.length ? 'justify-start' : 'pt-16 justify-center'}`}>
-            <Trans>Non riesco a leggere la libreria</Trans>
-            <button className="text-primary hover:underline" onClick={() => { void refresh() }}><Trans>Riprova</Trans></button>
-          </div>
-        ) : shown.length === 0 && (
-          <p className="pt-16 text-center text-sm text-muted-foreground">
-            {/* B4: tra gli archiviati la frase è sua — la libreria non è vuota, non c'è niente di archiviato */}
-            {archived
-              ? <Trans>Nessun documento archiviato.</Trans>
-              : <Trans>La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui.</Trans>}
-          </p>
-        )}
-        {/* la griglia (tavola 4): card senza bordo su bg-muted */}
-        {view === 'grid' ? (
-          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
-            {shown.map((i) => (
-              <div
-                key={i.id}
-                data-testid="library-card"
-                data-id={i.id}
-                className={`group relative overflow-hidden rounded-[18px] transition hover:bg-muted/80 ${live.selected.has(i.id) ? 'ring-2 ring-primary' : ''}`}
+              <button
+                type="button"
+                className={cn('flex w-full flex-1 flex-col gap-2 rounded-control text-left', DOC_CARD.focus)}
+                data-testid={`library-open-${i.id}`}
+                onClick={(e) => onItemOpen(e, i)}
+                onMouseDown={onItemMouseDown}
               >
-                <button
-                  type="button"
-                  className="block w-full text-left"
-                  data-testid={`library-open-${i.id}`}
-                  onClick={(e) => onItemOpen(e, i)}
-                  onMouseDown={onItemMouseDown}
-                >
-                  <div className="h-32 rounded-[14px] bg-muted">
-                    <LibraryPreview item={i} />
-                  </div>
-                  <div className="px-1 pt-2 pb-1">
-                    <p className="truncate text-sm font-medium">{i.pinned && <span className="mr-1 text-destructive">★</span>}{i.title}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {i18n.t(KIND_LABEL[i.kind])} · {nameOf(i.authorAgentId)} · {formatDate(i.updatedAt)}
-                    </p>
-                  </div>
-                </button>
-                {/* B4: il «⋯» della voce, in alto a destra della card (sempre visibile) */}
-                <LibraryItemMenu
-                  item={i}
-                  where="grid"
-                  className="absolute top-2 right-2 z-10"
-                  onChanged={() => void refresh()}
-                  onError={setActionError}
-                  initialConfirmDelete={initial?.confirmDeleteId === i.id}
-                  initialRename={initial?.rename?.id === i.id ? initial.rename.title ?? i.title : undefined}
-                />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {shown.map((i) => (
-              <div
-                key={i.id}
-                data-testid="library-row"
-                data-id={i.id}
-                className={`flex items-center gap-2 rounded-[14px] bg-muted/60 px-2 py-3 ${live.selected.has(i.id) ? 'ring-2 ring-primary' : ''}`}
+                {/* pr-10: lo spazio del «⋯» in alto a destra — il titolo non ci passa sotto.
+                    L'asterisco dei fissati è un'icona lucide, rossa e piena come il glifo «★» di prima */}
+                <span className="flex items-start gap-1.5 pr-10">
+                  {i.pinned && <Star className="mt-0.5 size-4 shrink-0 fill-current text-destructive" aria-hidden="true" />}
+                  <span className={DOC_CARD.title} title={i.title}>{i.title}</span>
+                </span>
+                <span className="flex h-18 w-full flex-col">
+                  <LibraryPreview item={i} />
+                </span>
+                <span className={cn(DOC_CARD.meta, 'mt-auto truncate')}>
+                  {i18n.t(KIND_LABEL[i.kind])} · {nameOf(i.authorAgentId)} · {formatDate(i.updatedAt)}
+                </span>
+              </button>
+              {/* B4: il «⋯» della voce, in alto a destra della card (sempre visibile) */}
+              <LibraryItemMenu
+                item={i}
+                where="grid"
+                className="absolute top-2 right-2"
+                onChanged={() => void refresh()}
+                onError={setActionError}
+                initialConfirmDelete={initial?.confirmDeleteId === i.id}
+                initialRename={initial?.rename?.id === i.id ? initial.rename.title ?? i.title : undefined}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <FlatList>
+          {shown.map((i) => (
+            <div
+              key={i.id}
+              data-testid="library-row"
+              data-id={i.id}
+              className={cn('flex items-center gap-2 rounded-control px-2 transition hover:bg-muted/50', live.selected.has(i.id) && 'ring-2 ring-primary')}
+            >
+              {/* B4: la casella di selezione (solo in lista: in griglia si seleziona con ⌘/Maiusc + clic) */}
+              <input
+                type="checkbox"
+                className="size-4 shrink-0 accent-primary"
+                checked={live.selected.has(i.id)}
+                aria-label={t`Seleziona ${i.title}`}
+                data-testid={`library-select-${i.id}`}
+                onChange={(e) => applyClick(i.id, (e.nativeEvent as MouseEvent).shiftKey ? 'range' : 'toggle')}
+              />
+              {/* il bottone che apre è un <button> vero e contiene la riga a filo: gli servono
+                  l'EVENTO del clic (⌘/Ctrl/Maiusc) e il mousedown della selezione, che FlatRow
+                  non passa — la riga è il suo contenuto, il bottone il clic */}
+              <button
+                type="button"
+                className={cn('min-w-0 flex-1 rounded-control text-left', DOC_CARD.focus)}
+                data-testid={`library-open-${i.id}`}
+                onClick={(e) => onItemOpen(e, i)}
+                onMouseDown={onItemMouseDown}
               >
-                {/* B4: la casella di selezione (solo in lista: in griglia si seleziona con ⌘/Maiusc + clic) */}
-                <input
-                  type="checkbox"
-                  className="size-4 shrink-0 accent-primary"
-                  checked={live.selected.has(i.id)}
-                  aria-label={t`Seleziona ${i.title}`}
-                  data-testid={`library-select-${i.id}`}
-                  onChange={(e) => applyClick(i.id, (e.nativeEvent as MouseEvent).shiftKey ? 'range' : 'toggle')}
+                <FlatRow
+                  leading={kindIcon(i.kind)}
+                  title={
+                    <span className="flex items-center gap-1.5">
+                      {i.pinned && <Star className="size-4 shrink-0 fill-current text-destructive" aria-hidden="true" />}
+                      <span className="min-w-0 truncate" title={i.title}>{i.title}</span>
+                      {i.kind === 'document' && <span className="shrink-0 text-caption text-muted-foreground">v{i.currentVersion}</span>}
+                      {i.tainted && (
+                        <span className="flex shrink-0 items-center gap-1 text-caption text-destructive" title={t`Proveniente da dati esterni`}>
+                          <TriangleAlert className="size-4" aria-hidden="true" />
+                          {t`esterno`}
+                        </span>
+                      )}
+                    </span>
+                  }
+                  subtitle={
+                    <>
+                      {i.kind === 'document' ? (
+                        i18n.t(KIND_LABEL.document)
+                      ) : i.kind === 'chart' ? (
+                        i18n.t(KIND_LABEL.chart)
+                      ) : (
+                        <>{i.fileName ?? t`file`} · <Plural value={i.fileSize ?? 0} one="# byte" other="# byte" /></>
+                      )}{' · '}{nameOf(i.authorAgentId)}
+                    </>
+                  }
+                  trailing={<span className="shrink-0 text-caption text-muted-foreground">{formatDate(i.updatedAt)}</span>}
                 />
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 text-left"
-                  data-testid={`library-open-${i.id}`}
-                  onClick={(e) => onItemOpen(e, i)}
-                  onMouseDown={onItemMouseDown}
-                >
-                  <p className="truncate text-sm">
-                    {i.pinned && <span className="mr-1 text-destructive">★</span>}
-                    {i.title}
-                    {i.kind === 'document' && <span className="ml-2 text-xs text-muted-foreground">v{i.currentVersion}</span>}
-                    {i.tainted && <span className="ml-2 text-xs text-destructive/80" title={t`Proveniente da dati esterni`}>{t`⚠ esterno`}</span>}
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {i.kind === 'document' ? (
-                      i18n.t(KIND_LABEL.document)
-                    ) : i.kind === 'chart' ? (
-                      i18n.t(KIND_LABEL.chart)
-                    ) : (
-                      <>{i.fileName ?? t`file`} · <Plural value={i.fileSize ?? 0} one="# byte" other="# byte" /></>
-                    )}{' · '}{nameOf(i.authorAgentId)} · {formatDate(i.updatedAt)}
-                  </p>
-                </button>
-                <LibraryItemMenu
-                  item={i}
-                  where="list"
-                  onChanged={() => void refresh()}
-                  onError={setActionError}
-                  initialConfirmDelete={initial?.confirmDeleteId === i.id}
-                  initialRename={initial?.rename?.id === i.id ? initial.rename.title ?? i.title : undefined}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-        {/* B4: la conferma UNA per tutte le voci selezionate — dice quante sono */}
-        {bulkConfirm && (
-          <LibraryDeleteDialog
-            ids={bulkConfirm.ids}
-            title={null}
-            onConfirm={() => void runBulk('delete', bulkConfirm.ids)}
-            onClose={() => setBulkConfirm(null)}
-          />
-        )}
-      </div>
-    </div>
+              </button>
+              <LibraryItemMenu
+                item={i}
+                where="list"
+                onChanged={() => void refresh()}
+                onError={setActionError}
+                initialConfirmDelete={initial?.confirmDeleteId === i.id}
+                initialRename={initial?.rename?.id === i.id ? initial.rename.title ?? i.title : undefined}
+              />
+            </div>
+          ))}
+        </FlatList>
+      )}
+      {/* B4: la conferma UNA per tutte le voci selezionate — dice quante sono */}
+      {bulkConfirm && (
+        <LibraryDeleteDialog
+          ids={bulkConfirm.ids}
+          title={null}
+          onConfirm={() => void runBulk('delete', bulkConfirm.ids)}
+          onClose={() => setBulkConfirm(null)}
+        />
+      )}
+    </PageShell>
   )
 }
+
+/** La riga rossa di un errore o di un avviso (l'azione fallita, la libreria oltre 2 GB). */
+const ALERT_ROW = 'rounded-control bg-destructive/10 px-3 py-2 text-small text-destructive'
 
 /**
  * B4: il «⋯» di una voce della Libreria — il menu dell'app (le sei voci della
@@ -617,9 +727,15 @@ export function LibraryItemMenu({
       <div className={className}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className={MENU_TRIGGER_CLASS}
+            {/* fase design (DS4): il bottone tondo da 32 di Button (ghost, solo icona) —
+                la misura delle icone delle testate. no-drag sta sul bottone: sta pure nella
+                fascia che TRASCINA la finestra (nella pagina aperta), o il clic trascinerebbe
+                la finestra; e lo è ovunque stia (griglia, lista, vista della voce) */}
+            <Button
+              variant="ghost"
+              icon
+              size="sm"
+              className="no-drag"
               aria-label={t`Altre azioni`}
               title={t`Altre azioni`}
               aria-haspopup="menu"
@@ -627,7 +743,7 @@ export function LibraryItemMenu({
               data-id={id}
             >
               <MoreHorizontal className="size-4" aria-hidden="true" />
-            </button>
+            </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" data-testid={`library-menu-content-${where}-${id}`}>
             {showOpen && (
@@ -693,6 +809,8 @@ export function LibraryItemMenu({
  * confirm() del browser. Con UNA voce dice il titolo, con più voci QUANTE:
  * «Eliminare «titolo»? Non si può annullare.» / «Eliminare 3 voci? Non si
  * può annullare.».
+ * Fase design (DS4): la larghezza è quella del dialogo (niente max-w scritto
+ * a mano), le azioni sono Button — Annulla secondario, Elimina distruttivo.
  */
 function LibraryDeleteDialog({ ids, title, onConfirm, onClose }: {
   ids: string[]
@@ -703,32 +821,22 @@ function LibraryDeleteDialog({ ids, title, onConfirm, onClose }: {
 }) {
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-sm" data-testid="library-delete-confirm">
+      <DialogContent data-testid="library-delete-confirm">
         <DialogHeader>
-          <DialogTitle className="text-lg">
+          <DialogTitle className="text-title">
             {title !== null ? <Trans>Eliminare «{title}»?</Trans> : <Trans>Eliminare {ids.length} voci?</Trans>}
           </DialogTitle>
-          <DialogDescription className="text-left text-[13px] leading-snug">
+          <DialogDescription className="text-left text-small">
             <Trans>Non si può annullare.</Trans>
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <button
-            type="button"
-            className="rounded-[10px] bg-muted px-3.5 py-1.5 text-sm transition hover:bg-accent"
-            data-testid="library-delete-confirm-cancel"
-            onClick={onClose}
-          >
+          <Button variant="secondary" data-testid="library-delete-confirm-cancel" onClick={onClose}>
             <Trans>Annulla</Trans>
-          </button>
-          <button
-            type="button"
-            className="rounded-[10px] bg-destructive/10 px-3.5 py-1.5 text-sm font-medium text-destructive transition hover:bg-destructive/20"
-            data-testid="library-delete-confirm-ok"
-            onClick={onConfirm}
-          >
+          </Button>
+          <Button variant="destructive" data-testid="library-delete-confirm-ok" onClick={onConfirm}>
             <Trans>Elimina</Trans>
-          </button>
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -745,12 +853,13 @@ function LibraryRenameDialog({ title, onTitle, onConfirm, onClose }: {
   const { t } = useLingui()
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-sm" data-testid="library-rename-dialog">
+      <DialogContent data-testid="library-rename-dialog">
         <DialogHeader>
-          <DialogTitle className="text-lg"><Trans>Rinomina</Trans></DialogTitle>
+          <DialogTitle className="text-title"><Trans>Rinomina</Trans></DialogTitle>
         </DialogHeader>
+        {/* il campo di DS1 (36 px, il raggio dei campi), con l'anello del fuoco da tastiera */}
         <input
-          className="h-10 w-full rounded-[10px] bg-muted px-3 text-sm outline-none"
+          className={cn(FIELD, FIELD_FOCUS, 'w-full')}
           aria-label={t`Nuovo titolo`}
           data-testid="library-rename-input"
           value={title}
@@ -759,28 +868,28 @@ function LibraryRenameDialog({ title, onTitle, onConfirm, onClose }: {
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onConfirm() } }}
         />
         <DialogFooter>
-          <button
-            type="button"
-            className="rounded-[10px] bg-muted px-3.5 py-1.5 text-sm transition hover:bg-accent"
-            data-testid="library-rename-cancel"
-            onClick={onClose}
-          >
+          <Button variant="secondary" data-testid="library-rename-cancel" onClick={onClose}>
             <Trans>Annulla</Trans>
-          </button>
-          <button
-            type="button"
-            className="rounded-[10px] bg-primary px-3.5 py-1.5 text-sm font-medium text-white transition hover:opacity-90"
-            data-testid="library-rename-save"
-            onClick={onConfirm}
-          >
+          </Button>
+          <Button data-testid="library-rename-save" onClick={onConfirm}>
             <Trans>Salva</Trans>
-          </button>
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
 
+/**
+ * La vista di UNA voce (un grafico, un file, lo storico delle versioni di un
+ * documento): lo stesso guscio della lista — PageShell, larghezza «page» —
+ * con la testata di PageHeader: indietro (torna alla lista), l'icona del
+ * tipo, il titolo, a destra l'id e il «⋯» della voce; sotto la riga, chi l'ha
+ * preparata (e l'avviso se viene da dati esterni).
+ * Fase design (DS4): il «← Lista» di prima è la freccia indietro della
+ * testata, come in ogni pagina; il suo nome accessibile è lo stesso testo di
+ * oggi per il ritorno alla lista («torna alla lista»).
+ */
 function LibraryItemView({ id }: { id: string }) {
   const { t } = useLingui()
   const openLibrary = useStore((s) => s.openLibrary)
@@ -809,83 +918,115 @@ function LibraryItemView({ id }: { id: string }) {
   }
   useEffect(() => { void refresh() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (err) return <div className="flex-1 px-6 py-4 text-sm text-destructive">{err} <button className="underline" onClick={() => openLibrary('')}><Trans>torna alla lista</Trans></button></div>
-  if (!content) return <div className="flex-1 px-6 py-4 text-sm text-muted-foreground">…</div>
-
+  // l'errore vince sul contenuto (come prima: la vista dell'errore sostituiva tutto)
+  const body = !err && content
   return (
-    <div className="flex-1 overflow-y-auto scroll-thin px-6 py-4">
-      <div className="mx-auto max-w-3xl space-y-4">
-        <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => openLibrary('')}><Trans>← Lista</Trans></button>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0">
-            <h3 className="truncate text-lg font-semibold text-foreground">
-              {item?.pinned && <span className="mr-1 text-destructive">★</span>}
-              {item?.title ?? id}
-            </h3>
-            <p className="text-xs text-muted-foreground">
-              {content.authorName}{item?.tainted ? t` · ⚠ proveniente da dati esterni` : ''}
-            </p>
-          </div>
-          {/* B4: al posto dei bottoni (Esporta/Fissa/Rinomina/Cancella col confirm del browser) il «⋯» della voce; l'id resta */}
-          {item && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">{item.id}</span>
-              <LibraryItemMenu item={item} where="view" showOpen={false} onChanged={() => void refresh(version ?? undefined)} onError={setErr} />
-            </div>
-          )}
-        </div>
-
-        {content.kind === 'document' && (
-          <>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <Trans>Versioni:</Trans>
-              {content.versions.map((v) => (
-                <button
-                  key={v}
-                  className={`rounded px-2 py-0.5 ${v === version ? 'bg-accent text-foreground' : 'hover:bg-muted'}`}
-                  onClick={() => void refresh(v)}
-                >
-                  v{v}
-                </button>
-              ))}
-              {version !== null && version < Math.max(...content.versions) && (
-                <button
-                  className="rounded border border-border px-2 py-0.5 hover:bg-muted"
-                  onClick={() => void api.libraryRestoreVersion(id, version).then(() => refresh())}
-                >
-                  <Trans>↩ Ripristina v{version} come nuova versione</Trans>
-                </button>
+    <PageShell
+      width="page"
+      testId="library-panel"
+      header={
+        <PageHeader
+          back={{ onClick: () => openLibrary(''), label: t`torna alla lista` }}
+          icon={item?.kind === 'chart' ? <BarChart3 className="size-5" /> : item?.kind === 'file' ? <FileIcon className="size-5" /> : <FileText className="size-5" />}
+          title={
+            <span className="flex min-w-0 items-center gap-2">
+              {item?.pinned && <Star className="size-5 shrink-0 fill-current text-destructive" aria-hidden="true" />}
+              <span className="min-w-0 truncate">{item?.title ?? id}</span>
+            </span>
+          }
+          description={content ? (
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>{content.authorName}</span>
+              {/* il «⚠» di prima è l'icona dell'avviso; il testo dice il resto */}
+              {item?.tainted && (
+                <span className="flex items-center gap-1 text-destructive">
+                  <TriangleAlert className="size-4" aria-hidden="true" />
+                  {t`Proveniente da dati esterni`}
+                </span>
               )}
-            </div>
-            <DocumentBody
-              markdown={content.content ?? ''}
-              onOpenDoc={(docId) => openPage(docId, 'library')} docExists={(docId) => docIds.has(docId)}
-            />
-          </>
-        )}
+            </span>
+          ) : undefined}
+          actions={item ? (
+            <>
+              <span className="text-caption text-muted-foreground">{item.id}</span>
+              {/* B4: al posto dei bottoni (Esporta/Fissa/Rinomina/Cancella col confirm del browser) il «⋯» della voce; l'id resta */}
+              <LibraryItemMenu item={item} where="view" showOpen={false} onChanged={() => void refresh(version ?? undefined)} onError={setErr} />
+            </>
+          ) : undefined}
+        />
+      }
+      contentClassName="flex flex-col gap-block pt-4 pb-10"
+    >
+      {err && (
+        <div className="flex flex-wrap items-center gap-2 text-body text-destructive">
+          {err}
+          <Button variant="ghost" size="sm" onClick={() => openLibrary('')}><Trans>torna alla lista</Trans></Button>
+        </div>
+      )}
+      {!body && !err && <p className="text-body text-muted-foreground">…</p>}
+      {body && (
+        <>
+          {body.kind === 'document' && (
+            <>
+              {/* le versioni: un interruttore a pastiglie (come griglia/elenco in testata); il ripristino è un'azione a parte */}
+              <div className="flex flex-wrap items-center gap-2 text-small text-muted-foreground">
+                <Trans>Versioni:</Trans>
+                <div className="flex items-center rounded-full bg-muted p-0.5">
+                  {body.versions.map((v) => (
+                    <Button
+                      key={v}
+                      variant="ghost"
+                      size="sm"
+                      shape="pill"
+                      className={cn('px-2', v === version && 'bg-card text-foreground hover:text-foreground')}
+                      onClick={() => void refresh(v)}
+                    >
+                      v{v}
+                    </Button>
+                  ))}
+                </div>
+                {version !== null && version < Math.max(...body.versions) && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void api.libraryRestoreVersion(id, version).then(() => refresh())}
+                  >
+                    {/* il «↩» di prima è l'icona */}
+                    <Undo2 className="size-4" aria-hidden="true" />
+                    <Trans>Ripristina v{version} come nuova versione</Trans>
+                  </Button>
+                )}
+              </div>
+              <DocumentBody
+                markdown={body.content ?? ''}
+                onOpenDoc={(docId) => openPage(docId, 'library')} docExists={(docId) => docIds.has(docId)}
+              />
+            </>
+          )}
 
-        {content.kind === 'chart' && <ChartBody content={content} />}
+          {body.kind === 'chart' && <ChartBody content={body} />}
 
-        {content.kind === 'file' && (
-          content.fileBase64 ? (
-            <img
-              className="max-h-[70vh] rounded-xl border border-border"
-              src={`data:${content.fileMime};base64,${content.fileBase64}`}
-              alt={item?.title ?? id}
-            />
-          ) : (
-            <p className="rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm text-foreground">
-              <Trans>File: {item?.fileName} ({item?.fileSize} byte) — esportalo per vederlo.</Trans>
-            </p>
-          )
-        )}
-      </div>
-    </div>
+          {body.kind === 'file' && (
+            body.fileBase64 ? (
+              <img
+                className="max-w-full rounded-surface border border-border"
+                src={`data:${body.fileMime};base64,${body.fileBase64}`}
+                alt={item?.title ?? id}
+              />
+            ) : (
+              <p className="rounded-surface border border-border bg-muted/50 px-4 py-3 text-body text-foreground">
+                <Trans>File: {item?.fileName} ({item?.fileSize} byte) — esportalo per vederlo.</Trans>
+              </p>
+            )
+          )}
+        </>
+      )}
+    </PageShell>
   )
 }
 
 function ChartBody({ content }: { content: LibraryContentInfo }) {
   const { t } = useLingui()
-  if (content.svg) return <img className="max-w-full rounded-xl border border-border bg-white" src={svgDataUrl(content.svg)} alt={t`grafico`} />
+  if (content.svg) return <img className="max-w-full rounded-surface border border-border bg-white" src={svgDataUrl(content.svg)} alt={t`grafico`} />
   return <InlineChart lang="mermaid" source={content.content ?? ''} />
 }

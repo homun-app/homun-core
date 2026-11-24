@@ -6,7 +6,7 @@
 // aperta, dove il primo `# ` uguale al titolo NON si riduplica (il titolo lo
 // mostra già la pagina); l'indice e gli id dei titoli non cambiano.
 import { describe, expect, it } from 'vitest'
-import { pagePreview, pageHeadings, pageBody } from '../page-view'
+import { pagePreview, pageHeadings, pageBody, previewLines } from '../page-view'
 
 describe('fase pagine (G1): pagePreview', () => {
   it('titolo dal primo #, intro = primo paragrafo, titoli ## e ### in ordine', () => {
@@ -184,9 +184,10 @@ describe('R2 (ritocchi-beta18): previewLineText — il testo, non il markdown', 
     expect(previewLineText('> una citazione')).toBe('una citazione')
   })
 
-  it('la vista a elenco della Libreria usa la STESSA funzione (niente più replace dei soli caratteri)', () => {
+  it('la scheda della Libreria usa la STESSA funzione (niente più replace dei soli caratteri)', () => {
     const src = readFileSync(fileURLToPath(new URL('../../components/LibraryPanel.tsx', import.meta.url)), 'utf8')
-    expect(src).toContain('previewLineText')
+    // fase design (DS4): le righe dell\'anteprima arrivano da previewLines, che è previewLineText riga per riga
+    expect(src).toContain('previewLines(')
     expect(src).not.toContain('replace(/[#*_')
   })
 })
@@ -239,5 +240,48 @@ describe('B4 (b20-bug): previewLineText — le tabelle non restano crude', () =>
     expect(p.intro).toBe('Ricetta · Data Pastiera · domenica')
     expect(p.intro).not.toContain('|')
     expect(p.intro).not.toContain('---')
+  })
+})
+
+// ---- Fase design (DS4): le righe dell'anteprima della SCHEDA ----
+// La scheda di un documento ha il titolo SOPRA e l'anteprima sotto: se la
+// prima riga del documento è il `# ` uguale al titolo, non si ripete (lo
+// stesso criterio di pageBody per la pagina aperta). Sono le prime `count`
+// righe utili, già TESTO: previewLineText riga per riga (mai markdown grezzo,
+// mai `|---|---|`).
+describe('fase design (DS4): previewLines — le righe dell\'anteprima della scheda', () => {
+  it('le prime quattro righe utili, come testo (le righe di tabella diventano celle separate da « · »)', () => {
+    const md = [
+      '# Fornitori',
+      '',
+      '| Fornitore | Cosa | Scadenza |',
+      '|---|---|---|',
+      '| Rossi SRL | farina | 12/12 |',
+      '| Bianchi & C. | uova | 01/12 |',
+      '',
+      'Totale: **1.550 €**.'
+    ].join('\n')
+    expect(previewLines(md, 'Fornitori')).toEqual([
+      'Fornitore · Cosa · Scadenza', 'Rossi SRL · farina · 12/12', 'Bianchi & C. · uova · 01/12', 'Totale: 1.550 €.'
+    ])
+  })
+
+  it('il `# ` uguale al titolo NON si ripete (il titolo sta sopra l\'anteprima); un `# ` diverso resta', () => {
+    expect(previewLines('# Pastiera napoletana\n\nGrano, ricotta, cidro.', 'Pastiera napoletana')).toEqual(['Grano, ricotta, cidro.'])
+    // maiuscole, spazi e punteggiatura in coda non contano (come pageBody)
+    expect(previewLines('# pastiera  napoletana!\n\nGrano.', 'Pastiera napoletana')).toEqual(['Grano.'])
+    expect(previewLines('# Altro titolo\n\nGrano.', 'Pastiera napoletana')).toEqual(['Altro titolo', 'Grano.'])
+  })
+
+  it('le righe vuote non contano, `count` decide quante; un documento corto ne ha meno, uno vuoto nessuna', () => {
+    expect(previewLines('a\n\n\nb\n \nc', 'T', 2)).toEqual(['a', 'b'])
+    expect(previewLines('solo una riga', 'T')).toEqual(['solo una riga'])
+    expect(previewLines('', 'T')).toEqual([])
+    // il solo titolo: l\'anteprima resta vuota (niente da ripetere)
+    expect(previewLines('# T\n', 'T')).toEqual([])
+  })
+
+  it('le immagini spariscono e i link restano come testo, riga per riga', () => {
+    expect(previewLines('![logo](data:image/png;base64,xxx)\n\nVedi [Pastiera napoletana](lib_e7eeadc6).', 'T')).toEqual(['Vedi Pastiera napoletana.'])
   })
 })
