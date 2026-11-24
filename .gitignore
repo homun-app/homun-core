@@ -16,3 +16,10 @@ vendor/engramma/*
 # fase locale (L2): il bundle llama.cpp si scarica con scripts/fetch-llama.mjs
 # (pin in scripts/llama-pin.json); nel repo restano SOLO il pin e lo script
 vendor/llama/
+
+# F5 (fase fondamenta): le uscite e l'esito di scripts/fatto.mjs non si committano
+fatto-esito.md
+fatto-uscite/
+
+# F1 (fase fondamenta): le differenze della galleria restano fuori dal repo
+galleria/.diff/
