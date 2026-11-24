@@ -690,19 +690,41 @@ const MEASURE_JS = (rootExpr, { withSidebar }) => `(() => {
   }
 
   // (d) CONTRASTO dei puntini di stato: ≥ 3:1 col fondo della riga (il primo
-  // antenato con uno sfondo), in entrambi i temi
+  // antenato con uno sfondo), in entrambi i temi. I colori computed arrivano
+  // come oklch(…) (il tema li dichiara così) o rgb(…): si convertono a sRGB
+  // e si fa la luminanza WCAG
   const dotIssues = []
   {
-    const chan = (v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) }
-    const lum = (bg) => 0.2126 * chan(bg[0]) + 0.7152 * chan(bg[1]) + 0.0722 * chan(bg[2])
-    const parse = (s) => { const m = /rgba?\\(([\\d.]+), ([\\d.]+), ([\\d.]+)(?:, ([\\d.]+))?\\)/.exec(s ?? ''); return m ? { c: [Number(m[1]), Number(m[2]), Number(m[3])], a: m[4] === undefined ? 1 : Number(m[4]) } : null }
+    const oklchToSrgb = (L, C, H) => {
+      const h = (H * Math.PI) / 180
+      const a = C * Math.cos(h)
+      const b = C * Math.sin(h)
+      const l_ = L + 0.3963377774 * a + 0.2158037573 * b
+      const m_ = L - 0.1055613458 * a - 0.0638541728 * b
+      const s_ = L - 0.0894841775 * a - 1.291485548 * b
+      const l = l_ * l_ * l_
+      const m = m_ * m_ * m_
+      const s = s_ * s_ * s_
+      const gam = (v) => Math.min(1, Math.max(0, v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055))
+      return [gam(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s), gam(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s), gam(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s)]
+    }
+    const parse = (s) => {
+      const mk = (c, a) => ({ c, a: a === undefined ? 1 : a })
+      const rgb = /rgba?\\(([\\d.]+), ([\\d.]+), ([\\d.]+)(?:, ?([\\d.]+))?\\)/.exec(s ?? '')
+      if (rgb) return mk([Number(rgb[1]), Number(rgb[2]), Number(rgb[3])], rgb[4] === undefined ? undefined : Number(rgb[4]))
+      const ok = /oklch\\(([\\d.]+) ([\\d.]+) ([\\d.]+)(?: \\/ ([\\d.]+))?\\)/.exec(s ?? '')
+      if (ok) return mk(oklchToSrgb(Number(ok[1]), Number(ok[2]), Number(ok[3])), ok[4] === undefined ? undefined : Number(ok[4]))
+      return null
+    }
+    const chan = (v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
+    const lum = (c) => 0.2126 * chan(c[0]) + 0.7152 * chan(c[1]) + 0.0722 * chan(c[2])
     for (const dot of scope.querySelectorAll('[data-testid="bot-dot-color"]')) {
       if (!inScope(dot) || !vis(dot)) continue
       const d = parse(getComputedStyle(dot).backgroundColor)
       if (!d || d.a === 0) continue
       let row = null
       for (let a = dot.parentElement; a; a = a.parentElement) { const p = parse(getComputedStyle(a).backgroundColor); if (p && p.a > 0) { row = p; break } }
-      if (!row) row = parse(getComputedStyle(document.body).backgroundColor) ?? { c: [255, 255, 255], a: 1 }
+      if (!row) row = parse(getComputedStyle(document.body).backgroundColor) ?? { c: [1, 1, 1], a: 1 }
       const l1 = lum(d.c)
       const l2 = lum(row.c)
       const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)
@@ -1193,10 +1215,13 @@ try {
     await rpc(cdp, `updateAgent(${JSON.stringify(bot.id)}, ${JSON.stringify({ providerId: 'finto', model: 'finto' })})`)
     others.push(bot)
   }
-  // R5 (b20-ritocchi): «Scrittura» col colore c7 — quello che in tema scuro
-  // non si vedeva (quasi nero su fondo nero): il controllo del contrasto dei
-  // puntini ha così il suo caso, in chiaro e in scuro
+  // R5 (b20-ritocchi): «Scrittura» (membro della squadra) e «Novità AI» (bot
+  // standalone, sempre visibile nella barra anche a squadra chiusa) col
+  // colore c7 — quello che in tema scuro non si vedeva (quasi nero su fondo
+  // nero): il controllo del contrasto dei puntini ha così il suo caso, in
+  // chiaro e in scuro
   await rpc(cdp, `updateAgent(${JSON.stringify(others[2].id)}, ${JSON.stringify({ avatar: { family: 'h-creature', color: 'c7' } })})`)
+  await rpc(cdp, `updateAgent(${JSON.stringify(others[0].id)}, ${JSON.stringify({ avatar: { family: 'h-creature', color: 'c7' } })})`)
   // i plugin FINTI (24 strumenti ciascuno), uno ROTTO, uno SPENTO, uno col TOKEN
   const FAKE_MCP = join(ROOT, 'scripts', 'fake-plugin-pulita-mcp.mjs')
   const pluginCfg = (i) => ({ id: `srv-plugin-${String(i).padStart(2, '0')}`, name: `plugin-${String(i).padStart(2, '0')}`, transport: 'stdio', command: process.execPath, args: [FAKE_MCP], enabled: true, enabledFor: ['*'] })
