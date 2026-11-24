@@ -5,6 +5,47 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.20] — 2026-11-24
+
+Homun ha un aspetto nuovo, uguale in ogni pagina, e i bot non si
+inceppano più in risposte vuote ripetute.
+
+### Novità
+
+- **Un design solo per tutta l'app.** Chat, barra laterale, Plugin,
+  Libreria, Da approvare, Attività, Registro, Impostazioni, menu e dialoghi
+  seguono le stesse misure, gli stessi testi e gli stessi colori, in chiaro
+  e in scuro. La chat ha una colonna di lettura centrata, e titoli e
+  tabelle sono curati anche nei messaggi dei bot.
+- **Una barra laterale più compatta**, con voci alla misura delle app che
+  usi ogni giorno.
+- **La testata delle colonne vela il testo che ci scorre sotto**, invece di
+  lasciarlo leggibile in mezzo ai controlli.
+- **I puntini colorati dei bot si vedono** in chiaro e in scuro.
+- **La Libreria:** elimina, archivia, seleziona più documenti insieme e
+  ritrovali in «Archiviati». Le schede della griglia hanno tutte la stessa
+  altezza e un'anteprima pulita.
+
+### Correzioni
+
+- **Niente più «Avvio automatico» e «Risposta vuota» a catena.** Quando il
+  modello risponde a vuoto Homun riprova una volta, poi mostra un solo
+  avviso col motivo («il modello ha restituito solo ragionamento», «0 token
+  in uscita») e un «Riprova». Gli avvisi uguali si raccolgono in una riga
+  con il conteggio.
+- **Collegare un'app (per esempio Spotify) non resta più bloccato.** La
+  riga dice cosa sta succedendo e si sblocca da sola. Quando l'app non si
+  può collegare spiega il perché, e «Come si risolve» porta alla scheda con
+  le alternative.
+- **Gli elenchi nei messaggi non vanno più a capo sul grassetto.**
+- **La chat non mostra più regole interne né markdown crudo** nei messaggi
+  tra bot.
+- **L'anello arancione del fuoco compare solo quando usi la tastiera**, non
+  dopo un clic.
+- **Nella pagina Plugin** la pillola della strada di collegamento non si
+  schiaccia più, e la colonna mostra il nome del comando invece del
+  percorso intero (che resta nel suggerimento).
+
 ## [0.3.1001-beta.19] — 2026-11-23
 
 Homun si apre al primo clic, e la pagina Plugin è più ordinata e arriva
