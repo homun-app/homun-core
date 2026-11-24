@@ -64,7 +64,7 @@ describe('PL1: la voce «Plugin» nella barra', () => {
     // la voce: testid per le sonde, icona lucide Puzzle, apre con openPlugin
     const row = sidebarBlock('PluginRow')
     expect(row).toContain('data-testid="sidebar-plugin"')
-    expect(row).toContain('<Puzzle className="size-4" />')
+    expect(row).toContain('<Puzzle className="size-5" />')
     expect(row).toMatch(/openPlugin\(\)/)
     expect(sidebarSrc()).toMatch(/import \{[^}]*Puzzle[^}]*\} from 'lucide-react'/)
   })
@@ -415,7 +415,13 @@ describe('DS4 (fase design): «Collegati» è la tabella unica, e lì la pagina 
       })
       const out = renderHtml(createElement(PluginPanel, {
         initial: {
-          installed: { servers: [{ id: 'srv-mm', name: 'Mattermost', transport: 'stdio', command: 'npx', args: ['@donach/mattermost-mcp'], enabled: true, enabledFor: ['*'], stateStatus: 'error', serverSlug: 'mattermost' }], plugins: [] },
+          installed: { servers: [
+            { id: 'srv-mm', name: 'Mattermost', transport: 'stdio', command: 'npx', args: ['@donach/mattermost-mcp'], enabled: true, enabledFor: ['*'], stateStatus: 'error', serverSlug: 'mattermost' },
+            // R4 (b20-ritocchi): il comando di un server può arrivare come PERCORSO
+            // ASSOLUTO (node di fnm, script locale): la riga mostra il NOME, il
+            // percorso intero resta nel suggerimento
+            { id: 'srv-fake', name: 'Plugin Pulita', transport: 'stdio', command: '/Users/fabio/.local/share/fnm/node-versions/v24.22.1/installation/bin/node', args: ['/Users/fabio/Projects/Bot/sandbot/scripts/fake-plugin-pulita-mcp.mjs'], enabled: true, enabledFor: ['*'], stateStatus: 'ok' }
+          ], plugins: [] },
           usage: [
             { tool: 'mcp__mattermost__post_message', last: Date.now() - 3 * 24 * 3600 * 1000, week: 4 },
             { tool: 'composio__trello__TRELLO_CREATE_CARD', last: Date.now() - 26 * 3600 * 1000, week: 31 }
@@ -447,7 +453,7 @@ describe('DS4 (fase design): «Collegati» è la tabella unica, e lì la pagina 
       expect(x.attrs.class ?? '').not.toContain('uppercase')
     }
     const rows = findAll(table, (n) => (n.attrs['data-testid'] ?? '').startsWith('plugin-connected-row-'))
-    expect(rows.map((r) => r.attrs['data-testid']).sort()).toEqual(['plugin-connected-row-app:notion', 'plugin-connected-row-app:trello', 'plugin-connected-row-server:srv-mm'])
+    expect(rows.map((r) => r.attrs['data-testid']).sort()).toEqual(['plugin-connected-row-app:notion', 'plugin-connected-row-app:trello', 'plugin-connected-row-server:srv-fake', 'plugin-connected-row-server:srv-mm'])
     for (const r of rows) {
       expect(r.tag).toBe('tr')
       expect(has(r, 'h-row')).toBe(true)
@@ -461,37 +467,54 @@ describe('DS4 (fase design): «Collegati» è la tabella unica, e lì la pagina 
     }
     // i valori di prima, tutti: comando, permessi in breve, ultimo uso, l'account onesto
     const texts = findAll(table, () => true).map((n) => textOf(n)).join('\n')
-    for (const valore of ['npx @donach/mattermost-mcp', '1 sempre · 1 blocca', '31 questa settimana', 'fabio', 'Tutti i bot', 'mai', 'non parte']) expect(texts).toContain(valore)
+    for (const valore of ['npx @donach/mattermost-mcp', 'node fake-plugin-pulita-mcp.mjs', '1 sempre · 1 blocca', '31 questa settimana', 'fabio', 'Tutti i bot', 'mai', 'non parte']) expect(texts).toContain(valore)
+    // il PERCORSO ASSOLUTO non si vede: nella riga c'è il nome del comando
+    expect(texts).not.toContain('/Users/fabio')
   }, 20_000)
 
   it('niente a capo: il badge della strada è una pillola su una riga (se non entra si tronca LEI); ogni cella tronca, e il valore intero sta nel suggerimento', async () => {
     const root = await renderConnected()
     const table = findAll(root, (n) => n.attrs['data-testid'] === 'plugin-connected-table')[0]!
     const pills = findAll(table, (n) => has(n, 'rounded-full') && has(n, 'text-caption'))
-    expect(pills.map((p) => textOf(p)).sort()).toEqual(['MCP diretto di Notion', 'sul Mac', 'tramite Composio'])
+    expect(pills.map((p) => textOf(p)).sort()).toEqual(['MCP diretto di Notion', 'sul Mac', 'sul Mac', 'tramite Composio'])
     for (const p of pills) {
-      for (const cls of ['truncate', 'max-w-full', 'px-2', 'py-0.5']) expect(has(p, cls)).toBe(true)
-      // il testo intero al passaggio, anche quando la pillola si tronca
+      // R4 (b20-ritocchi): la pillola mostra il nome INTERO — niente truncate,
+      // niente max-w-full — e MAI inline-block: col token --spacing-block la
+      // classe genera ANCHE inline-size: var(--spacing-block) = 16 px, e la
+      // pillola si schiacciava fino a una «s» in un cerchio
+      for (const cls of ['inline-flex', 'whitespace-nowrap', 'px-2', 'py-0.5']) expect(has(p, cls)).toBe(true)
+      expect(has(p, 'truncate'), 'la pillola non trona').toBe(false)
+      expect(has(p, 'max-w-full'), 'la pillola non si restringe').toBe(false)
+      expect(has(p, 'inline-block'), 'mai inline-block: collide con la scala degli spazi').toBe(false)
       expect(p.attrs.title).toBe(textOf(p))
     }
     const cells = findAll(table, (n) => n.tag === 'td')
-    expect(cells).toHaveLength(21)
+    expect(cells).toHaveLength(28)
     for (const c of cells) expect(findAll(c, (x) => has(x, 'truncate')).length).toBeGreaterThanOrEqual(1)
     // il valore intero al passaggio: le celle di testo lo portano nel title quando è una stringa
     const command = findAll(table, (n) => textOf(n) === 'npx @donach/mattermost-mcp')[0]!
     expect(command.attrs.title).toBe('npx @donach/mattermost-mcp')
+    // R4: il nome del comando nella riga, il PERCORSO INTERO nel suggerimento
+    const brief = findAll(table, (n) => textOf(n) === 'node fake-plugin-pulita-mcp.mjs')[0]!
+    expect(brief.attrs.title).toBe('/Users/fabio/.local/share/fnm/node-versions/v24.22.1/installation/bin/node /Users/fabio/Projects/Bot/sandbot/scripts/fake-plugin-pulita-mcp.mjs')
     // chi va bene è grigio, chi non va è rosso (PP4: un solo segnale di stato)
     const stato = findAll(table, (n) => textOf(n) === 'non parte' && n.attrs.title === 'non parte')[0]!
     expect(has(stato, 'text-destructive')).toBe(true)
     expect(stato.attrs.title).toBe('non parte')
   }, 20_000)
 
-  it('la tabella al minimo è 940 px — due colonne che crescono (160 ciascuna) e cinque fisse (620) —: ci sta in una finestra di 1280 con la barra com’è di default; sotto scorre DENTRO la tabella', async () => {
+  it('la tabella al minimo: due colonne che crescono (160 ciascuna) e cinque fisse, la Strada larga quanto la pillola più lunga (R4) — a 1280 ci sta senza scorrere, sotto scorre DENTRO la tabella', async () => {
     const root = await renderConnected()
     const table = findAll(root, (n) => n.attrs['data-testid'] === 'plugin-connected-table')[0]!
     expect(table.attrs.class ?? '').toContain('overflow-x-auto')
     expect(table.children[0]!.tag).toBe('table')
-    expect(table.children[0]!.attrs.style).toBe('min-width:940px')
+    // 460 = le quattro fisse (96+136+132+96) + le due che crescono (160 × 2 =
+    // 320); la Strada la decide la pillola più lunga presente
+    // («MCP diretto di Notion»)
+    const { stradaColumnWidth } = await import('../lib/plugins-view')
+    const min = 460 + 160 * 2 + stradaColumnWidth(['MCP diretto di Notion', 'sul Mac', 'tramite Composio'])
+    expect(table.children[0]!.attrs.style).toBe(`min-width:${min}px`)
+    expect(min).toBeGreaterThan(940)
   }, 20_000)
 
   it('solo su «Collegati» il contenuto è largo wide (1120): testata, descrizione, barra degli strumenti e corpo cambiano insieme', async () => {

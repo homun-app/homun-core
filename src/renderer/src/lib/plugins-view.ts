@@ -61,6 +61,8 @@ export interface YourPluginRow {
   composioSlug?: string
   /** PL3: il dettaglio onesto della riga — il comando del server, «N skill» del plugin */
   countLabel?: string
+  /** R4 (b20-ritocchi): il dettaglio INTERO per il suggerimento (il percorso del comando, quando la riga ne mostra il nome) */
+  countTitle?: string
   /** PL3: l'account onesto della riga (alias/email Composio, token, o nessun account) */
   accountLabel?: string
 }
@@ -164,7 +166,8 @@ export function yourPlugins(input: PluginViewInput): YourPluginRow[] {
       bots: botsLabelOf(s.enabledFor ?? null, input.agents),
       open: { kind: 'server', serverId: s.id },
       serverSlug,
-      countLabel: serverDetailOf(s),
+      countLabel: s.url ? serverDetailOf(s) : serverCommandBriefOf(s),
+      countTitle: serverDetailOf(s),
       accountLabel: accountLabelOfServer(s)
     })
   }
@@ -241,11 +244,38 @@ function accountLabelOfServer(s: { auth?: { kind?: 'oauth' | 'bearer' | 'headers
   return ''
 }
 
-/** Il dettaglio onesto di un server: il comando locale o l'indirizzo (mai di più). */
+/** Il dettaglio onesto di un server: l'indirizzo, o il comando locale per intero (va nel suggerimento). */
 function serverDetailOf(s: { command?: string; args?: string[]; url?: string }): string | undefined {
   if (s.url) return s.url
   if (s.command) return [s.command, ...(s.args ?? [])].join(' ')
   return undefined
+}
+
+/**
+ * R4 (b20-ritocchi): il NOME del comando, non il percorso — «node
+ * fake-plugin-pulita-mcp.mjs», non «/Users/…/node /Users/…/fake….mjs». Il
+ * percorso intero resta nel suggerimento della riga (serverDetailOf). Per
+ * ciò che non è un percorso (npx, i pacchetti con ambito @x/y) il nome è
+ * già tutto.
+ */
+export function serverCommandBriefOf(s: { command?: string; args?: string[] }): string | undefined {
+  if (!s.command) return undefined
+  // il nome di un PERCORSO (assoluto o relativo esplicito); tutto il resto —
+  // npx, i pacchetti con ambito @x/y, i file nudi — resta com'è
+  const brief = (p: string): string => (/^([~/]|\.[/\\])/.test(p) ? p.split('/').filter(Boolean).pop() ?? p : p)
+  return [brief(s.command), ...(s.args ?? []).map(brief)].join(' ')
+}
+
+/**
+ * R4 (b20-ritocchi): la larghezza della colonna «Strada»: quanto la pillola
+ * più lunga PRESENTE nella tabella (più il suo respiro), minimo 160 — la
+ * pillola non trona mai, dunque la colonna la contiene per intero. Il conto
+ * è prudente in eccesso (7,2 px per carattere di text-caption + il respiro
+ * della cella): un pixel in più si vede, un pixel in meno taglia.
+ */
+export function stradaColumnWidth(labels: string[]): number {
+  const widest = labels.reduce((n, l) => Math.max(n, l.length), 0)
+  return Math.min(280, Math.max(160, Math.ceil(widest * 7.2) + 28))
 }
 
 /** La chiave d'origine di una skill (la traduce la UI, il fatto sta qui). */

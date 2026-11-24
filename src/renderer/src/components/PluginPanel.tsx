@@ -49,7 +49,7 @@ import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, type AppCategoryId } from '../../../shared/app-catalog'
 import type { McpServerInfo, SkillLibraryItem, SkillCatalogEntry } from '../../../shared/types'
 import { appsCatalogModel, type AppsFilter, type InstalledPluginLike, type CatalogRowView } from '../lib/apps-view'
-import { yourPlugins, grayLineOf, stateLabelOf, stradaLabel, connectedTable, daSistemareCount, type PluginSegment, type YourPluginRow, type ConnectedFilter, type ConnectedTableRow } from '../lib/plugins-view'
+import { yourPlugins, grayLineOf, stateLabelOf, stradaLabel, stradaColumnWidth, connectedTable, daSistemareCount, type PluginSegment, type YourPluginRow, type ConnectedFilter, type ConnectedTableRow } from '../lib/plugins-view'
 import type { PermissionsConfig } from '../../../shared/types'
 import { humanizeSkillName } from '../../../shared/skill-md'
 import { Toggle } from './Settings'
@@ -129,7 +129,9 @@ const MENU_DIVIDER = <div className="my-1 h-px bg-border/60" aria-hidden="true" 
  * va è rosso: PP4, un solo segnale); account, permessi, bot e ultimo uso
  * sono dettagli, la riga grigia piccola (text-small).
  */
-function connectedColumns(lang: 'it' | 'en'): Array<DataTableColumn<ConnectedTableRow>> {
+function connectedColumns(lang: 'it' | 'en', rows: ReadonlyArray<ConnectedTableRow>): Array<DataTableColumn<ConnectedTableRow>> {
+  // R4 (b20-ritocchi): la colonna è larga quanto la pillola più lunga PRESENTE
+  const stradaWidth = stradaColumnWidth(rows.map((r) => stradaLabel(r.row.gray.strada, r.row.gray.origin, lang)))
   return [
     {
       id: 'collegamento',
@@ -140,20 +142,25 @@ function connectedColumns(lang: 'it' | 'en'): Array<DataTableColumn<ConnectedTab
           leading={<RowLogo row={r.row} name={r.row.name} className="size-8 text-body" />}
           primary={r.row.name}
           secondary={r.countLabel ?? undefined}
+          // R4: il nome del comando nella riga, il percorso intero al passaggio
+          secondaryTitle={r.row.countTitle}
         />
       )
     },
     {
       id: 'strada',
-      width: 160,
+      width: stradaWidth,
       header: <Trans>Strada</Trans>,
       cell: (r) => {
         const label = stradaLabel(r.row.gray.strada, r.row.gray.origin, lang)
         return (
-          // la pillola non va mai a capo; se fosse più larga della cella si
-          // tronca LEI (resta una pillola) e il suggerimento dice il resto
+          // R4 (b20-ritocchi): la pillola mostra il nome INTERO e non trona MAI.
+          // E niente «inline-block»: col token --spacing-block la classe genera
+          // ANCHE inline-size: var(--spacing-block) = 16 px, e la pillola si
+          // schiacciava a una «s» in un cerchio (la colonna, non lei, è larga
+          // quanto serve)
           <Cell>
-            <span className={`inline-block max-w-full truncate rounded-full px-2 py-0.5 text-caption ${stradaBadgeClass(r.row.gray.strada)}`} title={label}>{label}</span>
+            <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-caption ${stradaBadgeClass(r.row.gray.strada)}`} title={label}>{label}</span>
           </Cell>
         )
       }
@@ -806,7 +813,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
             testId="plugin-connected-filters"
           />
           <DataTable<ConnectedTableRow>
-            columns={connectedColumns(lang)}
+            columns={connectedColumns(lang, connectedRows)}
             rows={connectedRows}
             rowKey={(r) => r.row.key}
             onRowClick={(r) => openRow(r.row)}

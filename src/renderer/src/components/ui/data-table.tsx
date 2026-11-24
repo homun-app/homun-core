@@ -161,17 +161,21 @@ export function Cell({ children, secondary, leading }: {
  * Una cella da DUE righe volute: il titolo text-body in peso medio (il
  * titolo di riga di DS1) e sotto la riga grigia text-small. Tutte e due
  * troncate, col titolo intero nel title quando sono stringhe. `leading`:
- * logo o icona nello slot da 32, accanto alle due righe.
+ * logo o icona nello slot da 32, accanto alle due righe. `secondaryTitle`
+ * (R4 b20-ritocchi): il suggerimento della riga grigia quando è diverso dal
+ * testo che mostra — il NOME del comando nella riga, il PERCORSO intero al
+ * passaggio.
  */
-export function CellStack({ primary, secondary, leading }: {
+export function CellStack({ primary, secondary, secondaryTitle, leading }: {
   primary: ReactNode
   secondary?: ReactNode
+  secondaryTitle?: string
   leading?: ReactNode
 }): ReactNode {
   const lines = (
     <span className={clsx('block', leading !== undefined && 'min-w-0 flex-1')}>
       <span className="block truncate text-body font-medium" title={titleOf(primary)}>{primary}</span>
-      {secondary !== undefined && <span className="mt-0.5 block truncate text-small text-muted-foreground" title={titleOf(secondary)}>{secondary}</span>}
+      {secondary !== undefined && <span className="mt-0.5 block truncate text-small text-muted-foreground" title={secondaryTitle ?? titleOf(secondary)}>{secondary}</span>}
     </span>
   )
   if (leading === undefined) return lines
