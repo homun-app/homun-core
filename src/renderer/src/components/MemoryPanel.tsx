@@ -49,7 +49,7 @@ function fmtBytes(n: number): string {
 }
 
 export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: () => void }) {
-  const { i18n } = useLingui()
+  const { i18n, t } = useLingui()
   const memoryProgress = useStore((s) => s.memoryProgress)
   const select = useStore((s) => s.select)
   const [overview, setOverview] = useState<MemoryOverview | null>(null)
@@ -263,7 +263,7 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
                   {h.explain.lists?.join(' + ') ?? ''}
                   {h.explain.matchedTerms?.length ? ` · ${h.explain.matchedTerms.join(', ')}` : ''}
                   {h.explain.cosine !== undefined ? ` · cos ${h.explain.cosine.toFixed(3)}` : ''}
-                  {h.explain.graph ? ` · ${i18n.t('grafo')} ${h.explain.graph.weight}` : ''}
+                  {h.explain.graph ? ` · ${t`grafo`} ${h.explain.graph.weight}` : ''}
                 </p>
               )}
             </button>

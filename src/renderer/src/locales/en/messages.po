@@ -18,11 +18,6 @@ msgstr ""
 msgid "Cerca nella memoria…"
 msgstr "Search memory…"
 
-#. js-lingui-explicit-id
-#: src/renderer/src/components/MemoryPanel.tsx
-msgid "grafo"
-msgstr ""
-
 #: src/renderer/src/components/TaskCard.tsx
 msgid " — rispondi dalla vista del task (Apri)"
 msgstr " — answer from the task view (Open)"
@@ -3536,6 +3531,10 @@ msgstr "chart not available"
 #: src/renderer/src/components/GuideView.tsx
 msgid "Grafite"
 msgstr "Graphite"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "grafo"
+msgstr "graph"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "gratis, nessun dato esce"
