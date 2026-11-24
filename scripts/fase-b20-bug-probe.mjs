@@ -705,7 +705,9 @@ try {
     const text = await chatText(cdp)
     check('B2: in chat UNA riga di apertura e UN avviso: «Risposta vuota: il modello ha restituito solo ragionamento · 4 volte»', autoRows.length === 1 && text.includes('Risposta vuota: il modello ha restituito solo ragionamento · 4 volte') && text.split('Risposta vuota').length - 1 === 1,
       `${autoRows.length} righe di avvio · ${text.slice(text.indexOf('Risposta') - 30, text.indexOf('Risposta') + 110)}`)
-    check('B2: l’apertura «Avvio automatico» ha l’icona lucide (un <svg>) e nessuna emoji', autoRows.length === 1 && autoRows[0].svg === 1 && autoRows[0].emoji === false, JSON.stringify(autoRows).slice(0, 200))
+    // fase design: la riga d'apertura è il pezzo Notice dentro un <summary> richiudibile —
+    // due icone lucide (la sua + il chevron), mai un'emoji: era «un solo <svg>»
+    check('B2: l’apertura «Avvio automatico» ha le icone lucide (svg, zero emoji)', autoRows.length === 1 && autoRows[0].svg >= 1 && autoRows[0].emoji === false, JSON.stringify(autoRows).slice(0, 200))
     const retryButtons = await pageEval(cdp, `return document.querySelectorAll('[data-testid="notice-retry"]').length`)
     check('B2: l’avviso ha UN bottone «Riprova»', retryButtons === 1, `${retryButtons} bottoni`)
     await shot(cdp, '2-b2-risposta-vuota-4-volte-1280x800-chiaro')
