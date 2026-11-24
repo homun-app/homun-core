@@ -7,6 +7,16 @@
 // riscarica) e il modello della memoria (la memoria torna alla ricerca per
 // testo). Le azioni distruttive chiedono SEMPRE la conferma; i testi stanno
 // nei cataloghi it/en.
+//
+// Fase design (DS4, Impostazioni): la sezione era fatta a mano — etichetta in
+// MAIUSCOLETTO, scheda bordata col respiro di 4, pillole da 12 px — con le
+// sue regole. Ora è un gruppo come gli altri di Generali (SettingsGroup:
+// etichetta text-caption grigia 500, scheda tenue rounded-surface), le righe
+// hanno la misura delle righe di DS1 (alte almeno 52) e l'azione è Button da
+// 32. Ciò che le sonde e i test leggono non cambia: il testid della sezione e
+// quello di ogni riga, i due <p> (il nome, la misura) e UN bottone per riga.
+// `initial` sono i dati di partenza, per i test senza effect (nel prodotto si
+// carica dall'api, come prima).
 import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
@@ -14,6 +24,9 @@ import type { MessageDescriptor } from '@lingui/core'
 import { Loader2 } from 'lucide-react'
 import { api } from '../../store'
 import type { DiskSpaceInfo } from '../../../../shared/types'
+import { Button } from '../ui/button'
+import { SettingsGroup } from './SettingsGroup'
+import { CARD_ROW_CLS, SettingsNote } from './SettingsRow'
 
 /** I byte in parole: GB quando ci stanno, MB sotto. */
 export function fmtBytes(bytes: number | null): string {
@@ -81,32 +94,32 @@ export function PruneFeedback({ working, outcome }: { working: boolean; outcome:
   const { i18n } = useLingui()
   if (working) {
     return (
-      <p className="flex items-center gap-1.5 px-3 pb-2 pt-1 text-xs text-muted-foreground" data-testid="disk-space-prune-working">
-        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+      <SettingsNote testId="disk-space-prune-working" className="flex items-center gap-row-gap">
+        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
         {i18n._(msg`Libero spazio…`)}
-      </p>
+      </SettingsNote>
     )
   }
   if (outcome?.kind === 'freed') {
     return (
-      <p className="px-3 pb-2 pt-1 text-xs text-muted-foreground" data-testid="disk-space-freed">
+      <SettingsNote testId="disk-space-freed">
         <Trans>Liberati {fmtBytes(outcome.bytes)}</Trans>
-      </p>
+      </SettingsNote>
     )
   }
   if (outcome?.kind === 'nothing') {
     return (
-      <p className="px-3 pb-2 pt-1 text-xs text-muted-foreground" data-testid="disk-space-nothing">
+      <SettingsNote testId="disk-space-nothing">
         <Trans>Non c'era niente da liberare.</Trans>
-      </p>
+      </SettingsNote>
     )
   }
   return null
 }
 
-export function DiskSpaceSection() {
+export function DiskSpaceSection({ initial }: { initial?: DiskSpaceInfo | null }) {
   const { i18n } = useLingui()
-  const [info, setInfo] = useState<DiskSpaceInfo | null>(null)
+  const [info, setInfo] = useState<DiskSpaceInfo | null>(initial ?? null)
   const [busy, setBusy] = useState<string | null>(null)
   const [lastError, setLastError] = useState<string | null>(null)
   // U4: il lavoro e l'esito di «Libera spazio» si vedono (spinner, byte liberati)
@@ -145,46 +158,37 @@ export function DiskSpaceSection() {
 
   const free = info?.freeBytes ?? null
   return (
-    <section className="mt-6" data-testid="disk-space-section">
-      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {i18n._(msg`Spazio su disco`)}
-      </h3>
-      <div className="rounded-2xl border bg-card p-1">
+    // il testid sta su un involucro: la sezione è il gruppo (è lui che fa l'etichetta e la scheda),
+    // e le sonde di box-container contano i SUOI discendenti col testid disk-space-*
+    <div data-testid="disk-space-section">
+      <SettingsGroup
+        label={i18n._(msg`Spazio su disco`)}
+        // la frase sullo spazio libero sta SOTTO la scheda: è il footer del gruppo
+        footer={free !== null ? <Trans>Spazio libero sul Mac: {fmtBytes(free)} — prima di costruire o scaricare ne restano sempre 5 GB.</Trans> : undefined}
+      >
         {(info?.rows ?? []).map((row) => {
           const size = fmtBytes(row.bytes)
           const action = rowAction(row.id, size)
           return (
-            <div
-              key={row.id}
-              className="flex items-center justify-between gap-3 border-b border-border/40 px-3 py-2.5 last:border-b-0"
-              data-testid={`disk-space-${row.id}`}
-            >
+            // DUE <p> (il nome, la misura) e UN bottone: è così che la sonda di box-container legge la riga
+            <div key={row.id} className={CARD_ROW_CLS} data-testid={`disk-space-${row.id}`}>
               <div className="min-w-0">
-                <p className="truncate text-sm">{i18n._(rowLabel(row.id))}</p>
-                <p className="text-xs text-muted-foreground">{size}</p>
+                <p className="truncate text-body font-medium">{i18n._(rowLabel(row.id))}</p>
+                <p className="text-small text-muted-foreground">{size}</p>
               </div>
-              <button
-                className="shrink-0 rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
-                disabled={busy !== null || row.bytes === null}
-                onClick={() => runAction(row.id, row.destructive, size)}
-              >
+              <Button size="sm" disabled={busy !== null || row.bytes === null} onClick={() => runAction(row.id, row.destructive, size)}>
                 {busy === 'reclaimable' && row.id === 'reclaimable' ? i18n._(msg`Libero spazio…`) : i18n._(action.label)}
-              </button>
+              </Button>
             </div>
           )
         })}
         <PruneFeedback working={prune.working} outcome={prune.outcome} />
-        {free !== null && (
-          <p className="px-3 pb-2 pt-1 text-xs text-muted-foreground">
-            <Trans>Spazio libero sul Mac: {fmtBytes(free)} — prima di costruire o scaricare ne restano sempre 5 GB.</Trans>
-          </p>
-        )}
         {lastError && (
-          <p className="px-3 pb-2 pt-1 text-xs text-destructive" data-testid="disk-space-error">
+          <SettingsNote tone="destructive" testId="disk-space-error">
             {lastError.slice(0, 200)}
-          </p>
+          </SettingsNote>
         )}
-      </div>
-    </section>
+      </SettingsGroup>
+    </div>
   )
 }

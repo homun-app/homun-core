@@ -663,8 +663,8 @@ msgid "✓ Installato — il bot ha ricevuto l'esito"
 msgstr "✓ Installato — il bot ha ricevuto l'esito"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "✨ Suggerisci dal transcript"
-msgstr "✨ Suggerisci dal transcript"
+#~ msgid "✨ Suggerisci dal transcript"
+#~ msgstr "✨ Suggerisci dal transcript"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 #~ msgid "🗂 Memoria di questo bot"
@@ -1093,7 +1093,6 @@ msgid "notice.approvalExpired"
 msgstr "Approvazione scaduta."
 
 #: src/renderer/src/components/Settings.tsx
-#: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Approvazioni"
 msgstr "Approvazioni"
 
@@ -5318,7 +5317,6 @@ msgid "Mmh, questa chiave non entra."
 msgstr "Mmh, questa chiave non entra."
 
 #: src/renderer/src/components/Settings.tsx
-#: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Modelli"
 msgstr "Modelli"
@@ -7169,6 +7167,7 @@ msgstr "rimuovi"
 
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/ServerSheet.tsx
+#: src/renderer/src/components/settings/ApprovalsPage.tsx
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -8188,6 +8187,10 @@ msgstr "Su cosa vuoi che ti aiuti per primo?"
 #: src/renderer/src/components/Settings.tsx
 msgid "suggerimento routine"
 msgstr "suggerimento routine"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Suggerisci dal transcript"
+msgstr "Suggerisci dal transcript"
 
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Sul computer del bot"

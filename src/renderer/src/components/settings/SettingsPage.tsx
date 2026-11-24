@@ -1,14 +1,17 @@
-// Fase impostazioni (I5): il titolo di pagina, SEMPRE in testa (il modello di
-// Rakazo: pagina = titolo + 1–3 gruppi). Lo stesso font/size del titolo
-// «Modelli» di oggi (font-display text-2xl); lo spazio a destra resta per la ✕
-// del dialogo, che vive fuori (pr-12 come le pagine di oggi).
+// Fase impostazioni (I5): la pagina di una sezione — titolo + gruppi, lo
+// stesso modello di sempre (pagina = titolo + 1–3 gruppi).
+//
+// Fase design (DS4, Impostazioni): il TITOLO non lo fa più la pagina. Era in
+// testa al contenuto che scorre, con 48 px vuoti a destra (pr-12) per la ✕ e
+// una colonna di 768 px scritta a mano (max-w-3xl): la colonna non era
+// centrata e la barra di scorrimento nasceva dentro. Ora il titolo della
+// sezione e la ✕ stanno nella riga FERMA del dialogo (Settings.tsx), alla
+// stessa larghezza del contenuto (PageColumn), e la pagina è soltanto il suo
+// ritmo: i gruppi a 32 px l'uno dall'altro (gap-section, la distanza fra
+// sezioni di DS1 — prima 24). È un contenitore a blocchi: dentro c'è la
+// colonna del dialogo (PageColumn), che decide quanto è larga.
 import type { ReactNode } from 'react'
 
-export function SettingsPage({ title, children }: { title: ReactNode; children: ReactNode }) {
-  return (
-    <div className="space-y-6 pr-12">
-      <h2 className="font-display text-2xl">{title}</h2>
-      <div className="max-w-3xl space-y-6">{children}</div>
-    </div>
-  )
+export function SettingsPage({ children }: { children: ReactNode }) {
+  return <div className="flex flex-col gap-section">{children}</div>
 }

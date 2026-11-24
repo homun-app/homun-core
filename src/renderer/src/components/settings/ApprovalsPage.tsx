@@ -5,10 +5,23 @@
 // verso l'esterno restano da confermare). Poi «Consensi salvati» con i nomi
 // umani, e le regole per strumento sotto «Avanzate» (I4.5: nome umano in
 // testa, nome tecnico piccolo sotto; message_user nei default).
+//
+// Fase design (DS4, Impostazioni): la pagina passa al sistema. I tre modi sono
+// il segmento unico (SettingsSegments: largo quanto la scheda, un radiogroup —
+// lo era già, ma con tre pillole scritte a mano); le azioni sono Button (chi
+// toglie una regola è un bottone solo-icona con un nome accessibile: prima un
+// «✕» senza nome); i campi sono Input; le intestazioni dei gruppi di consensi
+// sono l'intestazione di gruppo del sistema, text-caption grigia 500 (prima in
+// MAIUSCOLETTO); la conferma di «Non chiedere» è una scheda rounded-surface col
+// titolo text-title. Ciò che leggono test e sonde non cambia: UN radiogroup
+// con tre bottoni su questa pagina, i testid dei gruppi, i <code> dei nomi
+// tecnici. `initial` sono i dati di partenza, per i test senza effect (nel
+// prodotto si carica dall'api, come prima).
 import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
+import { X } from 'lucide-react'
 import { api, useStore } from '../../store'
 import { useBotInfo } from '../../bot/use-bot'
 import { Bot } from '../../bot/Bot'
@@ -17,9 +30,13 @@ import { DEFAULT_AUTO_REVIEW, approvalsModeOf } from '../../../../shared/types'
 import { toolDisplayName } from '../../../../shared/tool-names'
 // fase use-app (U3): i consensi di use-app si chiamano per APP o per HOST
 import { grantDisplayName, groupGrantsByBot, grantKindOf, type GrantLike } from '../../lib/approval-app'
+import { cn } from '../../lib/utils'
+import { Button } from '../ui/button'
+import { Input } from '../ui/input'
+import { Select } from '../ui/select'
 import { SettingsPage } from './SettingsPage'
 import { SettingsGroup } from './SettingsGroup'
-import { SettingsRow } from './SettingsRow'
+import { SettingsRow, SettingsSegments, FIELD_ROW_CLS, FOCUS_RING, ROSSA_AL_PASSAGGIO } from './SettingsRow'
 import { SettingsAdvanced } from './SettingsAdvanced'
 
 const MODES: ReadonlyArray<{ id: ApprovalsMode; label: MessageDescriptor }> = [
@@ -36,19 +53,32 @@ const MODE_SENTENCES: Record<ApprovalsMode, MessageDescriptor> = {
   never: msg`Ogni azione parte senza aspettare.`
 }
 
+/** Una concessione salvata, come arriva da grantsList. */
+type GrantRow = { id: number; tool: string; target: string; createdAt: number; scope?: 'readOnly' | null; expiresAt?: number | null }
+
+/** I dati di partenza (per i test senza effect; nel prodotto si caricano dall'api). */
+export interface ApprovalsPageInitial {
+  mode?: ApprovalsMode
+  cfg?: AutoReviewSettings
+  grants?: GrantRow[] | null
+}
+
+/** Un link-bottone dentro una riga (il rimando «Cambia in Modelli ›»): testo in primo piano, sottolineato al passaggio. */
+const LINK_BOTTONE = cn('rounded-control px-1.5 py-1 text-body text-primary transition hover:underline', FOCUS_RING)
+
 /** U7: l'intestazione di un gruppo di consensi — il bot (mascotte e nome), o «Tutti i bot» per le righe NULL. */
 function GrantBotHeader({ agentId }: { agentId: string | null }) {
   const agents = useStore((s) => s.agents)
   const info = useBotInfo(agentId ?? '')
   if (agentId === null) {
     return (
-      <p className="px-4 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground" data-testid="grants-bot-all">
+      <p className="px-4 pb-1 pt-3 text-caption font-medium text-muted-foreground" data-testid="grants-bot-all">
         <Trans>Tutti i bot</Trans>
       </p>
     )
   }
   return (
-    <p className="flex items-center gap-1.5 px-4 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+    <p className="flex items-center gap-1.5 px-4 pb-1 pt-3 text-caption font-medium text-muted-foreground">
       {info ? <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={16} label={undefined} /> : null}
       {agents.find((a) => a.id === agentId)?.name ?? agentId}
     </p>
@@ -62,18 +92,18 @@ function grantKindLabelOf(tool: string, locale: 'it' | 'en'): string {
   return kind
 }
 
-export function ApprovalsPage() {
+export function ApprovalsPage({ initial }: { initial?: ApprovalsPageInitial }) {
   const { t, i18n } = useLingui()
   const permissions = useStore((s) => s.permissions)
   const refreshPermissions = useStore((s) => s.refreshPermissions)
   const setSettingsTab = useStore((s) => s.setSettingsTab)
   const prefill = useStore((s) => s.autoreviewPrefill)
-  const [mode, setMode] = useState<ApprovalsMode | null>(null)
-  const [cfg, setCfg] = useState<AutoReviewSettings | null>(null)
+  const [mode, setMode] = useState<ApprovalsMode | null>(initial?.mode ?? null)
+  const [cfg, setCfg] = useState<AutoReviewSettings | null>(initial?.cfg ?? null)
   const [pendingNever, setPendingNever] = useState(false)
   const [newAllow, setNewAllow] = useState('')
   const [newBlock, setNewBlock] = useState('')
-  const [grants, setGrants] = useState<Array<{ id: number; tool: string; target: string; createdAt: number; scope?: 'readOnly' | null; expiresAt?: number | null }> | null>(null)
+  const [grants, setGrants] = useState<GrantRow[] | null>(initial?.grants ?? null)
 
   const loadGrants = (): void => {
     void api.grantsList().then(setGrants).catch(() => setGrants([]))
@@ -99,7 +129,7 @@ export function ApprovalsPage() {
     }
   }, [prefill])
 
-  if (mode === null || !cfg || !permissions) return <p className="text-xs text-muted-foreground"><Trans>caricamento…</Trans></p>
+  if (mode === null || !cfg || !permissions) return <p className="text-small text-muted-foreground"><Trans>caricamento…</Trans></p>
 
   /** I4.1: il modo si scrive in approvals.mode e autoReview.enabled ne è derivato */
   const saveMode = async (m: ApprovalsMode): Promise<void> => {
@@ -115,31 +145,28 @@ export function ApprovalsPage() {
   }
 
   return (
-    <SettingsPage title={<Trans>Approvazioni</Trans>}>
+    <SettingsPage>
       {/* ---- I4.2 · Quando chiedere ---- */}
       <SettingsGroup label={<Trans>Quando chiedere</Trans>}>
-        <div className="px-4 py-3">
-          <div className="flex flex-wrap gap-1 rounded-full bg-card p-1" role="radiogroup" aria-label={t`Quando chiedere`}>
-            {MODES.map((m) => (
-              <button
-                key={m.id}
-                role="radio"
-                aria-checked={mode === m.id}
-                className={`flex-1 rounded-full px-3 py-1.5 text-center text-sm transition ${mode === m.id ? 'bg-foreground font-medium text-background' : 'text-muted-foreground hover:text-foreground'}`}
-                onClick={() => {
-                  if (m.id === 'never' && mode !== 'never') setPendingNever(true)
-                  else void saveMode(m.id)
-                }}
-              >
-                {i18n.t(m.label)}
-              </button>
-            ))}
-          </div>
-          <p className="mt-2 text-[13px] text-muted-foreground">{i18n.t(MODE_SENTENCES[mode])}</p>
+        <div className="px-4 py-row-pad">
+          {/* il segmento dei tre modi: largo quanto la scheda, alto 36 (sta in una pagina, non in una riga).
+              «Non chiedere» non si salva al clic: chiede la conferma (qui sotto) */}
+          <SettingsSegments<ApprovalsMode>
+            size="md"
+            fill
+            label={t`Quando chiedere`}
+            value={mode}
+            onChange={(m) => {
+              if (m === 'never' && mode !== 'never') setPendingNever(true)
+              else void saveMode(m)
+            }}
+            options={MODES.map((m) => ({ value: m.id, label: i18n.t(m.label) }))}
+          />
+          <p className="mt-3 text-small text-muted-foreground">{i18n.t(MODE_SENTENCES[mode])}</p>
           {/* AH5 (fase aiutanti): accanto a «Chiedi», la riga che dice cosa
               cambia nel computer dei bot */}
           {mode === 'ask' && (
-            <p className="mt-1 text-[13px] text-muted-foreground">
+            <p className="mt-1 text-small text-muted-foreground">
               <Trans>Nel computer dei bot i comandi girano senza chiedere: è isolato dal Mac.</Trans>
             </p>
           )}
@@ -157,10 +184,7 @@ export function ApprovalsPage() {
               }
               control={
                 <span className="flex items-center gap-3">
-                  <button
-                    className="text-sm text-primary transition hover:underline"
-                    onClick={() => setSettingsTab('modelli')}
-                  >
+                  <button type="button" className={LINK_BOTTONE} onClick={() => setSettingsTab('modelli')}>
                     <Trans>Cambia in Modelli ›</Trans>
                   </button>
                 </span>
@@ -193,8 +217,8 @@ export function ApprovalsPage() {
         label={<Trans>Consensi salvati</Trans>}
         footer={<Trans>«Consenti sempre» dati nelle card. Le letture di un server valgono solo per i tool che restano dichiarati in sola lettura.</Trans>}
       >
-        {grants === null && <div className="px-4 py-3 text-sm text-muted-foreground">…</div>}
-        {grants?.length === 0 && <div className="px-4 py-3 text-sm text-muted-foreground"><Trans>(nessun consenso salvato)</Trans></div>}
+        {grants === null && <div className="flex min-h-row items-center px-4 text-body text-muted-foreground">…</div>}
+        {grants?.length === 0 && <div className="flex min-h-row items-center px-4 text-body text-muted-foreground"><Trans>(nessun consenso salvato)</Trans></div>}
         {/* U7 (fase prima-release): i consensi raggruppati per BOT (nome e
             mascotte), col gruppo «Tutti i bot» per quelli di oggi (NULL) */}
         {grants !== null && groupGrantsByBot(grants as GrantLike[]).map((group) => (
@@ -207,22 +231,25 @@ export function ApprovalsPage() {
                 description={
                   <span>
                     {/* U7: la parola in monospazio e il tipo in chiaro */}
-                    {g.tool === 'run-command' ? <code className="font-mono text-[11px]">{g.target}</code> : <code className="font-mono text-[11px]">{g.tool}{g.target !== '*' ? ` · ${g.target}` : ''}</code>}
-                    <span className="ml-2 text-[11px] text-muted-foreground">{grantKindLabelOf(g.tool, i18n.locale === 'en' ? 'en' : 'it')}</span>
+                    {g.tool === 'run-command' ? <code className="font-mono text-caption">{g.target}</code> : <code className="font-mono text-caption">{g.tool}{g.target !== '*' ? ` · ${g.target}` : ''}</code>}
+                    <span className="ml-2 text-caption text-muted-foreground">{grantKindLabelOf(g.tool, i18n.locale === 'en' ? 'en' : 'it')}</span>
                     {g.expiresAt != null && (
-                      <span className="ml-2 text-[11px] text-muted-foreground">
+                      <span className="ml-2 text-caption text-muted-foreground">
                         <Trans>Scade: {new Date(g.expiresAt).toLocaleTimeString(i18n.locale, { hour: '2-digit', minute: '2-digit' })}</Trans>
                       </span>
                     )}
                   </span>
                 }
                 control={
-                  <button
-                    className="rounded-full bg-card px-2.5 py-1 text-xs text-muted-foreground transition hover:text-destructive"
+                  // quieta: grigia finché non ci si passa sopra (è lei che toglie, senza conferma)
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn('bg-card', ROSSA_AL_PASSAGGIO)}
                     onClick={() => { void api.grantRevoke(g.id).then(loadGrants).catch(() => undefined) }}
                   >
                     <Trans>Revoca</Trans>
-                  </button>
+                  </Button>
                 }
               />
             ))}
@@ -250,7 +277,7 @@ export function ApprovalsPage() {
             <SettingsRow
               key={`${r.tool}|${r.pattern}|${i}`}
               title={toolDisplayName(r.tool, i18n.locale === 'en' ? 'en' : 'it')}
-              description={<code className="font-mono text-[11px]">{r.tool}{r.pattern !== '*' ? ` · ${r.pattern}` : ''}</code>}
+              description={<code className="font-mono text-caption">{r.tool}{r.pattern !== '*' ? ` · ${r.pattern}` : ''}</code>}
               control={
                 <ModeSelect
                   value={r.mode}
@@ -270,27 +297,21 @@ export function ApprovalsPage() {
       {/* ---- I4.2 · la conferma di «Non chiedere» ---- */}
       {pendingNever && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={() => setPendingNever(false)}>
-          <div className="w-full max-w-md space-y-3 rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
-            <strong className="block font-display text-lg"><Trans>Non chiedere più?</Trans></strong>
-            <p className="text-sm text-muted-foreground">
+          <div className="flex w-full max-w-md flex-col gap-block rounded-surface bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
+            <strong className="block text-title font-semibold"><Trans>Non chiedere più?</Trans></strong>
+            <p className="text-body text-muted-foreground">
               <Trans>
                 Il bot agirà senza chiederti niente, anche per inviare o cancellare. Restano solo le protezioni fisse:
                 le azioni bloccate restano bloccate e le bozze verso l’esterno restano da confermare.
               </Trans>
             </p>
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
-                onClick={() => setPendingNever(false)}
-              >
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setPendingNever(false)}>
                 <Trans>Annulla</Trans>
-              </button>
-              <button
-                className="rounded-full bg-foreground px-4 py-1.5 text-sm font-medium text-background transition hover:opacity-90"
-                onClick={() => { setPendingNever(false); void saveMode('never') }}
-              >
+              </Button>
+              <Button onClick={() => { setPendingNever(false); void saveMode('never') }}>
                 <Trans>Non chiedere più</Trans>
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -299,23 +320,23 @@ export function ApprovalsPage() {
   )
 }
 
-/** Il selettore dei tre modi di una regola (Consenti sempre / Chiedi / Blocca). */
-function ModeSelect({ value, onChange }: { value: PermissionMode; onChange(v: PermissionMode): Promise<void> | void }) {
+/** Il selettore dei tre modi di una regola (Consenti sempre / Chiedi / Blocca): una pillola da 32, la misura dei controlli in riga. */
+export function ModeSelect({ value, onChange }: { value: PermissionMode; onChange(v: PermissionMode): Promise<void> | void }) {
   const { t } = useLingui()
   return (
-    <select
-      className="h-9 shrink-0 rounded-full bg-card px-2.5 text-sm outline-none"
+    <Select
+      className={cn(FIELD_ROW_CLS, 'w-auto shrink-0 rounded-full')}
       value={value}
       onChange={(e) => void onChange(e.target.value as PermissionMode)}
     >
       <option value="always_allow">{t`Consenti sempre`}</option>
       <option value="needs_approval">{t`Chiedi approvazione`}</option>
       <option value="blocked">{t`Blocca`}</option>
-    </select>
+    </Select>
   )
 }
 
-/** Le due liste di regole dell'Automatico (stile di oggi, dentro la scheda). */
+/** Le due liste di regole dell'Automatico, dentro la scheda: non sono mai le prime (sopra c'è sempre la riga del modello), e portano il filetto in cima. */
 function RuleList({ title, hint, rules, onAdd, onRemove, value, setValue }: {
   title: MessageDescriptor
   hint: MessageDescriptor
@@ -327,33 +348,37 @@ function RuleList({ title, hint, rules, onAdd, onRemove, value, setValue }: {
 }) {
   const { t, i18n } = useLingui()
   return (
-    <div className="border-t border-border/40 px-4 py-3">
-      <div className="text-sm">{i18n.t(title)}</div>
-      <div className="mt-0.5 text-[13px] text-muted-foreground">{i18n.t(hint)}</div>
-      <ul className="mt-2 space-y-1">
-        {rules.length === 0 && <li className="text-xs text-muted-foreground"><Trans>(nessuna regola)</Trans></li>}
+    <div className="border-t border-border/40 px-4 py-row-pad">
+      <div className="text-body font-medium">{i18n.t(title)}</div>
+      <div className="mt-0.5 text-small text-muted-foreground">{i18n.t(hint)}</div>
+      <ul className="mt-2 flex flex-col gap-1">
+        {rules.length === 0 && <li className="text-small text-muted-foreground"><Trans>(nessuna regola)</Trans></li>}
         {rules.map((r, i) => (
-          <li key={`${r}-${i}`} className="flex items-start gap-2 text-xs">
-            <span className="flex-1">{r}</span>
-            <button className="shrink-0 text-muted-foreground hover:text-destructive" onClick={() => onRemove(i)}>✕</button>
+          <li key={`${r}-${i}`} className="flex items-center gap-2 text-body">
+            <span className="min-w-0 flex-1">{r}</span>
+            {/* un bottone solo-icona, ma con un nome: prima era un «✕» senza */}
+            <Button variant="ghost" icon size="sm" aria-label={t`Rimuovi`} onClick={() => onRemove(i)}>
+              <X className="size-4" />
+            </Button>
           </li>
         ))}
       </ul>
       <div className="mt-2 flex gap-2">
-        <input
-          className="min-w-0 flex-1 rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
+        <Input
+          className={cn(FIELD_ROW_CLS, 'min-w-0 flex-1')}
           placeholder={t`es. comandi ls e cat dentro la home del bot`}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && value.trim()) { onAdd(); setValue('') } }}
         />
-        <button
-          className="rounded-full bg-card px-3 py-1.5 text-xs transition hover:bg-card/80 disabled:opacity-40"
+        <Button
+          variant="secondary"
+          size="sm"
           disabled={!value.trim()}
           onClick={() => { onAdd(); setValue('') }}
         >
           <Trans>Aggiungi</Trans>
-        </button>
+        </Button>
       </div>
     </div>
   )

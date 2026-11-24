@@ -2,17 +2,38 @@
 // colonna di sezioni a sinistra prende le ICONE (lucide), il dialogo non
 // dà il fuoco al primo bottone all'apertura (niente anello arancione: il
 // fuoco va al titolo; con la tastiera l'anello resta, via :focus-visible),
-// e ogni pagina usa gli stessi pezzi di components/settings/: titolo
-// (SettingsPage), gruppo a scheda (SettingsGroup), riga nome/controllo
-// (SettingsRow), «Avanzate» chiuso (SettingsAdvanced). Modelli e Approvazioni
-// vivono nei loro file (I2/I4). PP3 (fase plugin-pulita): la sezione «App e
-// skill» non c'è più — connettori, server MCP e skill stanno nella pagina
+// e ogni pagina usa gli stessi pezzi di components/settings/: gruppo a
+// scheda (SettingsGroup), riga nome/controllo (SettingsRow), «Avanzate»
+// chiuso (SettingsAdvanced). Modelli e Approvazioni vivono nei loro file
+// (I2/I4). PP3 (fase plugin-pulita): la vecchia sezione delle app e delle
+// skill non c'è più — connettori, server MCP e skill stanno nella pagina
 // «Plugin»; chi ne chiede ancora la scheda arriva lì (store: setSettingsTab).
+//
+// Fase design (DS4, Impostazioni): il dialogo passa al sistema. Lo schema è
+// quello di PageShell (components/ui/page-shell), dentro un dialogo:
+//   - IL CORPO CHE SCORRE È LARGO QUANTO L'AREA (la parte dei contenuti, a
+//     destra della navigazione). Prima stava dentro un padding di 24: la barra
+//     di scorrimento nasceva 24 px dentro il bordo destro, e la colonna del
+//     contenuto non era centrata (48 px vuoti per la ✕, 768 px scritti a
+//     mano). Ora la barra sta sul bordo del dialogo, riservata su tutti e due
+//     i lati (scrollbar-gutter: stable both-edges — la barra di scroll-thin
+//     occupa 6 px — così il contenuto resta centrato), e DENTRO il corpo il
+//     contenuto è centrato con PageColumn: alla larghezza delle impostazioni
+//     (880), larga (1120) in «Uso e costi», che ha le tabelle.
+//   - LA RIGA FERMA: il titolo della sezione e la ✕. Prima stavano nel
+//     contenuto che scorreva (la ✕ assoluta, il titolo in testa alla pagina,
+//     e «Torna alla guida» sopra il titolo): ora sono una riga alta 52 SOPRA
+//     lo scorrimento, larga quanto l'area, col contenuto alla stessa larghezza
+//     dello scorrimento (px-1.5: i 6 px della barra, come le righe ferme di
+//     PageShell). Il titolo non lo fa più la pagina: lo fa il dialogo, dal
+//     nome della sezione — le sei pagine ripetevano la voce della navigazione.
+//   - la colonna dei contenuti è un contenitore (@container): il margine
+//     della colonna si decide sull'AREA (24 sotto i 900 px), non sulla finestra.
 import { useEffect, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { Cpu, Gauge, KeyRound, Repeat, Settings as SettingsIcon, ShieldCheck, X } from 'lucide-react'
+import { Cpu, Gauge, KeyRound, Repeat, Settings as SettingsIcon, ShieldCheck, Sparkles, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { api, useStore } from '../store'
 import { formatDate, formatTime } from '../lib/i18n'
@@ -20,6 +41,7 @@ import { SUPPORTED_UI_LANGUAGES, type UiLanguageSetting } from '../../../shared/
 import { describeTrigger } from '../../../shared/cron-human'
 // fase 17c (C5/C6): lingua attiva per le descrizioni; fiducia e template dai codici
 import { i18n } from '../lib/i18n'
+import { cn } from '../lib/utils'
 import { VaultTab } from './VaultSettings'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
 import type { RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, RoutineTrigger, ThinkingSetting, WebSearchStatusRpc, WebSearchProviderStatusRpc, ModelUsageRow, ModelPrice, ModelPriceMap } from '../../../shared/types'
@@ -29,8 +51,12 @@ import { priceEditorRows } from '../lib/price-editor'
 import { isLocalKind } from '../../../main/agent/live-models'
 // fase 16c correzioni (R5): la valuta nella lingua dell'interfaccia
 import { fmtUsd as fmtUsdIn } from '../lib/fmt'
-import type { UiTheme } from '../theme'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
+import { Button } from './ui/button'
+import { Input } from './ui/input'
+import { Select } from './ui/select'
+import { PageColumn, type PageWidth } from './ui/page-shell'
+import { DataTable, Cell, type DataTableColumn } from './ui/data-table'
 // fase 18b (H5.3): il ModelPicker resta per il modello della ROUTINE (I1: qui
 // serve ancora un campo a testo libero per un id non ancora in elenco)
 import { ModelPicker, THINKING_LABELS } from './ui/ModelPicker'
@@ -40,7 +66,7 @@ import { ModelsPage } from './settings/ModelsPage'
 import { ApprovalsPage } from './settings/ApprovalsPage'
 import { SettingsPage } from './settings/SettingsPage'
 import { SettingsGroup } from './settings/SettingsGroup'
-import { SettingsRow } from './settings/SettingsRow'
+import { SettingsRow, SettingsSegments, FIELD_ROW_CLS, FIELD_PAGE_CLS, FOCUS_RING, ROSSA_AL_PASSAGGIO } from './settings/SettingsRow'
 import { SettingsAdvanced } from './settings/SettingsAdvanced'
 // fase box-container (BX3/BX4): «Spazio su disco» e il motore in Generali
 import { DiskSpaceSection } from './settings/DiskSpaceSection'
@@ -56,8 +82,8 @@ const SECTIONS: Record<string, { label: MessageDescriptor; icon: LucideIcon }> =
   uso: { label: msg`Uso e costi`, icon: Gauge }
 }
 
-/** RV3 (fase beta.2): le select gemelle di Generali (Finestra di consegna, Lingua). */
-const SETTINGS_SELECT_CLS = 'h-9 rounded-[10px] bg-card px-2 text-sm outline-none'
+/** L'ora della «Finestra di consegna»: il campo da 32 delle righe, stretto e con le cifre allineate. */
+const ORA_CLS = cn(FIELD_ROW_CLS, 'w-16 px-2 text-center tabular-nums')
 
 /** La lingua attiva come UiLanguage (fase 17c, C6). */
 function uiLang(): 'it' | 'en' {
@@ -91,10 +117,17 @@ export function Settings() {
     }
   }, [pendingTab, setSettingsTab])
 
+  // «Uso e costi» ha le tabelle: la colonna LARGA di DS1 (come «Collegati»); le altre pagine quella delle impostazioni
+  const width: PageWidth = tab === 'uso' ? 'wide' : 'page'
+  // il titolo della sezione è la voce della navigazione (stesso msgid): una sola verità
+  const title = i18n.t(SECTIONS[tab]!.label)
+
   return (
     <Dialog open onOpenChange={(o) => !o && setSettingsOpen(false)}>
       <DialogContent
-        className="flex h-[min(760px,calc(100vh-48px))] w-[min(1080px,calc(100vw-48px))] max-w-[min(1080px,calc(100vw-48px))] gap-0 p-0"
+        // overflow-hidden: il dialogo NON è lui a scorrere (di fabbrica lo è: overflow-y-auto) — scorre il corpo della
+        // colonna dei contenuti, e la sua barra sta sul bordo destro del dialogo. Così la navigazione resta ferma
+        className="flex h-[min(760px,calc(100vh-48px))] w-[min(1080px,calc(100vw-48px))] max-w-[min(1080px,calc(100vw-48px))] gap-0 overflow-hidden p-0"
         showCloseButton={false}
         // I5.5: niente anello arancione all'apertura — il fuoco automatico del
         // dialogo va al primo bottone («Generali») e l'anello si vede anche col
@@ -106,7 +139,10 @@ export function Settings() {
             bg-muted, NESSUN bordo; l'anello del fuoco SOLO da tastiera
             (:focus-visible), mai al clic col mouse */}
         <nav className="w-52 shrink-0 space-y-0.5 overflow-y-auto scroll-thin p-3">
-          <strong id="sandbot-settings-title" tabIndex={-1} className="block px-3 pb-3 pt-1 font-display text-lg outline-none">
+          {/* il titolo del dialogo, in cima alla colonna, ed è il bersaglio del fuoco
+              all'apertura. 12 (il respiro del nav) + 28 (la riga del testo) + 12:
+              le voci cominciano dove finisce, a destra, la riga ferma del titolo */}
+          <strong id="sandbot-settings-title" tabIndex={-1} className="block px-3 pb-3 text-title font-semibold outline-none">
             {i18n._(msg`Impostazioni`)}
           </strong>
           {(Object.keys(SECTIONS) as string[]).map((t) => {
@@ -114,50 +150,71 @@ export function Settings() {
             return (
               <button
                 key={t}
-                className={`flex w-full items-center gap-2.5 rounded-full px-3 py-2 text-left text-sm outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 ${tab === t ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                // la voce attiva è una voce, non una pillola: rounded-control (DS1)
+                className={cn(
+                  'flex h-row-text w-full items-center gap-row-gap rounded-control px-3 text-left text-body transition',
+                  FOCUS_RING,
+                  tab === t ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'
+                )}
                 onClick={() => setTab(t)}
               >
-                <Icon className="size-4 shrink-0" />
+                {/* l'icona in uno slot della sua misura (16): il nome parte sempre dalla stessa ascissa */}
+                <span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
+                  <Icon className="size-4" />
+                </span>
                 <span className="truncate">{i18n.t(SECTIONS[t]!.label)}</span>
               </button>
             )
           })}
         </nav>
-        {/* RV2 (fase beta.2): la ✕ sta FUORI dal contenitore che scorre — resta
-            visibile a qualunque scorrimento, in OGNI scheda (prima era absolute
-            DENTRO lo scroller e se ne andava col contenuto) */}
-        <div className="relative flex min-w-0 flex-1 flex-col">
-          {/* OA3: «Torna alla guida» quando il passo model l'ha aperta */}
-          {guideWaitingModel && (
-            <button
-              className="absolute left-5 top-4 z-10 rounded-full bg-foreground px-3.5 py-2 text-xs text-background outline-none transition hover:opacity-90 focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              data-testid="settings-back-to-guide"
-              onClick={() => setSettingsOpen(false)}
-            >
-              <Trans>Torna alla guida</Trans>
-            </button>
-          )}
-          {/* la ✕ tonda in alto a destra (Esc chiude, come sempre nel Dialog) */}
-          <button
-            className="absolute right-5 top-4 z-10 grid size-9 place-items-center rounded-full bg-muted text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            aria-label={i18n._(msg`Chiudi`)}
-            onClick={() => setSettingsOpen(false)}
-          >
-            <X className="size-4" />
-          </button>
-          <div className="@container min-h-0 flex-1 overflow-y-auto scroll-thin">
-            <div className="px-6 py-6">
+        {/* la colonna dei contenuti, larga quanto l'area che resta. È un contenitore: il margine della colonna
+            (PageColumn) lo decide l'AREA — 24 sotto i 900 px — e in questo dialogo lo è sempre */}
+        <div className="@container flex min-w-0 flex-1 flex-col">
+          {/* LA RIGA FERMA (52): il titolo della sezione · le azioni (la ✕, e «Torna alla guida»
+              quando la guida aspetta il modello). RV2 (fase beta.2): la ✕ resta visibile a
+              qualunque scorrimento, in OGNI scheda — sta sopra lo scorrimento, non dentro, e
+              mai sopra la barra. px-1.5: la barra di scroll-thin occupa 6 px, che il corpo
+              riserva su tutti e due i lati — così titolo, ✕ e contenuto hanno la stessa larghezza */}
+          <div className="shrink-0 px-1.5">
+            <PageColumn width={width}>
+              <div className="flex h-col-head items-center gap-3">
+                {/* le stesse classi del titolo di PageHeader: cede lo spazio alle azioni e tronca; se non ci
+                    sta, il nome intero si legge al passaggio */}
+                <h2 className="min-w-0 truncate font-display font-semibold text-page" title={title}>{title}</h2>
+                <span className="flex-1" />
+                <div className="flex shrink-0 items-center gap-2">
+                  {/* OA3: «Torna alla guida» quando il passo model l'ha aperta — un'azione della riga,
+                      accanto alla ✕ (prima era un bottone assoluto sopra il titolo) */}
+                  {guideWaitingModel && (
+                    <Button variant="secondary" size="sm" data-testid="settings-back-to-guide" onClick={() => setSettingsOpen(false)}>
+                      <Trans>Torna alla guida</Trans>
+                    </Button>
+                  )}
+                  {/* la ✕ (Esc chiude, come sempre nel Dialog): un bottone da 32 */}
+                  <Button variant="ghost" icon size="sm" aria-label={i18n._(msg`Chiudi`)} onClick={() => setSettingsOpen(false)}>
+                    <X className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            </PageColumn>
+          </div>
+          {/* IL CORPO CHE SCORRE: figlio diretto della colonna (min-h-0 flex-1: la sua altezza è
+              quella che resta, il di più scorre — lo schema di PageShell), largo quanto l'area:
+              la barra sta sul bordo destro del dialogo. overflow-x-hidden: se una pagina è più
+              larga la taglia fuori (le tabelle larghe scorrono dentro se stesse) */}
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable_both-edges]">
+            <PageColumn width={width} className="py-6">
               {tab === 'generale' && <GeneralTab />}
               {tab === 'modelli' && <ModelsPage />}
               {tab === 'approvazioni' && <ApprovalsPage />}
               {tab === 'vault' && (
-                <SettingsPage title={<Trans>Cassaforte</Trans>}>
+                <SettingsPage>
                   <VaultTab />
                 </SettingsPage>
               )}
               {tab === 'routine' && <RoutinesTab />}
               {tab === 'uso' && <UsageTab />}
-            </div>
+            </PageColumn>
           </div>
         </div>
       </DialogContent>
@@ -182,15 +239,18 @@ export function Toggle({ checked, onChange, disabled, label, testId }: {
       aria-label={label}
       disabled={disabled}
       {...(testId ? { 'data-testid': testId } : {})}
-      className={`relative h-6 w-10 shrink-0 rounded-full transition ${checked ? 'bg-foreground' : 'bg-muted-foreground/30'} ${disabled ? 'opacity-40' : ''}`}
+      // il bottone è alto 32 (il controllo piccolo di DS1: il bersaglio, anche dove l'interruttore
+      // sta in una testata), la PISTA dentro è alta 24 e la pallina 20: l'aspetto è quello di prima
+      className={`relative h-control-sm w-10 shrink-0 rounded-full transition ${disabled ? 'opacity-40' : ''}`}
       onClick={() => onChange(!checked)}
     >
-      <span className={`absolute top-0.5 size-5 rounded-full bg-card transition-all ${checked ? 'right-0.5' : 'left-0.5'}`} />
+      <span className={`absolute inset-x-0 inset-y-1 rounded-full transition ${checked ? 'bg-foreground' : 'bg-muted-foreground/30'}`} />
+      <span className={`absolute top-1 size-5 rounded-full bg-card transition-all ${checked ? 'right-0.5' : 'left-0.5'}`} />
     </button>
   )
 }
 
-/** I5.3: il campo numerico (look-around, pausa) — un campo VERO, non testo. */
+/** I5.3: il campo numerico (look-around, pausa) — un campo VERO, non testo: il campo di components/ui, alla misura dei controlli in riga. */
 function NumberField({ value, onChange, min, width, ariaLabel }: {
   value: number
   onChange(v: number): void
@@ -199,11 +259,11 @@ function NumberField({ value, onChange, min, width, ariaLabel }: {
   ariaLabel: string
 }) {
   return (
-    <input
+    <Input
       type="number"
       min={min}
       aria-label={ariaLabel}
-      className={`h-9 rounded-[10px] bg-card px-2.5 text-sm tabular-nums outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 ${width ?? 'w-20'}`}
+      className={cn(FIELD_ROW_CLS, 'tabular-nums', width ?? 'w-20')}
       value={value}
       onChange={(e) => onChange(Number(e.target.value))}
     />
@@ -310,23 +370,23 @@ function GeneralTab() {
   }
 
   return (
-    <SettingsPage title={<Trans>Generali</Trans>}>
+    <SettingsPage>
       {/* ---- Aspetto ---- */}
       <SettingsGroup label={<Trans>Aspetto</Trans>}>
         <SettingsRow
           title={<Trans>Tema</Trans>}
           control={
-            <span className="flex gap-1 rounded-full bg-card p-1">
-              {([['system', msg`Sistema`], ['light', msg`Chiaro`], ['dark', msg`Scuro`]] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  className={`rounded-full px-3 py-1 text-xs outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 ${theme === value ? 'bg-foreground text-background' : 'text-muted-foreground'}`}
-                  onClick={() => setTheme(value as UiTheme)}
-                >
-                  {i18n.t(label)}
-                </button>
-              ))}
-            </span>
+            // il segmento unico (SettingsSegments): «Sistema · Chiaro · Scuro» in una pillola, l'attiva piena
+            <SettingsSegments
+              label={t`Tema`}
+              value={theme}
+              onChange={(v) => setTheme(v)}
+              options={[
+                { value: 'system', label: <Trans>Sistema</Trans> },
+                { value: 'light', label: <Trans>Chiaro</Trans> },
+                { value: 'dark', label: <Trans>Scuro</Trans> }
+              ]}
+            />
           }
         />
         {/* RV3 (fase beta.2): una select (le pillole vanno bene per 2–3 voci,
@@ -336,8 +396,8 @@ function GeneralTab() {
         <SettingsRow
           title={<Trans>Lingua</Trans>}
           control={
-            <select
-              className={SETTINGS_SELECT_CLS}
+            <Select
+              className={FIELD_ROW_CLS}
               aria-label={t`Lingua`}
               data-testid="ui-language-select"
               value={uiLanguage}
@@ -347,7 +407,7 @@ function GeneralTab() {
               {SUPPORTED_UI_LANGUAGES.map((l) => (
                 <option key={l.code} value={l.code}>{l.endonym}</option>
               ))}
-            </select>
+            </Select>
           }
         />
       </SettingsGroup>
@@ -364,57 +424,46 @@ function GeneralTab() {
             title={<Trans>Per attivarlo, macOS chiede il tuo via</Trans>}
             description={<Trans>Apri Elementi login e attiva Homun.</Trans>}
             control={
-              <button
-                className="rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                onClick={() => void api.openLoginItemsSettings()}
-              >
+              <Button size="sm" onClick={() => void api.openLoginItemsSettings()}>
                 <Trans>Apri Elementi login</Trans>
-              </button>
+              </Button>
             }
           />
         )}
-        {/* RV1 (fase beta.2): data-testid per i test del render (niente DOM nel repo) */}
-        <div data-testid="settings-update-row">
-          <SettingsRow
-            title={<Trans>Versione e aggiornamenti</Trans>}
-            description={<span className="font-mono text-xs">{appVersion || '—'}</span>}
-            control={
-              <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-                {!canUpdate ? (
-                  <Trans>Questa build non riceve aggiornamenti</Trans>
-                ) : updater.needsMove ? (
-                  // l'app va spostata in Applicazioni: il motivo e il bottone
-                  // che RIPROPONE lo spostamento (gli aggiornamenti sono spenti
-                  // per questa sessione, e «Controlla aggiornamenti» non può
-                  // funzionare: il main risponde comunque needsMove, mai silenzio)
-                  <>
-                    <span className="text-waiting"><Trans>Per gli aggiornamenti sposta Homun in Applicazioni</Trans></span>
-                    <button
-                      className="rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                      data-testid="move-to-applications"
-                      onClick={() => { void api.moveToApplications() }}
-                    >
-                      <Trans>Sposta in Applicazioni</Trans>
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    {updateResult === 'current' && <span className="text-chart-2"><Trans>Aggiornato</Trans></span>}
-                    {updateResult === 'available' && <span><Trans>Versione nuova disponibile</Trans></span>}
-                    {updateResult === 'error' && <span><Trans>Controllo non riuscito</Trans></span>}
-                    <button
-                      className="rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
-                      disabled={updateBusy}
-                      onClick={() => void checkUpdates()}
-                    >
-                      <Trans>Controlla aggiornamenti</Trans>
-                    </button>
-                  </>
-                )}
-              </span>
-            }
-          />
-        </div>
+        {/* RV1 (fase beta.2): data-testid per i test del render (niente DOM nel repo). Fase design: sta sulla
+            riga — prima stava su un div intorno, e la riga era il primo figlio di quel div: niente filetto */}
+        <SettingsRow
+          testId="settings-update-row"
+          title={<Trans>Versione e aggiornamenti</Trans>}
+          description={<span className="font-mono text-foreground">{appVersion || '—'}</span>}
+          control={
+            <span className="flex shrink-0 items-center gap-2 text-small text-muted-foreground">
+              {!canUpdate ? (
+                <Trans>Questa build non riceve aggiornamenti</Trans>
+              ) : updater.needsMove ? (
+                // l'app va spostata in Applicazioni: il motivo e il bottone
+                // che RIPROPONE lo spostamento (gli aggiornamenti sono spenti
+                // per questa sessione, e «Controlla aggiornamenti» non può
+                // funzionare: il main risponde comunque needsMove, mai silenzio)
+                <>
+                  <span className="text-waiting"><Trans>Per gli aggiornamenti sposta Homun in Applicazioni</Trans></span>
+                  <Button size="sm" data-testid="move-to-applications" onClick={() => { void api.moveToApplications() }}>
+                    <Trans>Sposta in Applicazioni</Trans>
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {updateResult === 'current' && <span className="text-chart-2"><Trans>Aggiornato</Trans></span>}
+                  {updateResult === 'available' && <span><Trans>Versione nuova disponibile</Trans></span>}
+                  {updateResult === 'error' && <span><Trans>Controllo non riuscito</Trans></span>}
+                  <Button size="sm" disabled={updateBusy} onClick={() => void checkUpdates()}>
+                    <Trans>Controlla aggiornamenti</Trans>
+                  </Button>
+                </>
+              )}
+            </span>
+          }
+        />
         {/* RP3 (fase rilascio di prova): il canale degli aggiornamenti, sotto
             «Controlla aggiornamenti» — le prerelease le vede solo chi le chiede */}
         <SettingsRow
@@ -431,21 +480,19 @@ function GeneralTab() {
             title={<Trans>Guida iniziale</Trans>}
             description={<Trans>Si riprendono solo i passi saltati. Rifarla da capo non tocca bot né dati.</Trans>}
             control={
-              <span className="flex shrink-0 items-center gap-2 text-xs" data-testid="settings-guide-row">
-                <button
-                  className="rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
+              <span className="flex shrink-0 items-center gap-2" data-testid="settings-guide-row">
+                {/* «Riprendi» è l'azione della riga: la pillola piena; «Rifai da capo» viene dopo: secondaria */}
+                <Button
+                  size="sm"
                   disabled={skippedSteps.length === 0}
                   title={skippedSteps.length === 0 ? t`Nessun passo saltato da riprendere` : undefined}
                   onClick={() => { void onboardingReopen(skippedSteps[0]!) }}
                 >
                   <Trans>Riprendi</Trans>
-                </button>
-                <button
-                  className="rounded-full bg-muted px-3 py-1.5 text-xs text-foreground outline-none transition hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  onClick={() => { void onboardingReopen('restart') }}
-                >
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => { void onboardingReopen('restart') }}>
                   <Trans>Rifai da capo</Trans>
-                </button>
+                </Button>
               </span>
             }
           />
@@ -457,8 +504,8 @@ function GeneralTab() {
         <SettingsRow
           title={<Trans>Fuso orario</Trans>}
           control={
-            <input
-              className="h-9 w-44 rounded-[10px] bg-card px-2.5 text-sm outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            <Input
+              className={cn(FIELD_ROW_CLS, 'w-44')}
               placeholder={Intl.DateTimeFormat().resolvedOptions().timeZone}
               value={tz}
               onChange={(e) => setTz(e.target.value)}
@@ -471,26 +518,26 @@ function GeneralTab() {
           description={<Trans>I messaggi non urgenti delle routine aspettano questa finestra.</Trans>}
           control={
             <span className="flex shrink-0 items-center gap-2">
-              <select
-                className={SETTINGS_SELECT_CLS}
+              <Select
+                className={FIELD_ROW_CLS}
                 value={winMode}
                 onChange={(e) => { setWinMode(e.target.value as 'morning' | 'working'); void saveWindow() }}
               >
                 <option value="morning">{t`mattina`}</option>
                 <option value="working">{t`orario lavorativo`}</option>
-              </select>
+              </Select>
               {winMode === 'morning' ? (
                 <>
-                  <input className="h-9 w-16 rounded-[10px] bg-card px-2 text-center text-sm tabular-nums outline-none" value={morning.start} onChange={(e) => setMorning({ ...morning, start: e.target.value })} onBlur={() => void saveWindow()} />
+                  <Input className={ORA_CLS} value={morning.start} onChange={(e) => setMorning({ ...morning, start: e.target.value })} onBlur={() => void saveWindow()} />
                   <span className="text-muted-foreground">–</span>
-                  <input className="h-9 w-16 rounded-[10px] bg-card px-2 text-center text-sm tabular-nums outline-none" value={morning.end} onChange={(e) => setMorning({ ...morning, end: e.target.value })} onBlur={() => void saveWindow()} />
+                  <Input className={ORA_CLS} value={morning.end} onChange={(e) => setMorning({ ...morning, end: e.target.value })} onBlur={() => void saveWindow()} />
                 </>
               ) : (
                 <>
-                  <span className="text-xs text-muted-foreground">{t`lun–ven`}</span>
-                  <input className="h-9 w-16 rounded-[10px] bg-card px-2 text-center text-sm tabular-nums outline-none" value={working.start} onChange={(e) => setWorking({ ...working, start: e.target.value })} onBlur={() => void saveWindow()} />
+                  <span className="text-small text-muted-foreground">{t`lun–ven`}</span>
+                  <Input className={ORA_CLS} value={working.start} onChange={(e) => setWorking({ ...working, start: e.target.value })} onBlur={() => void saveWindow()} />
                   <span className="text-muted-foreground">–</span>
-                  <input className="h-9 w-16 rounded-[10px] bg-card px-2 text-center text-sm tabular-nums outline-none" value={working.end} onChange={(e) => setWorking({ ...working, end: e.target.value })} onBlur={() => void saveWindow()} />
+                  <Input className={ORA_CLS} value={working.end} onChange={(e) => setWorking({ ...working, end: e.target.value })} onBlur={() => void saveWindow()} />
                 </>
               )}
             </span>
@@ -511,12 +558,12 @@ function GeneralTab() {
             />
           )
         })}
-        {agents.length === 0 && <div className="px-4 py-3 text-sm text-muted-foreground"><Trans>(nessun bot)</Trans></div>}
+        {agents.length === 0 && <div className="flex min-h-row items-center px-4 text-body text-muted-foreground"><Trans>(nessun bot)</Trans></div>}
       </SettingsGroup>
 
       {/* fase 14 (punto 1): l'avviso della Libreria resta, in fondo */}
       {libStats?.warn && (
-        <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <p className="rounded-surface bg-destructive/10 px-4 py-3 text-small text-destructive">
           <Trans>Libreria: {(libStats.bytes / 1024 / 1024 / 1024).toFixed(1)} GB — oltre i 2 GB consigliati. Valuta cosa cancellare dalla vista Libreria (nessun blocco automatico).</Trans>
         </p>
       )}
@@ -540,7 +587,7 @@ function GeneralTab() {
                     setMinAwayHours(v)
                     void api.settingsSet('minAwayHours', v)
                   }} />
-                <span className="text-xs text-muted-foreground"><Trans>ore</Trans></span>
+                <span className="text-small text-muted-foreground"><Trans>ore</Trans></span>
               </span>
             }
           />
@@ -555,7 +602,7 @@ function GeneralTab() {
                     setAwayPauseDays(v)
                     void api.settingsSet('awayPauseDays', v)
                   }} />
-                <span className="text-xs text-muted-foreground"><Trans>giorni</Trans></span>
+                <span className="text-small text-muted-foreground"><Trans>giorni</Trans></span>
               </span>
             }
           />
@@ -620,9 +667,9 @@ function WebSearchSection() {
         control={<Toggle label={t`Servizi di ricerca gratuiti`} checked={keyless ?? true} disabled={keyless === null} onChange={(v) => void toggle(v)} />}
       />
       {(status?.providers ?? []).length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border/40 px-4 py-2.5">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border/40 px-4 py-2">
           {(status?.providers ?? []).map((p) => (
-            <span key={p.name} className={`text-xs ${stateOf(p).cls}`}>
+            <span key={p.name} className={`text-small ${stateOf(p).cls}`}>
               {p.label}: {stateOf(p).text}
             </span>
           ))}
@@ -632,8 +679,15 @@ function WebSearchSection() {
   )
 }
 
-// ---- fase 18b (H6.2) → I5.7: Uso e costi — col TITOLO e i quattro numeri
-// in riquadri separati, col costo in evidenza; le viste restano ----
+// ---- fase 18b (H6.2) → I5.7: Uso e costi — i quattro numeri in riquadri
+// separati, col costo in evidenza; le viste restano ----
+//
+// Fase design (DS4): il periodo e la vista sono segmenti (SettingsSegments),
+// i numeri sono text-title (i numeri grandi di DS1) e la tabella è LA tabella
+// unica (DataTable): intestazioni text-caption grigie in tono normale (prima
+// in maiuscoletto), i numeri allineati a destra (align="right"), le celle che
+// non sono cifre sono secondarie (Cell secondary), filetti fra le righe — e se
+// la finestra è stretta scorre DENTRO la tabella, mai la pagina.
 
 /** Le finestre del periodo, calcolate in ora LOCALE nel renderer. */
 type UsagePeriod = 'today' | '7d' | '30d' | 'month'
@@ -665,15 +719,29 @@ const SOURCE_LABELS: Record<string, MessageDescriptor> = {
   'routine-suggest': msg`suggerimento routine`
 }
 
-function UsageTab() {
+/** I dati iniziali (per i test senza effect; nel prodotto si caricano dall'api). */
+export interface UsageTabInitial {
+  rows?: ModelUsageRow[]
+  modelRows?: ModelUsageRow[]
+  prices?: ModelPriceMap
+  view?: UsageView
+}
+
+type UsageView = 'model' | 'agent' | 'source'
+
+/** Una riga della tabella col suo posto: la chiave è il nome più il posto (un modello può comparire due volte). */
+type UsageLine = { row: ModelUsageRow; index: number }
+
+export function UsageTab({ initial }: { initial?: UsageTabInitial }) {
   const { t, i18n } = useLingui()
   const providers = useStore((s) => s.providers)
   const [period, setPeriod] = useState<UsagePeriod>('7d')
-  const [view, setView] = useState<'model' | 'agent' | 'source'>('model')
-  const [rows, setRows] = useState<ModelUsageRow[]>([])
-  const [modelRows, setModelRows] = useState<ModelUsageRow[]>([])
-  const [prices, setPrices] = useState<ModelPriceMap>({})
-  const [loaded, setLoaded] = useState(false)
+  const [view, setView] = useState<UsageView>(initial?.view ?? 'model')
+  const [rows, setRows] = useState<ModelUsageRow[]>(initial?.rows ?? [])
+  const [modelRows, setModelRows] = useState<ModelUsageRow[]>(initial?.modelRows ?? [])
+  const [prices, setPrices] = useState<ModelPriceMap>(initial?.prices ?? {})
+  // con i dati iniziali (i test) la tabella è già carica: l'effetto che carica non gira nel render statico
+  const [loaded, setLoaded] = useState(initial !== undefined)
 
   const refresh = () => {
     const from = periodStart(period)
@@ -699,103 +767,98 @@ function UsageTab() {
     return { text: '—', partial: false }
   }
 
+  /** Il nome della riga nella vista corrente (è anche la base della chiave di React). */
+  const lineName = (r: ModelUsageRow): string =>
+    view === 'model' ? `${r.providerId}|${r.model}` : view === 'agent' ? (r.agentId ?? 'system') : r.source
+  const lineKey = ({ row, index }: UsageLine): string => `${lineName(row)}|${index}`
+  // le cifre tutte della stessa larghezza: i numeri a destra si allineano anche per colonna
+  const num = (n: number): ReactNode => <Cell><span className="tabular-nums">{fmtInt(n)}</span></Cell>
+  const columns: ReadonlyArray<DataTableColumn<UsageLine>> = [
+    {
+      id: 'name',
+      grow: true,
+      header: view === 'model' ? t`modello` : view === 'agent' ? t`bot` : t`origine`,
+      // una riga per cella (le righe restano da 52): il nome resta com'era, «tipo:nome» in monospazio
+      cell: ({ row }) => (view === 'model'
+        ? <Cell><span className="font-mono">{`${row.providerKind}:${row.model}`}</span></Cell>
+        : <Cell>{view === 'agent' ? (row.agentName ?? t`Sistema`) : (SOURCE_LABELS[row.source] ? i18n.t(SOURCE_LABELS[row.source]!) : row.source)}</Cell>)
+    },
+    // le colonne dei numeri sono strette quanto basta alle loro intestazioni e a un numero di 7 cifre:
+    // 408 + i 160 del nome = 568, e la tabella sta intera anche nella finestra minima (colonna di 582)
+    { id: 'calls', header: <Trans>chiamate</Trans>, align: 'right', width: 72, cell: ({ row }) => num(row.calls) },
+    { id: 'input', header: <Trans>token in</Trans>, align: 'right', width: 88, cell: ({ row }) => num(row.input) },
+    { id: 'output', header: <Trans>token out</Trans>, align: 'right', width: 88, cell: ({ row }) => num(row.output) },
+    { id: 'cache', header: <Trans>cache</Trans>, align: 'right', width: 64, cell: ({ row }) => num(row.cacheRead + row.cacheWrite) },
+    // «locale» e «—» (i modelli senza prezzo) non sono cifre: celle secondarie. «parziale» (qualche
+    // chiamata senza prezzo) è il dettaglio grigio accanto al costo
+    {
+      id: 'cost',
+      header: <Trans>costo</Trans>,
+      align: 'right',
+      width: 96,
+      cell: ({ row }) => {
+        const cost = costCell(row)
+        if (row.costUsd === null) return <Cell secondary>{cost.text}</Cell>
+        return (
+          <Cell>
+            <span className="tabular-nums">{cost.text}</span>
+            {cost.partial && <span className="ml-1.5 text-small text-muted-foreground">{t`parziale`}</span>}
+          </Cell>
+        )
+      }
+    }
+  ]
+
   return (
-    <SettingsPage title={<Trans>Uso e costi</Trans>}>
-      {/* il periodo, come oggi */}
-      <div className="flex flex-wrap items-center gap-1">
-        {(Object.keys(PERIOD_LABELS) as UsagePeriod[]).map((p) => (
-          <button
-            key={p}
-            className={`rounded-full px-2.5 py-1 text-xs outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 ${period === p ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-            onClick={() => setPeriod(p)}
-          >
-            {i18n.t(PERIOD_LABELS[p]!)}
-          </button>
-        ))}
-      </div>
+    <SettingsPage>
+      {/* il periodo, i numeri e la tabella sono UNA sezione: i suoi blocchi a 16 px */}
+      <div className="flex flex-col gap-block">
+        {/* il periodo, come oggi */}
+        <div>
+          <SettingsSegments<UsagePeriod>
+            value={period}
+            onChange={setPeriod}
+            options={(Object.keys(PERIOD_LABELS) as UsagePeriod[]).map((p) => ({ value: p, label: i18n.t(PERIOD_LABELS[p]!) }))}
+          />
+        </div>
 
-      {/* I5.7: i quattro numeri in riquadri separati, col costo in evidenza */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <div className="rounded-2xl bg-muted/60 px-3 py-2.5">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>chiamate</Trans></div>
-          <div className="text-sm">{fmtInt(totalCalls)}</div>
+        {/* I5.7: i quattro numeri in riquadri separati, col costo in evidenza */}
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Stat label={<Trans>chiamate</Trans>} value={fmtInt(totalCalls)} />
+          <Stat label={<Trans>token in</Trans>} value={fmtInt(totalIn)} />
+          <Stat label={<Trans>token out</Trans>} value={fmtInt(totalOut)} />
+          <Stat label={<Trans>costo totale</Trans>} value={anyUnknown ? `≥ ${fmtUsd(totalCost)}` : fmtUsd(totalCost)} strong />
         </div>
-        <div className="rounded-2xl bg-muted/60 px-3 py-2.5">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>token in</Trans></div>
-          <div className="text-sm">{fmtInt(totalIn)}</div>
-        </div>
-        <div className="rounded-2xl bg-muted/60 px-3 py-2.5">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>token out</Trans></div>
-          <div className="text-sm">{fmtInt(totalOut)}</div>
-        </div>
-        <div className="rounded-2xl bg-foreground/90 px-3 py-2.5 text-background">
-          <div className="text-[11px] uppercase tracking-wide text-background/70"><Trans>costo totale</Trans></div>
-          <div className="font-display text-lg">{anyUnknown ? `≥ ${fmtUsd(totalCost)}` : fmtUsd(totalCost)}</div>
-        </div>
-      </div>
-      {anyUnknown && (
-        <p className="text-xs text-muted-foreground"><Trans>Il costo è un minimo: alcuni modelli non hanno un prezzo.</Trans></p>
-      )}
+        {anyUnknown && (
+          <p className="text-small text-muted-foreground"><Trans>Il costo è un minimo: alcuni modelli non hanno un prezzo.</Trans></p>
+        )}
 
-      {/* le tre viste, come oggi */}
-      <div className="flex w-fit items-center gap-1 rounded-full bg-muted p-1">
-        {(['model', 'agent', 'source'] as const).map((v) => (
-          <button
-            key={v}
-            className={`rounded-full px-2.5 py-1 text-xs outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 ${view === v ? 'bg-card text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-            onClick={() => setView(v)}
-          >
-            {v === 'model' ? t`per modello` : v === 'agent' ? t`per bot` : t`per origine`}
-          </button>
-        ))}
-      </div>
-
-      {/* la tabella, come oggi */}
-      {!loaded ? (
-        <p className="text-xs text-muted-foreground"><Trans>caricamento…</Trans></p>
-      ) : rows.length === 0 ? (
-        <p className="text-xs text-muted-foreground"><Trans>Nessuna chiamata nel periodo.</Trans></p>
-      ) : (
-        <div className="overflow-x-auto rounded-2xl bg-muted/60">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="px-3 py-2">{view === 'model' ? t`modello` : view === 'agent' ? t`bot` : t`origine`}</th>
-                <th className="px-3 py-2 text-right"><Trans>chiamate</Trans></th>
-                <th className="px-3 py-2 text-right"><Trans>token in</Trans></th>
-                <th className="px-3 py-2 text-right"><Trans>token out</Trans></th>
-                <th className="px-3 py-2 text-right"><Trans>cache</Trans></th>
-                <th className="px-3 py-2 text-right"><Trans>costo</Trans></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const cost = costCell(r)
-                const key = view === 'model' ? `${r.providerId}|${r.model}` : view === 'agent' ? (r.agentId ?? 'system') : r.source
-                return (
-                  <tr key={`${key}-${i}`} className="border-t border-border/30 first:border-0">
-                    <td className="px-3 py-2 font-mono">
-                      {view === 'model'
-                        ? `${r.providerKind}:${r.model}`
-                        : view === 'agent'
-                          ? (r.agentName ?? t`Sistema`)
-                          : (SOURCE_LABELS[r.source] ? i18n.t(SOURCE_LABELS[r.source]!) : r.source)}
-                    </td>
-                    <td className="px-3 py-2 text-right">{fmtInt(r.calls)}</td>
-                    <td className="px-3 py-2 text-right">{fmtInt(r.input)}</td>
-                    <td className="px-3 py-2 text-right">{fmtInt(r.output)}</td>
-                    <td className="px-3 py-2 text-right">{fmtInt(r.cacheRead + r.cacheWrite)}</td>
-                    <td className="px-3 py-2 text-right">
-                      {cost.text}
-                      {cost.partial && <span className="ml-1 text-[10px] text-muted-foreground">{t`parziale`}</span>}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+        {/* le tre viste, come oggi */}
+        <div>
+          <SettingsSegments<UsageView>
+            value={view}
+            onChange={setView}
+            options={[
+              { value: 'model', label: t`per modello` },
+              { value: 'agent', label: t`per bot` },
+              { value: 'source', label: t`per origine` }
+            ]}
+          />
         </div>
-      )}
+
+        {/* la tabella unica (DataTable): scorre dentro se stessa se non ci sta */}
+        {!loaded ? (
+          <p className="text-small text-muted-foreground"><Trans>caricamento…</Trans></p>
+        ) : rows.length === 0 ? (
+          <p className="text-small text-muted-foreground"><Trans>Nessuna chiamata nel periodo.</Trans></p>
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={rows.map((row, index) => ({ row, index }))}
+            rowKey={lineKey}
+          />
+        )}
+      </div>
 
       <PriceSettings
         modelRows={modelRows}
@@ -804,6 +867,16 @@ function UsageTab() {
         onSaved={refresh}
       />
     </SettingsPage>
+  )
+}
+
+/** I5.7: un numero in evidenza — l'etichetta sopra (text-caption), il numero sotto ai 20 px di DS1. `strong`: il costo, in primo piano. */
+function Stat({ label, value, strong }: { label: ReactNode; value: string; strong?: boolean }) {
+  return (
+    <div className={cn('min-w-0 rounded-surface px-3 py-3', strong ? 'bg-foreground text-background' : 'bg-muted/60')}>
+      <div className={cn('truncate text-caption', strong ? 'text-background/70' : 'text-muted-foreground')}>{label}</div>
+      <div className="mt-0.5 truncate text-title font-semibold tabular-nums">{value}</div>
+    </div>
   )
 }
 
@@ -870,16 +943,16 @@ function PriceRow({ providerId, model, label, price, onSaved }: {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border/40 px-4 py-2.5 text-xs first:border-0">
+    <div className="flex flex-wrap items-center gap-2 border-t border-border/40 px-4 py-row-pad text-small first:border-0">
       <span className="min-w-0 flex-1 truncate font-mono">{model}</span>
       <span className="text-muted-foreground">{label}</span>
-      <label className="flex items-center gap-1">
+      <label className="flex items-center gap-1.5">
         <Trans>ingresso $/M</Trans>
-        <input className="h-8 w-20 rounded-lg bg-card px-2 text-xs outline-none" type="text" value={inVal} onChange={(e) => setInVal(e.target.value)} onBlur={() => void commit()} aria-label={t`prezzo ingresso $/M`} />
+        <Input className={cn(FIELD_ROW_CLS, 'w-20 tabular-nums')} type="text" value={inVal} onChange={(e) => setInVal(e.target.value)} onBlur={() => void commit()} aria-label={t`prezzo ingresso $/M`} />
       </label>
-      <label className="flex items-center gap-1">
+      <label className="flex items-center gap-1.5">
         <Trans>uscita $/M</Trans>
-        <input className="h-8 w-20 rounded-lg bg-card px-2 text-xs outline-none" type="text" value={outVal} onChange={(e) => setOutVal(e.target.value)} onBlur={() => void commit()} aria-label={t`prezzo uscita $/M`} />
+        <Input className={cn(FIELD_ROW_CLS, 'w-20 tabular-nums')} type="text" value={outVal} onChange={(e) => setOutVal(e.target.value)} onBlur={() => void commit()} aria-label={t`prezzo uscita $/M`} />
       </label>
     </div>
   )
@@ -936,47 +1009,33 @@ function RoutinesTab() {
   }
 
   return (
-    <SettingsPage title={<Trans>Routine</Trans>}>
+    <SettingsPage>
       <SettingsGroup label={<Trans>Del bot principale</Trans>}>
         {routines.map((r) => {
           const state = r.enabled ? t`attiva` : r.paused_for_away ? t`in pausa per assenza` : t`in pausa`
           const stateColor = r.enabled ? 'text-chart-2' : r.paused_for_away ? 'text-destructive' : 'text-muted-foreground'
           return (
-            <div key={r.id} className="border-t border-border/40 px-4 py-3 first:border-0">
-              <div className="flex flex-wrap items-center gap-2">
+            // la riga di una routine: nome (con il suo tipo) · quando scatta · come va · le azioni.
+            // Le azioni stanno in una riga loro, in fondo: sono Button (da 32, col loro respiro),
+            // e accanto al nome non ci sarebbero più state
+            <div key={r.id} className="px-4 py-row-pad [&:not(:first-child)]:border-t [&:not(:first-child)]:border-border/40">
+              <div className="flex min-w-0 items-center gap-2">
                 <span className={`h-2 w-2 shrink-0 rounded-full ${r.enabled ? 'bg-chart-2' : r.paused_for_away ? 'bg-destructive' : 'bg-muted-foreground/40'}`} />
-                <span className="min-w-0 flex-1 truncate text-sm">{r.title}</span>
-                <span className="rounded-full bg-card px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{i18n.t(KIND_LABEL[kindOf(r.trigger)])}</span>
-                <button
-                  className="text-xs text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  title={t`Apri nel pannello del bot`}
-                  onClick={() => {
-                    void select(r.agent_id)
-                    openBotTab('routines')
-                    setSettingsOpen(false)
-                  }}
-                >
-                  <Trans>nel bot ›</Trans>
-                </button>
-                <button className="text-xs text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50" onClick={() => setEditing(r)}><Trans>modifica</Trans></button>
-                <button className="text-xs text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50" onClick={() => void pauseResume(r)}>
-                  {r.enabled ? <Trans>metti in pausa</Trans> : <Trans>riattiva</Trans>}
-                </button>
-                <button className="text-xs text-muted-foreground outline-none transition hover:text-destructive focus-visible:ring-[3px] focus-visible:ring-ring/50" onClick={async () => { await api.deleteRoutine(r.id); await refresh() }}>
-                  <Trans>elimina</Trans>
-                </button>
+                <span className="min-w-0 flex-1 truncate text-body font-medium">{r.title}</span>
+                <span className="shrink-0 rounded-full bg-card px-2 py-0.5 text-caption text-muted-foreground">{i18n.t(KIND_LABEL[kindOf(r.trigger)])}</span>
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">{describeTrigger(r.trigger ?? null, r.schedule, uiLang())}</p>
-              <div className="mt-1 flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+              <p className="mt-1 text-small text-muted-foreground">{describeTrigger(r.trigger ?? null, r.schedule, uiLang())}</p>
+              <div className="mt-1 flex flex-wrap items-center gap-3 text-caption text-muted-foreground">
                 <span className={stateColor}>{state}</span>
                 {r.next_run && <span>{t`prossima: ${formatDate(r.next_run)}`}</span>}
                 {r.last_run && <span>{t`ultima: ${formatDate(r.last_run)}`}</span>}
               </div>
               {r.webhook_url && (
-                <div className="mt-1 flex items-center gap-2 rounded-xl bg-card px-2 py-1.5">
-                  <code className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{r.webhook_url}</code>
+                <div className="mt-2 flex items-center gap-2 rounded-control bg-card px-3 py-1.5">
+                  <code className="min-w-0 flex-1 truncate font-mono text-small text-muted-foreground">{r.webhook_url}</code>
                   <button
-                    className="text-[10px] text-primary hover:text-primary"
+                    type="button"
+                    className={cn('shrink-0 rounded-control px-1.5 py-1 text-body text-primary transition hover:underline', FOCUS_RING)}
                     onClick={() => void navigator.clipboard?.writeText(
                       `curl -X POST ${r.webhook_url} -H "Authorization: Bearer ${r.trigger?.type === 'webhook' ? r.trigger.token : ''}" -d '{"test":1}'`
                     )}
@@ -985,11 +1044,33 @@ function RoutinesTab() {
                   </button>
                 </div>
               )}
+              {/* -ml-3: il respiro del primo bottone, così le azioni cominciano sotto il nome */}
+              <div className="-ml-3 mt-2 flex flex-wrap items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={t`Apri nel pannello del bot`}
+                  onClick={() => {
+                    void select(r.agent_id)
+                    openBotTab('routines')
+                    setSettingsOpen(false)
+                  }}
+                >
+                  <Trans>nel bot ›</Trans>
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setEditing(r)}><Trans>modifica</Trans></Button>
+                <Button variant="ghost" size="sm" onClick={() => void pauseResume(r)}>
+                  {r.enabled ? <Trans>metti in pausa</Trans> : <Trans>riattiva</Trans>}
+                </Button>
+                <Button variant="ghost" size="sm" className={ROSSA_AL_PASSAGGIO} onClick={async () => { await api.deleteRoutine(r.id); await refresh() }}>
+                  <Trans>elimina</Trans>
+                </Button>
+              </div>
             </div>
           )
         })}
         {routines.length === 0 && (
-          <div className="px-4 py-3 text-sm text-muted-foreground"><Trans>(nessuna routine)</Trans></div>
+          <div className="flex min-h-row items-center px-4 text-body text-muted-foreground"><Trans>(nessuna routine)</Trans></div>
         )}
       </SettingsGroup>
 
@@ -1019,9 +1100,10 @@ function RoutinesTab() {
             }}
             err={err}
           />
-          <div className="space-y-2 pt-2">
-            <button
-              className="rounded-full bg-muted px-3 py-1.5 text-xs outline-none transition hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
+          <div className="flex flex-col gap-2">
+            {/* fase design: l'emoji ✨ diventa l'icona lucide (fuori dal testo: il testo resta «Suggerisci dal transcript») */}
+            <Button
+              variant="secondary"
               disabled={busy || !activeId}
               onClick={async () => {
                 setBusy(true); setErr(''); setSuggestions([])
@@ -1030,16 +1112,21 @@ function RoutinesTab() {
                 setBusy(false)
               }}
             >
-              {busy ? t`analizzo…` : <Trans>✨ Suggerisci dal transcript</Trans>}
-            </button>
+              {busy ? t`analizzo…` : (
+                <>
+                  <Sparkles className="size-4" />
+                  <Trans>Suggerisci dal transcript</Trans>
+                </>
+              )}
+            </Button>
             {suggestions.map((s, i) => (
-              <div key={i} className="rounded-2xl bg-muted/60 px-3 py-2">
+              <div key={i} className="rounded-surface bg-muted/60 px-4 py-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm">{s.title}</span>
-                  <code className="rounded-full bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground">{s.schedule}</code>
-                  <div className="flex-1" />
-                  <button
-                    className="rounded-full bg-card px-2 py-1 text-xs outline-none transition hover:bg-card/80 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  <span className="min-w-0 flex-1 truncate text-body font-medium">{s.title}</span>
+                  <code className="shrink-0 rounded-full bg-card px-2 py-0.5 font-mono text-caption text-muted-foreground">{s.schedule}</code>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={async () => {
                       await api.createRoutine(activeId!, s.title, s.description, s.schedule)
                       setSuggestions(suggestions.filter((_, j) => j !== i))
@@ -1047,9 +1134,9 @@ function RoutinesTab() {
                     }}
                   >
                     <Trans>Aggiungi</Trans>
-                  </button>
+                  </Button>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">{s.description}</p>
+                <p className="mt-1 text-small text-muted-foreground">{s.description}</p>
               </div>
             ))}
           </div>
@@ -1070,14 +1157,12 @@ function NewRoutinePicker(props: {
   const [kind, setKind] = useState<TriggerKind | null>(null)
   if (!kind) {
     return (
-      <div className="space-y-2">
-        <button
-          className="flex w-full items-center gap-2 rounded-2xl bg-muted/60 px-4 py-2.5 text-left text-sm text-muted-foreground outline-none transition hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          onClick={() => setKind('schedule')}
-        >
+      <div className="flex flex-col gap-2">
+        {/* il testo comincia con «+»: è così che lo cercano le sonde, e resta identico */}
+        <Button variant="secondary" className="w-full" onClick={() => setKind('schedule')}>
           <Trans>+ Nuova routine</Trans>
-        </button>
-        {props.err && <p className="text-xs text-destructive">{props.err}</p>}
+        </Button>
+        {props.err && <p className="text-small text-destructive">{props.err}</p>}
       </div>
     )
   }
@@ -1237,7 +1322,7 @@ function TriggerEditor(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, connectorId])
 
-  const inputCls = 'rounded-lg bg-card px-2 py-1.5 text-xs outline-none'
+  // fase design: i campi dell'editor sono il campo di components/ui alla misura dei controlli di una pagina (36)
   const presetHint = (preset: 'email' | 'calendar_event'): string => {
     const { tool: chosen } = autoTool(preset, connectorId)
     return chosen
@@ -1246,73 +1331,69 @@ function TriggerEditor(props: {
   }
 
   return (
-    <div className="space-y-2 rounded-2xl bg-muted/60 p-3">
-      <div className="flex flex-wrap gap-1">
+    <div className="flex flex-col gap-2 rounded-surface bg-muted/60 p-4">
+      {/* il tipo di trigger: sei voci, coi nomi lunghi — vanno a capo. Non sono un segmento
+          (che sta in una riga sola): sono tasti di scelta, e quello attivo è pieno */}
+      <div className="flex flex-wrap items-center gap-1">
         {(Object.keys(KIND_LABEL) as TriggerKind[]).map((k) => (
-          <button
-            key={k}
-            className={`rounded-full px-2 py-1 text-[11px] outline-none ${kind === k ? 'bg-card text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-            onClick={() => setKind(k)}
-          >
-            {i18n.t(KIND_LABEL[k])}
-          </button>
+          <Chip key={k} active={kind === k} onClick={() => setKind(k)}>{i18n.t(KIND_LABEL[k])}</Chip>
         ))}
       </div>
-      <input className={`w-full ${inputCls} text-sm`} placeholder={t`Titolo (es. Riepilogo email del mattino)`} value={title} onChange={(e) => setTitle(e.target.value)} />
-      <input className={`w-full ${inputCls} text-sm`} placeholder={t`Cosa deve fare il Bot a ogni esecuzione`} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      <Input className={cn(FIELD_PAGE_CLS, 'w-full')} placeholder={t`Titolo (es. Riepilogo email del mattino)`} value={title} onChange={(e) => setTitle(e.target.value)} />
+      <Input className={cn(FIELD_PAGE_CLS, 'w-full')} placeholder={t`Cosa deve fare il Bot a ogni esecuzione`} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
       {/* fase skill (S7.4): il prompt può COMINCIARE con /nome — la skill si
           carica al momento dell'esecuzione, come nel compositore */}
-      <p className="text-[11px] text-muted-foreground"><Trans>Può cominciare con /nome di una skill: il bot la caricherà a ogni esecuzione.</Trans></p>
+      <p className="text-small text-muted-foreground"><Trans>Può cominciare con /nome di una skill: il bot la caricherà a ogni esecuzione.</Trans></p>
 
       {kind === 'schedule' && (
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <button className={`rounded-full px-2 py-1 ${cron !== '' ? 'bg-card text-foreground' : ''}`} onClick={() => { setCron('0 9 * * *') }}>{t`cron`}</button>
-            <button className={`rounded-full px-2 py-1 ${cron === '' ? 'bg-card text-foreground' : ''}`} onClick={() => setCron('')}>{t`ogni…`}</button>
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-small text-muted-foreground">
+            <Chip active={cron !== ''} onClick={() => { setCron('0 9 * * *') }}>{t`cron`}</Chip>
+            <Chip active={cron === ''} onClick={() => setCron('')}>{t`ogni…`}</Chip>
             {cron === '' && (
               <>
-                <select className={inputCls} value={every} onChange={(e) => setEvery(e.target.value as typeof every)}>
+                <Select className={FIELD_PAGE_CLS} value={every} onChange={(e) => setEvery(e.target.value as typeof every)}>
                   <option value="day">{t`giorno`}</option>
                   <option value="weekday">{t`giorni feriali`}</option>
                   <option value="week">{t`settimana`}</option>
                   <option value="month">{t`mese`}</option>
                   <option value="hour">{t`ora`}</option>
-                </select>
+                </Select>
                 {every === 'week' && (
-                  <select className={inputCls} value={weekday} onChange={(e) => setWeekday(Number(e.target.value))}>
+                  <Select className={FIELD_PAGE_CLS} value={weekday} onChange={(e) => setWeekday(Number(e.target.value))}>
                     {[msg`domenica`, msg`lunedì`, msg`martedì`, msg`mercoledì`, msg`giovedì`, msg`venerdì`, msg`sabato`].map((d, i) => (
                       <option key={i} value={i}>{i18n.t(d)}</option>
                     ))}
-                  </select>
+                  </Select>
                 )}
                 {every === 'month' && (
-                  <input className={`w-16 ${inputCls}`} type="number" min={1} max={31} value={monthDay} onChange={(e) => setMonthDay(Number(e.target.value))} />
+                  <Input className={cn(FIELD_PAGE_CLS, 'w-16')} type="number" min={1} max={31} value={monthDay} onChange={(e) => setMonthDay(Number(e.target.value))} />
                 )}
-                <input className={`w-20 ${inputCls}`} placeholder="HH:MM" value={at} onChange={(e) => setAt(e.target.value)} />
-                <select className={inputCls} value={mode} onChange={(e) => setMode(e.target.value as 'at' | 'around')}>
+                <Input className={cn(FIELD_PAGE_CLS, 'w-20')} placeholder="HH:MM" value={at} onChange={(e) => setAt(e.target.value)} />
+                <Select className={FIELD_PAGE_CLS} value={mode} onChange={(e) => setMode(e.target.value as 'at' | 'around')}>
                   <option value="at">{t`preciso`}</option>
                   <option value="around">{t`circa (±15 min)`}</option>
-                </select>
+                </Select>
               </>
             )}
-            {cron !== '' && <input className={`flex-1 font-mono ${inputCls}`} value={cron} onChange={(e) => setCron(e.target.value)} />}
+            {cron !== '' && <Input className={cn(FIELD_PAGE_CLS, 'min-w-0 flex-1 font-mono')} value={cron} onChange={(e) => setCron(e.target.value)} />}
           </div>
         </div>
       )}
 
       {(kind === 'email' || kind === 'calendar_event' || kind === 'connector_poll') && (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           {kind === 'connector_poll' && (
             <>
-              <select className={`w-full ${inputCls}`} value={connectorId} onChange={(e) => setConnectorId(e.target.value)}>
+              <Select className={cn(FIELD_PAGE_CLS, 'w-full')} value={connectorId} onChange={(e) => setConnectorId(e.target.value)}>
                 <option value="">{t`— connettore —`}</option>
                 {presetConnectors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 {props.manualServers.map((s) => <option key={s.id} value={s.id}>{s.name} {t`(server manuale)`}</option>)}
-              </select>
+              </Select>
               {props.manualServers.some((s) => s.id === connectorId) && (
                 // fase 7 (residuo 0a): readOnlyHint di un server manuale è
                 // autodichiarato — serve la spunta esplicita dell'utente
-                <label className="flex items-start gap-2 rounded-lg bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive/90">
+                <label className="flex items-start gap-2 rounded-surface bg-destructive/10 px-3 py-2 text-small text-destructive">
                   <input
                     type="checkbox"
                     className="mt-0.5"
@@ -1324,50 +1405,50 @@ function TriggerEditor(props: {
               )}
             </>
           )}
-          {(kind === 'email' || kind === 'calendar_event') && <p className="text-[11px] text-muted-foreground">{presetHint(kind)}</p>}
+          {(kind === 'email' || kind === 'calendar_event') && <p className="text-small text-muted-foreground">{presetHint(kind)}</p>}
           {kind === 'email' && (
-            <input className={`w-full ${inputCls}`} placeholder={t`Quando arriva un'e-mail che corrisponde a… (query)`} value={query} onChange={(e) => setQuery(e.target.value)} />
+            <Input className={cn(FIELD_PAGE_CLS, 'w-full')} placeholder={t`Quando arriva un'e-mail che corrisponde a… (query)`} value={query} onChange={(e) => setQuery(e.target.value)} />
           )}
           {kind === 'calendar_event' && (
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <label className="flex items-center gap-2 text-small text-muted-foreground">
               <Trans>avvisa</Trans>
-              <input className={`w-16 ${inputCls}`} type="number" min={0} value={offsetMinutes} onChange={(e) => setOffsetMinutes(Number(e.target.value))} />
+              <Input className={cn(FIELD_PAGE_CLS, 'w-16')} type="number" min={0} value={offsetMinutes} onChange={(e) => setOffsetMinutes(Number(e.target.value))} />
               <Trans>minuti prima dell'evento</Trans>
             </label>
           )}
           <div className="grid grid-cols-2 gap-2">
-            <input className={`font-mono ${inputCls}`} placeholder={t`tool (mcp__…__…)`} value={tool} onChange={(e) => setTool(e.target.value)} />
-            <input className={`font-mono ${inputCls}`} placeholder={t`idField (es. "messages[].id")`} value={idField} onChange={(e) => setIdField(e.target.value)} />
-            <input className={inputCls} type="number" min={2} title={t`minuti tra i poll (minimo 2)`} value={intervalMin} onChange={(e) => setIntervalMin(Number(e.target.value))} />
+            <Input className={cn(FIELD_PAGE_CLS, 'font-mono')} placeholder={t`tool (mcp__…__…)`} value={tool} onChange={(e) => setTool(e.target.value)} />
+            <Input className={cn(FIELD_PAGE_CLS, 'font-mono')} placeholder={t`idField (es. "messages[].id")`} value={idField} onChange={(e) => setIdField(e.target.value)} />
+            <Input className={FIELD_PAGE_CLS} type="number" min={2} title={t`minuti tra i poll (minimo 2)`} value={intervalMin} onChange={(e) => setIntervalMin(Number(e.target.value))} />
             {kind === 'connector_poll' && (
-              <input className={`font-mono ${inputCls}`} placeholder={t`args JSON, es. {"query":"x"}`} value={argsJson} onChange={(e) => setArgsJson(e.target.value)} />
+              <Input className={cn(FIELD_PAGE_CLS, 'font-mono')} placeholder={t`args JSON, es. {"query":"x"}`} value={argsJson} onChange={(e) => setArgsJson(e.target.value)} />
             )}
           </div>
         </div>
       )}
 
       {kind === 'webhook' && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-small text-muted-foreground">
           <Trans>All'uscita trovi l'URL con il token da copiare: qualunque sistema può far scattare la routine con un POST.</Trans>
         </p>
       )}
       {kind === 'presence_return' && (
-        <p className="text-[11px] text-muted-foreground"><Trans>La routine gira quando torni al computer dopo un'assenza lunga.</Trans></p>
+        <p className="text-small text-muted-foreground"><Trans>La routine gira quando torni al computer dopo un'assenza lunga.</Trans></p>
       )}
 
       {/* fase 18b (H7): il modello della routine — «Quello del bot» (default)
           oppure provider + ModelPicker + ragionamento, come per i bot (H3) */}
-      <div className="space-y-2 rounded-xl bg-card/60 px-2 py-2">
+      <div className="flex flex-col gap-2 rounded-surface bg-card/60 px-3 py-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{t`modello`}</span>
-          <select
-            className={inputCls}
+          <span className="text-small text-muted-foreground">{t`modello`}</span>
+          <Select
+            className={FIELD_PAGE_CLS}
             value={modelProvider}
             onChange={(e) => { setModelProvider(e.target.value); setModelId(''); setModelThinking('default') }}
           >
             <option value="">{t`Quello del bot`}</option>
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          </Select>
           {modelProvider && (
             <ModelPicker
               className="min-w-44 flex-1"
@@ -1386,36 +1467,56 @@ function TriggerEditor(props: {
           const savedLevel = levels.includes(modelThinking) ? modelThinking : 'default'
           return (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{t`ragionamento`}</span>
-              <select
-                className={inputCls}
+              <span className="text-small text-muted-foreground">{t`ragionamento`}</span>
+              <Select
+                className={FIELD_PAGE_CLS}
                 value={savedLevel}
                 onChange={(e) => setModelThinking(e.target.value as ThinkingSetting)}
               >
                 {(['default', ...levels] as ThinkingSetting[]).map((l) => (
                   <option key={l} value={l}>{i18n.t(THINKING_LABELS[l]!)}</option>
                 ))}
-              </select>
+              </Select>
             </div>
           )
         })()}
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-small text-muted-foreground">
           <Trans>Vale solo per i turni di questa routine; il resto del bot non cambia.</Trans>
         </p>
       </div>
 
-      <input className={`w-full ${inputCls}`} placeholder={t`Fuso orario (es. Europe/Rome)`} value={timezone} onChange={(e) => setTimezone(e.target.value)} />
-      {err && <p className="text-xs text-destructive">{err}</p>}
+      <Input className={cn(FIELD_PAGE_CLS, 'w-full')} placeholder={t`Fuso orario (es. Europe/Rome)`} value={timezone} onChange={(e) => setTimezone(e.target.value)} />
+      {err && <p className="text-small text-destructive">{err}</p>}
       <div className="flex justify-end gap-2 pt-1">
-        <button className="rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={props.onCancel}><Trans>Annulla</Trans></button>
-        <button
-          className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+        <Button variant="ghost" onClick={props.onCancel}><Trans>Annulla</Trans></Button>
+        <Button
           disabled={busy || !title.trim() || !prompt.trim() || !props.agentId || (!!modelProvider && !modelId.trim())}
           onClick={() => void save()}
         >
           {r ? <Trans>Salva</Trans> : <Trans>Crea routine</Trans>}
-        </button>
+        </Button>
       </div>
     </div>
+  )
+}
+
+/**
+ * Un tasto di scelta che può RIPETERSI e ANDARE A CAPO — i sei tipi di trigger
+ * di una routine, con i loro nomi lunghi («quando torni al computer»), e la
+ * coppia «cron · ogni…». Non è un segmento: quelli stanno in una riga sola
+ * (SettingsSegments). La voce attiva è piena, come la voce attiva dei segmenti;
+ * l'altezza è quella dei controlli di una pagina (36), perché stanno in mezzo
+ * ai campi dell'editor.
+ */
+function Chip({ active, onClick, children }: { active: boolean; onClick(): void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      className={cn('h-control shrink-0 rounded-full px-3 text-body transition', FOCUS_RING, 'disabled:pointer-events-none disabled:opacity-50', active ? 'bg-foreground font-medium text-background' : 'bg-muted text-muted-foreground hover:text-foreground')}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   )
 }

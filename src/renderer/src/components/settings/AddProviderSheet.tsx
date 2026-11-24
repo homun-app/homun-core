@@ -6,11 +6,24 @@
 // G4 (fase guida): la prova della chiave e il salvataggio stanno nell'hook
 // condiviso useProviderSetup (lib/use-provider-setup.ts) — lo usa anche la
 // guida del primo avvio; per l'utente questo foglio non cambia.
+//
+// Fase design (DS4, Impostazioni): il foglio passa al sistema. La scheda ha
+// il raggio delle superfici (prima 24 px), il titolo è text-title (i titoli di
+// dialoghi e schede di DS1: prima 18 px in Bricolage, il font che resta solo
+// al titolo di pagina); l'elenco dei tipi e quello dei provider trovati sono
+// righe a filo (FlatRow: prima ogni tipo una riga scritta a mano dentro una
+// scheda), con le etichette di gruppo del sistema; la ricerca è una pillola
+// alta 36 col campo dentro; i campi sono Input da 36 (prima 40 e 30, con
+// l'iniziale a 12 px) e le azioni Button (l'indietro un bottone tondo da 32).
+// I loghi (ProviderMark) sono quelli di DS1: 40 nelle testate, 32 nelle righe
+// — lo usa anche ModelSelect, che li troverà già alla misura del sistema.
+// Testi, placeholder e l'id del campo chiave non cambiano: li cercano i test
+// e le sonde.
 import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { ChevronLeft, Search , Server } from 'lucide-react'
+import { ChevronLeft, Search, Server } from 'lucide-react'
 import { api } from '../../store'
 import type { ProviderKind, ProviderPublic } from '../../../../shared/types'
 import { providerLogoUrl, providerLogoSvg } from '../../lib/provider-logos'
@@ -19,6 +32,11 @@ import { CONNECTABLE_KINDS } from '../../lib/model-select'
 // i nomi dei tipi e la logica di prova/salvataggio: hook condiviso (G4), usato
 // anche dalla guida del primo avvio
 import { KIND_LABELS, useProviderSetup } from '../../lib/use-provider-setup'
+import { cn } from '../../lib/utils'
+import { Button } from '../ui/button'
+import { FlatList, FlatRow } from '../ui/flat-list'
+import { Input } from '../ui/input'
+import { FIELD_PAGE_CLS, FOCUS_RING } from './SettingsRow'
 
 export { KIND_LABELS }
 
@@ -28,27 +46,44 @@ const GROUP_LABELS: Record<'mac' | 'key' | 'server', MessageDescriptor> = {
   server: msg`Un altro server`
 }
 
-/** La piastrella del tipo: il logo vero se c'è, l'iniziale altrimenti (I2.4).
+/**
+ * DS1: i loghi delle app sono 40 px nelle testate di scheda e 32 px nelle
+ * righe (prima 44 e 28). Il raggio segue la misura — quello delle superfici
+ * sul 40, quello dei controlli sul 32 — e l'iniziale (per i tipi senza logo)
+ * è la metà della piastrella.
+ */
+const MISURA = {
+  md: 'size-10 rounded-surface text-title',
+  sm: 'size-8 rounded-control text-reading'
+} as const
+
+/** Un link-bottone dentro una riga del foglio («Avanzate», «Fatto»): grigio, in primo piano al passaggio. */
+const LINK_BOTTONE = cn('rounded-control px-1.5 py-1 text-small text-muted-foreground transition hover:text-foreground', FOCUS_RING)
+
+/**
+ * La piastrella del tipo: il logo vero se c'è, l'iniziale altrimenti (I2.4).
  *  U5 (fase prima-release): i loghi MONOCROMI (Anthropic, OpenAI — Simple
  *  Icons, CC0) si rendono INLINE col colore del testo, SENZA piastrella:
  *  dentro un <img> un SVG non eredita currentColor. Un solo componente per
- *  tutti i loghi: guida, Impostazioni › Modelli, foglio, scelta del modello. */
+ *  tutti i loghi: guida, Impostazioni › Modelli, foglio, scelta del modello.
+ */
 export function ProviderMark({ kind, name, size = 'md' }: { kind: ProviderKind | string; name: string; size?: 'sm' | 'md' }) {
   const url = providerLogoUrl(kind as ProviderKind)
-  const dim = size === 'md' ? 'size-11 text-base' : 'size-7 text-xs'
+  const dim = MISURA[size]
   const mono = providerLogoSvg(kind as ProviderKind)
-  // U6: il compatibile e il custom non sono un'azienda: icona GENERICA Server, monocroma
+  // U6: il compatibile e il custom non sono un'azienda: icona GENERICA Server, monocroma.
+  // La misura dell'icona è scritta FISSA in ciascun ramo (la guarda la guardia: un'espressione no)
   if (kind === 'openai-compatible' || kind === 'custom') {
     return (
-      <span className={`${dim} grid shrink-0 place-items-center rounded-[12px] bg-card text-foreground`} title={name}>
-        <Server className={size === 'md' ? 'size-5' : 'size-4'} aria-hidden="true" />
+      <span className={cn(dim, 'grid shrink-0 place-items-center bg-card text-foreground')} title={name}>
+        {size === 'md' ? <Server className="size-5" aria-hidden="true" /> : <Server className="size-4" aria-hidden="true" />}
       </span>
     )
   }
   if (mono) {
     return (
       <span
-        className={`${dim} grid shrink-0 place-items-center text-foreground [&>svg]:size-3/4`}
+        className={cn(dim, 'grid shrink-0 place-items-center text-foreground [&>svg]:size-3/4')}
         title={name}
         dangerouslySetInnerHTML={{ __html: mono }}
       />
@@ -56,13 +91,13 @@ export function ProviderMark({ kind, name, size = 'md' }: { kind: ProviderKind |
   }
   if (url) {
     return (
-      <span className={`grid ${dim} shrink-0 place-items-center overflow-hidden rounded-[12px] bg-card dark:bg-white`} title={name}>
+      <span className={cn(dim, 'grid shrink-0 place-items-center overflow-hidden bg-card dark:bg-white')} title={name}>
         <img src={url} alt="" className="size-3/4 object-contain" draggable={false} />
       </span>
     )
   }
   return (
-    <span className={`grid ${dim} shrink-0 place-items-center rounded-[12px] bg-card font-bold`}>
+    <span className={cn(dim, 'grid shrink-0 place-items-center bg-card font-semibold')}>
       {name.slice(0, 1).toUpperCase()}
     </span>
   )
@@ -126,65 +161,57 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
       <div
-        className="flex max-h-[min(640px,calc(100vh-64px))] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-card shadow-soft"
+        className="flex max-h-[min(640px,calc(100vh-64px))] w-full max-w-md flex-col overflow-hidden rounded-surface bg-card shadow-soft"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 px-5 pb-2 pt-5">
           {kind && (
-            <button
-              className="grid size-8 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
-              aria-label={t`Indietro`}
-              onClick={() => { setKind(null); setFound(null); reset() }}
-            >
+            <Button variant="ghost" icon size="sm" aria-label={t`Indietro`} onClick={() => { setKind(null); setFound(null); reset() }}>
               <ChevronLeft className="size-4" />
-            </button>
+            </Button>
           )}
-          <strong className="font-display text-lg">
+          <strong className="text-title font-semibold">
             {kind ? <Trans>Collega {KIND_LABELS[kind] ?? ''}</Trans> : <Trans>Aggiungi provider</Trans>}
           </strong>
         </div>
 
         {/* passo 1 — l'elenco dei tipi, con ricerca */}
         {!kind && (
-          <div className="flex min-h-0 flex-1 flex-col px-5 pb-5">
-            <div className="mb-3 flex h-9 items-center gap-2 rounded-full bg-muted px-3">
+          <div className="flex min-h-0 flex-1 flex-col gap-block px-5 pb-5">
+            {/* la ricerca: una pillola alta 36, col campo dentro (senza bordi suoi) */}
+            <div className="flex h-control items-center gap-2 rounded-full bg-muted px-3">
               <Search className="size-4 shrink-0 text-muted-foreground" />
               <input
-                className="w-full bg-transparent text-sm outline-none"
+                className="w-full bg-transparent text-body outline-none"
                 placeholder={t`Cerca (Ollama, Anthropic…)`}
                 value={query}
                 autoFocus
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto scroll-thin pr-1">
+            <div className="flex min-h-0 flex-1 flex-col gap-block overflow-y-auto scroll-thin pr-1.5">
               {groups.map((g) => {
                 const kinds = kindsOf(g)
                 if (kinds.length === 0) return null
                 return (
-                  <div key={g}>
-                    <p className="mb-1.5 text-[13px] text-muted-foreground">{i18n.t(GROUP_LABELS[g])}</p>
-                    <div className="overflow-hidden rounded-2xl bg-muted/60">
+                  // etichetta di gruppo + elenco a filo: le distanze di Section (12 dall'etichetta all'elenco)
+                  <div key={g} className="flex flex-col gap-section-head">
+                    <h3 className="text-caption font-medium text-muted-foreground">{i18n.t(GROUP_LABELS[g])}</h3>
+                    <FlatList>
                       {kinds.map((k) => (
-                        <button
+                        <FlatRow
                           key={k}
-                          className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-muted [&:not(:first-child)]:border-t [&:not(:first-child)]:border-border/40"
+                          clickable
                           onClick={() => { setKind(k); reset() }}
-                        >
-                          <ProviderMark kind={k} name={KIND_LABELS[k]!} size="sm" />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm">{KIND_LABELS[k]}</span>
-                            {g === 'mac' && (
-                              <span className="block text-[13px] text-muted-foreground"><Trans>gratis, nessun dato esce</Trans></span>
-                            )}
-                            {g === 'server' && (
-                              <span className="block text-[13px] text-muted-foreground"><Trans>qualsiasi servizio compatibile OpenAI</Trans></span>
-                            )}
-                          </span>
-                          <span className="text-sm text-primary"><Trans>Collega</Trans></span>
-                        </button>
+                          leading={<ProviderMark kind={k} name={KIND_LABELS[k]!} size="sm" />}
+                          title={KIND_LABELS[k]}
+                          subtitle={g === 'mac'
+                            ? <Trans>gratis, nessun dato esce</Trans>
+                            : g === 'server' ? <Trans>qualsiasi servizio compatibile OpenAI</Trans> : undefined}
+                          trailing={<span className="text-body text-primary"><Trans>Collega</Trans></span>}
+                        />
                       ))}
-                    </div>
+                    </FlatList>
                   </div>
                 )
               })}
@@ -194,35 +221,34 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
 
         {/* passo 2 — i campi del tipo scelto */}
         {kind && group === 'mac' && (
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto scroll-thin px-5 pb-5">
-            <p className="text-[13px] text-muted-foreground">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto scroll-thin px-5 pb-5">
+            <p className="text-small text-muted-foreground">
               {kind === 'ollama'
                 ? <Trans>Cerco Ollama sul tuo Mac (porta 11434).</Trans>
                 : <Trans>Cerco LM Studio sul tuo Mac (porta 1234).</Trans>}
             </p>
-            <button
-              className="w-full rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background transition hover:opacity-90 disabled:opacity-40"
-              disabled={scanning}
-              onClick={scan}
-            >
+            <Button className="w-full" disabled={scanning} onClick={scan}>
               {scanning ? <Trans>Cerco…</Trans> : <Trans>Cerca di nuovo</Trans>}
-            </button>
-            {scanError && <p className="text-[13px] text-muted-foreground"><Trans>Non riesco a cercare sul Mac: riprova.</Trans></p>}
+            </Button>
+            {scanError && <p className="text-small text-muted-foreground"><Trans>Non riesco a cercare sul Mac: riprova.</Trans></p>}
             {found !== null && (found.length > 0 ? (
-              <div className="space-y-1">
-                {found.map((p) => (
-                  <div key={p.id} className="flex items-center gap-3 rounded-2xl bg-muted/60 px-3 py-2.5">
-                    <ProviderMark kind={p.kind} name={p.name} size="sm" />
-                    <span className="min-w-0 flex-1 text-sm">{p.name}</span>
-                    <span className="text-sm text-chart-2"><Trans>Collegato</Trans></span>
-                  </div>
-                ))}
-                <button className="w-full pt-1 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
+              <div className="flex flex-col gap-1">
+                <FlatList>
+                  {found.map((p) => (
+                    <FlatRow
+                      key={p.id}
+                      leading={<ProviderMark kind={p.kind} name={p.name} size="sm" />}
+                      title={p.name}
+                      trailing={<span className="text-body text-chart-2"><Trans>Collegato</Trans></span>}
+                    />
+                  ))}
+                </FlatList>
+                <button type="button" className={cn(LINK_BOTTONE, 'self-start')} onClick={onClose}>
                   <Trans>Fatto</Trans>
                 </button>
               </div>
             ) : (
-              <p className="text-[13px] text-muted-foreground">
+              <p className="text-small text-muted-foreground">
                 <Trans>Non l’ho trovato. Aprilo e riprova, oppure inserisci l’indirizzo a mano:</Trans>{' '}
                 <a className="text-primary hover:underline" href={kind === 'ollama' ? 'https://ollama.com' : 'https://lmstudio.ai'} target="_blank" rel="noreferrer">
                   {kind === 'ollama' ? 'ollama.com' : 'lmstudio.ai'}
@@ -230,23 +256,20 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
               </p>
             ))}
             {found !== null && found.length === 0 && (
-              <div className="space-y-2 pt-1">
-                <button
-                  className="text-xs text-muted-foreground transition hover:text-foreground"
-                  onClick={() => setShowAdvanced((v) => !v)}
-                >
+              <div className="flex flex-col gap-2 pt-1">
+                <button type="button" className={LINK_BOTTONE} onClick={() => setShowAdvanced((v) => !v)}>
                   <Trans>Avanzate</Trans>
                 </button>
                 {showAdvanced && (
-                  <input
-                    className="w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none"
+                  <Input
+                    className={cn(FIELD_PAGE_CLS, 'w-full')}
                     placeholder={kind === 'ollama' ? t`http://127.0.0.1:11434` : t`http://127.0.0.1:1234`}
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
                   />
                 )}
-                <button
-                  className="w-full rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+                <Button
+                  className="w-full"
                   disabled={busy || !baseUrl.trim()}
                   onClick={() => {
                     void (async () => {
@@ -256,72 +279,72 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
                   }}
                 >
                   <Trans>Collega {KIND_LABELS[kind] ?? ''}</Trans>
-                </button>
+                </Button>
               </div>
             )}
           </div>
         )}
 
         {kind && (group === 'key' || group === 'server') && (
-          <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto scroll-thin px-5 pb-5">
+          <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto scroll-thin px-5 pb-5">
             {group === 'server' && (
-              <input
-                className="w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none"
+              <Input
+                className={cn(FIELD_PAGE_CLS, 'w-full')}
                 placeholder={t`Nome (es. Il mio gateway)`}
                 value={serverName || suggestedNameOf(effectiveBaseUrl)}
                 onChange={(e) => setServerName(e.target.value)}
               />
             )}
             <div>
-              <button className="text-xs text-muted-foreground transition hover:text-foreground" onClick={() => setShowAdvanced((v) => !v)}>
+              <button type="button" className={LINK_BOTTONE} onClick={() => setShowAdvanced((v) => !v)}>
                 <Trans>Avanzate</Trans>
               </button>
               {showAdvanced && (
-                <input
-                  className="mt-1.5 w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none"
+                <Input
+                  className={cn(FIELD_PAGE_CLS, 'mt-1.5 w-full')}
                   placeholder={group === 'server' ? t`Indirizzo (es. http://127.0.0.1:8000/v1)` : t`Base URL`}
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
                 />
               )}
             </div>
-            <label className="block text-[13px] text-muted-foreground" htmlFor="sandbot-addprovider-key">
+            <label className="block text-small text-muted-foreground" htmlFor="sandbot-addprovider-key">
               {group === 'server' ? <Trans>La chiave (lasciala vuota se il server non la chiede)</Trans> : <Trans>Incolla la chiave</Trans>}
             </label>
-            <input
+            <Input
               id="sandbot-addprovider-key"
-              className="h-10 w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none"
+              className={cn(FIELD_PAGE_CLS, 'w-full')}
               type="password"
               placeholder={group === 'server' ? t`Chiave (facoltativa)` : t`sk-…`}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
             />
-            {probe.probing && <p className="text-[13px] text-muted-foreground"><Trans>Provo la chiave…</Trans></p>}
+            {probe.probing && <p className="text-small text-muted-foreground"><Trans>Provo la chiave…</Trans></p>}
             {probe.ok === true && probe.models.length > 0 && (
-              <p className="text-[14px] text-chart-2"><Trans>✓ Funziona · {probe.models.length} modelli disponibili</Trans></p>
+              <p className="text-body text-chart-2"><Trans>✓ Funziona · {probe.models.length} modelli disponibili</Trans></p>
             )}
             {probe.ok === true && probe.models.length === 0 && (
               /* U6: il servizio è raggiunto ma non elenca i modelli: si scrive a mano */
-              <label className="block text-[13px] text-muted-foreground">
+              <label className="block text-small text-muted-foreground">
                 <Trans>Il servizio non elenca i modelli: scrivi il nome del modello</Trans>
-                <input
+                <Input
                   data-testid="sheet-manual-model"
-                  className="mt-1 h-10 w-full rounded-[12px] bg-muted px-3 py-2 text-sm text-foreground outline-none"
+                  className={cn(FIELD_PAGE_CLS, 'mt-1 w-full text-foreground')}
                   placeholder={t`es. llama-3.2-3b-instruct`}
                   value={manualModel}
                   onChange={(e) => setManualModel(e.target.value)}
                 />
               </label>
             )}
-            {probe.ok === false && <p className="text-[14px] text-destructive">{probeErrorText(probe.error ?? 'error')}</p>}
-            <p className="text-xs text-muted-foreground"><Trans>La chiave resta nel Portachiavi del Mac.</Trans></p>
-            <button
-              className="w-full rounded-full bg-foreground px-4 py-2 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-40"
+            {probe.ok === false && <p className="text-body text-destructive">{probeErrorText(probe.error ?? 'error')}</p>}
+            <p className="text-small text-muted-foreground"><Trans>La chiave resta nel Portachiavi del Mac.</Trans></p>
+            <Button
+              className="w-full"
               disabled={busy || !probe.ok || !effectiveBaseUrl.trim() || (group === 'server' && !serverName.trim())}
               onClick={() => void connect()}
             >
               <Trans>Collega {group === 'server' ? (serverName.trim() || t`il server`) : (KIND_LABELS[kind] ?? '')}</Trans>
-            </button>
+            </Button>
           </div>
         )}
       </div>

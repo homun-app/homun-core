@@ -10,6 +10,16 @@
 // lista d'avanzamento (BoxSetupProgress, il componente condiviso); il
 // link alle release resta come «Dettagli»; con la preparazione in corso
 // o in errore, la stessa lista con Riprova o Annulla.
+//
+// Fase design (DS4, Impostazioni): la sezione era fatta a mano — etichetta in
+// MAIUSCOLETTO, scheda bordata col respiro di 4, pillole da 12 px — con le
+// sue regole. Ora è un gruppo come gli altri di Generali (SettingsGroup), le
+// sue righe hanno la misura delle righe di DS1, le azioni sono Button da 32 e
+// le due scelte («Dove girano i comandi», «Motore») sono i segmenti unici
+// (SettingsSegments: un radiogroup — prima bottoni senza nome, con
+// aria-pressed). Testid e testi non cambiano: è ciò che leggono le sonde di
+// box-container e di modalita-box. `initial` è lo stato di partenza, per i
+// test senza effect (nel prodotto si carica dall'api, come prima).
 import { useEffect, useState } from 'react'
 import { useLingui } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
@@ -18,6 +28,9 @@ import { api, useStore } from '../../store'
 import type { EngineStatusInfo } from '../../../../shared/types'
 import { BoxSetupProgress } from '../BoxSetupProgress'
 import { boxSetupActive } from '../../lib/box-setup-rows'
+import { Button } from '../ui/button'
+import { SettingsGroup } from './SettingsGroup'
+import { CARD_ROW_CLS, CARD_NOTE_CLS as NOTE_CLS, ROSSA_QUIETA, SettingsNote, SettingsSegments } from './SettingsRow'
 
 export const APPLE_CONTAINER_RELEASES_URL = 'https://github.com/apple/container/releases'
 
@@ -98,9 +111,9 @@ export function engineRowAction(
   return action
 }
 
-export function EngineSection() {
+export function EngineSection({ initial }: { initial?: EngineStatusInfo | null }) {
   const { i18n } = useLingui()
-  const [st, setSt] = useState<EngineStatusInfo | null>(null)
+  const [st, setSt] = useState<EngineStatusInfo | null>(initial ?? null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // OB3: lo stato della preparazione (RPC + evento box-setup, senza ricaricare)
@@ -186,55 +199,42 @@ export function EngineSection() {
   // ferma su un errore da riprovare) — a ready basta la riga del motore
   const showProgress = boxSetup !== null && (boxSetupActive(boxSetup.phase) || boxSetup.phase === 'error')
   return (
-    <section className="mt-6" data-testid="engine-section">
-      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {i18n._(msg`Computer dei bot`)}
-      </h3>
-      <div className="rounded-2xl border bg-card p-1">
-        <div className="flex items-center justify-between gap-3 border-b border-border/40 px-3 py-2.5">
+    // il testid sta su un involucro: la sezione è il gruppo (l'etichetta e la scheda), e la sonda di
+    // box-container legge lo stato, i bottoni e i testid dei SUOI discendenti
+    <div data-testid="engine-section">
+      <SettingsGroup label={i18n._(msg`Computer dei bot`)}>
+        <div className={CARD_ROW_CLS}>
           <div className="min-w-0" data-testid="engine-status-text">
-            <p className="truncate text-sm">
+            <p className="truncate text-body font-medium">
               {status ? i18n._(status.text) : i18n._(msg`Sto guardando…`)}
             </p>
             {st?.setting === 'auto' && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-small text-muted-foreground">
                 {i18n._(msg`Motore scelto in automatico`)}
               </p>
             )}
           </div>
           {rowAction === 'start' && (
-            <button
-              className="shrink-0 rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
-              disabled={busy}
-              onClick={() => runEngine('start')}
-            >
+            <Button size="sm" disabled={busy} onClick={() => runEngine('start')}>
               {i18n._(msg`Accendi`)}
-            </button>
+            </Button>
           )}
           {rowAction === 'kernel' && (
-            <button
-              className="shrink-0 rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
-              disabled={busy}
-              onClick={() => runEngine('kernel')}
-            >
+            <Button size="sm" disabled={busy} onClick={() => runEngine('kernel')}>
               {i18n._(msg`Installa il kernel`)}
-            </button>
+            </Button>
           )}
           {/* OB3: «Installa» avvia la STESSA preparazione della guida.
               OBR4: con la preparazione in errore non c'è (rowAction) */}
           {rowAction === 'install' && (
-            <button
-              className="shrink-0 rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
-              disabled={busy}
-              data-testid="engine-install"
-              onClick={() => { void boxSetupStart() }}
-            >
+            <Button size="sm" disabled={busy} data-testid="engine-install" onClick={() => { void boxSetupStart() }}>
               {i18n._(msg`Installa`)}
-            </button>
+            </Button>
           )}
         </div>
         {st?.appleState === 'not-installed' && (
-          <div className="border-b border-border/40 px-3 py-2.5 text-xs text-muted-foreground" data-testid="engine-install-hint">
+          // resta un <div> col suo <p>: il link «Dettagli» accanto al testo non deve entrare nel messaggio
+          <div className={`${NOTE_CLS} text-small text-muted-foreground`} data-testid="engine-install-hint">
             <p>
               {i18n._(msg`Il computer dei bot senza Docker usa Apple container: lo installa Apple col suo pacchetto firmato (chiede la password del Mac).`)}{' '}
               <a className="underline" href={APPLE_CONTAINER_RELEASES_URL} target="_blank" rel="noreferrer">
@@ -245,7 +245,7 @@ export function EngineSection() {
         )}
         {/* OB3: la lista d'avanzamento della preparazione, la STESSA della guida */}
         {showProgress && boxSetup && (
-          <div className="border-b border-border/40 px-3 py-3">
+          <div className="border-b border-border/40 px-4 py-3">
             <BoxSetupProgress
               state={boxSetup}
               onOpenInstaller={() => { void boxSetupOpenInstaller() }}
@@ -253,86 +253,70 @@ export function EngineSection() {
             />
             {boxSetup.phase === 'error' && boxSetup.error && (
               <div className="mt-2 flex items-center justify-between gap-3">
-                <p className="m-0 min-w-0 text-xs text-destructive" data-testid="engine-setup-error">{boxSetup.error.message}</p>
-                <button
-                  className="shrink-0 rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                  data-testid="engine-setup-retry"
-                  onClick={() => { void boxSetupRetry() }}
-                >
+                <p className="m-0 min-w-0 text-small text-destructive" data-testid="engine-setup-error">{boxSetup.error.message}</p>
+                <Button size="sm" data-testid="engine-setup-retry" onClick={() => { void boxSetupRetry() }}>
                   {i18n._(msg`Riprova`)}
-                </button>
+                </Button>
               </div>
             )}
           </div>
         )}
         {containerInstalled && (
-          <div className="flex items-center justify-between gap-3 border-b border-border/40 px-3 py-2.5">
-            <p className="min-w-0 text-xs text-muted-foreground" data-testid="engine-uninstall-hint">
+          <div className={CARD_ROW_CLS}>
+            <p className="min-w-0 text-small text-muted-foreground" data-testid="engine-uninstall-hint">
               {i18n._(msg`Lo strumento di Apple si può togliere: chiede la password del Mac e rimuove i computer dei bot.`)}
             </p>
-            <button
-              className="shrink-0 rounded-full px-3 py-1.5 text-xs text-destructive outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
+            {/* quieta, rossa solo nel testo: la conferma la chiede LEI (window.confirm) */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={ROSSA_QUIETA}
               disabled={uninstalling}
               data-testid="engine-uninstall"
               onClick={() => runUninstall()}
             >
               {i18n._(msg`Disinstalla lo strumento di Apple`)}
-            </button>
+            </Button>
           </div>
         )}
         {/* MB3 (fase modalita-box): la SCELTA dell'utente — dove girano i comandi
             del bot. «Sul computer del bot» senza preparazione avvia la STESSA
             preparazione della guida (sandboxModeSet → boxSetupStart), con il
             consenso del clic esplicito come «Installa» di OB3 qui accanto */}
-        <div className="flex items-center justify-between gap-3 border-b border-border/40 px-3 py-2.5">
-          <p className="min-w-0 text-xs text-muted-foreground">{i18n._(msg`Dove girano i comandi`)}</p>
-          <span className="flex gap-1 rounded-full bg-card p-1" data-testid="sandbox-mode-choice">
-            {(['box', 'host'] as const).map((id) => (
-              <button
-                key={id}
-                className={`rounded-full px-3 py-1 text-xs outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 ${
-                  mode === id ? 'bg-foreground text-background' : 'text-muted-foreground'
-                }`}
-                disabled={busy}
-                data-testid={`sandbox-mode-${id}`}
-                aria-pressed={mode === id}
-                onClick={() => chooseMode(id)}
-              >
-                {i18n._(modeChoiceLabel(id))}
-              </button>
-            ))}
-          </span>
+        <div className={CARD_ROW_CLS}>
+          <p className="min-w-0 text-body">{i18n._(msg`Dove girano i comandi`)}</p>
+          <SettingsSegments<'box' | 'host'>
+            label={i18n._(msg`Dove girano i comandi`)}
+            testId="sandbox-mode-choice"
+            disabled={busy}
+            value={mode}
+            onChange={chooseMode}
+            options={(['box', 'host'] as const).map((id) => ({ value: id, label: i18n._(modeChoiceLabel(id)), testId: `sandbox-mode-${id}` }))}
+          />
         </div>
         {mode !== null && (
-          <p className="border-b border-border/40 px-3 py-2 text-xs text-muted-foreground" data-testid="sandbox-mode-hint">
+          <SettingsNote testId="sandbox-mode-hint">
             {i18n._(modeChoiceHint(mode))}
-          </p>
+          </SettingsNote>
         )}
-        <div className="flex items-center justify-between gap-3 px-3 py-2.5">
-          <p className="text-xs text-muted-foreground">{i18n._(msg`Motore`)}</p>
-          <span className="flex gap-1 rounded-full bg-card p-1">
-            {(['auto', 'apple-container', 'docker'] as const).map((id) => (
-              <button
-                key={id}
-                className={`rounded-full px-3 py-1 text-xs outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 ${
-                  (st?.setting ?? 'auto') === id ? 'bg-foreground text-background' : 'text-muted-foreground'
-                }`}
-                disabled={busy}
-                onClick={() => choose(id)}
-              >
-                {i18n._(engineChoiceLabel(id))}
-              </button>
-            ))}
-          </span>
+        <div className={CARD_ROW_CLS}>
+          <p className="min-w-0 text-body">{i18n._(msg`Motore`)}</p>
+          <SettingsSegments<'auto' | 'apple-container' | 'docker'>
+            label={i18n._(msg`Motore`)}
+            disabled={busy}
+            value={st?.setting ?? 'auto'}
+            onChange={choose}
+            options={(['auto', 'apple-container', 'docker'] as const).map((id) => ({ value: id, label: i18n._(engineChoiceLabel(id)) }))}
+          />
         </div>
         {error && (
-          <p className="px-3 pb-2 pt-1 text-xs text-destructive" data-testid="engine-error">
+          <SettingsNote tone="destructive" testId="engine-error">
             {/* OBR2: il messaggio dell'uninstall manuale porta il comando di Apple
                 da COPIARE (~210 caratteri): il tetto non lo deve tagliare */}
             {error.slice(0, 320)}
-          </p>
+          </SettingsNote>
         )}
-      </div>
-    </section>
+      </SettingsGroup>
+    </div>
   )
 }
