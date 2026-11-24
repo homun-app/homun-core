@@ -1193,6 +1193,10 @@ try {
     await rpc(cdp, `updateAgent(${JSON.stringify(bot.id)}, ${JSON.stringify({ providerId: 'finto', model: 'finto' })})`)
     others.push(bot)
   }
+  // R5 (b20-ritocchi): «Scrittura» col colore c7 — quello che in tema scuro
+  // non si vedeva (quasi nero su fondo nero): il controllo del contrasto dei
+  // puntini ha così il suo caso, in chiaro e in scuro
+  await rpc(cdp, `updateAgent(${JSON.stringify(others[2].id)}, ${JSON.stringify({ avatar: { family: 'h-creature', color: 'c7' } })})`)
   // i plugin FINTI (24 strumenti ciascuno), uno ROTTO, uno SPENTO, uno col TOKEN
   const FAKE_MCP = join(ROOT, 'scripts', 'fake-plugin-pulita-mcp.mjs')
   const pluginCfg = (i) => ({ id: `srv-plugin-${String(i).padStart(2, '0')}`, name: `plugin-${String(i).padStart(2, '0')}`, transport: 'stdio', command: process.execPath, args: [FAKE_MCP], enabled: true, enabledFor: ['*'] })
