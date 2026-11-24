@@ -715,9 +715,21 @@ export function AppRow({ row, flow, failure, onConnect, onCancel, onConflictReso
                       ? <Trans>Nessuna risposta</Trans>
                       : <Trans>Non riuscito</Trans>}
                 </span>
-                <Button variant="ghost" size="sm" data-testid={`app-retry-${row.app.id}`} onClick={(e) => { stop(e); onConnect(row) }}>
-                  <Trans>Riprova</Trans>
-                </Button>
+                {failed?.reason === 'not-connectable' ? (
+                  // R6 (b20-ritocchi): la causa è PERMANENTE (manca la
+                  // configurazione di accesso sul conto Composio) — «Riprova»
+                  // non cambierebbe niente. «Come si risolve» apre la scheda
+                  // dell'app: dove stanno la configurazione e le alternative
+                  // (per molte app, l'MCP diretto del fornitore)
+                  <Button variant="ghost" size="sm" data-testid={`app-howto-${row.app.id}`} onClick={(e) => { stop(e); onOpen(row) }}>
+                    <Trans>Come si risolve</Trans>
+                  </Button>
+                ) : (
+                  // gli errori TEMPORANEI (rete, tempo scaduto) si riprovano
+                  <Button variant="ghost" size="sm" data-testid={`app-retry-${row.app.id}`} onClick={(e) => { stop(e); onConnect(row) }}>
+                    <Trans>Riprova</Trans>
+                  </Button>
+                )}
               </>
             )}
           </>

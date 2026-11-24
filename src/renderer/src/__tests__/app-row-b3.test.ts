@@ -75,11 +75,16 @@ describe('B3: la riga in ogni esito del clic — mai muta, mai senza via d\'usci
     expect(textOf(byId(root, 'app-retry-spotify')!)).toBe('Riprova')
   })
 
-  it('app non collegabile (manca la configurazione di accesso): la riga lo dice — «Non si può collegare» col motivo', () => {
+  it('app non collegabile (manca la configurazione di accesso): PERMANENTE — «Come si risolve» al posto di «Riprova», e porta alla scheda', () => {
     const { root } = render('failed', { reason: 'not-connectable', text: 'Composio non gestisce il login di Spotify: manca la sua configurazione di accesso.' })
     expect(textOf(byId(root, 'app-status-spotify')!)).toBe('Non si può collegare')
     expect(textOf(byId(root, 'app-error-spotify')!)).toContain('manca la sua configurazione di accesso')
-    expect(byId(root, 'app-retry-spotify')).not.toBeNull()
+    // R6 (b20-ritocchi): la causa è PERMANENTE — «Riprova» non cambierebbe
+    // niente. Al suo posto «Come si risolve», che apre la scheda dell'app
+    // (dove stanno la configurazione e le alternative, come l'MCP diretto)
+    expect(byId(root, 'app-retry-spotify'), 'niente «Riprova» per una causa permanente').toBeNull()
+    expect(textOf(byId(root, 'app-howto-spotify')!)).toBe('Come si risolve')
+    expect(APPS_SRC).toContain('data-testid={`app-howto-${row.app.id}`} onClick={(e) => { stop(e); onOpen(row) }')
   })
 
   it('tempo massimo scaduto: la riga si sblocca con «Nessuna risposta», l\'avviso e «Riprova»', () => {
