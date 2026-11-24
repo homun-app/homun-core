@@ -46,6 +46,10 @@ const APP_DIR = resolve(argValue('--app') ?? ROOT)
 const PRIMA = argv.includes('--prima')
 const AFFIANCATE = argv.includes('--affiancate')
 const SOLO = argValue('--solo')?.split(',').map((s) => s.trim()).filter(Boolean) ?? null
+/** Le scritte delle affiancate: chi le vuole diverse (una fase nuova con un'altra
+ *  base di riferimento) le passa da riga di comando, il resto è «PRIMA»/«DOPO». */
+const ETICHETTA_PRIMA = argValue('--etichetta-prima') ?? 'PRIMA'
+const ETICHETTA_DOPO = argValue('--etichetta-dopo') ?? 'DOPO'
 const PREFIX = 'sandbot-fase-design'
 const TMP = mkdtempSync(`/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/${PREFIX}-`)
 const DATA = join(TMP, 'data')
@@ -1174,7 +1178,7 @@ const composePair = async (cdp, name) => {
     const d = document.createElement('div')
     d.id = ${JSON.stringify(`sonda-affiancate-${name}`)}
     d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#fff;display:flex'
-    d.innerHTML = ${JSON.stringify(`<div style="display:flex;flex-direction:column">${label('PRIMA · base fase-b20-bug')}<img style="display:block;width:${w}px;height:${h}px" src="${img(a)}"></div><div style="width:8px;background:#d9d9de"></div><div style="display:flex;flex-direction:column">${label('DOPO · fase design')}<img style="display:block;width:${w}px;height:${h}px" src="${img(b)}"></div>`)}
+    d.innerHTML = ${JSON.stringify(`<div style="display:flex;flex-direction:column">${label(ETICHETTA_PRIMA)}<img style="display:block;width:${w}px;height:${h}px" src="${img(a)}"></div><div style="width:8px;background:#d9d9de"></div><div style="display:flex;flex-direction:column">${label(ETICHETTA_DOPO)}<img style="display:block;width:${w}px;height:${h}px" src="${img(b)}"></div>`)}
     document.body.appendChild(d)
     await Promise.all([...d.querySelectorAll('img')].map((i) => i.decode().catch(() => undefined)))
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
