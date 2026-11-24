@@ -5,12 +5,24 @@
 // bot o squadre, in forma ridotta («+N altrove · Apri "Da approvare"»); la
 // richiesta del bot aperto sta sopra il campo di scrittura
 // (ComposerApproval). Nella chat di squadra resta la barra di Q2.
-import { useEffect } from 'react'
+//
+// Fase design (DS4): il riquadro è una riga compatta ai token: un Notice (il
+// pezzo delle righe di sistema della chat) dentro una scheda
+// (rounded-surface), in text-body, con «Apri «Da approvare»» per azione — un
+// Button. Prima TUTTO il riquadro era un bottone largo quanto la colonna.
+// Sta alla larghezza della colonna di lettura (PageColumn: 720, col margine
+// della pagina) e si riserva da solo lo spazio in cima: la testata della chat
+// è ASSOLUTA in cima alla colonna e il riquadro è il primo del flusso, perciò
+// pt-16 — come i messaggi sotto (prima era pt-[60px], scritto a mano).
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
+import { ShieldAlert } from 'lucide-react'
 import { useStore } from '../store'
 import type { ApprovalsCenterRow } from '../../../shared/types'
 import { visibleApprovalsRows } from '../lib/approvals-center'
+import { Button } from './ui/button'
+import { Notice } from './ui/notice'
+import { PageColumn } from './ui/page-shell'
 
 /**
  * il riquadro ridotto «+N altrove» — A3 (fase approvazioni-chiare): in cima
@@ -29,14 +41,22 @@ export function ApprovalsBannerElsewhere({ excludeBotId }: { excludeBotId?: stri
     .filter((r) => r.botId !== excludeBotId)
   if (elsewhere.length === 0) return null
   return (
-    <div className="mx-auto mb-1 w-full max-w-3xl px-6 pt-[60px]" data-testid="approvals-banner">
-      <button
-        className="flex w-full items-center gap-2 rounded-[14px] bg-card px-4 py-2 text-left text-sm shadow-soft transition hover:bg-card/80"
-        onClick={() => setApprovalsOpen(true)}
+    // il testid sta sul contenitore e DENTRO c'è il bottone: la sonda del
+    // centro apre il riquadro con `[data-testid="approvals-banner"] button`
+    <PageColumn width="reading" testId="approvals-banner" className="mb-2 pt-16">
+      <Notice
+        // il tono dell'attesa (text-waiting): è un invito a decidere, non un avviso grigio
+        tone="warning"
+        icon={<ShieldAlert className="size-4" />}
+        action={
+          <Button variant="secondary" size="sm" onClick={() => setApprovalsOpen(true)}>
+            <Trans>Apri «Da approvare»</Trans>
+          </Button>
+        }
+        className="rounded-surface border border-border bg-card p-3 text-body"
       >
-        <span className="font-semibold text-waiting">+{elsewhere.length} {i18n.t(msg`altrove`)}</span>
-        <span className="text-muted-foreground">· <Trans>Apri «Da approvare»</Trans></span>
-      </button>
-    </div>
+        <span className="font-semibold">+{elsewhere.length} {i18n.t(msg`altrove`)}</span>
+      </Notice>
+    </PageColumn>
   )
 }

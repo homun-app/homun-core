@@ -56,7 +56,10 @@ describe('Q2: la coda «Da approvare» (tavola 2)', () => {
     const text = textOf(tree)
     expect(text).toContain('Da approvare')
     expect(text).toContain('Weekend Torino · tutte le richieste del team, in un posto')
-    expect(text).toContain('Torna al team')
+    // Fase design (DS4): «Torna al team» è il bottone indietro della testata (un'icona, non più
+    // un'etichetta): lo dice il suo aria-label — è così che lo trova la sonda della fase squadra
+    const indietro = findAll(tree, (n) => n.attrs['data-testid'] === 'approvals-back')[0]
+    expect(indietro?.attrs['aria-label']).toBe('Torna al team')
     expect(text).toContain('Solo tu puoi decidere')
     expect(text).toContain('Fatto da soli, senza chiederti')
     expect(text).toContain('Lasciato passare dal revisore')

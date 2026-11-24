@@ -1499,6 +1499,7 @@ msgstr "Blu"
 msgid "bot"
 msgstr "bot"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
@@ -2581,6 +2582,10 @@ msgstr "Copiato sul Mac"
 msgid "core"
 msgstr "core"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Cosa"
+msgstr "Cosa"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Cosa deve fare il Bot a ogni esecuzione"
 msgstr "Cosa deve fare il Bot a ogni esecuzione"
@@ -3220,6 +3225,7 @@ msgstr "Eseguito senza chiedere (Approvazioni: non chiedere)"
 msgid "skill.err.duplicateName"
 msgstr "Esiste già una skill con questo nome."
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/Chat.tsx
 msgid "Esito"
 msgstr "Esito"
@@ -6761,6 +6767,10 @@ msgstr "Qualcosa non è andato: te lo dico qui sotto."
 msgid "qualsiasi servizio compatibile OpenAI"
 msgstr "qualsiasi servizio compatibile OpenAI"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Quando"
+msgstr "Quando"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Quando arriva un'e-mail che corrisponde a… (query)"
 msgstr "Quando arriva un'e-mail che corrisponde a… (query)"
@@ -8291,8 +8301,8 @@ msgid "group.hourlyCap"
 msgstr "Tetto orario raggiunto (40 messaggi di bot in un’ora): i turni del gruppo riprendono a breve."
 
 #: src/renderer/src/components/ActivityPanel.tsx
-msgid "ti aspetta"
-msgstr "ti aspetta"
+#~ msgid "ti aspetta"
+#~ msgstr "ti aspetta"
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "Ti chiedo"

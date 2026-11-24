@@ -4,16 +4,34 @@
 // Non riusciti; righe senza bordo con mascotte, nome del bot nel suo colore,
 // stato, titolo ed esito. Il clic apre la chat del bot sul lavoro (openTask
 // per i task) o vicino al suo turno (routine). Il ‹ torna alla chat.
+//
+// Fase design (DS4): la vista è fatta coi PEZZI di DS2. Il guscio è PageShell,
+// largo wide (1120: è un elenco da leggere per colonne), con la testata
+// PageHeader (indietro, l'icona, il titolo); ricerca e filtri stanno nel
+// toolbar, FERMI sopra il corpo che scorre. Le righe sono dentro FlatList e
+// hanno le misure della riga di elenco di DS1 — le stesse di FlatRow: lo slot
+// da 32, il respiro di 12, 12 fra la mascotte e il testo — ma sono scritte
+// qui, perché hanno TRE righe di testo (nome e stato, titolo, esito) e
+// FlatRow ne ha due. Il leading è la mascotte del bot, il suo «logo»: 32 px,
+// come i loghi nelle righe, e sta sul rigo del nome (sotto ci possono essere
+// due righe: centrato sul blocco finirebbe accanto al titolo).
+// `activityInitial` è per i test senza effect (come registroInitial del
+// centro): nel prodotto i dati arrivano dall'api.
 import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { Search, ChevronLeft } from 'lucide-react'
+import { Activity, Search } from 'lucide-react'
 import { api, useStore } from '../store'
 import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
 import { activityRows, type ActivityFilter, type ActivityRow } from '../lib/activity-rows'
+import { cn } from '../lib/utils'
 import type { GlobalActivityData } from '../../../shared/types'
+import { Button } from './ui/button'
+import { FlatList } from './ui/flat-list'
+import { PageHeader } from './ui/page-header'
+import { PageShell } from './ui/page-shell'
 
 const FILTER_LABELS: Record<ActivityFilter, MessageDescriptor> = {
   all: msg`Tutti`,
@@ -68,29 +86,39 @@ function ActivityListRow({ row, onOpen }: { row: ActivityRow; onOpen(row: Activi
       : row.status === 'failed' ? 'text-destructive'
         : 'text-muted-foreground'
   if (!agent || !info) return null
+  // la riga di sotto: chi aspetta te lo dice al posto del titolo (che non ha)
+  const conTitolo = row.kind === 'waiting' || row.title !== ''
   return (
+    // un <button> e non un FlatRow cliccabile: dentro non ci sono controlli, e il tasto vero è quello che si aspetta la tastiera
     <button
-      className="flex w-full flex-col gap-1 rounded-[14px] px-2.5 py-2.5 text-left transition hover:bg-muted/60"
+      type="button"
+      className="flex w-full cursor-pointer items-start gap-row-gap py-row-pad text-left transition hover:bg-muted/50"
       onClick={() => onOpen(row)}
     >
-      <span className="flex items-center gap-2">
-        <Bot family={info.avatar.family} color={info.avatar.color} state={alive ? state : 'idle'} size={22} track={false} dimmed={info.dimmed} />
-        <strong className="text-sm" style={{ color: `var(--bot-${info.avatar.color})` }}>{agent.name}</strong>
-        {row.routine && <span className="text-xs text-muted-foreground">· <Trans>routine</Trans></span>}
-        <span className="flex-1" />
-        <span className={`text-xs ${statusCls}`}>{statusText}</span>
+      {/* -mt-1.5: lo slot (32) centrato sul rigo del nome (20), non sul blocco */}
+      <span className="-mt-1.5 grid size-8 shrink-0 place-items-center">
+        <Bot family={info.avatar.family} color={info.avatar.color} state={alive ? state : 'idle'} size={32} track={false} dimmed={info.dimmed} />
       </span>
-      {(row.kind === 'waiting' ? <Trans>ti aspetta</Trans> : row.title) !== '' && (
-        <span className="text-sm text-foreground/80">{row.kind === 'waiting' ? <Trans>ha bisogno di te</Trans> : row.title}</span>
-      )}
-      {row.status === 'done' && row.summary && (
-        <span className="line-clamp-1 text-xs text-muted-foreground">{row.summary}</span>
-      )}
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="truncate text-body font-medium" style={{ color: `var(--bot-${info.avatar.color})` }}>{agent.name}</span>
+          {row.routine && <span className="shrink-0 text-small text-muted-foreground">· <Trans>routine</Trans></span>}
+          <span className="flex-1" />
+          {/* lo stato non va a capo: cede il nome */}
+          <span className={`shrink-0 whitespace-nowrap text-caption ${statusCls}`}>{statusText}</span>
+        </span>
+        {conTitolo && (
+          <span className="mt-0.5 block truncate text-body">{row.kind === 'waiting' ? <Trans>ha bisogno di te</Trans> : row.title}</span>
+        )}
+        {row.status === 'done' && row.summary && (
+          <span className="mt-0.5 block truncate text-small text-muted-foreground">{row.summary}</span>
+        )}
+      </span>
     </button>
   )
 }
 
-export function ActivityPanel() {
+export function ActivityPanel({ activityInitial }: { activityInitial?: GlobalActivityData } = {}) {
   const { t, i18n } = useLingui()
   const activityOpen = useStore((s) => s.activityOpen)
   const setActivityOpen = useStore((s) => s.setActivityOpen)
@@ -98,7 +126,7 @@ export function ActivityPanel() {
   const openTask = useStore((s) => s.openTask)
   const [filter, setFilter] = useState<ActivityFilter>('all')
   const [query, setQuery] = useState('')
-  const [data, setData] = useState<GlobalActivityData | null>(null)
+  const [data, setData] = useState<GlobalActivityData | null>(activityInitial ?? null)
   // fase 16c correzioni (R1): un RPC che fallisce non è «nessun lavoro» —
   // si mostra una riga d'errore con Riprova, mai lo stato vuoto in silenzio
   const [failed, setFailed] = useState(false)
@@ -121,65 +149,74 @@ export function ActivityPanel() {
     setActivityOpen(false)
   }
 
-  // verifica impostazioni: la vista sta SOPRA la fascia di trascinamento della
-  // chat, che Electron calcola ignorando lo z-index — no-drag, o la freccia ‹
-  // in alto cade dentro la fascia e il clic trascina la finestra
+  // il guscio è no-drag (PageShell): la vista sta SOPRA la fascia di
+  // trascinamento della chat, che Electron calcola ignorando lo z-index —
+  // senza, la freccia ‹ in alto cade dentro la fascia e il clic trascina la finestra
   return (
-    <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background px-8 py-6">
-      {/* la testa della vista: ‹ Attività, la ricerca e le pillole (tavola 4) */}
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <button
-            className="grid size-8 place-items-center rounded-[10px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            aria-label={t`Torna alla chat`}
-            onClick={() => setActivityOpen(false)}
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          <h1 className="font-display text-2xl"><Trans>Attività</Trans></h1>
-        </div>
-        <label className="flex h-10 items-center gap-2.5 rounded-full bg-muted px-4 text-sm text-muted-foreground">
-          <Search className="size-4 shrink-0" />
-          <input
-            className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none"
-            placeholder={t`Cerca nei lavori`}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
-        <div className="flex flex-wrap gap-1.5">
-          {(Object.keys(FILTER_LABELS) as ActivityFilter[]).map((f) => (
-            <button
-              key={f}
-              className={`h-8 rounded-full px-3.5 text-[13px] transition ${filter === f ? 'bg-foreground text-background' : 'bg-muted text-foreground hover:bg-accent'}`}
-              onClick={() => setFilter(f)}
-            >
-              {i18n.t(FILTER_LABELS[f])}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="mx-auto mt-4 w-full max-w-3xl flex-1 overflow-y-auto scroll-thin">
-        {/* fase 16c correzioni (R1): un RPC fallito non è «nessun lavoro» —
-            riga d'errore in parole con Riprova, mai lo stato vuoto in silenzio */}
-        {failed && (
-          <div className={`flex items-center gap-2 text-sm text-muted-foreground ${data ? 'justify-start pb-3' : 'justify-center pt-10'}`}>
-            <Trans>Non riesco a leggere le attività</Trans>
-            <button className="text-primary hover:underline" onClick={load}><Trans>Riprova</Trans></button>
+    <PageShell
+      width="wide"
+      z={20}
+      testId="activity-panel"
+      header={
+        <PageHeader
+          title={t`Attività`}
+          icon={<Activity className="size-5" />}
+          back={{ onClick: () => setActivityOpen(false), label: t`Torna alla chat` }}
+        />
+      }
+      toolbar={
+        <>
+          {/* la ricerca: un campo (rounded-control) alto come i controlli di default (36) */}
+          <label className="flex h-control min-w-0 flex-1 items-center gap-3 rounded-control bg-muted px-3 text-muted-foreground">
+            <Search className="size-4 shrink-0" />
+            <input
+              className="min-w-0 flex-1 bg-transparent text-body text-foreground outline-none"
+              placeholder={t`Cerca nei lavori`}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
+          {/* i filtri (tavolo 4): pillole, una sola accesa — tutte pillole, la forma non cambia con lo stato.
+              min-w-0 e non shrink-0: in un'area stretta (finestra a 900 px col pannello del bot aperto)
+              le pillole cedono spazio e vanno a capo, invece di spingersi sotto il pannello; la ricerca
+              (flex-1) prende ciò che resta */}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {(Object.keys(FILTER_LABELS) as ActivityFilter[]).map((f) => (
+              <Button
+                key={f}
+                variant={filter === f ? 'primary' : 'secondary'}
+                shape="pill"
+                size="sm"
+                className="text-caption"
+                onClick={() => setFilter(f)}
+              >
+                {i18n.t(FILTER_LABELS[f])}
+              </Button>
+            ))}
           </div>
-        )}
-        {!failed && data === null ? (
-          <p className="text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>
-        ) : data !== null && rows.length === 0 ? (
-          <p className="px-2 pt-10 text-center text-sm text-muted-foreground">
-            <Trans>Nessun lavoro qui: i compiti dei bot e le loro routine finiscono in questo elenco.</Trans>
-          </p>
-        ) : data !== null && (
-          <div className="flex flex-col gap-0.5">
-            {rows.map((row) => <ActivityListRow key={row.key} row={row} onOpen={open} />)}
-          </div>
-        )}
-      </div>
-    </div>
+        </>
+      }
+      contentClassName="flex flex-col gap-section pt-2 pb-6"
+    >
+      {/* fase 16c correzioni (R1): un RPC fallito non è «nessun lavoro» —
+          riga d'errore in parole con Riprova, mai lo stato vuoto in silenzio */}
+      {failed && (
+        <div className={cn('flex items-center gap-3 text-body text-muted-foreground', data ? '' : 'justify-center pt-10')}>
+          <Trans>Non riesco a leggere le attività</Trans>
+          <Button variant="ghost" size="sm" onClick={load}><Trans>Riprova</Trans></Button>
+        </div>
+      )}
+      {!failed && data === null ? (
+        <p className="text-small text-muted-foreground"><Trans>caricamento…</Trans></p>
+      ) : data !== null && rows.length === 0 ? (
+        <p className="pt-10 text-center text-body text-muted-foreground">
+          <Trans>Nessun lavoro qui: i compiti dei bot e le loro routine finiscono in questo elenco.</Trans>
+        </p>
+      ) : data !== null ? (
+        <FlatList>
+          {rows.map((row) => <ActivityListRow key={row.key} row={row} onOpen={open} />)}
+        </FlatList>
+      ) : null}
+    </PageShell>
   )
 }
