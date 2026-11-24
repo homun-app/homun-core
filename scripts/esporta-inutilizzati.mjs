@@ -92,8 +92,9 @@ const namesOfList = (list) => {
   for (const part of list.split(',')) {
     const spec = part.trim().replace(/^type\s+/, '').replace(/:.*$/, '')
     if (!spec) continue
-    const as = /\bas\s+([A-Za-z_$][\w$]*)$/.exec(spec)
-    out.push(as ? as[1] : spec)
+    // `a as b` in un import prende DAL MODULO «a» (b è il nome locale): conta «a»; in una destructuring `a: b` conta «a»
+    const as = /\bas\s+/.exec(spec)
+    out.push(as ? spec.split(/\s+as\s+/)[0] : spec)
   }
   return out
 }
@@ -123,12 +124,18 @@ export function importsOf(text, fromFile) {
   for (const m of text.matchAll(/\bexport\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) push(m[2], namesOfList(m[1]), 're-export')
   for (const m of text.matchAll(/\bexport\s*\*\s*from\s*["']([^"']+)["']/g)) push(m[1], ['*'], 're-export-star')
   // import dinamici: const { a, b } = await import('…') prende quei nomi; const m = await import('…') prende il modulo intero
-  for (const m of text.matchAll(/\{([^}]*)\}\s*=\s*(?:await\s+)?import\s*\(\s*["']([^"']+)["']\s*\)/g)) push(m[2], namesOfList(m[1]), 'dynamic')
+  // dentro le graffe ci stanno solo nomi (su più righe, ma NIENTE altre graffe): con [^}]* la ricerca
+  // partiva da una graffa APERTA molto prima (il corpo della funzione) e i nomi letti erano
+  // spazzatura — l'export risultava «inutilizzato» mentre era usato
+  for (const m of text.matchAll(/\{([^{}]*)\}\s*=\s*(?:await\s+)?import\s*\(\s*["']([^"']+)["']\s*\)/g)) push(m[2], namesOfList(m[1]), 'dynamic')
   // il modulo intero (const m = await import(…)): la forma con la destructuring ({ a } = await import(…)) è già contata sopra
   for (const m of text.matchAll(/=\s*(?:await\s+)?import\s*\(\s*["']([^"']+)["']\s*\)/g)) {
     const prima = text.slice(0, m.index).trimEnd()
     if (prima.endsWith('}')) continue
-    push(m[1], ['*'], 'dynamic')
+    // il modulo preso per intero, poi letto per proprietà (m.exportName): contano come presi i nomi
+    // che in QUESTO file compaiono dopo un punto — cautelativo (può lasciare un inutilizzato non visto, mai il contrario)
+    const letti = [...new Set([...text.matchAll(/\.([A-Za-z_$][\w$]*)/g)].map((x) => x[1]))]
+    push(m[1], ['*', ...letti], 'dynamic')
   }
   return out
 }

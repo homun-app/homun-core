@@ -92,12 +92,9 @@
  * (size-5); loghi delle app 32 px nelle righe (size-8), 40 px nelle testate di
  * scheda (size-10). Solo lucide: nessuna emoji nell'interfaccia (guardia).
  *
- * (I token --radius-sm…4xl di fabbrica restano finché le pagine non sono
- * migrate a DS4: poi escono.)
+ * (I token --radius-sm…4xl che l'app ridefiniva nel tema e --radius sono
+ * usciti a DS5: più nessuno li usa.)
  */
-@theme {
-  --container-pill: 35rem;
-}
 /* static: le variabili escono sempre nel CSS, anche dove si leggono con var(…) fuori dalle utility */
 @theme static {
   /* tipografia */
@@ -173,13 +170,6 @@
  */
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
-  --radius-3xl: calc(var(--radius) + 12px);
-  --radius-4xl: calc(var(--radius) + 16px);
   --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", system-ui, sans-serif;
   --font-sans: "Figtree Variable", "Figtree", system-ui, sans-serif;
   --shadow-soft: var(--shadow-soft);
@@ -231,7 +221,6 @@
  */
 :root {
   color-scheme: light;
-  --radius: 0.625rem;
   /* palette crema (secondo :root di Lovable) */
   --background: oklch(0.975 0.006 85);
   --card: oklch(0.995 0.003 85);
@@ -388,41 +377,31 @@
   border-radius: 3px;
 }
 
-/* ---------- Bot animations (da Lovable, identiche) ---------- */
+/* ---------- Bot animations (da Lovable) ---------- */
+/* fase design (DS5): via le regole senza più utilizzatori — le parti della
+   vecchia mascotte (bot-ring, bot-antenna, bot-puff, bot-draw) e la famiglia
+   «cloud»: la mascotte di oggi ha le sue (hm-*, bot-pixel-grid) */
 .bot { position: relative; display: grid; place-items: center; }
 .bot-svg { animation: bot-breathe 3.6s ease-in-out infinite; transform-origin: 50% 90%; }
 .bot--speaking .bot-svg { animation: bot-speak .45s ease-in-out infinite; }
 .bot--happy .bot-svg { animation: bot-hop .7s cubic-bezier(.3,1.6,.5,1) infinite; }
 .bot--thinking .bot-svg { animation: bot-tilt 2.4s ease-in-out infinite; }
-.bot--cloud .bot-svg { animation-name: bot-float; animation-duration: 4s; }
-.bot--cloud.bot--happy .bot-svg { animation: bot-hop .7s cubic-bezier(.3,1.6,.5,1) infinite; }
 
 .bot-blink { animation: bot-blink 4.5s infinite; }
 .bot-talk { animation: bot-talk .25s ease-in-out infinite alternate; }
 .bot-dot { animation: bot-dot 1s ease-in-out infinite; }
-.bot-ring { transform-origin: 50px 50px; animation: bot-spin 6s linear infinite; }
-.bot--thinking .bot-ring { animation-duration: 1.4s; }
-.bot-antenna { animation: bot-antenna 1.6s ease-in-out infinite; }
-.bot--speaking .bot-antenna, .bot--listening .bot-antenna { animation-duration: .4s; }
-.bot-puff { transform-origin: 50px 60px; animation: bot-puff 3s ease-in-out infinite; }
 .bot-pixel-grid rect { animation: bot-pixel 2.4s ease-in-out infinite; }
 .bot--thinking .bot-pixel-grid rect { animation-duration: .9s; }
-.bot-draw { stroke-dasharray: 230; animation: bot-draw 3s ease-in-out infinite; }
 .bot-wave { position: absolute; inset: 10%; border-radius: 9999px; border: 2px solid; opacity: 0; animation: bot-wave 1.2s ease-out infinite; }
 
 @keyframes bot-breathe { 0%,100% { transform: scale(1,1); } 50% { transform: scale(1.03,.97); } }
-@keyframes bot-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6%); } }
 @keyframes bot-speak { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05,.95); } }
 @keyframes bot-hop { 0%,100% { transform: translateY(0) scale(1); } 40% { transform: translateY(-12%) scale(.96,1.05); } 80% { transform: translateY(0) scale(1.06,.94); } }
 @keyframes bot-tilt { 0%,100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
 @keyframes bot-blink { 0%,92%,100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
 @keyframes bot-talk { from { transform: scaleY(.3); } to { transform: scaleY(1.2); } }
 @keyframes bot-dot { 0%,100% { transform: translateY(0); opacity: .3; } 50% { transform: translateY(-3px); opacity: 1; } }
-@keyframes bot-spin { to { transform: rotate(360deg); } }
-@keyframes bot-antenna { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-@keyframes bot-puff { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04,.98); } }
 @keyframes bot-pixel { 0%,100% { opacity: 1; } 50% { opacity: .65; } }
-@keyframes bot-draw { 0% { stroke-dashoffset: 230; } 50%,100% { stroke-dashoffset: 0; } }
 @keyframes bot-wave { 0% { transform: scale(.8); opacity: .7; } 100% { transform: scale(1.5); opacity: 0; } }
 
 /* homun */

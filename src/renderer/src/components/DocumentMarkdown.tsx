@@ -423,7 +423,3 @@ export function InlineChart({ lang, source }: { lang: 'vega-lite' | 'mermaid'; s
   return <img className="max-w-full rounded-surface border border-border bg-white" src={url} alt={t`grafico ${lang}`} />
 }
 
-/** Gli id dei titoli ##/### di un documento, nell'ordine (per le ancore). */
-export function docHeadingIds(markdown: string): string[] {
-  return pageHeadings(markdown).map((h) => h.id)
-}

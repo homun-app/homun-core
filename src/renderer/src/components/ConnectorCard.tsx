@@ -12,7 +12,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { Plug } from 'lucide-react'
 import { api, useStore } from '../store'
-import type { ConnectorInfo, TranscriptEntry } from '../../../shared/types'
+import type { TranscriptEntry } from '../../../shared/types'
 import { logoUrlForSlug } from '../lib/app-logos'
 import { composioRouteFor } from '../lib/connector-route'
 // B3 (fase b20-bug): l'esito che il daemon pubblica per i flussi in background (stessa regola della riga)
@@ -299,7 +299,3 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   )
 }
 
-/** Quale connettore serve a questa card (per il lookup del catalogo nella vista). */
-export function connectorOf(connectors: ConnectorInfo[], id: string | undefined): ConnectorInfo | undefined {
-  return connectors.find((c) => c.id === id)
-}

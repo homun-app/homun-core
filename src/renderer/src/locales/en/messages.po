@@ -27,10 +27,6 @@ msgstr "graph"
 msgid " — rispondi dalla vista del task (Apri)"
 msgstr " — answer from the task view (Open)"
 
-#: src/renderer/src/components/LibraryPanel.tsx
-#~ msgid " · ⚠ proveniente da dati esterni"
-#~ msgstr " · ⚠ from external data"
-
 #. placeholder {0}: p.lastError.status
 #: src/renderer/src/components/Settings.tsx
 msgid " (HTTP {0})"
@@ -568,14 +564,6 @@ msgstr "•••• {0}"
 msgid "•••• salvato"
 msgstr "•••• saved"
 
-#: src/renderer/src/components/LibraryPanel.tsx
-#~ msgid "← Lista"
-#~ msgstr "← List"
-
-#: src/renderer/src/components/LibraryPanel.tsx
-#~ msgid "↩ Ripristina v{version} come nuova versione"
-#~ msgstr "↩ Restore v{version} as a new version"
-
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "+ Aggiungi contatto"
 msgstr "+ Add contact"
@@ -595,34 +583,6 @@ msgstr "+ New routine"
 #: src/renderer/src/components/McpWindow.tsx
 msgid "+ Variabile"
 msgstr "+ Variable"
-
-#: src/renderer/src/components/LibraryCards.tsx
-#~ msgid "⚠ dati letti da una fonte esterna"
-#~ msgstr "⚠ data read from an external source"
-
-#: src/renderer/src/components/Chat.tsx
-#~ msgid "⚠ errore"
-#~ msgstr "⚠ error"
-
-#: src/renderer/src/components/LibraryPanel.tsx
-#~ msgid "⚠ esterno"
-#~ msgstr "⚠ external"
-
-#: src/renderer/src/components/PageView.tsx
-#~ msgid "⚠ proveniente da dati esterni"
-#~ msgstr "⚠ coming from external data"
-
-#: src/renderer/src/components/LibraryCards.tsx
-#~ msgid "⚠ Richiesta nata dopo contenuti letti dal web: controlla che l'origine sia davvero quella del sito."
-#~ msgstr "⚠ Request raised after reading web content: check the origin is really the site's."
-
-#: src/renderer/src/components/RuleProposalCard.tsx
-#~ msgid "⚡ Regola proposta — continuo da solo quando…"
-#~ msgstr "⚡ Proposed rule — I continue on my own when…"
-
-#: src/renderer/src/components/RuleProposalCard.tsx
-#~ msgid "⛔ Regola proposta — mi fermo e chiedo sempre quando…"
-#~ msgstr "⛔ Proposed rule — I stop and always ask when…"
 
 #. placeholder {0}: message.name
 #: src/renderer/src/components/ConnectorCards13.tsx
@@ -661,14 +621,6 @@ msgstr "✓ Works · {0} models available"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "✓ Installato — il bot ha ricevuto l'esito"
 msgstr "✓ Installed — the bot received the result"
-
-#: src/renderer/src/components/Settings.tsx
-#~ msgid "✨ Suggerisci dal transcript"
-#~ msgstr "✨ Suggest from transcript"
-
-#: src/renderer/src/components/MemoryPanel.tsx
-#~ msgid "🗂 Memoria di questo bot"
-#~ msgstr "🗂 This bot's memory"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "30 giorni"
@@ -981,7 +933,6 @@ msgstr "More…"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
-#: src/renderer/src/lib/approvals-center.ts
 msgid "altro"
 msgstr "other"
 
@@ -1514,7 +1465,6 @@ msgstr "bot · {0}"
 msgid "Bot che la usano"
 msgstr "Bots that use it"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Bot che lo usano"
@@ -2912,10 +2862,6 @@ msgstr "Forget forever"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Dimenticare per sempre questa memoria? Il testo sparisce del tutto e non si torna indietro (l'eliminazione normale, invece, si può annullare)."
 msgstr "Forget this memory forever? The text is completely erased and there is no way back (a normal delete can still be undone)."
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Diretta: il permesso resta sul tuo Mac"
-msgstr "Direct: the permission stays on your Mac"
 
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Direttamente sul Mac"
@@ -4662,10 +4608,6 @@ msgid "Inviata automaticamente: {0}"
 msgstr "Sent automatically: {0}"
 
 #: src/renderer/src/lib/approvals-center.ts
-msgid "invii"
-msgstr "sends"
-
-#: src/renderer/src/lib/approvals-center.ts
 msgid "Invii"
 msgstr "Sends"
 
@@ -5117,10 +5059,6 @@ msgstr "local"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "log"
 msgstr "log"
-
-#: src/renderer/src/lib/approvals-center.ts
-msgid "login"
-msgstr "logins"
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Login"
@@ -6248,10 +6186,6 @@ msgstr "Origins https://… (comma separated)"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "owner/repo di GitHub oppure URL git https"
 msgstr "GitHub owner/repo or https git URL"
-
-#: src/renderer/src/lib/approvals-center.ts
-msgid "pagamenti"
-msgstr "payments"
 
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "pagamenti e acquisti"
@@ -7945,10 +7879,6 @@ msgstr "System"
 msgid "Siti"
 msgstr "Sites"
 
-#: src/renderer/src/lib/approvals-center.ts
-msgid "siti interattivi"
-msgstr "interactive sites"
-
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "sito nuovo, interattivo"
@@ -8244,7 +8174,6 @@ msgstr "Task not found"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
-#: src/renderer/src/lib/approvals-center.ts
 msgid "team"
 msgstr "team"
 
@@ -8302,10 +8231,6 @@ msgstr "Text missing"
 #: src/shared/ui-messages.ts
 msgid "group.hourlyCap"
 msgstr "Hourly cap reached (40 bot messages in one hour): group turns resume shortly."
-
-#: src/renderer/src/components/ActivityPanel.tsx
-#~ msgid "ti aspetta"
-#~ msgstr "waiting for you"
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "Ti chiedo"
@@ -8426,7 +8351,6 @@ msgstr "TOTP not supported (algorithm {algorithm}, digits {digits}, period {peri
 msgid "tramite Composio"
 msgstr "via Composio"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "Tramite Composio: login e azioni passano dai suoi server"
 msgstr "Via Composio: logins and actions pass through its servers"
@@ -8560,7 +8484,6 @@ msgid "Tutti"
 msgstr "All"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/PluginPanel.tsx
@@ -8764,10 +8687,6 @@ msgstr "used by: {0}"
 #: src/renderer/src/components/Settings.tsx
 msgid "uscita $/M"
 msgstr "output $/M"
-
-#: src/renderer/src/lib/approvals-center.ts
-msgid "uso del Mac"
-msgstr "Mac usage"
 
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx

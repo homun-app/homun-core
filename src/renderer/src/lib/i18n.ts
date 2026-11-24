@@ -79,9 +79,4 @@ export function formatTime(
   return new Intl.DateTimeFormat(activeLocale(), options).format(at)
 }
 
-/** Numero nel formato della lingua attiva. */
-export function formatNumber(n: number, options?: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(activeLocale(), options).format(n)
-}
-
 export { i18n }

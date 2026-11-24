@@ -10,7 +10,7 @@
 import type { CatalogEntry, ConnectorState } from './index'
 import { searchCatalog } from './index'
 import {
-  fetchRegistryEntries, registryRuntime, registrySiteUrl, registryTitle, registryTrust,
+  registryRuntime, registryTitle, registryTrust,
   type RegistryEntry
 } from './registry'
 import type { MarketplacePlugin } from './marketplace'
@@ -208,17 +208,3 @@ export function formatSearchResults(out: MergeOutput): string {
   return lines.length ? lines.join('\n') : 'No connector found for this search.'
 }
 
-/**
- * L'orchestrazione del tool search_connectors: catalogo + plugin dai
- * marketplace registrati (già scaricati e cachati) + registro (rete, host
- * fisso, 8 s, cache 10 minuti). Se il registro non risponde, le altre fonti
- * rispondono comunque e la riga REGISTRY_DOWN_LINE lo dice.
- */
-export async function searchAllConnectors(
-  query: string,
-  input: Omit<MergeInput, 'registry'> & { fetchRegistry?: typeof fetchRegistryEntries }
-): Promise<MergeOutput> {
-  const fetchRegistry = input.fetchRegistry ?? fetchRegistryEntries
-  const registry = await fetchRegistry(query).catch(() => null)
-  return mergeConnectorResults({ catalog: input.catalog, plugins: input.plugins, registry }, query)
-}

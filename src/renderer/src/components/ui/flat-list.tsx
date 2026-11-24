@@ -55,12 +55,8 @@ export function FlatRow({ leading, title, subtitle, trailing, onClick, clickable
     <>
       {conLeading && <span className="grid size-8 shrink-0 place-items-center">{leading}</span>}
       <span className="min-w-0 flex-1">
-        {/* Stringhe fisse, NON cn(): il cn di questa base (18d09f22) è il
-            twMerge di fabbrica, che scambia le dimensioni di DS1 (text-small,
-            text-caption…) per COLORI e, davanti a un text-muted-foreground,
-            le toglierebbe — la riga grigia perderebbe la sua taglia.
-            (626750e2 gliela insegna.) Qui non c'è nulla da fondere: si
-            scrivono e basta, e vanno bene con entrambi i cn. */}
+        {/* Stringhe fisse, NON cn(): qui non c'è nulla da fondere, si scrivono
+            e basta (una riga grigia resta text-small anche davanti al colore). */}
         <span className="block truncate text-body font-medium">{title}</span>
         {subtitle !== undefined && <span className="mt-0.5 block truncate text-small text-muted-foreground">{subtitle}</span>}
       </span>

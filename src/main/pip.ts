@@ -8,7 +8,6 @@
 // Qui NIENTE importazioni di Electron: le parti pure (opzioni, bounds) e il
 // manager con dipendenze INIETTABILI — i test passano la finestra finta, il
 // main passa l'adattatore vero (src/main/index.ts).
-import type { SandbotEvent } from '../shared/types'
 
 /** Il rapporto della PiP: 16:10 come la zona dell'anteprima (SV2). */
 export const PIP_ASPECT = 16 / 10
@@ -260,5 +259,3 @@ export class PipManager {
 
 }
 
-/** Il tipo dell'evento che il main broadcasta alle finestre (locale, non daemon). */
-export type PipEvent = Extract<SandbotEvent, { type: 'pip' }>

@@ -29,12 +29,9 @@
 //    ritaglia al proprio riquadro, e la riga è larga quanto il riquadro — un
 //    anello fuori dal bordo, ai lati, sparirebbe.
 //
-// cn() e le dimensioni di DS1: questo pezzo nasce su 18d09f22, dove cn è il
-// twMerge di fabbrica e scambia le sei dimensioni (text-caption, text-small,
-// text-body…) per COLORI — davanti a un text-muted-foreground, text-caption
-// sparisce. 626750e2 glielo insegna, ma qui non c'è ancora. Dove stanno
-// insieme una dimensione e un colore si usa clsx, che concatena e basta:
-// non c'è nulla da fondere, quindi va bene con entrambi i cn.
+// Dove stanno insieme una dimensione di testo e un colore si usa clsx, che
+// concatena e basta: qui non c'è nulla da fondere. (cn, in lib/utils, conosce
+// i token di DS1 dal commit 626750e2: il motivo era un cn che non li conosceva.)
 import type { ReactNode } from 'react'
 import { clsx } from 'clsx'
 import { cn } from '../../lib/utils'

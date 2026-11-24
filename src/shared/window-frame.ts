@@ -22,5 +22,3 @@ export const COLUMN_HEAD_HEIGHT = 52
 export const SIDEBAR_HEAD_PAD: number = TRAFFIC_LIGHT_POSITION.x + TRAFFIC_LIGHTS_WIDTH + 12
 /** Il centro verticale dei semafori: la riga su cui devono stare anche le icone (tolleranza 1 px). */
 export const TRAFFIC_LIGHT_ROW: number = TRAFFIC_LIGHT_POSITION.y + TRAFFIC_LIGHT_BUTTON / 2
-/** Le icone delle testate stanno in bottoni da 32 px. */
-export const HEAD_BUTTON = 32

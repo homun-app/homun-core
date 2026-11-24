@@ -327,11 +327,6 @@ export function createLocalModelServer(opts: {
   }
 }
 
-// ---- le dipendenze di PRODUZIONE (il daemon le passa ai moduli veri) ----
-
-/** La porta libera reale su 127.0.0.1. */
-export const findFreePortProd: LocalModelServerDeps['findFreePort'] = defaultFindFreePort
-
 /** Il percorso dell'eseguibile di un pid (ps -p PID -o comm=), null se morto. */
 export async function processPathOfProd(pid: number): Promise<string | null> {
   return await new Promise((resolve) => {

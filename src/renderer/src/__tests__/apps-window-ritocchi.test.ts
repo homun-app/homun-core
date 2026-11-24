@@ -39,8 +39,9 @@ describe('U2 → PL7: la finestra App non c\'è più; i fogli vivono nella pagin
     for (const gone of ['AppsWindow', 'AppsView', 'AppDetailSheet', 'ComposioAccountSheet', 'ConnectedDetailSheet', 'DevelopersSheet']) {
       expect(src, gone).not.toMatch(new RegExp(`^(export )?function ${gone}\\(`, 'm'))
     }
-    // i pezzi esportati che la pagina usa
-    for (const piece of ['AppRow', 'AppLogo', 'FilterPill', 'useConnectFlows', 'BotTogglesForApp', 'GatewayAccountsSection', 'DevelopersContent']) {
+    // i pezzi esportati che la pagina usa (fase design, DS5: FilterPill e BotTogglesForApp non
+    // le usava più nessuno — resti della finestra «App» — e sono usciti con il censimento degli export)
+    for (const piece of ['AppRow', 'AppLogo', 'useConnectFlows', 'GatewayAccountsSection', 'DevelopersContent']) {
       expect(src, piece).toMatch(new RegExp(`^export function ${piece}\\(`, 'm'))
     }
   })

@@ -4,7 +4,7 @@
 // bot singoli), l'urgenza (prima l'insieme fisso, poi la più vecchia) e i
 // conteggi dei filtri. Le decisioni passano sempre da resolveApproval: qui
 // non si decide niente.
-import type { ApprovalsCenterRow, SquadPendingApprovalInfo } from '../../../shared/types'
+import type { ApprovalsCenterRow } from '../../../shared/types'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 
@@ -73,17 +73,6 @@ export function approvalsFilterCounts(rows: ApprovalsCenterRow[]): Record<'dati-
     if (r.category === 'dati-tuoi' || r.category === 'invio' || r.category === 'sito-interattivo') c[r.category]++
   }
   return c
-}
-
-/** le etichette corte del riquadro («2 siti interattivi, 1 login»). */
-export const CATEGORY_SHORT: Record<SquadPendingApprovalInfo['category'], MessageDescriptor> = {
-  'dati-tuoi': msg`login`,
-  pagamento: msg`pagamenti`,
-  invio: msg`invii`,
-  'sito-interattivo': msg`siti interattivi`,
-  mac: msg`uso del Mac`,
-  squadra: msg`team`,
-  altro: msg`altro`
 }
 
 // ---- A2 (fase approvazioni-chiare): il Registro ----

@@ -11,7 +11,7 @@
 // per chiudere — la coda è durevole — ed esce con 0) e poi lo rilancia.
 // Riconnette automaticamente.
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
-import { openSync, closeSync, existsSync, rmSync } from 'node:fs'
+import { openSync, closeSync } from 'node:fs'
 import { join } from 'node:path'
 import { WsClient } from './ws-client'
 import { readDaemonInfo, removeDaemonInfo, pidAlive, releaseDaemonLock, daemonMatchesBuild, type DaemonInfo, type DaemonBuild } from '../daemon/daemon-files'
@@ -461,11 +461,6 @@ export class DaemonClient {
         })
     )
   }
-}
-
-/** Rimuove i file di stato del daemon (test). */
-export function resetDaemonFiles(): void {
-  rmSync(join(dataDir(), 'daemon.json'), { force: true })
 }
 
 /** Il flag della modalità daemon, esposto per i test e i probe (A1). */

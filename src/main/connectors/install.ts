@@ -12,7 +12,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import type { SendMessagePayload, SecretKind } from '../../shared/types'
+import type { SendMessagePayload } from '../../shared/types'
 import { SECRET_KIND } from '../../shared/types'
 // fase mcp-setup (M3): i tipi dello spec del modulo (condivisi col renderer)
 import type { McpServerConnectResult, McpServerSetupField, McpServerSetupSpec, McpServerSetupTokenHeader } from '../../shared/types'
@@ -41,7 +41,7 @@ import {
 // E4 (fase mcp-env): il registro npm per i server npm: proposti dal bot
 import { parseNpmServerId, fetchNpmPackageInfo, type NpmPackageInfo } from './npm-registry'
 import {
-  argvPlaceholdersOf, dirStats, inspectPlugin, sourceSupported, stagePlugin, substitutePluginRoot, substituteUserConfig, userConfigKeysOf,
+  argvPlaceholdersOf, inspectPlugin, sourceSupported, stagePlugin, substitutePluginRoot, substituteUserConfig, userConfigKeysOf,
   type MarketplacePlugin, type PluginInspection, type PluginMcpServer
 } from './marketplace'
 import type { MarketplaceManager } from './marketplace-manager'
@@ -895,28 +895,6 @@ function serverRuntimeInfo(s: PluginMcpServer): { name: string; runtimeKind: 'un
   if (argvVars.length) return { name: s.name, runtimeKind: 'unsupported', runtimeDetail: argvVars[0]! }
   if (s.url) return { name: s.name, runtimeKind: 'remote', runtimeDetail: new URL(s.url).host }
   return { name: s.name, runtimeKind: 'box', runtimeDetail: [s.command, ...(s.args ?? [])].slice(0, 3).join(' ') }
-}
-
-/**
- * Fase skill · Sfoglia (B3): i dettagli di una proposta in attesa, per
- * l'anteprima della finestra «Skill» — skill CON DESCRIZIONE, parti non
- * usate, sha12 e dimensione dello staging. Null se non c'è (installata,
- * scartata o scaduta).
- */
-export function pluginProposalDetails(id: string): {
-  skills: Array<{ name: string; description: string }>
-  ignored: string[]
-  sha12: string
-  size: number
-} | null {
-  const p = pendingPlugins.get(id)
-  if (!p) return null
-  return {
-    skills: p.inspection.skills.map((s) => ({ name: s.name, description: s.description })),
-    ignored: p.inspection.ignored,
-    sha12: p.sha12,
-    size: dirStats(p.staging).bytes
-  }
 }
 
 /**

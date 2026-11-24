@@ -85,11 +85,6 @@ export function estimateTokensOf(text: string): number {
 /** Etichetta dello scope per il prompt. */
 const SCOPE_LABEL: Record<MemoryScope, string> = { agent: 'agent', user: 'user (shared)' }
 
-/** Etichetta dello scope per il prompt (anche il blocco «Relevant memories»). */
-export function scopeLabelForPrompt(scope: MemoryScope): string {
-  return SCOPE_LABEL[scope]
-}
-
 /**
  * Sezione "# Memory" del system prompt (funzione pura). Fase
  * memoria-engramma (M4): SOLO i fatti stabili (core), TUTTI, in ordine

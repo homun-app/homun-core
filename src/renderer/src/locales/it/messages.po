@@ -27,10 +27,6 @@ msgstr "grafo"
 msgid " — rispondi dalla vista del task (Apri)"
 msgstr " — rispondi dalla vista del task (Apri)"
 
-#: src/renderer/src/components/LibraryPanel.tsx
-#~ msgid " · ⚠ proveniente da dati esterni"
-#~ msgstr " · ⚠ proveniente da dati esterni"
-
 #. placeholder {0}: p.lastError.status
 #: src/renderer/src/components/Settings.tsx
 msgid " (HTTP {0})"
@@ -568,14 +564,6 @@ msgstr "•••• {0}"
 msgid "•••• salvato"
 msgstr "•••• salvato"
 
-#: src/renderer/src/components/LibraryPanel.tsx
-#~ msgid "← Lista"
-#~ msgstr "← Lista"
-
-#: src/renderer/src/components/LibraryPanel.tsx
-#~ msgid "↩ Ripristina v{version} come nuova versione"
-#~ msgstr "↩ Ripristina v{version} come nuova versione"
-
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "+ Aggiungi contatto"
 msgstr "+ Aggiungi contatto"
@@ -595,34 +583,6 @@ msgstr "+ Nuova routine"
 #: src/renderer/src/components/McpWindow.tsx
 msgid "+ Variabile"
 msgstr "+ Variabile"
-
-#: src/renderer/src/components/LibraryCards.tsx
-#~ msgid "⚠ dati letti da una fonte esterna"
-#~ msgstr "⚠ dati letti da una fonte esterna"
-
-#: src/renderer/src/components/Chat.tsx
-#~ msgid "⚠ errore"
-#~ msgstr "⚠ errore"
-
-#: src/renderer/src/components/LibraryPanel.tsx
-#~ msgid "⚠ esterno"
-#~ msgstr "⚠ esterno"
-
-#: src/renderer/src/components/PageView.tsx
-#~ msgid "⚠ proveniente da dati esterni"
-#~ msgstr "⚠ proveniente da dati esterni"
-
-#: src/renderer/src/components/LibraryCards.tsx
-#~ msgid "⚠ Richiesta nata dopo contenuti letti dal web: controlla che l'origine sia davvero quella del sito."
-#~ msgstr "⚠ Richiesta nata dopo contenuti letti dal web: controlla che l'origine sia davvero quella del sito."
-
-#: src/renderer/src/components/RuleProposalCard.tsx
-#~ msgid "⚡ Regola proposta — continuo da solo quando…"
-#~ msgstr "⚡ Regola proposta — continuo da solo quando…"
-
-#: src/renderer/src/components/RuleProposalCard.tsx
-#~ msgid "⛔ Regola proposta — mi fermo e chiedo sempre quando…"
-#~ msgstr "⛔ Regola proposta — mi fermo e chiedo sempre quando…"
 
 #. placeholder {0}: message.name
 #: src/renderer/src/components/ConnectorCards13.tsx
@@ -661,14 +621,6 @@ msgstr "✓ Funziona · {0} modelli disponibili"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "✓ Installato — il bot ha ricevuto l'esito"
 msgstr "✓ Installato — il bot ha ricevuto l'esito"
-
-#: src/renderer/src/components/Settings.tsx
-#~ msgid "✨ Suggerisci dal transcript"
-#~ msgstr "✨ Suggerisci dal transcript"
-
-#: src/renderer/src/components/MemoryPanel.tsx
-#~ msgid "🗂 Memoria di questo bot"
-#~ msgstr "🗂 Memoria di questo bot"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "30 giorni"
@@ -981,7 +933,6 @@ msgstr "Altri…"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
-#: src/renderer/src/lib/approvals-center.ts
 msgid "altro"
 msgstr "altro"
 
@@ -1514,7 +1465,6 @@ msgstr "bot · {0}"
 msgid "Bot che la usano"
 msgstr "Bot che la usano"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Bot che lo usano"
@@ -2912,10 +2862,6 @@ msgstr "Dimentica per sempre"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Dimenticare per sempre questa memoria? Il testo sparisce del tutto e non si torna indietro (l'eliminazione normale, invece, si può annullare)."
 msgstr "Dimenticare per sempre questa memoria? Il testo sparisce del tutto e non si torna indietro (l'eliminazione normale, invece, si può annullare)."
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Diretta: il permesso resta sul tuo Mac"
-msgstr "Diretta: il permesso resta sul tuo Mac"
 
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Direttamente sul Mac"
@@ -4662,10 +4608,6 @@ msgid "Inviata automaticamente: {0}"
 msgstr "Inviata automaticamente: {0}"
 
 #: src/renderer/src/lib/approvals-center.ts
-msgid "invii"
-msgstr "invii"
-
-#: src/renderer/src/lib/approvals-center.ts
 msgid "Invii"
 msgstr "Invii"
 
@@ -5117,10 +5059,6 @@ msgstr "locale"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "log"
 msgstr "log"
-
-#: src/renderer/src/lib/approvals-center.ts
-msgid "login"
-msgstr "login"
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Login"
@@ -6248,10 +6186,6 @@ msgstr "Origini https://… (separate da virgola)"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "owner/repo di GitHub oppure URL git https"
 msgstr "owner/repo di GitHub oppure URL git https"
-
-#: src/renderer/src/lib/approvals-center.ts
-msgid "pagamenti"
-msgstr "pagamenti"
 
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "pagamenti e acquisti"
@@ -7945,10 +7879,6 @@ msgstr "Sistema"
 msgid "Siti"
 msgstr "Siti"
 
-#: src/renderer/src/lib/approvals-center.ts
-msgid "siti interattivi"
-msgstr "siti interattivi"
-
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "sito nuovo, interattivo"
@@ -8244,7 +8174,6 @@ msgstr "Task non trovato"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
-#: src/renderer/src/lib/approvals-center.ts
 msgid "team"
 msgstr "team"
 
@@ -8302,10 +8231,6 @@ msgstr "Testo mancante"
 #: src/shared/ui-messages.ts
 msgid "group.hourlyCap"
 msgstr "Tetto orario raggiunto (40 messaggi di bot in un’ora): i turni del gruppo riprendono a breve."
-
-#: src/renderer/src/components/ActivityPanel.tsx
-#~ msgid "ti aspetta"
-#~ msgstr "ti aspetta"
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "Ti chiedo"
@@ -8426,7 +8351,6 @@ msgstr "TOTP non supportato (algorithm {algorithm}, digits {digits}, period {per
 msgid "tramite Composio"
 msgstr "tramite Composio"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "Tramite Composio: login e azioni passano dai suoi server"
 msgstr "Tramite Composio: login e azioni passano dai suoi server"
@@ -8560,7 +8484,6 @@ msgid "Tutti"
 msgstr "Tutti"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/PluginPanel.tsx
@@ -8764,10 +8687,6 @@ msgstr "usato da: {0}"
 #: src/renderer/src/components/Settings.tsx
 msgid "uscita $/M"
 msgstr "uscita $/M"
-
-#: src/renderer/src/lib/approvals-center.ts
-msgid "uso del Mac"
-msgstr "uso del Mac"
 
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx

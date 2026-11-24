@@ -31,7 +31,6 @@ import type { ImportSource } from './mcp/import-sources'
 import { appNeedsMove, proposeMoveToApplications, updateCheckResultWhenMoveNeeded } from './app-location'
 import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
 import { assertDroppedMacPath } from './dropped-file'
-import type { SandbotEvent } from '../shared/types'
 
 /** Canali inoltrati 1:1 al daemon (nomi = metodi RPC). */
 export const DAEMON_RPC_CHANNELS = [
@@ -558,8 +557,3 @@ export function registerIpc(
   })
 }
 
-/** Broadcast di un evento locale (deep link, primo avvio) a tutte le finestre. */
-export function emitLocal(e: SandbotEvent, getWindows: () => BrowserWindow[]): void {
-  for (const w of getWindows()) w.webContents.send('sandbot:event', e)
-  if (e.type === 'agents') refreshTray()
-}

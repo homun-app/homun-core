@@ -193,4 +193,4 @@ export function llmStream(
 }
 
 // ---- re-esportazioni utili dell'adattatore (per i chiamanti e i test) ----
-export { LlmProviderError, PiUserAbortError, modelCapabilities, catalogModelInfos, type ModelCapabilities } from './llm-pi'
+export { modelCapabilities, catalogModelInfos } from './llm-pi'

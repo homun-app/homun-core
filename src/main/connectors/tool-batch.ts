@@ -17,7 +17,7 @@
 // (composio-actions.ts, regola di Rakazo action-approval.ts:79–113).
 //
 // Modulo PURO: nessuna dipendenza dal daemon, testabile in nodo puro.
-import { classifyComposioToolName, composioActionOfToolName, composioSendLikeName, redactComposioSecrets, stripToolkitPrefix } from './composio-actions'
+import { classifyComposioToolName, composioSendLikeName, redactComposioSecrets, stripToolkitPrefix } from './composio-actions'
 import { composioToolkitName, composioToolPolicy } from './composio-meta'
 // K6 (ritocchi): composioToolkitOfSlug vive in shared (lo usa anche il renderer)
 import { composioToolkitOfSlug, localizedActionName, localizedConnectionsAction, localizedProxyRequestAction } from '../../shared/composio-names'
@@ -369,39 +369,6 @@ export function redactBatchLeaves<T>(value: T): T {
   return value
 }
 
-/**
- * Le voci del blocco per la CARD (C7 punto 1): argomenti brevi prima e testi
- * lunghi dopo (argumentLines di Rakazo, approval-ask.ts:281–297), i segreti
- * mascherati in ogni foglia, l'account quando c'è. «…» per una voce senza
- * nome (complete false).
- */
-export const BATCH_ARGUMENT_SHORT_LENGTH = 200
-
-/** Le righe degli argomenti di una voce: `first` i valori brevi (e i
- *  strutturati), `last` i testi lunghi, così i destinatari vengono prima. */
-export function batchArgumentLines(values: Record<string, unknown>): { first: Array<[string, string]>; last: Array<[string, string]> } {
-  const first: Array<[string, string]> = []
-  const last: Array<[string, string]> = []
-  for (const [key, raw] of Object.entries(values)) {
-    const text = batchArgumentText(raw)
-    if (!text) continue
-    const line: [string, string] = [key, text]
-    if (text.length <= BATCH_ARGUMENT_SHORT_LENGTH) first.push(line)
-    else last.push(line)
-  }
-  return { first, last }
-}
-
-function batchArgumentText(value: unknown): string {
-  if (value == null) return ''
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  if (Array.isArray(value) && value.every((item) => item === null || typeof item !== 'object')) {
-    return value.map(String).join(', ')
-  }
-  return JSON.stringify(value) ?? ''
-}
-
 // ---- il titolo del blocco dalla lingua della UI (C7 punto 1) ----
 
 /**
@@ -701,11 +668,6 @@ export function manageConnectionsAgentResult(output: string, links: Array<{ tool
     `The authorization link for ${names} has been shown to the user in a connection card: they must click it to finish the login in the browser.`,
     'Wait for the user confirmation; Homun checks the connection and updates the card. Do not print or repeat the link.'
   ].join(' ')
-}
-
-/** Il toolkit di uno strumento composio__<tk>__ACTION del vecchio flusso SDK (qui per simmetria). */
-export function toolkitOfComposioToolName(toolName: string): string | null {
-  return composioActionOfToolName(toolName)?.toolkit ?? null
 }
 
 // ---- il gate del blocco e di MANAGE_CONNECTIONS (C2/C5, PURO) ----

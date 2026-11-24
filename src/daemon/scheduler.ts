@@ -23,10 +23,6 @@ import { UI } from '../shared/ui-messages'
 
 type Emitter = (e: SandbotEvent) => void
 
-export interface SchedulerDeps {
-  now(): number
-}
-
 /**
  * Accoda il job di run di una routine (con l'evento che l'ha causata, se c'è).
  * X1 (fase sicurezza-beta16): null se il bot è rimosso — la routine non gira.

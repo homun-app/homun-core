@@ -4,7 +4,7 @@
 // si scelgono dall'elenco di toolsOfServer, NIENTE nomi inventati nel codice),
 // variazione 'around' deterministica, formattazione dell'evento <evento> che
 // entra nel prompt del turno come evidenza.
-import type { ConnectorPollTrigger, EveryScheduleSpec, RoutineTrigger, TriggerEventPayload, UiText } from './types'
+import type { EveryScheduleSpec, RoutineTrigger, TriggerEventPayload, UiText } from './types'
 import { neutralizeClosingTag } from './agent-message'
 // fase 17c (C3) / fase 18a (E0): i testi d'errore dei trigger nel catalogo UI
 import { ui } from './ui-text'
@@ -279,12 +279,3 @@ export function formatTriggerEvent(title: string, prompt: string, event: Trigger
   ].join('\n')
 }
 
-/** Il preset di un trigger (null per i trigger non da preset). */
-export function pollPreset(t: RoutineTrigger): 'email' | 'calendar_event' | null {
-  return t.type === 'connector_poll' ? (t.preset ?? null) : null
-}
-
-/** Il trigger connector_poll come lo usa lo scheduler (null per gli altri tipi). */
-export function asPollTrigger(t: RoutineTrigger | null | undefined): ConnectorPollTrigger | null {
-  return t?.type === 'connector_poll' ? t : null
-}

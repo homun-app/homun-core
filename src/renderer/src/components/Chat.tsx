@@ -40,7 +40,7 @@ import { noticeSeverity, type NoticeSeverity } from '../lib/notice-severity'
 // bottone della notice apre il selettore del bot quando c'è un provider
 import { groupRepeatedNotices } from '../lib/notice-rows'
 import { modelNoticeTarget } from '../lib/model-notice'
-import { i18n, formatTime } from '../lib/i18n'
+import { i18n } from '../lib/i18n'
 import { cn } from '../lib/utils'
 import { GROUP_CHAIN_CLOSED_TEXT, GROUP_RATE_LIMIT_TEXT, GROUP_HOURLY_CAP_TEXT, parseCoordinatorNowText, parseMemberNoModelText } from '../../../main/agent/group-turns'
 // B1 (fase b20-bug): dei testi per il MODELLO la chat mostra solo il contenuto dell'involucro
@@ -345,9 +345,7 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
   const interrupt = useStore((s) => s.interrupt)
   const setTyping = useStore((s) => s.setTyping)
   const debugSteps = useStore((s) => s.debugSteps)
-  // fase pagine (G2): la pagina aperta copre il transcript, non il compositore;
-  // G4: la precompilazione del compositore (suggerimento «Crea una routine»)
-  const openPageInfo = useStore((s) => s.openPageInfo)
+  // G4 (fase pagine): la precompilazione del compositore (suggerimento «Crea una routine»)
   const composerPrefill = useStore((s) => s.composerPrefill)
   const setComposerPrefill = useStore((s) => s.setComposerPrefill)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -356,8 +354,6 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
   const setMemoryOpen = useStore((s) => s.setMemoryOpen)
   const rightPanel = useStore((s) => s.rightPanel)
   const setRightPanel = useStore((s) => s.setRightPanel)
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const setSettingsTab = useStore((s) => s.setSettingsTab)
   const openTaskId = useStore((s) => s.openTaskId)
   const setOpenTask = useStore((s) => s.openTask)
   // G2 (fase 0.3.1001 grafica): il pannello si chiude (✕, Esc, velo) → il
@@ -1571,7 +1567,3 @@ export function groupSystemText(text: string): string {
   return text
 }
 
-/** L'ora HH:MM nella lingua attiva (le righe «dopo la decisione» di S6). */
-export function decisionTime(at: number): string {
-  return formatTime(at)
-}

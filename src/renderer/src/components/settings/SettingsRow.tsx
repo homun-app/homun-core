@@ -37,8 +37,8 @@ import { cn } from '../../lib/utils'
  * (h-control-sm, l'altezza dei controlli piccoli di DS1: toolbar, righe), il
  * raggio dei campi (rounded-control) e il testo dell'interfaccia (text-body).
  * Le classi passano da cn dentro il pezzo: vince l'ultima, sui token di DS1
- * come sulla scala di Tailwind — così la pagina decide la misura anche finché
- * Input e Select non sono migrati (hanno h-9, rounded-md e la taglia md:text-sm).
+ * come sulla scala di Tailwind — così la pagina decide la misura (il default
+ * dei campi è 36, h-control: DS5 li ha portati anche loro ai token).
  */
 export const FIELD_ROW_CLS = 'h-control-sm rounded-control text-body'
 

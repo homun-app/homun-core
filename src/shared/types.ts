@@ -1776,13 +1776,6 @@ export interface MemoryPurgeResult {
   views: Array<{ viewId: string | null; root: string; reason: string }>
 }
 
-/** Una skill dell'agente (SKILL.md), con le istruzioni complete. */
-export interface SkillInfo {
-  name: string
-  description: string
-  content: string
-}
-
 // ---- fase skill: la libreria unica (S2) ----
 
 /** Da dove arriva una skill della libreria. */
@@ -2271,13 +2264,6 @@ export const SECRET_KIND = {
   bearer: 'bearer'
 } as const
 export type SecretKind = keyof typeof SECRET_KIND
-
-/** Il needsAuth.kind del server (key/env/settings) → tipo di segreto dello store. */
-export const SECRET_KIND_FOR_NEEDS: Record<'key' | 'env' | 'settings', SecretKind> = {
-  key: 'headers',
-  env: 'env',
-  settings: 'userConfig'
-}
 
 export interface McpServerInfo {
   id: string

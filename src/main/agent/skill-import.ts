@@ -6,7 +6,7 @@
 // libreria di Homun oppure la COLLEGA in sola lettura quando l'utente sceglie
 // «Usa la cartella originale». MAI script eseguiti all'import: si leggono e
 // si copiano SOLO file di testo (scanSkillFolder li valida così).
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { parseSkillMd } from '../../shared/skill-md'
 import { libraryDir, saveSkillsLibrary, scanSkillFolder, skillsLibrary } from './skills'
@@ -194,20 +194,3 @@ export function applySkillsImport(home: string, picks: SkillImportPick[], mode: 
   return out
 }
 
-/** Toglie UN collegamento (l'entry): la cartella originale non si tocca. */
-export function removeLinkedSkill(name: string): boolean {
-  const lib = skillsLibrary()
-  if (!lib[name]?.linkedPath) return false
-  delete lib[name]
-  saveSkillsLibrary(lib)
-  return true
-}
-
-/** Svuota la libreria di test (mai usato dal prodotto). */
-export function resetLibraryForTests(): void {
-  saveSkillsLibrary({})
-  try {
-    rmSync(join(libraryDir(), 'prezzi'), { recursive: true, force: true })
-    rmSync(join(libraryDir(), 'lavoro'), { recursive: true, force: true })
-  } catch { /* non c'è */ }
-}

@@ -228,7 +228,3 @@ export function sanitizeComposioError(error: unknown): string {
   return redactComposioSecrets(message)
 }
 
-// ---- le provenienze (A7) ----
-
-/** La riga piccola sulla provenienza, come chiave i18n del catalogo UI. */
-export type ComposioProvenance = 'direct' | 'composio'

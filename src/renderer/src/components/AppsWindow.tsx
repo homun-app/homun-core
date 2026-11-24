@@ -30,16 +30,13 @@ import { Plus } from 'lucide-react'
 import { api, useStore } from '../store'
 import { i18n } from '../lib/i18n'
 import type { AppsRegistryResult, ComposioGatewayAppInfo, ComposioGatewayStatusInfo } from '../../../shared/types'
-import { botsToggleState, gatewayAccountRows, accountLimitMessage, type CatalogRowView } from '../lib/apps-view'
+import { gatewayAccountRows, accountLimitMessage, type CatalogRowView } from '../lib/apps-view'
 // B3 (fase b20-bug): il flusso «Connetti» è PURO (tempo massimo, esiti in riga) — qui solo il cablaggio
 import { createAppConnectFlows, type AppConnectFlows, type AppFlowFailure, type AppFlowKind } from '../lib/app-connect-flow'
 // PP4 (fase plugin-pulita): la riga del catalogo è a filo
 import { FlatList, FlatRow } from './ui/flat-list'
 import { Section } from './ui/section'
 import { Button, buttonVariants } from './ui/button'
-import { SettingsGroup } from './settings/SettingsGroup'
-import { SettingsRow } from './settings/SettingsRow'
-import { Toggle } from './Settings'
 import { catalogLogoUrl, LOGO_CLASS, LOGO_TILE_CLASS } from '../lib/app-logos'
 
 export type { AppFlowFailure, AppFlowKind }
@@ -56,17 +53,6 @@ const FIELD = 'h-control min-w-0 rounded-control bg-card px-3 text-body outline-
 /** La lingua attiva come UiLanguage. */
 function uiLang(): 'it' | 'en' {
   return i18n.locale === 'en' ? 'en' : 'it'
-}
-
-/** A7: l'etichetta piccola sulla provenienza dei dati (sta nel dettaglio, non sulle righe). */
-export function ProvenanceTag({ via }: { via: 'direct' | 'composio' }) {
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-caption ${via === 'composio' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
-      {via === 'composio'
-        ? <Trans>Tramite Composio: login e azioni passano dai suoi server</Trans>
-        : <Trans>Diretta: il permesso resta sul tuo Mac</Trans>}
-    </span>
-  )
 }
 
 /**
@@ -543,21 +529,6 @@ function ComposioKeySection() {
   )
 }
 
-// ---- fase catalogo app (P3): le pillole e la riga di un'app ----
-
-/** Una pillola dei filtri (Tutte · Connesse · categorie · Altro ▾). */
-export function FilterPill({ active, onClick, children }: { active: boolean; onClick(): void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      className={`rounded-full px-3 py-1 text-caption transition ${active ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  )
-}
-
 /**
  * Le fasi visibili della riga durante «Connetti» in un passo (P4).
  * B3 (fase b20-bug): anche `starting` (dal clic alla risposta) e `failed` col
@@ -778,54 +749,6 @@ export function AppRow({ row, flow, failure, onConnect, onCancel, onConflictReso
           </Button>
         </div>
       )}
-    </div>
-  )
-}
-
-// ---- la vista vera e propria ----
-
-export function BotTogglesForApp({ directId, enabledFor, agents, onChanged }: {
-  directId: string
-  enabledFor: string[] | null | undefined
-  agents: Array<{ id: string; name: string }>
-  onChanged(): void
-}): ReactNode {
-  const { t } = useLingui()
-  const st = botsToggleState(enabledFor, agents)
-  const save = (ids: string[]): void => {
-    void api.connectorsSetEnabledFor('server', directId, ids).then(onChanged)
-  }
-  return (
-    <div className="mt-3" data-testid="app-bots-toggles">
-      <SettingsGroup label={<Trans>Bot che lo usano</Trans>}>
-        <SettingsRow
-          title={<Trans>Tutti i bot</Trans>}
-          control={
-            <Toggle
-              label={t`Tutti i bot`}
-              checked={st.all}
-              onChange={(v) => save(v ? ['*'] : [])}
-            />
-          }
-        />
-        {st.bots.map((b) => (
-          <SettingsRow
-            key={b.id}
-            title={b.name}
-            control={
-              <Toggle
-                label={b.name}
-                checked={b.checked}
-                disabled={b.disabled}
-                onChange={(v) => {
-                  const ids = (enabledFor ?? []).filter((id) => id !== '*')
-                  save(v ? [...ids, b.id] : ids.filter((id) => id !== b.id))
-                }}
-              />
-            }
-          />
-        ))}
-      </SettingsGroup>
     </div>
   )
 }

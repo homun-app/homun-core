@@ -32,7 +32,7 @@ describe('esporta-inutilizzati: gli export, dalle dichiarazioni', () => {
 })
 
 describe('esporta-inutilizzati: gli import, dai sorgenti', () => {
-  it('statici (default, nominati, alias, type), a stella, d’effetto, ri-esportazioni, dinamici', () => {
+  it('statici (default, nominati, alias, type), a stella, d’effetto, ri-esportazioni, dinamici — di un alias conta il NOME ESPORTATO', () => {
     const src = [
       "import dif, { a, b as c, type D } from './uno'",
       "import type { E } from './due'",
@@ -41,17 +41,24 @@ describe('esporta-inutilizzati: gli import, dai sorgenti', () => {
       "export { f, g as h } from './cinque'",
       "export * from './sei'",
       "const { i, j } = await import('./sette')",
-      "const m = await import('./otto')"
+      "const m = await import('./otto')",
+      // dentro una funzione, dopo una riga con una graffa aperta: i nomi sono SOLO quelli fra le graffe della destructuring
+      "async function f(x) {\n  if (!x) return null\n  const { preso, altro: alias } = await import('./nove')\n  return preso(x)\n}",
+      // la destructuring su più righe (come fanno i test che prendono mezza API)
+      "const {\n  unoDue,\n  tre: aliasDiTre\n} = await import('./dieci')"
     ].join('\n')
     const imp = importsOf(src, '/repo/src/x.ts')
     expect(imp.map((x) => [x.spec, x.kind, x.named])).toEqual([
-      ['./uno', 'import', ['default', 'a', 'c', 'D']],
+      ['./uno', 'import', ['default', 'a', 'b', 'D']],
       ['./due', 'import', ['E']],
       ['./tre', 'namespace', ['*']],
       ['./quattro', 'side-effect', []],
-      ['./cinque', 're-export', ['f', 'h']],
+      ['./cinque', 're-export', ['f', 'g']], // «g as h»: dal modulo «cinque» si prende g (h è il nome con cui si ri-esporta)
       ['./sei', 're-export-star', ['*']],
       ['./sette', 'dynamic', ['i', 'j']],
+      // prima le destructuring (nell'ordine del testo), poi i moduli presi per intero
+      ['./nove', 'dynamic', ['preso', 'altro']],
+      ['./dieci', 'dynamic', ['unoDue', 'tre']],
       ['./otto', 'dynamic', ['*']]
     ])
     // i moduli di fuori (i pacchetti) non si risolvono: niente bersaglio
@@ -123,7 +130,8 @@ describe('esporta-inutilizzati: l’incrocio', () => {
     const config = readFileSync(join(ROOT, 'vitest.config.ts'), 'utf8')
     for (const f of LOADED_BY_CONFIG) expect(config).toContain(`'${f}'`)
   })
-  it('da riga di comando: --json scrive il censimento (con tsc) e la temporanea delle dichiarazioni sparisce', () => {
+  // tsc emette le dichiarazioni di tutto il prodotto: nella suite intera, con tutte le coroutine, può superare i 5 s di default
+  it('da riga di comando: --json scrive il censimento (con tsc) e la temporanea delle dichiarazioni sparisce', { timeout: 120_000 }, () => {
     const outDir = mkdtempSync(join(TEST_TMP_BASE, 'esporta-inutilizzati-out-'))
     try {
       const r = spawnSync(process.execPath, [SCRIPT, '--json', `--out=${outDir}`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })

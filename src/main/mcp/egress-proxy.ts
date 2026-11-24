@@ -232,11 +232,6 @@ export async function ensureMcpEgressProxy(
   return port
 }
 
-/** La porta del proxy di un server (0 se mai avviato). */
-export function mcpEgressProxyPort(serverId: string): number {
-  return proxies.get(serverId)?.port ?? 0
-}
-
 // ---- BR2-style: col motore Apple il box raggiunge il Mac al GATEWAY della
 // rete vmnet (host.docker.internal non esiste) — il proxy apre un SECONDO
 // ascolto lì, MAI su 0.0.0.0, e accetta SOLO i client della sottorete del box

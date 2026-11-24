@@ -95,8 +95,6 @@ export function createApprovalNotifier(deps: ApprovalNotifierDeps) {
   }
 }
 
-export type ApprovalNotifier = ReturnType<typeof createApprovalNotifier>
-
 /**
  * A3 (fase approvazioni-chiare): il corpo RIPULITO della notifica di una
  * richiesta — come X2 per i server MCP, una delle frasi dell'ELENCO CHIUSO

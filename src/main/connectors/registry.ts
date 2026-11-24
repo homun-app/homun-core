@@ -14,9 +14,6 @@ import type { RegistryHeaderSpec, RegistryVarSpec } from '../../shared/registry-
 /** L'host fisso del registro: l'unico che questo modulo contatta (hook di test per la verifica d'integrazione). */
 export const REGISTRY_BASE = process.env.SANDBOT_TEST_REGISTRY_URL || 'https://registry.modelcontextprotocol.io'
 
-/** Timeout della lettura del registro (la ricerca non deve fermare il turno). */
-export const REGISTRY_TIMEOUT_MS = 8_000
-
 /** Cache per query: 10 minuti. */
 export const REGISTRY_CACHE_MS = 10 * 60_000
 
