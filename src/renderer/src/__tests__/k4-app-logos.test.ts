@@ -1,10 +1,11 @@
 // K4 (fase team-bot): il logo VERO delle app nelle righe dei connettori,
 // ovunque compaiano. La finestra «Collega app» e le card della chat lo
 // fanno già (catalogLogoUrl/logoUrlForSlug); qui entrano anche le righe dei
-// server della finestra «Server MCP» (per nome: «Mattermost» → il suo SVG),
-// il foglio del server (nome, o il publisher del registro: io.github.mattermost
-// → mattermost) e le testate dell'importazione (Gemini CLI → gemini.svg).
-// Solo se il file MANCA resta l'iniziale nel quadrato tenue di oggi.
+// server della finestra «Server MCP» (per nome: «Mattermost» → il suo SVG)
+// e le testate dell'importazione (Gemini CLI → gemini.svg). Solo se il file
+// MANCA resta l'iniziale nel quadrato tenue di oggi. Il foglio del server
+// (nome, o il publisher del registro) era morto da PL7: la fase linguaggio
+// (C0) lo ha cancellato con i suoi test.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -12,7 +13,6 @@ import { fileURLToPath } from 'node:url'
 const read = (rel: string): string => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
 const LOGOS_SRC = read('../lib/app-logos.ts')
 const WIN_SRC = read('../components/McpWindow.tsx')
-const SHEET_SRC = read('../components/ServerSheet.tsx')
 
 // il modulo vive su import.meta.glob (vite): nei test node la mappa è vuota
 // ma le FUNZIONI PURE restano verificabili — il matching UI è nelle guardie
@@ -33,14 +33,6 @@ describe('K4: la riga del server usa il logo quando c\'è (finestra «Server MCP
     expect(WIN_SRC).toMatch(/logoUrlForName\(s\.name\)/)
     expect(WIN_SRC).toMatch(/data-testid="mcp-server-logo"/)
     expect(WIN_SRC).toMatch(/<img[^>]*mcp-server-logo|data-testid="mcp-server-logo"/)
-  })
-})
-
-describe('K4: il foglio del server prova nome e publisher del registro', () => {
-  it('ServerLogo rende la <img> del logo (nome, o il publisher) prima di cadere sull\'iniziale', () => {
-    expect(SHEET_SRC).toMatch(/logoUrlForName/)
-    expect(SHEET_SRC).toMatch(/publisherLine|source\?\.name/)
-    expect(SHEET_SRC).toMatch(/data-testid="server-sheet-logo"/)
   })
 })
 
