@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest'
 
 const QUI = dirname(fileURLToPath(import.meta.url))
 const RENDERER = join(QUI, '..', '..', 'renderer', 'src')
-const RADICE = join(QUI, '..', '..', '..', '..')
+const RADICE = join(QUI, '..', '..', '..')
 
 const MARCATORE = 'galleria-componenti'
 

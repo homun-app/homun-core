@@ -12,7 +12,7 @@
 // per eseguibile (ps -axo pid=,comm=). Non fa commit, non tagga e non tocca
 // il REPORT. Esce con 1 se un passo è rosso.
 import { spawn, spawnSync } from 'node:child_process'
-import { openSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs'
+import { openSync, closeSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ROOT = join(import.meta.dirname, '..')
@@ -28,7 +28,6 @@ const stamp = (ms) => {
   const s = Math.round(ms / 100) / 10
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`
 }
-const rows = []
 mkdirSync(USCITE, { recursive: true })
 writeFileSync(join(USCITE, 'fotografia-iniziale.txt'), '') // riempita sotto, subito
 
@@ -41,59 +40,60 @@ const fotoTemporanei = (where) => {
 }
 const fotoPrima = fotoTemporanei('iniziale')
 
-/** Un passo: comando già in forma [file, args…], uscita in streaming sul file (le sonde sono lunghe: si legge da terra). */
-const esegui = (nome, file, args, { env } = {}) => new Promise((resolve) => {
+/** Un passo: comando (cmd, args…) e uscita in streaming sul file logFile (le sonde sono lunghe: si legge da terra). L'esito è dal CODICE di uscita: 0 = OK, tutto il resto = KO (nessun «undefined» che passa come verde). */
+const esegui = (nome, cmd, args, logFile, { env } = {}) => new Promise((resolve) => {
   const t = Date.now()
-  const path = join(USCITE, file)
+  const path = join(USCITE, logFile)
   const fd = openSync(path, 'w')
-  const child = spawn(file, args, { cwd: ROOT, env: { ...process.env, ...(env ?? {}) }, stdio: ['ignore', fd, fd] })
+  let risolto = false
+  const chiudi = (oggetto) => { if (!risolto) { risolto = true; try { closeSync(fd) } catch { /* già chiuso */ } resolve(oggetto) } }
+  const child = spawn(cmd, args, { cwd: ROOT, env: { ...process.env, ...(env ?? {}) }, stdio: ['ignore', fd, fd] })
   child.on('close', (code) => {
     try { writeFileSync(path + '.code', String(code)) } catch { /* il file d'uscita resta quello che conta */ }
-    resolve({ nome, path, code, ms: Date.now() - t })
+    chiudi({ nome, path, esito: code === 0 ? 'OK' : 'KO', code, ms: Date.now() - t, nota: code === 0 ? '' : `codice d'uscita ${code}` })
   })
-  child.on('error', (e) => resolve({ nome, path, code: -1, ms: Date.now() - t, errore: e.message }))
+  child.on('error', (e) => chiudi({ nome, path, esito: 'KO', code: -1, ms: Date.now() - t, nota: 'spawn: ' + e.message }))
 })
-
-const aggiungi = (passo, esito, ms, percorso, nota = '') => {
-  rows.push({ passo, esito, ms, percorso, nota })
-  console.log(`[fatto] ${esito === 'OK' ? '✓' : '✗'} ${passo} · ${stamp(ms)}${nota ? ` · ${nota}` : ''} · ${percorso}`)
-}
 
 // ---- i passi, uno alla volta ----
 const passi = []
+const aggiungi = (passo) => {
+  if (passo.esito !== 'OK' && passo.esito !== 'salto') passo.esito = 'KO' // difensiva: nessun esito strano passa per verde
+  passi.push(passo)
+  console.log(`[fatto] ${passo.esito === 'OK' ? '✓' : passo.esito === 'salto' ? '»' : '✗'} ${passo.nome} · ${passo.esito === 'salto' ? 'salto' : stamp(passo.ms)}${passo.nota ? ` · ${passo.nota}` : ''} · ${passo.path}`)
+}
 const run = async () => {
   // 1. typecheck
-  passi.push(await esegui('typecheck', 'typecheck.log', ['node_modules/typescript/bin/tsc', '--noEmit']))
+  aggiungi(await esegui('typecheck', 'node_modules/typescript/bin/tsc', ['--noEmit'], 'typecheck.log'))
 
   // 2. suite: npm test E test:ci-sim (Docker Desktop che non risponde compreso: la suite non lo dipende)
-  passi.push(await esegui('suite: npm test', 'suite-npm-test.log', ['npm', 'test']))
-  passi.push(await esegui('suite: ci-sim', 'suite-ci-sim.log', ['npm', 'run', 'test:ci-sim']))
+  aggiungi(await esegui('suite: npm test', 'npm', ['test'], 'suite-npm-test.log'))
+  aggiungi(await esegui('suite: ci-sim', 'npm', ['run', 'test:ci-sim'], 'suite-ci-sim.log'))
 
   // 3. build: electron-vite build DIRETTO (l'hook prebuild scriverebbe in vendor/)
-  passi.push(await esegui('build', 'build.log', ['node_modules/.bin/electron-vite', 'build']))
+  aggiungi(await esegui('build', 'node_modules/.bin/electron-vite', ['build'], 'build.log'))
 
   // 4. galleria (dalla F1 in poi; prima non esiste: «salto» con nota, la corsa resta valida per misurare)
   const galleriaEsiste = spawnSync('node', ['-e', 'require("node:fs").accessSync("scripts/galleria.mjs")'], { cwd: ROOT }).status === 0
   if (galleriaEsiste) {
-    passi.push(await esegui('galleria', 'galleria.log', ['node', 'scripts/galleria.mjs']))
+    aggiungi(await esegui('galleria', 'node', ['scripts/galleria.mjs'], 'galleria.log'))
   } else {
-    passi.push({ nome: 'galleria', esito: 'salto', ms: 0, path: join(USCITE, 'galleria.log'), nota: 'scripts/galleria.mjs non esiste ancora' })
+    aggiungi({ nome: 'galleria', esito: 'salto', ms: 0, path: join(USCITE, 'galleria.log'), nota: 'scripts/galleria.mjs non esiste ancora' })
     writeFileSync(join(USCITE, 'galleria.log'), 'salto: scripts/galleria.mjs non esiste ancora (fase precedente alla F1)\n')
   }
 
   // 5. sonde di comportamento, UNA alla volta, uscita su file
   if (sonde.length === 0) {
-    passi.push({ nome: 'sonde: nessuna sonda indicata', esito: 'OK', ms: 0, path: join(USCITE, 'sonde.log'), nota: '--sonde non usato' })
+    aggiungi({ nome: 'sonde: nessuna sonda indicata', esito: 'OK', ms: 0, path: join(USCITE, 'sonde.log'), nota: '--sonde non usato' })
     writeFileSync(join(USCITE, 'sonde.log'), 'nessuna sonda indicata (--sonde non usato)\n')
   }
   for (const s of sonde) {
     const script = join(ROOT, 'scripts', `${s}-probe.mjs`)
     if (spawnSync('node', ['-e', 'require("node:fs").accessSync(process.argv[1])', script], { cwd: ROOT }).status !== 0) {
-      passi.push({ nome: `sonda ${s}`, esito: 'KO', ms: 0, path: join(USCITE, `sonda-${s}.log`), nota: `scripts/${s}-probe.mjs non esiste` })
+      aggiungi({ nome: `sonda ${s}`, esito: 'KO', ms: 0, path: join(USCITE, `sonda-${s}.log`), nota: `scripts/${s}-probe.mjs non esiste` })
       continue
     }
-    const r = await esegui(`sonda ${s}`, `sonda-${s}.log`, ['node', script])
-    passi.push({ ...r, nome: `sonda ${s}` })
+    aggiungi(await esegui(`sonda ${s}`, 'node', [script], `sonda-${s}.log`))
   }
 
   // 6. processi Electron e --homun-daemon DEL REPO, contati per eseguibile
@@ -105,8 +105,7 @@ const run = async () => {
   const daemonRighe = args.split('\n').filter((l) => l.includes('--homun-daemon') && l.includes(ROOT))
   const path6 = join(USCITE, 'processi.txt')
   writeFileSync(path6, `pid,comm con Electron del repo (${ROOT}):\n${electronRighe.join('\n') || '(nessuna)'}\n\npid,args con --homun-daemon del repo:\n${daemonRighe.join('\n') || '(nessuna)'}\n`)
-  const ok6 = electronRighe.length === 0 && daemonRighe.length === 0
-  passi.push({ nome: 'processi del repo a 0', esito: ok6 ? 'OK' : 'KO', ms: Date.now() - t6, path: path6, nota: `${electronRighe.length} Electron, ${daemonRighe.length} daemon` })
+  aggiungi({ nome: 'processi del repo a 0', esito: electronRighe.length === 0 && daemonRighe.length === 0 ? 'OK' : 'KO', ms: Date.now() - t6, path: path6, nota: `${electronRighe.length} Electron, ${daemonRighe.length} daemon` })
 
   // 7. temporanei: ogni cartella NUOVA (di chiunque) rispetto alla fotografia iniziale è un errore
   const t7 = Date.now()
@@ -114,7 +113,7 @@ const run = async () => {
   const nuove = [...fotoDopo].filter((n) => !fotoPrima.has(n)).sort()
   const path7 = join(USCITE, 'temporanei.txt')
   writeFileSync(path7, `nuove rispetto a inizio corsa:\n${nuove.join('\n') || '(nessuna)'}\n`)
-  passi.push({ nome: 'nessuna temporanea nuova', esito: nuove.length === 0 ? 'OK' : 'KO', ms: Date.now() - t7, path: path7, nota: `${nuove.length} nuove` })
+  aggiungi({ nome: 'nessuna temporanea nuova', esito: nuove.length === 0 ? 'OK' : 'KO', ms: Date.now() - t7, path: path7, nota: `${nuove.length} nuove` })
 
   // ---- fatto-esito.md: una riga per passo ----
   const rosso = passi.filter((p) => p.esito === 'KO')
