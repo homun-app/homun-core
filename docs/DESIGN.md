@@ -289,6 +289,10 @@ Galleria: menu-account, chat (menu «Ragiona»).
 La superficie del catalogo: UNA forma sola — rounded-surface, bordo del tema, fondo card, NESSUNA ombra — per le card in chat e le schede della griglia. Il respiro interno è una variante chiusa (`padding` block 16 di default · none per chi lo decide da sé); il ritmo del contenuto lo decide chi la riempie (Stack). Non usarla per gli elenchi (righe a filo: ListGroup) né per i menu (popover).
 Galleria: superfici.
 
+### filter-chips
+Le pillole di filtro della barra, in TRE varianti chiuse: `Scelta` (la scelta singola col conteggio, accesa piena) · `Menu` (la pillola-menu «Bot: tutti ▾», che prende il posto dei `<select>` di filtro di Libreria) · `Interruttore` (la pillola che accende un filtro, «Archiviati»). Prendono il posto di FilterPill e dei Button shape="pill" usati come filtro. Sono FILTRI: la scelta di un'impostazione è Segmented; i conteggi li porta chi le usa.
+Galleria: ricerca.
+
 ### search-field
 L'UNICA ricerca dell'app: la lente e il campo in una casa da 36 (h-control), fondo tenue, raggio dei controlli, larghezza 72 di default (chi la usa la allarga con className). Il valore è controllato; il testid va sul CAMPO (lo cercano le sonde); il segnaposto e il nome accessibile li porta chi la usa. Vietato scrivere un campo di ricerca fuori da qui (guardia di C4).
 Galleria: ricerca.

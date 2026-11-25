@@ -49,6 +49,7 @@ import { Textarea } from '../components/ui/textarea'
 import { Switch } from '../components/ui/switch'
 import { Segmented } from '../components/ui/segmented'
 import { SearchField } from '../components/ui/search-field'
+import { FilterChipsScelta, FilterChipsMenu, FilterChipsInterruttore } from '../components/ui/filter-chips'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -153,7 +154,7 @@ export const SEZIONI = [
   { id: 'tabella', titolo: 'data-table', componenti: ['data-table'] },
   { id: 'elenchi', titolo: 'flat-list, list-row e list-group', componenti: ['flat-list', 'list-row', 'list-group'] },
   { id: 'testate', titolo: 'section, page-header, column-head', componenti: ['section', 'page-header', 'column-head'] },
-  { id: 'ricerca', titolo: 'search-field — l\'unica ricerca', componenti: ['search-field'] },
+  { id: 'ricerca', titolo: 'search-field e filter-chips — ricerca e filtri', componenti: ['search-field', 'filter-chips'] },
   { id: 'superfici', titolo: 'card e empty-state — superfici', componenti: ['card', 'empty-state'] },
   { id: 'schede', titolo: 'underline-tabs', componenti: ['underline-tabs'] },
   { id: 'dialogo', titolo: 'dialog aperto', componenti: ['dialog'] },
@@ -338,6 +339,16 @@ const Sezione = ({ id }: { id: IdSezione }) => {
             <SearchField value="" onChange={() => undefined} placeholder="Cerca tra plugin e skill" ariaLabel="Cerca tra plugin e skill" testId="galleria-search" />
             <SearchField value="mater" onChange={() => undefined} placeholder="Cerca tra i documenti" ariaLabel="Cerca tra i documenti" />
             <SearchField value="" onChange={() => undefined} className="w-96" placeholder="Cerca in tutte le attività" ariaLabel="Cerca in tutte le attività" />
+          </Riga>
+          <Riga label="filter-chips — le tre varianti (scelta · menu · interruttore)">
+            <div className="flex flex-wrap items-center gap-2">
+              <FilterChipsScelta active count={12} onSelect={() => undefined}>Tutte</FilterChipsScelta>
+              <FilterChipsScelta active={false} count={3} onSelect={() => undefined}>Dati tuoi</FilterChipsScelta>
+              <FilterChipsScelta active={false} onSelect={() => undefined}>Pagamenti</FilterChipsScelta>
+              <FilterChipsMenu label="Bot" value="tutti" options={[{ value: 'tutti', label: 'tutti' }, { value: 'competitoor', label: 'Competitoor' }, { value: 'ricerche', label: 'Ricerche' }]} onSelect={() => undefined} />
+              <FilterChipsInterruttore active={false} onToggle={() => undefined}>Archiviati</FilterChipsInterruttore>
+              <FilterChipsInterruttore active onToggle={() => undefined}>Archiviati (acceso)</FilterChipsInterruttore>
+            </div>
           </Riga>
         </Section>
       )}
