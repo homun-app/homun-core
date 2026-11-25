@@ -59,6 +59,9 @@ const TITOLO = {
   h3: 'mt-1 font-semibold first:mt-0'
 } as const
 
+/** Lo stile di OGNI link del markdown: sottolineatura e primario, dai token (lo stesso per chat e documenti). */
+const LINK = 'text-primary underline underline-offset-2'
+
 /** PROSE: le regole di DS1 per ogni elemento del markdown. L'unico posto. */
 const PROSE: Components = {
   h1: ({ node: _n, ...p }) => <h1 {...p} className={TITOLO.h1} />,
@@ -68,8 +71,11 @@ const PROSE: Components = {
   h4: ({ node: _n, ...p }) => <h4 {...p} className="font-semibold" />,
   h5: ({ node: _n, ...p }) => <h5 {...p} className="font-semibold" />,
   h6: ({ node: _n, ...p }) => <h6 {...p} className="font-semibold" />,
-  // un link si riconosce dalla sottolineatura: il colore resta quello del testo
-  a: ({ node: _n, ...p }) => <a {...p} className="underline underline-offset-2" />,
+  // C1 (fase linguaggio): il link del markdown si DISTINGUE — sottolineatura
+  // e colore primario, tutti e due dai token. Prima solo la sottolineatura
+  // «col colore del testo», e nei documenti DocLink rimpiazzava anche quella:
+  // il link era indistinguibile dal testo (visto in componenti-markdown-1)
+  a: ({ node: _n, ...p }) => <a {...p} className={LINK} />,
   ul: ({ node: _n, ...p }) => <ul {...p} className="list-disc pl-6" />,
   ol: ({ node: _n, ...p }) => <ol {...p} className="list-decimal pl-6" />,
   // la voce resta una voce di elenco: il pallino vive sul <li>, e su un
@@ -221,12 +227,12 @@ function DocLink({ href, children, onOpenDoc, docExists }: {
   if (target.kind === 'doc') {
     const exists = docExists ? docExists(target.id) : true
     if (!exists) {
-      return <span className="cursor-help underline decoration-dotted" title={t`documento non trovato`}>{children}</span>
+      return <span className="cursor-help decoration-dotted text-primary underline underline-offset-2" title={t`documento non trovato`}>{children}</span>
     }
     return (
       <button
         type="button" data-testid="doc-link" data-doc={target.id}
-        className="cursor-pointer text-left underline decoration-muted-foreground/50 hover:decoration-foreground"
+        className="cursor-pointer text-left underline decoration-muted-foreground/50 hover:decoration-foreground text-primary underline underline-offset-2"
         onClick={() => onOpenDoc?.(target.id)}
       >
         {children}
@@ -237,6 +243,7 @@ function DocLink({ href, children, onOpenDoc, docExists }: {
     return (
       <a
         href={`#${target.id}`}
+        className={LINK}
         onClick={(e) => {
           e.preventDefault()
           document.getElementById(target.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -251,7 +258,7 @@ function DocLink({ href, children, onOpenDoc, docExists }: {
     // che lo manda al browser esterno SOLO dopo canOpenExternally
     return (
       <a
-        href={target.url} target="_blank" rel="noopener noreferrer"
+        href={target.url} target="_blank" rel="noopener noreferrer" className={LINK}
         onClick={(e) => {
           e.preventDefault()
           window.open(target.url, '_blank', 'noopener')
