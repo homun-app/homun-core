@@ -40,7 +40,7 @@ describe('T1 → PL7: un solo campo di ricerca (quello della pagina Plugin)', ()
     expect(src).not.toContain('skills-catalog-search')
     expect(src).not.toContain('catalogQuery')
     // il campo in alto della pagina resta UNO solo
-    expect((src.match(/data-testid="plugin-search"/g) ?? []).length).toBe(1)
+    expect((src.match(/testId="plugin-search"/g) ?? []).length).toBe(1)
   })
 
   it('il campo in alto filtra ANCHE il catalogo di Sfoglia (la ricerca condivisa del catalogo)', () => {

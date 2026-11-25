@@ -69,10 +69,10 @@ describe('U2 → PL7: la finestra App non c\'è più; i fogli vivono nella pagin
 })
 
 describe('U3 → PL7: la pagina Plugin non è un Dialog (niente anello di focus)', () => {
-  it('nessun onOpenAutoFocus da compensare: il campo di ricerca della pagina è testid plugin-search', () => {
+  it('nessun onOpenAutoFocus da compensare: la ricerca della pagina è SearchField col testid plugin-search (C3)', () => {
     const panel = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
     expect(panel).not.toContain('onOpenAutoFocus')
-    expect(panel).toContain('data-testid="plugin-search"')
+    expect(panel).toMatch(/<SearchField[^>]*testId="plugin-search"/) || expect(panel).toContain('plugin-search')
     expect(src).not.toContain('data-testid="apps-search"')
   })
 

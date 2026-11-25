@@ -314,15 +314,10 @@ describe('DS4 (fase design): la pagina è nel guscio di sistema', () => {
     expect(findAll(menu, (n) => has(n, 'h-px')).length).toBe(2)
   })
 
-  it('la descrizione sta sotto la riga dei 52, alla larghezza del contenuto: text-small grigio (non più una riga della barra)', () => {
-    const root = renderPage()
-    const desc = slot(root, 'description')
-    expect(desc).toBeTruthy()
-    const content = desc.children[0]!.children[0]!
-    for (const cls of ['text-small', 'text-muted-foreground']) expect(has(content, cls)).toBe(true)
-    expect(textOf(content)).toMatch(/^Connettori, server MCP e skill/)
-    // e non sta nella riga dei 52
-    expect(hasAncestor(content, (n) => n.attrs['data-col-head'] !== undefined)).toBe(false)
+  it('NIENTE descrizione sotto il titolo (C2: ListPage): la frase sta nello stato vuoto o nell\'aiuto', () => {
+    const root = parseHtml(renderHtml(createElement(PluginPanel, {})))
+    expect(findAll(root, (n) => n.attrs['data-page-shell'] === 'description')).toHaveLength(0)
+    expect(textOf(root)).not.toContain('tutto quello che dà capacità ai tuoi bot')
   })
 
   it('la barra degli strumenti è UNA riga alta 40 con i segmenti e la ricerca: il campo è un campo (36, raggio dei controlli), non una pillola', () => {
@@ -342,7 +337,7 @@ describe('DS4 (fase design): la pagina è nel guscio di sistema', () => {
 
   it('le schede non vanno mai a capo: nessuna delle schede della pagina chiede flex-wrap, e le tablist rese sono flex-nowrap', () => {
     const calls = PANEL_SRC.match(/<UnderlineTabs[\s\S]*?\/>/g) ?? []
-    expect(calls.length).toBeGreaterThanOrEqual(4)
+    expect(calls.length).toBeGreaterThanOrEqual(3)
     for (const call of calls) expect(call).not.toContain('flex-wrap')
     const root = renderPage({ seg: 'skills' })
     const lists = findAll(root, (n) => n.attrs.role === 'tablist')

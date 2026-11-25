@@ -134,12 +134,13 @@ describe('PP1 → DS4: lista, viste e scheda montano PageShell', () => {
   const widthsOf = (root: HtmlNode, testId: string): Array<string | undefined> =>
     findAll(findAll(root, (n) => n.attrs['data-testid'] === testId)[0]!, isContent).map((n) => n.attrs.style)
 
-  it('la lista e le tre viste interne (mcp, skill-import, skill-new) hanno il corpo che scorre figlio diretto della radice, la riga dei 52 in cima, e sono larghe quanto la pagina (880)', async () => {
+  it('la lista e le tre viste interne (mcp, skill-import, skill-new) hanno il corpo che scorre figlio diretto della radice, la riga dei 52 in cima, e sono larghe quanto la pagina (wide, C2: una sola)', async () => {
     await quiet()
     const { PluginPanel } = await import('../components/PluginPanel')
     // quante colonne di contenuto ha la vista: una per ciascuno degli slot fermi (testata, descrizione, barra) più quella del corpo
+    // C2/C3: la descrizione non c'è più: una colonna in meno per «all»
     const views: Array<[string, Record<string, unknown>, number]> = [
-      ['all', {}, 4],
+      ['all', {}, 3],
       ['mcp', { view: 'mcp' }, 2],
       ['skill-import', { view: 'skill-import', importRows: [{ name: 'lavoro', description: 'Riassume le email', sources: ['claude'], valid: true, existing: false, files: ['a.txt'] }] }, 3],
       ['skill-new', { view: 'skill-new' }, 2]
@@ -161,15 +162,15 @@ describe('PP1 → DS4: lista, viste e scheda montano PageShell', () => {
     }
   })
 
-  it('«Collegati» è l\'unica vista larga wide (1120): cambia la larghezza della colonna, non il guscio — stesso testid, stessa testata, stessa barra', async () => {
+  it('la larghezza è UNA (wide, C2) anche su «Collegati»: stesso testid, stessa testata, stessa barra — cambia solo il contenuto', async () => {
     await quiet()
     const { PluginPanel } = await import('../components/PluginPanel')
     const html = renderHtml(createElement(PluginPanel, { initial: { seg: 'connected' } } as never))
     expect(shellProblems(html, 'plugin-page')).toEqual([])
     const root = parseHtml(html)
     const widths = widthsOf(root, 'plugin-page')
-    // testata · descrizione · barra degli strumenti · corpo: tutte e quattro alla larghezza della tabella
-    expect(widths).toHaveLength(4)
+    // testata · barra degli strumenti · corpo (la descrizione non c'è più, C2)
+    expect(widths).toHaveLength(3)
     for (const w of widths) expect(w).toBe('max-width:var(--w-wide)')
     expect(findAll(root, (n) => n.attrs['data-testid'] === 'plugin-connected-table')).toHaveLength(1)
   })

@@ -43,7 +43,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
-import { BadgeCheck, ChevronDown, Puzzle, Search, Sparkles, X } from 'lucide-react'
+import { BadgeCheck, ChevronDown, Puzzle, Sparkles, X } from 'lucide-react'
 import { api, useStore, type PluginCardTab, type PluginPoint } from '../store'
 import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, type AppCategoryId } from '../../../shared/app-catalog'
@@ -59,6 +59,9 @@ import { AppLogo } from './ui/app-logo'
 import { DevelopersContent } from './plugin/developers-content'
 // Fase design (DS2): il guscio di OGNI pagina a tutta area e la sua testata — al posto di PluginShell
 import { PageShell } from './ui/page-shell'
+// C3 (fase linguaggio): la ricerca della pagina è il pezzo del catalogo
+import { SearchField } from './ui/search-field'
+import { FilterChipsScelta } from './ui/filter-chips'
 import { PageHeader } from './ui/page-header'
 // PP4 (fase plugin-pulita): righe a filo e schede come testo — meno contenitori, un solo segnale di stato
 import { FlatList, FlatRow } from './ui/flat-list'
@@ -611,7 +614,6 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
           )}
         />
       )}
-      description={<Trans>Connettori, server MCP e skill: tutto quello che dà capacità ai tuoi bot, in un posto.</Trans>}
       toolbar={(
         <>
           {/* i segmenti (tavola 8) — PP4: sono testo. Prendono lo spazio che
@@ -620,17 +622,18 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
           <div data-testid="plugin-segments" className="min-w-0 flex-1">
             <UnderlineTabs<PluginSegment> tabs={segments} value={seg} onChange={setSeg} label={t`Visualizza`} />
           </div>
-          {/* la ricerca: un campo, 36 px come tutti (prima una pillola alta 40) */}
-          <label className="flex h-control w-72 shrink-0 items-center gap-2 rounded-control bg-muted px-4 text-body text-muted-foreground">
-            <Search className="size-4 shrink-0" aria-hidden="true" />
-            <input
-              className="min-w-0 flex-1 bg-transparent text-body text-foreground outline-none placeholder:text-muted-foreground"
-              data-testid="plugin-search"
-              placeholder={t`Cerca tra plugin e skill`}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
+          {/* C3 (fase linguaggio): la ricerca è SearchField, l'unica dell'app (il testid plugin-search resta) */}
+          <SearchField value={query} onChange={setQuery} placeholder={t`Cerca tra plugin e skill`} ariaLabel={t`Cerca tra plugin e skill`} testId="plugin-search" />
+          {/* C3: le «strade» di Collegati in PILLOLE nella barra — niente seconda fila di schede nel corpo */}
+          {seg === 'connected' && (
+            <div className="flex min-w-0 items-center gap-2 pl-3" data-testid="plugin-connected-filters" role="group" aria-label={t`Filtra per strada`}>
+              <FilterChipsScelta active={onlyDaSistemare ? false : connFilter === 'all'} onSelect={() => { setConnFilter('all'); setOnlyDaSistemare(false) }}><Trans>Tutte le strade</Trans></FilterChipsScelta>
+              {([['direct', t`MCP diretto`], ['composio', t`Composio`], ['mac', t`Sul Mac`], ['box', t`Nel computer isolato`]] as Array<[ConnectedFilter, string]>).map(([f, label]) => (
+                <FilterChipsScelta key={f} active={!onlyDaSistemare && connFilter === f} onSelect={() => { setConnFilter(f); setOnlyDaSistemare(false) }}>{label}</FilterChipsScelta>
+              ))}
+              <FilterChipsScelta active={onlyDaSistemare} count={daSistemareCount(yourRows)} onSelect={() => setOnlyDaSistemare(true)}><Trans>Da sistemare</Trans></FilterChipsScelta>
+            </div>
+          )}
         </>
       )}
       contentClassName="flex flex-col gap-section pb-6"
@@ -800,24 +803,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
       {/* --- COLLEGATI (tavola 10): la tabella con le sette colonne --- */}
       {seg === 'connected' && (
         <Section testId="plugin-connected">
-          {/* i filtri: per strada e «Da sistemare · N» — come testo (PP4), su una riga */}
-          <UnderlineTabs<ConnectedFilter | 'da-sistemare'>
-            tabs={[
-              ['all', t`Tutte le strade`],
-              ['direct', t`MCP diretto`],
-              ['composio', t`Composio`],
-              ['mac', t`Sul Mac`],
-              ['box', t`Nel computer isolato`],
-              ['da-sistemare', t`Da sistemare · ${daSistemareCount(yourRows)}`]
-            ]}
-            value={onlyDaSistemare ? 'da-sistemare' : connFilter}
-            onChange={(f) => {
-              if (f === 'da-sistemare') setOnlyDaSistemare(true)
-              else { setConnFilter(f); setOnlyDaSistemare(false) }
-            }}
-            label={t`Filtra per strada`}
-            testId="plugin-connected-filters"
-          />
+          {/* C3: i filtri per strada stanno nella BARRA, sopra — qui la tabella e basta */}
           <DataTable<ConnectedTableRow>
             columns={connectedColumns(lang, connectedRows)}
             rows={connectedRows}

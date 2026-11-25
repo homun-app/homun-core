@@ -336,7 +336,8 @@ describe('PL1: la pagina Plugin (render vero, api finta)', () => {
     const root = parseHtml(out)
     const texts = findAll(root, () => true).map((n) => textOf(n)).join('\n')
     expect(texts).toContain('Plugin')
-    expect(texts).toMatch(/Connettori, server MCP e skill/)
+    // C2/C3: la descrizione sotto il titolo NON c'è più (ListPage: la frase va nello stato vuoto)
+    expect(texts).not.toMatch(/Connettori, server MCP e skill/)
     expect(texts).toContain('Tutto')
     expect(texts).toContain('Connettori')
     expect(texts).toContain('Skill')
@@ -517,15 +518,16 @@ describe('DS4 (fase design): «Collegati» è la tabella unica, e lì la pagina 
     expect(min).toBeGreaterThan(940)
   }, 20_000)
 
-  it('solo su «Collegati» il contenuto è largo wide (1120): testata, descrizione, barra degli strumenti e corpo cambiano insieme', async () => {
+  it('la larghezza è UNA (wide, C2): anche su «Collegati» — e i filtri per strada stanno nella BARRA (C3), la tabella da sola nel corpo', async () => {
     const root = await renderConnected()
     const page = findAll(root, (n) => n.attrs['data-testid'] === 'plugin-page')[0]!
     const columns = findAll(page, (n) => 'data-page-content' in n.attrs)
-    expect(columns.length).toBeGreaterThanOrEqual(4)
+    expect(columns.length).toBeGreaterThanOrEqual(3)
     for (const c of columns) expect(c.attrs.style).toBe('max-width:var(--w-wide)')
-    // e la tabella sta dentro il segmento, dopo i filtri
+    // C3: i filtri per strada stanno nella BARRA (fuori dal segmento), la tabella da sola nel corpo
     const segment = findAll(root, (n) => n.attrs['data-testid'] === 'plugin-connected')[0]!
-    expect(findAll(segment, (n) => n.attrs['data-testid'] === 'plugin-connected-filters')).toHaveLength(1)
+    expect(findAll(segment, (n) => n.attrs['data-testid'] === 'plugin-connected-filters')).toHaveLength(0)
+    expect(findAll(root, (n) => n.attrs['data-testid'] === 'plugin-connected-filters')).toHaveLength(1)
     expect(findAll(segment, (n) => n.attrs['data-testid'] === 'plugin-connected-table')).toHaveLength(1)
   }, 20_000)
 })
