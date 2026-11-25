@@ -66,7 +66,7 @@ import { Section } from './ui/section'
 import { Button } from './ui/button'
 // PL2 (fase plugin): la scheda del plugin (tavola 9) — clic su una riga
 import { PluginCard } from './PluginCard'
-import { ManualServers } from './McpWindow'
+import { ManualServers } from './plugin/manual-servers'
 // PL5: l'editor, il dettaglio delle skill di plugin e l'anteprima del catalogo — riusati
 import { SkillEditor, PluginDetail, CatalogPreview } from './SkillsWindow'
 import { SKILL_CATEGORIES, searchSkillCatalog, skillCatalogDescription, skillCatalogInstallState, type SkillCategoryId } from '../../../shared/skill-catalog'

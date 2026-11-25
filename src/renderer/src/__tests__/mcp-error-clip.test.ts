@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const MCPW = readFileSync(fileURLToPath(new URL('../components/McpWindow.tsx', import.meta.url)), 'utf8')
+const MCPW = readFileSync(fileURLToPath(new URL('../components/plugin/manual-servers.tsx', import.meta.url)), 'utf8')
 
 describe('X2: la riga della finestra «Server MCP» usa lo stesso taglio (guardia sul sorgente)', () => {
   it('RowTestStatus passa l\'errore da clipErrorText, sia nel segno sia nel suggerimento', () => {

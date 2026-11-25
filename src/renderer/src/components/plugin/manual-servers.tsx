@@ -1,7 +1,8 @@
-// PL7 (fase plugin): i PEZZI della vecchia finestra «Server MCP» — la
-// finestra non esiste più (la casa è la pagina «Plugin»): qui resta
+// PL7 (fase plugin) → C0 (fase linguaggio): i PEZZI della vecchia finestra
+// «Server MCP» — la finestra non esiste più (la casa è la pagina «Plugin»):
 // ManualServers (l'elenco dei server col test, il form stdio/http con le
-// variabili e l'import); l'elenco di import è in plugin/import-list.tsx.
+// variabili e l'import) in un file suo di components/plugin/; l'elenco di
+// import è in import-list.tsx, accanto.
 //
 // Fase design (DS4): ai token, nella vista «Server MCP» della pagina.
 //  - I SERVER sono righe a filo come quelle di «I tuoi» (FlatRow): prima ogni
@@ -21,23 +22,23 @@
 import { useEffect, useState } from 'react'
 import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { PlugZap, Pencil, Trash2, X } from 'lucide-react'
-import { api, useStore } from '../store'
-import type { McpServerInfo, McpServerSecret } from '../../../shared/types'
-import { serverCommandLine } from '../lib/mcp-row'
-import { cn } from '../lib/utils'
+import { api, useStore } from '../../store'
+import type { McpServerInfo, McpServerSecret } from '../../../../shared/types'
+import { serverCommandLine } from '../../lib/mcp-row'
+import { cn } from '../../lib/utils'
 // E1 (fase mcp-env): le righe «Variabili» del form stdio
-import { envRowsFromServer, saveEnvPayload, newEnvRow, envNameLooksSecret, type EnvRow } from '../lib/mcp-env'
+import { envRowsFromServer, saveEnvPayload, newEnvRow, envNameLooksSecret, type EnvRow } from '../../lib/mcp-env'
 // U2 (fase mcp-ui): l'elenco di import raggruppato per origine
-import { groupImportRows, importRowKey, type ImportGroupUi, type ImportScanRow, type ImportSkipRow, type ImportSource } from '../lib/mcp-import-groups'
+import { groupImportRows, importRowKey, type ImportGroupUi, type ImportScanRow, type ImportSkipRow, type ImportSource } from '../../lib/mcp-import-groups'
 // K4 (fase team-bot): il logo VERO dell'app quando il file c'è nel repo
-import { logoUrlForName, LOGO_CLASS, LOGO_TILE_CLASS } from '../lib/app-logos'
+import { logoUrlForName, LOGO_CLASS, LOGO_TILE_CLASS } from '../../lib/app-logos'
 // X2 (fase sicurezza-beta16): l'errore del test si mostra tagliato a 300
-import { clipErrorText } from '../../../main/mcp/error-category'
+import { clipErrorText } from '../../../../main/mcp/error-category'
 // C0 (fase linguaggio): l'elenco di import in un file suo, sempre di plugin/
-import { ImportList } from './plugin/import-list'
-import { FlatList, FlatRow } from './ui/flat-list'
-import { Section } from './ui/section'
-import { Button } from './ui/button'
+import { ImportList } from './import-list'
+import { FlatList, FlatRow } from '../ui/flat-list'
+import { Section } from '../ui/section'
+import { Button } from '../ui/button'
 
 /**
  * Il campo di testo del form di un server (DS1): 36 px — la misura dei campi

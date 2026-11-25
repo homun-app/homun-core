@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const MCPW = readFileSync(fileURLToPath(new URL('../components/McpWindow.tsx', import.meta.url)), 'utf8')
+const MCPW = readFileSync(fileURLToPath(new URL('../components/plugin/manual-servers.tsx', import.meta.url)), 'utf8')
 const API = readFileSync(fileURLToPath(new URL('../../../daemon/api.ts', import.meta.url)), 'utf8')
 
 describe('U5: il test di connessione parte DA SOLO dopo import/aggiunta/modifica', () => {

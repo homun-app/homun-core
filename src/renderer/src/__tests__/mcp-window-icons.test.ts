@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const WIN_SRC = readFileSync(fileURLToPath(new URL('../components/McpWindow.tsx', import.meta.url)), 'utf8')
+const WIN_SRC = readFileSync(fileURLToPath(new URL('../components/plugin/manual-servers.tsx', import.meta.url)), 'utf8')
 
 /** Il blocco di ManualServers (l'elenco dei server col form), non il resto del file. */
 function manualServersBlock(): string {

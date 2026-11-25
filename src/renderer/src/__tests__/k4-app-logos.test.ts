@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 
 const read = (rel: string): string => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
 const LOGOS_SRC = read('../lib/app-logos.ts')
-const WIN_SRC = read('../components/McpWindow.tsx') + read('../components/plugin/import-list.tsx')
+const WIN_SRC = read('../components/plugin/manual-servers.tsx') + read('../components/plugin/import-list.tsx')
 
 // il modulo vive su import.meta.glob (vite): nei test node la mappa è vuota
 // ma le FUNZIONI PURE restano verificabili — il matching UI è nelle guardie

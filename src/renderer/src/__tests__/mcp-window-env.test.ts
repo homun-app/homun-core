@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { envRowsFromServer, saveEnvPayload, newEnvRow } from '../lib/mcp-env'
 
-const WIN_SRC = readFileSync(fileURLToPath(new URL('../components/McpWindow.tsx', import.meta.url)), 'utf8')
+const WIN_SRC = readFileSync(fileURLToPath(new URL('../components/plugin/manual-servers.tsx', import.meta.url)), 'utf8')
 
 describe('E1: il modello delle righe Variabili del form stdio', () => {
   it('envRowsFromServer: i non segreti portano il valore, i segreti restano vuoti (si sostituiscono)', () => {

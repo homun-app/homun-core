@@ -13,7 +13,7 @@ import { renderHtml, setStoreStateForRender, parseHtml, textOf, findAll } from '
 
 const SIDEBAR = fileURLToPath(new URL('../components/Sidebar.tsx', import.meta.url))
 const APPSW = fileURLToPath(new URL('../components/AppsWindow.tsx', import.meta.url))
-const MCPW = fileURLToPath(new URL('../components/McpWindow.tsx', import.meta.url))
+const MCPW = fileURLToPath(new URL('../components/plugin/manual-servers.tsx', import.meta.url))
 const APP = fileURLToPath(new URL('../App.tsx', import.meta.url))
 const PANEL = fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url))
 const STORE = fileURLToPath(new URL('../store.ts', import.meta.url))
@@ -24,8 +24,8 @@ describe('PL7: la finestra «Server MCP» non c\'è più', () => {
     expect(src).not.toMatch(/export function McpWindow\b/)
     expect(src).not.toContain('Dialog open')
     expect(src).toContain('export function ManualServers()')
-    // C0 (fase linguaggio): l'elenco di import è un file suo in plugin/
-    expect(src).toMatch(/import \{ ImportList \} from '\.\/plugin\/import-list'/)
+    // C0 (fase linguaggio): l'elenco di import è un file suo, accanto
+    expect(src).toMatch(/import \{ ImportList \} from '\.\/import-list'/)
   })
 
   it('lo store NON ha più mcpOpen/setMcpOpen né i flag del foglio sviluppatori', () => {
@@ -88,7 +88,7 @@ describe('PL7: la pagina Plugin apre ManualServers nel punto MCP', () => {
 
 describe('PL7: il render di ManualServers (componente vero, api finta)', () => {
   it('l\'intestazione dell\'elenco e il form di aggiunta', async () => {
-    const { ManualServers } = await import('../components/McpWindow')
+    const { ManualServers } = await import('../components/plugin/manual-servers')
     const { useStore } = await import('../store')
     setStoreStateForRender(useStore, {
       agents: [
