@@ -721,7 +721,7 @@ const SOURCE_LABELS: Record<string, MessageDescriptor> = {
 }
 
 /** I dati iniziali (per i test senza effect; nel prodotto si caricano dall'api). */
-export interface UsageTabInitial {
+interface UsageTabInitial {
   rows?: ModelUsageRow[]
   modelRows?: ModelUsageRow[]
   prices?: ModelPriceMap

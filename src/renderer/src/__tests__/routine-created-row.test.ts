@@ -25,7 +25,8 @@ vi.mock('react/jsx-dev-runtime', async (orig) => {
   }
 })
 
-const { RoutineCreatedRow, RoutineTzAsk, activatePlanOf } = await import('../components/RoutineCreatedRow')
+const { RoutineCreatedRow, activatePlanOf } = await import('../components/RoutineCreatedRow')
+const { RoutineTzAsk } = await import('../components/routine-tz-ask')
 const { useStore } = await import('../store')
 
 import type { TranscriptEntry } from '../../../shared/types'
