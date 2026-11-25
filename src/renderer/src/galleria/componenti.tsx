@@ -523,41 +523,46 @@ const Sezione = ({ id }: { id: IdSezione }) => {
       {id === 'gusci' && (
         <Section title="page-shell e list-page — i gusci e il modello di elenco" testId="galleria-section-shell">
           <div className="mb-2">
-            <Etichetta>list-page — il modello della pagina di elenco (nel suo riquadro, come i gusci)</Etichetta>
-            <div className="relative h-72 overflow-hidden rounded-surface border border-border">
-              <ListPage
-                titolo="Plugin"
-                testId="galleria-list-page"
-                schede={{ tabs: [['tutto', 'Tutto'], ['connettori', 'Connettori'], ['skill', 'Skill'], ['collegati', 'Collegati · 12']] as never, value: 'tutto', onChange: () => undefined }}
-                headName="componenti"
-                contentClassName="py-4"
-              >
-                <div className="text-body">Il corpo dell'elenco: ListGroup e righe, nel modello che non si ridisegna.</div>
-              </ListPage>
-            </div>
-          </div>
-          <div className="mb-2">
-            <Etichetta>detail-page — la scheda di una cosa (indietro, stessa larghezza wide, sopra la pagina)</Etichetta>
-            <div className="relative h-72 overflow-hidden rounded-surface border border-border">
-              <DetailPage
-                titolo="Mattermost" testId="galleria-detail-page" headName="componenti"
-                indietro={{ onClick: () => undefined, label: 'Torna ai plugin' }}
-                contentClassName="py-4"
-              >
-                <div className="text-body">Le sezioni della scheda: ListGroup, righe e azioni come le pagine.</div>
-              </DetailPage>
-            </div>
-          </div>
-          <div>
-            <Etichetta>document-page — il documento della Libreria (reading 720: si legge)</Etichetta>
-            <div className="relative h-72 overflow-hidden rounded-surface border border-border">
-              <DocumentPage
-                titolo="Il documento" testId="galleria-document-page" headName="componenti"
-                indietro={{ onClick: () => undefined, label: 'Torna alla Libreria' }}
-                contentClassName="py-4"
-              >
-                <div className="text-reading">Il corpo del documento, alla larghezza della lettura.</div>
-              </DocumentPage>
+            <Etichetta>i tre modelli in fila — list-page, detail-page e document-page (nei loro riquadri, come i gusci)</Etichetta>
+            <div className="flex items-start gap-4">
+              <div className="min-w-0 flex-1">
+                <Etichetta>list-page — l'elenco</Etichetta>
+                <div className="relative h-56 overflow-hidden rounded-surface border border-border">
+                  <ListPage
+                    titolo="Plugin"
+                    testId="galleria-list-page"
+                    schede={{ tabs: [['tutto', 'Tutto'], ['connettori', 'Connettori'], ['skill', 'Skill'], ['collegati', 'Collegati · 12']] as never, value: 'tutto', onChange: () => undefined }}
+                    headName="componenti"
+                    contentClassName="py-4"
+                  >
+                    <div className="text-body">Il corpo dell'elenco: ListGroup e righe, nel modello che non si ridisegna.</div>
+                  </ListPage>
+                </div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <Etichetta>detail-page — la scheda (indietro, stessa wide, sopra la pagina)</Etichetta>
+                <div className="relative h-56 overflow-hidden rounded-surface border border-border">
+                  <DetailPage
+                    titolo="Mattermost" testId="galleria-detail-page" headName="componenti"
+                    indietro={{ onClick: () => undefined, label: 'Torna ai plugin' }}
+                    contentClassName="py-4"
+                  >
+                    <div className="text-body">Le sezioni della scheda: ListGroup, righe e azioni come le pagine.</div>
+                  </DetailPage>
+                </div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <Etichetta>document-page — il documento (reading 720: si legge)</Etichetta>
+                <div className="relative h-56 overflow-hidden rounded-surface border border-border">
+                  <DocumentPage
+                    titolo="Il documento" testId="galleria-document-page" headName="componenti"
+                    indietro={{ onClick: () => undefined, label: 'Torna alla Libreria' }}
+                    contentClassName="py-4"
+                  >
+                    <div className="text-reading">Il corpo del documento, alla larghezza della lettura.</div>
+                  </DocumentPage>
+                </div>
+              </div>
             </div>
           </div>
           {/* G2: ogni guscio sta in un riquadro relative ad altezza FISSA con
@@ -565,7 +570,7 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               l'ultimo guscio si stenderebbe su tutta la pagina (page-shell.tsx
               non si tocca) */}
           {(['reading', 'wide'] as PageWidth[]).map((w) => (
-            <div key={w} className="relative mb-4 h-40 overflow-hidden rounded-surface border border-border">
+            <div key={w} className="relative mb-4 h-32 overflow-hidden rounded-surface border border-border">
               <PageShell width={w} testId={`galleria-shell-${w}`} headName="componenti"
                 header={<PageHeader title={`Il guscio «${w}»`} testId={`galleria-shell-header-${w}`} />}
                 contentClassName="py-4">

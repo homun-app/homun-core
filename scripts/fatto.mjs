@@ -58,7 +58,12 @@ const esegui = (nome, cmd, args, logFile, { env } = {}) => new Promise((resolve)
   const fd = openSync(path, 'w')
   let risolto = false
   const chiudi = (oggetto) => { if (!risolto) { risolto = true; try { closeSync(fd) } catch { /* già chiuso */ } resolve(oggetto) } }
-  const child = spawn(cmd, args, { cwd: ROOT, env: { ...process.env, TMPDIR: radiceCorsa ?? process.env.TMPDIR, ...(env ?? {}) }, stdio: ['ignore', fd, fd] })
+  // il ci-sim NON riceve la radice come TMPDIR: la sua base è la T/ comune
+  // com'è sempre stata — un livello in più e il socket Unix di vnc-view.sock
+  // (test screen) supera i 108 caratteri di percorso e listen va in EINVAL
+  const senzaRadice = logFile === 'suite-ci-sim.log'
+  const TMPDIR_PASSATO = senzaRadice ? process.env.TMPDIR : (radiceCorsa ?? process.env.TMPDIR)
+  const child = spawn(cmd, args, { cwd: ROOT, env: { ...process.env, TMPDIR: TMPDIR_PASSATO, ...(env ?? {}) }, stdio: ['ignore', fd, fd] })
   child.on('close', (code) => {
     try { writeFileSync(path + '.code', String(code)) } catch { /* il file d'uscita resta quello che conta */ }
     chiudi({ nome, path, esito: code === 0 ? 'OK' : 'KO', code, ms: Date.now() - t, nota: code === 0 ? '' : `codice d'uscita ${code}` })
