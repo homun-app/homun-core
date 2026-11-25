@@ -75,8 +75,17 @@ const MASCHERE = {
       motivo: 'l\'anteprima della mascotte del nuovo bot: il colore è hash dell\'id casuale del bot che verrà creato — diverso a ogni corsa per definizione' }
   ]
 }
-/** La scena dei COMPONENTI (F2): esiste solo con SANDBOT_TEST_GALLERIA=1. */
-const SCENA_COMPONENTI = { id: 'componenti', label: 'La pagina dei componenti', group: 'Componenti', root: `document.querySelector('[data-testid="galleria-componenti"]')`, scene: true, withSidebar: true, open: 'componenti', focus: null }
+/**
+ * Le scene dei COMPONENTI (F2/G2): UNA PER SEZIONE della pagina, in chiaro e
+ * in scuro — come Storybook/Chromatic, una cattura per storia, non una
+ * pagina lunga in una foto sola. L'elenco delle sezioni lo dà la pagina
+ * stessa (__galleriaComponenti.sezioni()): le scene nascono a runtime.
+ */
+const sceneComponenti = (sezioni) => sezioni.map((id) => ({
+  id: `componenti-${id}`, label: `Componenti › ${id}`, group: 'Componenti',
+  root: `document.querySelector('[data-testid="galleria-componenti"]')`,
+  scene: true, withSidebar: true, open: 'componenti', sezione: id, focus: null
+}))
 
 const nomeCattura = (page, tema, w) => `${page.id}-${tema}${w !== 1280 ? `-${w}` : ''}.png`
 
@@ -88,7 +97,8 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
   await s.viewport(w, 800 - 800 + (w === 900 ? 640 : 800))
   await s.tema(tema)
   await closeOverlays(s)
-  // la pagina dei componenti (F2): la apre il suo API, la chiude closeOverlays
+  // la pagina dei componenti (F2/G2): UNA SEZIONE per scena, la apre il suo
+  // API (apri(sezione)), la chiude closeOverlays
   if (page.open === 'componenti') {
     const api = await s.eval(`return typeof window.__galleriaComponenti === 'object' && typeof window.__galleriaComponenti?.apri === 'function'`).catch(() => false)
     if (!api) {
@@ -96,10 +106,27 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
       const errore = await s.eval(`try { await import(window.__galleriaUrl); return 'import ok' } catch (e) { return 'import KO: ' + (e?.message ?? e) }`).catch((e) => 'eval KO: ' + e.message)
       log('ERRORE: l\'API della pagina componenti non è montata —', errore, '· url:', await s.eval(`return window.__galleriaUrl ?? null`).catch(() => '?'))
     }
-    // un REMOUNT pulito a ogni combinazione (chiudi+apri: come le altre pagine si riaprono)
-    await s.eval(`window.__galleriaComponenti?.chiudi(); window.__galleriaComponenti?.apri(); return true`)
-    await s.attendi(`(() => { const el = document.querySelector('[data-testid="galleria-componenti"]'); return !!(el && el.querySelector('[data-testid="galleria-componenti-contenuto"]')) })()`, { entro: 10_000, motivo: 'la pagina dei componenti si apra col suo contenuto' })
-    } else {
+    // un REMOUNT pulito a ogni combinazione (apri chiude e rimonta: come le
+    // altre pagine si riaprono)
+    await s.eval(`window.__galleriaComponenti?.apri(${JSON.stringify(page.sezione)}); return true`)
+    await s.attendi(`(() => { const el = document.querySelector('[data-testid="galleria-componenti-contenuto"]'); return !!el })()`, { entro: 10_000, motivo: `la sezione ${page.sezione} della pagina componenti si apra col suo contenuto` })
+    // G2: la radice della sezione deve stare INTERA nel viewport — una
+    // cattura che taglia il fondo in silenzio non è una prova (se la sezione
+    // non ci sta, si divide in due scene: chi sta fuori non si vede)
+    const fuori = await s.eval(`return (() => {
+      const el = document.querySelector('[data-testid="galleria-componenti-contenuto"]')
+      if (!el) return 'il contenuto della pagina componenti non è nel DOM'
+      const sezione = el.dataset.sezione ?? null
+      if (sezione !== null && sezione !== ${JSON.stringify(page.sezione)}) return 'la sezione aperta è «' + sezione + '», non «' + ${JSON.stringify(page.sezione)} + '»'
+      const r = el.getBoundingClientRect()
+      if (r.height === 0) return 'la sezione è alta 0'
+      if (r.top < -0.5 || r.bottom > window.innerHeight + 0.5) {
+        return 'la sezione ' + (sezione ?? '(pagina intera)') + ' esce dal viewport: top ' + Math.round(r.top) + ', bottom ' + Math.round(r.bottom) + ' su ' + window.innerHeight
+      }
+      return null
+    })()`)
+    if (fuori) errori.push(fuori)
+  } else {
     await openPage(s, page, ctx)
   }
   if (page.overlay && page.open !== 'componenti') await openOverlay(s, page)
@@ -249,7 +276,11 @@ try {
   const { ctx } = await preparaDeterministica(s, { providerPort: porta })
   log('setup deterministico fatto (timeline e Libreria seminati all\'istante fermo)')
 
-  const pages = [...PAGES.filter((p) => p.when !== 'prima-del-setup'), SCENA_COMPONENTI]
+  // le sezioni della pagina dei componenti le dichiara la PAGINA (componenti.tsx):
+  // la galleria non tiene una lista sua da far driftare
+  const sezioni = await s.attendi(`(() => { const a = window.__galleriaComponenti?.sezioni?.(); return Array.isArray(a) && a.length > 0 ? a : null })()`, { entro: 15_000, motivo: 'la pagina dei componenti dia le sue sezioni' })
+  log('le sezioni dei componenti:', sezioni.join(', '))
+  const pages = [...PAGES.filter((p) => p.when !== 'prima-del-setup'), ...sceneComponenti(sezioni)]
   const vuole = (p) => !SOLO || SOLO.includes(p.id)
   for (const page of pages.filter(vuole)) {
     for (const [w, tema] of combinazioni(page)) {

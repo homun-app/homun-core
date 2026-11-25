@@ -3,6 +3,15 @@
 // in scuro (il tema lo cambia la galleria con la classe `dark`): gli stati
 // difficili da raggiungere navigando l'app si vedono qui, isolati.
 //
+// G2 (fase fondamenta-galleria): UNA SEZIONE PER VOLTA. Lo stato dell'arte
+// (Storybook, Chromatic, toHaveScreenshot) è una cattura per STORIA: un pezzo
+// piccolo e stabile per ogni gruppo di stati, non una pagina lunga in una
+// foto sola (che non sta nel viewport e l'ultima demo la copre tutta). La
+// galleria apre UNA sezione per scena: __galleriaComponenti.apri(sezione),
+// con l'elenco da sezioni(). La radice della sezione porta il testid
+// galleria-componenti-contenuto e l'id in data-sezione: la galleria controlla
+// che stia INTERA nel viewport (niente pezzi tagliati in silenzio).
+//
 // NON entra nel build di produzione: la galleria compila questo modulo a
 // parte (scripts/galleria-modulo.config.mjs) e lo carica con un import()
 // dinamico dietro il controllo SANDBOT_TEST_GALLERIA=1 (App.tsx). Il
@@ -10,9 +19,9 @@
 // verifica a ogni fase.
 //
 // Regola per il futuro (docs/FATTO.md): un componente NUOVO in
-// components/ui/ entra in questa pagina con tutti i suoi stati. La guardia
-// (src/__tests__/guardie/componenti.test.ts) fallisce se un file di
-// components/ui/ non è importato qui.
+// components/ui/ entra in questa pagina con tutti i suoi stati, in una
+// SEZIONE che lo dichiara in `componenti` (la guardia componenti.test.ts
+// controlla che ogni file di ui/ sia dichiarato da almeno una sezione).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { I18nProvider } from '@lingui/react'
@@ -43,9 +52,10 @@ import { BOT_FAMILIES, BOT_COLORS } from '../../../shared/avatar'
 /** Le stesse tinte dei puntini di stato dei bot (Sidebar, ColorDot): 8 px, contrasto ≥ 3:1 in entrambi i temi. */
 const PUNTINI = BOT_COLORS
 
-const MD_TUTTI_I_CASI = `# Il documento di prova
+/** Il markdown della sezione, in due parti (una pagina sola non sta in 800 px). */
+const MD_PRIMA_PARTE = `# Il documento di prova
 
-Tutti i casi del markdown, in una pagina sola.
+Tutti i casi del markdown, divisi in due scene.
 
 ## Titolo di secondo livello
 
@@ -63,8 +73,9 @@ Larghi (più testo per voce):
 
 - una voce con un testo molto più lungo che racconta due righe e ci sta, con **grassetto** in mezzo, perché la larghezza della pagina lo consente
 - l'altra voce lunga, che si spezza quando serve e non prima
+`
 
-Annidati:
+const MD_SECONDA_PARTE = `## Gli elenchi annidati
 
 1. il primo passo
    - il primo sotto-passo
@@ -108,11 +119,35 @@ const MODELLI: ModelInfo[] = [
   { id: 'finto-remoto', label: 'Finto remoto', source: 'live', contextWindow: 65_536, vision: null, tools: null, thinkingLevels: [], cost: null, costSource: null, local: false }
 ]
 
-/** La pagina VERA dei componenti, tutti gli stati, dal vivo. */
-const Pagina = () => {
+/**
+ * LE SEZIONI della pagina: la galleria fa UNA SCENA per sezione (in chiaro e
+ * in scuro). `componenti` dichiara i file di components/ui/ che la sezione
+ * mostra: la guardia (src/__tests__/guardie/componenti.test.ts) fallisce se
+ * un file di ui/ non è dichiarato da NESSUNA sezione — un componente nuovo
+ * entra qui con tutti i suoi stati.
+ */
+export const SEZIONI = [
+  { id: 'bottoni', titolo: 'button', componenti: ['button'] },
+  { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
+  { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
+  { id: 'tabella', titolo: 'data-table', componenti: ['data-table'] },
+  { id: 'elenchi', titolo: 'flat-list', componenti: ['flat-list'] },
+  { id: 'testate', titolo: 'section, page-header, column-head', componenti: ['section', 'page-header', 'column-head'] },
+  { id: 'schede', titolo: 'underline-tabs', componenti: ['underline-tabs'] },
+  { id: 'dialogo', titolo: 'dialog aperto', componenti: ['dialog'] },
+  { id: 'menu', titolo: 'dropdown-menu aperto', componenti: ['dropdown-menu'] },
+  { id: 'modelli', titolo: 'ModelPicker e ModelSelect', componenti: ['ModelPicker', 'ModelSelect'] },
+  { id: 'pillole', titolo: 'pillole, badge e puntini di stato', componenti: [] },
+  { id: 'gusci', titolo: 'page-shell — i tre gusci di larghezza', componenti: ['page-shell'] },
+  { id: 'markdown-1', titolo: 'DocumentBody — titoli, grassetti ed elenchi', componenti: [] },
+  { id: 'markdown-2', titolo: 'DocumentBody — elenchi annidati, tabella, citazione e codice', componenti: [] }
+] as const
+
+type IdSezione = (typeof SEZIONI)[number]['id']
+
+/** La VERA pagina di una sezione, con tutti gli stati dei suoi componenti. */
+const Sezione = ({ id }: { id: IdSezione }) => {
   const [tab, setTab] = useState('una')
-  const [dialogo, setDialogo] = useState(true)
-  const [menu, setMenu] = useState(true)
   const [modello, setModello] = useState<string | null>('finto')
   const righeVuote: typeof righe = []
   const righe = [
@@ -125,197 +160,246 @@ const Pagina = () => {
     { id: 'giudizio', header: 'Giudizio', width: 110, cell: (r: typeof righe[0]) => <Cell>{r.giudizio}</Cell> },
     { id: 'lungo', header: 'Nota', width: 320, cell: (r: typeof righe[0]) => <Cell secondary>{r.lungo}</Cell> }
   ]
+  const info = SEZIONI.find((s) => s.id === id)
   return (
-    <div className="p-8" data-testid="galleria-componenti-contenuto">
-      <PageHeader title="I componenti, uno per uno" description="Tutti gli stati, dal vivo: la pagina dei componenti è solo di sviluppo e di test." testId="galleria-page-header" />
+    <div className="p-8" data-testid="galleria-componenti-contenuto" data-sezione={id}>
+      <PageHeader title={info?.titolo ?? id} description="La pagina dei componenti è solo di sviluppo e di test: una sezione per volta, tutti gli stati, dal vivo." testId="galleria-page-header" />
 
-      <div className="mt-6">
-        <UnderlineTabs
-          tabs={[['una', 'Prima'], ['due', 'Seconda'], ['tre', 'Terza'], ['quattro', 'Quarta scheda'], ['cinque', 'Quinta scheda'], ['sei', 'Sesta scheda'], ['sette', 'Settima scheda'], ['otto', 'Ottava scheda']]}
-          value={tab}
-          onChange={setTab}
-          label="Le schede di prova"
-          testId="galleria-tabs"
-        />
-      </div>
+      {id === 'bottoni' && (
+        <Section title="button — tutte le varianti e taglie" testId="galleria-section-button">
+          <Riga label="primary">
+            <Button variant="primary">Aggiungi</Button>
+            <Button variant="primary" size="sm">Piccolo</Button>
+            <Button variant="primary" shape="control">Controllo</Button>
+            <Button variant="primary" disabled>Disattivato</Button>
+            <Button variant="primary" disabled><Loader2 className="size-4" />In caricamento</Button>
+          </Riga>
+          <Riga label="secondary">
+            <Button variant="secondary">Secondario</Button>
+            <Button variant="secondary" size="sm" shape="control">Controllo piccolo</Button>
+            <Button variant="secondary" disabled>Disattivato</Button>
+          </Riga>
+          <Riga label="ghost">
+            <Button variant="ghost">Fantasma</Button>
+            <Button variant="ghost" size="sm">Piccolo</Button>
+          </Riga>
+          <Riga label="destructive">
+            <Button variant="destructive">Elimina</Button>
+            <Button variant="destructive" size="sm" shape="control">Piccolo</Button>
+          </Riga>
+          <Riga label="solo icona (aria-label)">
+            <Button variant="ghost" icon aria-label="Aggiungi qualcosa"><Plus className="size-4" /></Button>
+            <Button variant="secondary" icon aria-label="Impostazioni"><Settings className="size-4" /></Button>
+          </Riga>
+        </Section>
+      )}
 
-      <Section title="button — tutte le varianti e taglie" testId="galleria-section-button">
-        <Riga label="primary">
-          <Button variant="primary">Aggiungi</Button>
-          <Button variant="primary" size="sm">Piccolo</Button>
-          <Button variant="primary" shape="control">Controllo</Button>
-          <Button variant="primary" disabled>Disattivato</Button>
-          <Button variant="primary" disabled><Loader2 className="size-4" />In caricamento</Button>
-        </Riga>
-        <Riga label="secondary">
-          <Button variant="secondary">Secondario</Button>
-          <Button variant="secondary" size="sm" shape="control">Controllo piccolo</Button>
-          <Button variant="secondary" disabled>Disattivato</Button>
-        </Riga>
-        <Riga label="ghost">
-          <Button variant="ghost">Fantasma</Button>
-          <Button variant="ghost" size="sm">Piccolo</Button>
-        </Riga>
-        <Riga label="destructive">
-          <Button variant="destructive">Elimina</Button>
-          <Button variant="destructive" size="sm" shape="control">Piccolo</Button>
-        </Riga>
-        <Riga label="solo icona (aria-label)">
-          <Button variant="ghost" icon aria-label="Aggiungi qualcosa"><Plus className="size-4" /></Button>
-          <Button variant="secondary" icon aria-label="Impostazioni"><Settings className="size-4" /></Button>
-        </Riga>
-        <Riga label="pillole e badge">
-          <Button variant="primary" size="sm">Pillola</Button>
-          <span className="inline-flex items-center rounded-full bg-muted px-2 h-control-sm text-caption">badge neutro</span>
-          <span className="inline-flex items-center rounded-full bg-destructive text-destructive-foreground px-2 h-control-sm text-caption">badge rosso</span>
-        </Riga>
-      </Section>
+      {id === 'campi' && (
+        <Section title="input e select — vuoto, pieno, con errore" testId="galleria-section-input">
+          <Riga label="input">
+            <Input className="w-56" placeholder="Vuoto" />
+            <Input className="w-56" defaultValue="Pieno" />
+            <Input className="w-56" placeholder="Con errore" aria-invalid="true" />
+            <Input className="w-56" disabled defaultValue="Disattivato" />
+          </Riga>
+          <Riga label="select">
+            <Select className="w-56" defaultValue=""><option value="">Scegli…</option><option value="a">Scelta A</option></Select>
+            <Select className="w-56" defaultValue="a"><option value="a">Scelta A</option></Select>
+            <Select className="w-56" defaultValue="a" aria-invalid="true"><option value="a">Con errore</option></Select>
+          </Riga>
+          <Riga label="le classi del campo da sole (FIELD_CLASS)">
+            <input className="h-control w-56 rounded-control border border-input px-3 text-body" placeholder="campo grezzo" />
+          </Riga>
+        </Section>
+      )}
 
-      <Section title="input e select — vuoto, pieno, con errore" testId="galleria-section-input">
-        <Riga label="input">
-          <Input className="w-56" placeholder="Vuoto" />
-          <Input className="w-56" defaultValue="Pieno" />
-          <Input className="w-56" placeholder="Con errore" aria-invalid="true" />
-          <Input className="w-56" disabled defaultValue="Disattivato" />
-        </Riga>
-        <Riga label="select">
-          <Select className="w-56" defaultValue=""><option value="">Scegli…</option><option value="a">Scelta A</option></Select>
-          <Select className="w-56" defaultValue="a"><option value="a">Scelta A</option></Select>
-          <Select className="w-56" defaultValue="a" aria-invalid="true"><option value="a">Con errore</option></Select>
-        </Riga>
-        <Riga label="le classi del campo da sole (FIELD_CLASS)">
-          <input className="h-control w-56 rounded-control border border-input px-3 text-body" placeholder="campo grezzo" />
-        </Riga>
-      </Section>
+      {id === 'avvisi' && (
+        <Section title="notice — ogni gravità, con e senza azione" testId="galleria-section-notice">
+          <div className="flex flex-col gap-3">
+            <Notice icon={<CheckCircle2 className="size-4" />}>Tutto a posto: nessuna azione da fare.</Notice>
+            <Notice icon={<TriangleAlert className="size-4" />} tone="warning">Un avviso giallo, senza azione.</Notice>
+            <Notice icon={<TriangleAlert className="size-4" />} tone="destructive">Un errore permanente senza azione.</Notice>
+            <Notice icon={<TriangleAlert className="size-4" />} tone="destructive" repeat={4} action={<Button variant="secondary" size="sm">Riprova</Button>}>
+              Risposta vuota: il modello ha restituito solo ragionamento
+            </Notice>
+            <Notice icon={<CircleHelp className="size-4" />} tone="destructive" action={<Button variant="ghost" size="sm">Come si risolve</Button>}>
+              Il comando non è riuscito
+            </Notice>
+          </div>
+        </Section>
+      )}
 
-      <Section title="notice — ogni gravità, con e senza azione" testId="galleria-section-notice">
-        <div className="flex flex-col gap-3">
-          <Notice icon={<CheckCircle2 className="size-4" />}>Tutto a posto: nessuna azione da fare.</Notice>
-          <Notice icon={<TriangleAlert className="size-4" />} tone="warning">Un avviso giallo, senza azione.</Notice>
-          <Notice icon={<TriangleAlert className="size-4" />} tone="destructive">Un errore permanente senza azione.</Notice>
-          <Notice icon={<TriangleAlert className="size-4" />} tone="destructive" repeat={4} action={<Button variant="secondary" size="sm">Riprova</Button>}>
-            Risposta vuota: il modello ha restituito solo ragionamento
-          </Notice>
-          <Notice icon={<CircleHelp className="size-4" />} tone="destructive" action={<Button variant="ghost" size="sm">Come si risolve</Button>}>
-            Il comando non è riuscito
-          </Notice>
-        </div>
-      </Section>
+      {id === 'tabella' && (
+        <Section title="data-table — righe, vuota, testo lungo" testId="galleria-section-data-table">
+          <DataTable columns={colonne} rows={righe} rowKey={(r: typeof righe[0]) => r.id} testId="galleria-tabella" />
+          <div className="mt-6">
+            <DataTable columns={colonne} rows={righeVuote} rowKey={(r: typeof righe[0]) => r.id} empty="Nessuna ricetta: la tabella vuota." testId="galleria-tabella-vuota" />
+          </div>
+        </Section>
+      )}
 
-      <Section title="data-table — righe, vuota, testo lungo" testId="galleria-section-data-table">
-        <DataTable columns={colonne} rows={righe} rowKey={(r: typeof righe[0]) => r.id} testId="galleria-tabella" />
-        <div className="mt-6">
-          <DataTable columns={colonne} rows={righeVuote} rowKey={(r: typeof righe[0]) => r.id} empty="Nessuna ricetta: la tabella vuota." testId="galleria-tabella-vuota" />
-        </div>
-      </Section>
+      {id === 'elenchi' && (
+        <Section title="flat-list" testId="galleria-section-flat-list">
+          <FlatList testId="galleria-flat-list">
+            <FlatRow title="La prima riga" subtitle="con un sottotitolo" trailing={<Button variant="ghost" size="sm" shape="control">Apri</Button>} />
+            <FlatRow title="La seconda riga" subtitle="cliccabile" clickable onClick={() => undefined} />
+            <FlatRow title="La terza riga" />
+          </FlatList>
+        </Section>
+      )}
 
-      <Section title="flat-list" testId="galleria-section-flat-list">
-        <FlatList testId="galleria-flat-list">
-          <FlatRow title="La prima riga" subtitle="con un sottotitolo" trailing={<Button variant="ghost" size="sm" shape="control">Apri</Button>} />
-          <FlatRow title="La seconda riga" subtitle="cliccabile" clickable onClick={() => undefined} />
-          <FlatRow title="La terza riga" />
-        </FlatList>
-      </Section>
-
-      <Section title="section, page-header, column-head" testId="galleria-section-section">
-        <div className="grid grid-cols-2 gap-8 items-start">
-          <div>
-            <div data-testid="galleria-column-head"><ColumnHead name="Le colonne di prova">
-              <Button variant="ghost" icon aria-label="Aggiungi"><Plus className="size-4" /></Button>
-            </ColumnHead></div>
-            <div className="mt-4">
-              <PageHeader title="Una testata di pagina" description="La descrizione sotto la testata." testId="galleria-page-header-2" />
+      {id === 'testate' && (
+        <Section title="section, page-header, column-head" testId="galleria-section-section">
+          <div className="grid grid-cols-2 gap-8 items-start">
+            <div>
+              <div data-testid="galleria-column-head"><ColumnHead name="Le colonne di prova">
+                <Button variant="ghost" icon aria-label="Aggiungi"><Plus className="size-4" /></Button>
+              </ColumnHead></div>
+              <div className="mt-4">
+                <PageHeader title="Una testata di pagina" description="La descrizione sotto la testata." testId="galleria-page-header-2" />
+              </div>
+            </div>
+            <div>
+              <Section title="Una sezione con azione" action={<Button variant="ghost" size="sm">Mostra tutto</Button>}>
+                <div className="text-body">Il contenuto della sezione.</div>
+              </Section>
             </div>
           </div>
-          <div>
-            <Section title="Una sezione con azione" action={<Button variant="ghost" size="sm">Mostra tutto</Button>}>
-              <div className="text-body">Il contenuto della sezione.</div>
-            </Section>
+        </Section>
+      )}
+
+      {id === 'schede' && (
+        <Section title="underline-tabs — otto schede, la seconda attiva" testId="galleria-section-tabs">
+          <UnderlineTabs
+            tabs={[['una', 'Prima'], ['due', 'Seconda'], ['tre', 'Terza'], ['quattro', 'Quarta scheda'], ['cinque', 'Quinta scheda'], ['sei', 'Sesta scheda'], ['sette', 'Settima scheda'], ['otto', 'Ottava scheda']]}
+            value={tab}
+            onChange={setTab}
+            label="Le schede di prova"
+            testId="galleria-tabs"
+          />
+          <div className="mt-4 text-body">Il contenuto della scheda «{tab}»: il filetto resta sotto la scheda attiva.</div>
+        </Section>
+      )}
+
+      {id === 'dialogo' && (
+        <Section title="dialog — aperto (scena sua: l'overlay copre il resto)" testId="galleria-section-dialog">
+          <div className="h-64 relative">
+            <Dialog open onOpenChange={() => undefined}>
+              <DialogContent data-testid="galleria-dialogo">
+                <DialogHeader>
+                  <DialogTitle>Il dialogo di prova</DialogTitle>
+                  <DialogDescription>La descrizione che spiega cosa fa.</DialogDescription>
+                </DialogHeader>
+                <div className="text-body">Il corpo del dialogo.</div>
+                <DialogFooter>
+                  <DialogClose asChild><Button variant="ghost">Annulla</Button></DialogClose>
+                  <DialogClose asChild><Button variant="primary">Conferma</Button></DialogClose>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
-        </div>
-      </Section>
+        </Section>
+      )}
 
-      <Section title="dialog e dropdown-menu aperti" testId="galleria-section-dialog">
-        <div className="h-64 relative">
-          <Dialog open={dialogo} onOpenChange={setDialogo}>
-            <DialogContent data-testid="galleria-dialogo">
-              <DialogHeader>
-                <DialogTitle>Il dialogo di prova</DialogTitle>
-                <DialogDescription>La descrizione che spiega cosa fa.</DialogDescription>
-              </DialogHeader>
-              <div className="text-body">Il corpo del dialogo.</div>
-              <DialogFooter>
-                <DialogClose asChild><Button variant="ghost">Annulla</Button></DialogClose>
-                <DialogClose asChild><Button variant="primary">Conferma</Button></DialogClose>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-          <DropdownMenu open={menu} onOpenChange={setMenu}>
-            <DropdownMenuTrigger asChild>
-              <Button variant="secondary" size="sm">Il menu aperto ▾</Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent data-testid="galleria-menu">
-              <DropdownMenuItem>Apri</DropdownMenuItem>
-              <DropdownMenuItem>Rinomina</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>Archivia</DropdownMenuItem>
-              <DropdownMenuItem className="text-destructive">Elimina</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </Section>
+      {id === 'menu' && (
+        <Section title="dropdown-menu — aperto (scena sua)" testId="galleria-section-menu">
+          <div className="h-64 relative">
+            <DropdownMenu open onOpenChange={() => undefined}>
+              <DropdownMenuTrigger asChild>
+                <Button variant="secondary" size="sm">Il menu aperto ▾</Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent data-testid="galleria-menu">
+                <DropdownMenuItem>Apri</DropdownMenuItem>
+                <DropdownMenuItem>Rinomina</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem>Archivia</DropdownMenuItem>
+                <DropdownMenuItem className="text-destructive">Elimina</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </Section>
+      )}
 
-      <Section title="ModelPicker e ModelSelect" testId="galleria-section-model">
-        <Riga label="ModelPicker">
-          <ModelPicker models={MODELLI} value={modello} onChange={setModello} placeholder="predefinito…" />
-          <ModelPicker models={MODELLI} value={null} onChange={() => undefined} placeholder="nessun modello" />
-          <ModelPicker models={MODELLI} value={modello} onChange={() => undefined} disabled />
-          <ModelPicker models={MODELLI} value={null} onChange={() => undefined} pillTrigger={{ label: 'Altri modelli…' }} />
-        </Riga>
-        <Riga label="ModelSelect">
-          <ModelSelect value={null} onChange={() => undefined} allowNone allowFollowMain />
-          <ModelSelect value={{ providerId: 'finto', model: 'finto' }} onChange={() => undefined} />
-        </Riga>
-      </Section>
+      {id === 'modelli' && (
+        <Section title="ModelPicker e ModelSelect" testId="galleria-section-model">
+          <Riga label="ModelPicker">
+            <ModelPicker models={MODELLI} value={modello} onChange={setModello} placeholder="predefinito…" />
+            <ModelPicker models={MODELLI} value={null} onChange={() => undefined} placeholder="nessun modello" />
+            <ModelPicker models={MODELLI} value={modello} onChange={() => undefined} disabled />
+            <ModelPicker models={MODELLI} value={null} onChange={() => undefined} pillTrigger={{ label: 'Altri modelli…' }} />
+          </Riga>
+          <Riga label="ModelSelect">
+            <ModelSelect value={null} onChange={() => undefined} allowNone allowFollowMain />
+            <ModelSelect value={{ providerId: 'finto', model: 'finto' }} onChange={() => undefined} />
+          </Riga>
+        </Section>
+      )}
 
-      <Section title="puntini di stato dei bot — tutti i colori, 8 px" testId="galleria-section-puntini">
-        <div className="flex items-center gap-4">
-          {PUNTINI.map((c) => (
-            <div key={c} className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
-              <span data-testid={`bot-dot-${c}`} aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ background: `var(--bot-dot-${c})` }} />
-              <span className="text-caption">{c}</span>
+      {id === 'pillole' && (
+        <Section title="pillole, badge e puntini di stato" testId="galleria-section-puntini">
+          <Riga label="pillole e badge">
+            <Button variant="primary" size="sm">Pillola</Button>
+            <span className="inline-flex items-center rounded-full bg-muted px-2 h-control-sm text-caption">badge neutro</span>
+            <span className="inline-flex items-center rounded-full bg-destructive text-destructive-foreground px-2 h-control-sm text-caption">badge rosso</span>
+          </Riga>
+          <Riga label="puntini di stato dei bot — tutti i colori, 8 px">
+            <div className="flex items-center gap-4">
+              {PUNTINI.map((c) => (
+                <div key={c} className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
+                  <span data-testid={`bot-dot-${c}`} aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ background: `var(--bot-dot-${c})` }} />
+                  <span className="text-caption">{c}</span>
+                </div>
+              ))}
+            </div>
+          </Riga>
+          <Riga label="famiglie dell'avatar">
+            <div className="flex items-center gap-4">
+              {BOT_FAMILIES.map((f) => (
+                <div key={f} className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
+                  <span aria-hidden="true" className="size-5 shrink-0 rounded-full" style={{ background: 'var(--bot-dot-c1)' }} />
+                  <span className="text-caption">{f}</span>
+                </div>
+              ))}
+            </div>
+          </Riga>
+        </Section>
+      )}
+
+      {id === 'gusci' && (
+        <Section title="page-shell — i tre gusci di larghezza" testId="galleria-section-shell">
+          {/* G2: ogni guscio sta in un riquadro relative ad altezza FISSA con
+              overflow-hidden: PageShell è absolute inset-0, senza il riquadro
+              l'ultimo guscio si stenderebbe su tutta la pagina (page-shell.tsx
+              non si tocca) */}
+          {(['reading', 'page', 'wide'] as PageWidth[]).map((w) => (
+            <div key={w} className="mb-4 h-40 overflow-hidden rounded-surface border border-border">
+              <PageShell width={w} testId={`galleria-shell-${w}`} headName="componenti"
+                header={<PageHeader title={`Il guscio «${w}»`} testId={`galleria-shell-header-${w}`} />}
+                contentClassName="py-4">
+                <PageColumn width={w}>
+                  <div className="text-body">Il contenuto del guscio «{w}»: la colonna centrata alla larghezza scelta.</div>
+                </PageColumn>
+              </PageShell>
             </div>
           ))}
-        </div>
-        <Riga label="famiglie dell'avatar">
-          {BOT_FAMILIES.map((f) => (
-            <div key={f} className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
-              <span aria-hidden="true" className="size-5 shrink-0 rounded-full" style={{ background: 'var(--bot-dot-c1)' }} />
-              <span className="text-caption">{f}</span>
-            </div>
-          ))}
-        </Riga>
-      </Section>
+        </Section>
+      )}
 
-      <Section title="DocumentBody — tutti i casi del markdown" testId="galleria-section-markdown">
-        <PageColumn width="reading">
-          <DocumentBody markdown={MD_TUTTI_I_CASI} />
-        </PageColumn>
-      </Section>
+      {id === 'markdown-1' && (
+        <Section title="DocumentBody — titoli, grassetti ed elenchi (1ª parte)" testId="galleria-section-markdown-1">
+          <PageColumn width="reading">
+            <DocumentBody markdown={MD_PRIMA_PARTE} />
+          </PageColumn>
+        </Section>
+      )}
 
-      <Section title="PageShell — i tre gusci di larghezza" testId="galleria-section-shell">
-        {(['reading', 'page', 'wide'] as PageWidth[]).map((w) => (
-          <div key={w} className="mb-6 h-40">
-            <PageShell width={w} testId={`galleria-shell-${w}`} headName="componenti"
-              header={<PageHeader title={`Il guscio «${w}»`} testId={`galleria-shell-header-${w}`} />}
-              contentClassName="py-4">
-              <PageColumn width={w}>
-                <div className="text-body">Il contenuto del guscio «{w}»: la colonna centrata alla larghezza scelta.</div>
-              </PageColumn>
-            </PageShell>
-          </div>
-        ))}
-      </Section>
+      {id === 'markdown-2' && (
+        <Section title="DocumentBody — tabella, citazione e codice (2ª parte)" testId="galleria-section-markdown-2">
+          <PageColumn width="reading">
+            <DocumentBody markdown={MD_SECONDA_PARTE} />
+          </PageColumn>
+        </Section>
+      )}
     </div>
   )
 }
@@ -324,19 +408,25 @@ const Pagina = () => {
 let host: HTMLDivElement | null = null
 let radice: ReturnType<typeof createRoot> | null = null
 
-const apri = () => {
-  if (host) return
+const monta = (id: IdSezione) => {
+  if (!host) return
+  radice?.unmount()
+  radice = createRoot(host)
+  radice.render(
+    <I18nProvider i18n={i18n}>
+      <Sezione id={id} />
+    </I18nProvider>
+  )
+}
+
+const apri = (id?: IdSezione) => {
+  chiudi()
   host = document.createElement('div')
   host.dataset.testid = 'galleria-componenti'
   // la pagina di test sta sopra tutto; il tema (la classe dark) lo decide la galleria sull'<html>
   host.style.cssText = 'position:fixed;inset:0;z-index:2147483600;background:var(--background);color:var(--foreground);overflow:auto'
   document.body.appendChild(host)
-  radice = createRoot(host)
-  radice.render(
-    <I18nProvider i18n={i18n}>
-      <Pagina />
-    </I18nProvider>
-  )
+  monta(SEZIONI.find((s) => s.id === id) ? id! : SEZIONI[0]!.id)
 }
 
 const chiudi = () => {
@@ -346,8 +436,8 @@ const chiudi = () => {
   host = null
 }
 
-/** L'API che la galleria usa: apri()/chiudi() tra le scene. L'import del modulo NON apre nulla. */
-;(window as unknown as Record<string, unknown>).__galleriaComponenti = { apri, chiudi }
+/** L'API che la galleria usa: apri(sezione)/chiudi() tra le scene, sezioni() per l'elenco. L'import del modulo NON apre nulla. */
+;(window as unknown as Record<string, unknown>).__galleriaComponenti = { apri, chiudi, sezioni: () => SEZIONI.map((s) => s.id) }
 
 // la lingua dell'interfaccia di prova (il sorgente è italiano: anche senza catalogo i testi sono giusti)
 void activateUiLanguage('it')

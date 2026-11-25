@@ -58,4 +58,26 @@ describe('ogni componente di components/ui/ è nella pagina dei componenti', () 
     })
     expect(mancanti).toEqual([])
   })
+
+  // G2 (fase fondamenta-galleria): la pagina è a SEZIONI e la galleria fa una
+  // scena per sezione — un componente che nessuna sezione dichiara non si
+  // vedrebbe mai: la guardia controlla la dichiarazione `componenti:` di SEZIONI
+  it('ogni file di components/ui/ è dichiarato nei componenti di almeno una sezione', () => {
+    const pagina = readFileSync(join(RENDERER, 'galleria', 'componenti.tsx'), 'utf8')
+    const fileUi = readdirSync(join(RENDERER, 'components', 'ui')).filter((f) => f.endsWith('.tsx')).map((f) => f.replace(/\.tsx$/, ''))
+    const mancanti = fileUi.filter((nome) => {
+      const re = new RegExp(`componenti:\\s*\\[[^\\]]*['"]${nome}['"]`)
+      return !re.test(pagina)
+    })
+    expect(mancanti).toEqual([])
+  })
+
+  it('le sezioni hanno id unici e validi ( diventano scene componenti-<id>)', () => {
+    const pagina = readFileSync(join(RENDERER, 'galleria', 'componenti.tsx'), 'utf8')
+    const blocco = pagina.slice(pagina.indexOf('export const SEZIONI'))
+    const id = [...blocco.matchAll(/\{ id: '([^']+)',/g)].map((m) => m[1]!)
+    expect(id.length).toBeGreaterThan(0)
+    expect(new Set(id).size).toBe(id.length)
+    for (const i of id) expect(i).toMatch(/^[a-z0-9-]+$/)
+  })
 })
