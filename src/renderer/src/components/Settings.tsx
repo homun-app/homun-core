@@ -90,7 +90,8 @@ function uiLang(): 'it' | 'en' {
   return i18n.locale === 'en' ? 'en' : 'it'
 }
 
-export function Settings() {
+/** I dati iniziali della scheda «Uso e costi» (per i test senza effect; nel prodotto si caricano dall'api) — la cucitura sta sul padre, come registroInitial in ApprovalsCenter: UsageTab non è esportato, il test passa da qui. */
+export function Settings({ usageInitial }: { usageInitial?: UsageTabInitial } = {}) {
   const { i18n } = useLingui()
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   // OA3 (fase onboarding-a): la guida aspetta il modello — chi arriva qui dal
@@ -213,7 +214,7 @@ export function Settings() {
                 </SettingsPage>
               )}
               {tab === 'routine' && <RoutinesTab />}
-              {tab === 'uso' && <UsageTab />}
+              {tab === 'uso' && <UsageTab initial={usageInitial} />}
             </PageColumn>
           </div>
         </div>
@@ -732,7 +733,12 @@ type UsageView = 'model' | 'agent' | 'source'
 /** Una riga della tabella col suo posto: la chiave è il nome più il posto (un modello può comparire due volte). */
 type UsageLine = { row: ModelUsageRow; index: number }
 
-export function UsageTab({ initial }: { initial?: UsageTabInitial }) {
+/**
+ * La scheda «Uso e costi». LOCALE dal C0 della fase linguaggio: l'export
+ * serviva solo ai test (il censimento la diceva «SOLO TEST»); la cucitura di
+ * test è usageInitial di Settings, sopra.
+ */
+function UsageTab({ initial }: { initial?: UsageTabInitial }) {
   const { t, i18n } = useLingui()
   const providers = useStore((s) => s.providers)
   const [period, setPeriod] = useState<UsagePeriod>('7d')

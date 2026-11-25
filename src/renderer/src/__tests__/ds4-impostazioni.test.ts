@@ -29,7 +29,7 @@ vi.mock('react/jsx-dev-runtime', async (orig) => {
   }
 })
 
-const { Settings, UsageTab } = await import('../components/Settings')
+const { Settings } = await import('../components/Settings')
 const { VaultTab } = await import('../components/VaultSettings')
 const { SettingsGroup } = await import('../components/settings/SettingsGroup')
 const { SettingsRow, SettingsSegments } = await import('../components/settings/SettingsRow')
@@ -950,7 +950,10 @@ describe('DS4 Impostazioni: «Uso e costi»', () => {
 
   it('la tabella è DataTable: intestazioni text-caption grigie in tono normale e su una riga, i numeri a destra, «parziale» il dettaglio grigio, «locale» una cella secondaria', () => {
     setStoreStateForRender(useStore, { providers: [] } as never)
-    const root = htmlOf(createElement(UsageTab, { initial: { rows: ROWS, modelRows: [], prices: {} } as never }))
+    // C0 (fase linguaggio): UsageTab non è più esportata (serviva solo ai
+    // test): si rende tramite Settings, con la cucitura usageInitial
+    setStoreStateForRender(useStore, { settingsOpen: true, settingsTab: 'uso' })
+    const root = htmlOf(createElement(Settings, { usageInitial: { rows: ROWS, modelRows: [], prices: {} } } as never))
     const table = byTag(root, 'table')[0]!
     // se non ci sta scorre DENTRO la tabella: mai la pagina
     expect(has(table.parent!, 'overflow-x-auto', 'scroll-thin')).toBe(true)
@@ -982,23 +985,32 @@ describe('DS4 Impostazioni: «Uso e costi»', () => {
     expect(textOf(celleLocali[5]!)).toBe('locale')
     expect(has(byTag(celleLocali[5]!, 'span')[0]!, 'text-small', 'text-muted-foreground')).toBe(true)
     expect(textOf(celleLocali[0]!)).toContain('locale-x')
-    expect(textOffSystem(root)).toEqual([])
-    expect(radiusOffSystem(root)).toEqual([])
-    expect(measureOffSystem(root)).toEqual([])
+    // i controlli di sistema guardano DENTRO il corpo che scorre (il guscio
+    // del dialogo porta le sue misure min(…), che non sono di questa scheda)
+    const dentro = settingsScroller(root)
+    expect(textOffSystem(dentro)).toEqual([])
+    expect(radiusOffSystem(dentro)).toEqual([])
+    expect(measureOffSystem(dentro)).toEqual([])
   })
 
   /** Le celle di una tabella resa: per riga, il testo di ogni cella. */
   const celleDi = (root: HtmlNode): string[][] => byTag(byTag(root, 'tbody')[0]!, 'tr').map((tr) => byTag(tr, 'td').map((td) => textOf(td)))
   const intestazioniDi = (root: HtmlNode): string[] => byTag(byTag(root, 'table')[0]!, 'th').map(textOf)
 
+  /** Il render della scheda «uso» tramite Settings (UsageTab non è più esportata). */
+  const renderUso = (initial: Record<string, unknown>): HtmlNode => {
+    setStoreStateForRender(useStore, { settingsOpen: true, settingsTab: 'uso' })
+    return htmlOf(createElement(Settings, { usageInitial: initial } as never))
+  }
+
   it('le tre viste cambiano l\u2019intestazione e il nome della prima colonna; senza chiamate lo dice, senza tabella', () => {
-    const perBot = htmlOf(createElement(UsageTab, { initial: { view: 'agent', rows: ROWS, modelRows: [], prices: {} } as never }))
+    const perBot = renderUso({ view: 'agent', rows: ROWS, modelRows: [], prices: {} })
     expect(intestazioniDi(perBot)[0]).toBe('bot')
     expect(celleDi(perBot).map((riga) => riga[0])).toEqual(['Bot', 'Sistema'])
-    const perOrigine = htmlOf(createElement(UsageTab, { initial: { view: 'source', rows: ROWS, modelRows: [], prices: {} } as never }))
+    const perOrigine = renderUso({ view: 'source', rows: ROWS, modelRows: [], prices: {} })
     expect(intestazioniDi(perOrigine)[0]).toBe('origine')
     expect(celleDi(perOrigine).map((riga) => riga[0])).toEqual(['turno', 'suggerimento routine'])
-    const senza = htmlOf(createElement(UsageTab, { initial: { rows: [], modelRows: [], prices: {} } as never }))
+    const senza = renderUso({ rows: [], modelRows: [], prices: {} })
     expect(byTag(senza, 'table')).toEqual([])
     expect(textOf(senza)).toContain('Nessuna chiamata nel periodo.')
   })
