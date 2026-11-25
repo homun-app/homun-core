@@ -15,7 +15,7 @@
 //   B5 l'anello del fuoco: nessuno dopo un clic del mouse, sì con Tab.
 // Catture solo via CDP in docs/catture/fase-b20-bug/ (chiaro e scuro).
 //
-//   node scripts/fase-b20-bug-probe.mjs [--run 1|2|3] [--app <cartella>] [--prima]
+//   node scripts/fase-b20-bug-probe.mjs [--app <cartella>] [--prima]
 //
 // --app: l'app da avviare (package.json + out/; default: questo repo). Le
 //        catture «prima» vengono dal build della base (ee2b0d3b), salvato in
@@ -27,37 +27,35 @@
 // database TEMPORANEO della sonda; i risvegli (B2) entrano dalla coda dei job,
 // come quelli veri (un comando finito). Nessuna rete fuori da 127.0.0.1,
 // nessun Docker, nessun Composio vero: mai i file VERI delle altre app.
-import { spawn, spawnSync } from 'node:child_process'
+//
+// F7 (fase fondamenta): la sonda usa il MOTORE comune (scripts/lib/sonda.mjs):
+// un avvio per corsa con porta CDP libera scelta a caso, e le attese sono su
+// CONDIZIONE (s.attendi e varianti), non a tempo. Cosa controlla NON cambia:
+// stesse verifiche e stesso numero di controlli verdi (76).
 import { DatabaseSync } from 'node:sqlite'
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServer } from 'node:http'
+import { avviaSonda } from './lib/sonda.mjs'
+import { findProbeDaemons } from './lib/probe-daemons.mjs'
 
 const ROOT = join(import.meta.dirname, '..')
 const argValue = (flag) => (process.argv.includes(flag) ? process.argv[process.argv.indexOf(flag) + 1] : undefined)
 const APP_DIR = resolve(argValue('--app') ?? ROOT)
 const PRIMA = process.argv.includes('--prima')
 const PREFIX = 'sandbot-fase-b20-bug'
-const TMP = mkdtempSync(`/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/${PREFIX}-`)
-const DATA = join(TMP, 'data')
-const FAKE_HOME = join(TMP, 'home')
-const DB = join(DATA, 'data', 'sandbot.db')
 const SHOTS = join(ROOT, 'docs', 'catture', 'fase-b20-bug')
 mkdirSync(SHOTS, { recursive: true })
-mkdirSync(DATA, { recursive: true })
-mkdirSync(FAKE_HOME, { recursive: true })
 const shotName = (name) => `${PRIMA ? 'prima-' : ''}${name}.png`
 
 const results = []
 const T0 = Date.now()
 const log = (...a) => console.log('[fase-b20-bug]', `+${((Date.now() - T0) / 1000).toFixed(1)}s`, ...a)
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const check = (name, ok, detail = '') => {
   results.push({ name, ok: !!ok, detail: String(detail).slice(0, 300) })
   log(ok ? 'OK ' : 'KO ', name, ok ? '' : '— ' + detail)
 }
-const withTimeout = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + what)), ms))])
 
 /** L'impronta del build che si avvia (per il REPORT: quali file, quale hash). */
 const buildFingerprint = () => {
@@ -307,175 +305,73 @@ composio.url = `http://127.0.0.1:${composioMcp.address().port}/mcp`
 /** Il tempo massimo del daemon sull'avvio (ms), accorciato per la sonda: di serie 20 000. */
 const APP_CONNECT_TIMEOUT_MS = 1500
 
-// ---- l'app Electron VERA (out/ dell'app scelta) ----
-const ELECTRON = join(ROOT, 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
-const DEBUG_PORT = 9591 + (Number(process.argv.includes('--run') ? process.argv[process.argv.indexOf('--run') + 1] : '0') % 20)
-let appLog = ''
-let app = null
-const startApp = () => {
-  appLog = ''
-  // la finestra COPERTA: senza questi tre interruttori Chromium la considera nascosta e non consegna più gli eventi (valgono uguale per la base e per il build della fase)
-  const CHROMIUM_COVERED = ['--disable-features=MacWebContentsOcclusion', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding']
-  const p = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`, '--lang=it', ...CHROMIUM_COVERED], {
-    cwd: APP_DIR,
-    env: {
-      HOME: FAKE_HOME,
-      PATH: process.env.PATH,
-      SANDBOT_TEST_USER_DATA: DATA,
-      SANDBOT_TEST_FAKE_KEYCHAIN: join(DATA, 'keychain-finta.json'),
-      SANDBOT_TEST_FAKE_SAFESTORAGE: join(DATA, 'safestorage-finta.json'),
-      // B3: il Composio FINTO (server MCP + AS), il «browser» finto e il tempo massimo dell'avvio accorciato (valgono uguale per la base e per il build della fase; la base non legge l'ultimo)
-      SANDBOT_TEST_COMPOSIO_MCP_URL: composio.url,
-      SANDBOT_TEST_FAKE_BROWSER: '1',
-      SANDBOT_TEST_APP_CONNECT_TIMEOUT_MS: String(APP_CONNECT_TIMEOUT_MS)
-    },
-    stdio: ['ignore', 'pipe', 'pipe']
-  })
-  p.stdout.on('data', (d) => { appLog += d.toString() })
-  p.stderr.on('data', (d) => { appLog += d.toString() })
-  app = p
-  return p
-}
-const stopApp = () => { try { app?.kill('SIGTERM') } catch { /* già via */ } }
-const pidAlive = (pid) => { try { process.kill(pid, 0); return true } catch { return false } }
-const waitPidGone = async (pid, capMs = 15_000) => {
-  const deadline = Date.now() + capMs
-  while (pidAlive(pid)) {
-    if (Date.now() > deadline) return false
-    await sleep(200)
-  }
-  return true
-}
-const cleanupFromSignal = async (code) => {
-  stopApp()
-  try {
-    if (Number.isInteger(app?.pid)) await waitPidGone(app.pid, 8_000)
-    const { stopProbeDaemons } = await import('./lib/probe-daemons.mjs')
-    await stopProbeDaemons(PREFIX, { log: () => undefined }).catch(() => undefined)
-    rmSync(TMP, { recursive: true, force: true })
-  } catch { /* meglio possibile */ }
-  process.exit(code)
-}
-process.on('SIGINT', () => { void cleanupFromSignal(130) })
-process.on('SIGTERM', () => { void cleanupFromSignal(143) })
-// un'eccezione non catturata (per esempio in un server finto della sonda) chiude app, daemon e cartella: una corsa caduta non lascia nulla
-process.on('uncaughtException', (e) => { console.error('[fase-b20-bug] eccezione non catturata nella sonda:', e?.stack ?? e); void cleanupFromSignal(1) })
-process.on('unhandledRejection', (e) => { console.error('[fase-b20-bug] rifiuto non catturato nella sonda:', e instanceof Error ? e.stack : e); void cleanupFromSignal(1) })
+// ---- l'app Electron VERA (out/ dell'app scelta) via il MOTORE comune (F7): un avvio per corsa, porta CDP libera scelta a caso ----
+const sonda = await avviaSonda({
+  prefix: PREFIX,
+  appDir: APP_DIR,
+  envExtra: {
+    // B3: il Composio FINTO (server MCP + AS), il «browser» finto e il tempo massimo dell'avvio accorciato (valgono uguale per la base e per il build della fase; la base non legge l'ultimo)
+    SANDBOT_TEST_COMPOSIO_MCP_URL: composio.url,
+    SANDBOT_TEST_FAKE_BROWSER: '1',
+    SANDBOT_TEST_APP_CONNECT_TIMEOUT_MS: String(APP_CONNECT_TIMEOUT_MS)
+  },
+  log
+})
 
-// ---- CDP ----
-const httpJson = async (path) => (await fetch(`http://127.0.0.1:${DEBUG_PORT}${path}`).then((r) => r.json()))
-async function openCdp(url) {
-  const sock = new WebSocket(url)
-  await new Promise((res, rej) => { sock.onopen = res; sock.onerror = rej })
-  let id = 0
-  const waits = new Map()
-  sock.onmessage = (m) => {
-    const v = JSON.parse(m.data)
-    if (v.id && waits.has(v.id)) { const w = waits.get(v.id); waits.delete(v.id); v.error ? w.rej(new Error(v.error.message)) : w.res(v.result) }
-  }
-  return {
-    sock,
-    send: (method, params = {}, capMs = 20_000) => withTimeout(new Promise((res, rej) => {
-      const mid = ++id
-      waits.set(mid, { res, rej })
-      sock.send(JSON.stringify({ id: mid, method, params }))
-    }), capMs, method)
-  }
+// ---- gli aiuti sopra il motore: le attese sono su CONDIZIONE, non a tempo ----
+/** Il clic del motore (il suo loop di riprova è integrato), col risultato booleano della sonda: false se il bersaglio non c'è. */
+const clic = async (testid, entro = 5_000) => sonda.clic(testid, { entro }).catch(() => false)
+const clicAria = async (label, entro = 5_000) => sonda.clicAria(label, { entro }).catch(() => false)
+/** Un messaggio scritto nel campo di scrittura e inviato col submit del form, come farebbe l'utente. */
+const sendMessage = async (text) => {
+  await sonda.scrivi('form textarea', text)
+  return sonda.eval(`
+    const ta = document.querySelector('form textarea')
+    if (!ta) return false
+    ta.closest('form').requestSubmit()
+    return true
+  `)
 }
-const waitForPage = async (timeoutMs = 30_000) => {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    try {
-      const list = await httpJson('/json/list')
-      const target = list.find((t) => t.type === 'page' && !(t.url ?? '').includes('/pip/'))
-      if (target) return { cdp: await openCdp(target.webSocketDebuggerUrl), url: target.url }
-    } catch { /* il debugger non è ancora su */ }
-    if (Date.now() > deadline) return null
-    await sleep(200)
-  }
+/** Il testo della colonna della chat (compattato). */
+const chatText = () => sonda.eval(`return (document.querySelector('main')?.textContent ?? '').replace(/\\s+/g, ' ').trim()`)
+const entriesOf = (agentId) => sonda.rpc(`getEntries(${JSON.stringify(agentId)})`)
+/** Le ultime entry del transcript, per il log (kind · role · content · meta): la catena esatta la si legge qui. */
+const logTranscript = async (agentId, last = 14, tag = 'transcript') => {
+  const all = await entriesOf(agentId)
+  const rows = all.slice(-last).map((e) => `${e.id}:${e.kind}${e.role === 'user' ? '/user' : ''} ${JSON.stringify(String(e.content ?? '').slice(0, 46))} ${e.meta ? JSON.stringify(Object.fromEntries(Object.entries(e.meta).filter(([k]) => !['ui', 'retry'].includes(k)))).slice(0, 110) : ''}${e.meta?.ui ? ' ui=' + JSON.stringify(e.meta.ui) : ''}`)
+  log(tag, `(${all.length} entry)`, rows.join('\n  '))
 }
-const pageEval = async (cdp, expr) => {
-  const r = await withTimeout(cdp.send('Runtime.evaluate', { expression: `((async () => { ${expr} })())`, awaitPromise: true, returnByValue: true }), 30_000, 'Runtime.evaluate')
-  if (r.exceptionDetails) throw new Error('eccezione nel renderer: ' + JSON.stringify(r.exceptionDetails.exception?.description ?? r.exceptionDetails).slice(0, 400))
-  return r?.result?.value
+/** Il reload della pagina: il segno sparisce col nuovo documento, così le attese dopo non leggono la pagina VECCHIA. */
+const ricarica = async () => {
+  await sonda.eval(`window.__b20reload = true; setTimeout(() => location.reload(), 0); return true`).catch(() => undefined)
+  await sonda.attendi(`!window.__b20reload`, { entro: 15_000, motivo: 'il reload sia partito (il segno è sparito)' }).catch(() => undefined)
 }
-const rpc = async (cdp, callExpr) => {
-  for (let i = 0; i < 8; i++) {
-    try {
-      return await pageEval(cdp, `if (!window.sandbot) throw new Error('preload non pronto'); return await window.sandbot.${callExpr}`)
-    } catch (e) {
-      if (i === 7) throw e
-      await sleep(700)
-    }
-  }
+/** Il clic VERO del mouse (CDP: moved, pressed, released) su un punto della finestra: poi si aspetta che il fuoco sia in modalità «pointer», non un tempo fisso. */
+const realClick = async (point) => {
+  await sonda.mouse({ type: 'mouseMoved', x: point.x, y: point.y })
+  await sonda.mouse({ type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1 })
+  await sonda.mouse({ type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1 })
+  await sonda.attendi(`(() => { const el = document.activeElement; const from = document.documentElement.dataset.focusFrom ?? document.documentElement.getAttribute('data-focus-from'); return !!el && el !== document.body && from === 'pointer' })()`,
+    { entro: 4_000, motivo: 'il fuoco dopo il clic sia in modalità «pointer»' }).catch(() => false)
 }
-const waitDom = async (cdp, exprTrue, timeoutMs = 8_000, step = 200) => {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    try {
-      if (await pageEval(cdp, `return !!(${exprTrue})`) === true) return true
-    } catch { /* si riprova */ }
-    if (Date.now() > deadline) return false
-    await sleep(step)
-  }
+/** Il tasto Tab VERO (CDP): poi si aspetta che il fuoco sia passato in modalità «keyboard». */
+const realTab = async () => {
+  await sonda.tasto({ type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 })
+  await sonda.tasto({ type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 })
+  await sonda.attendi(`(() => { const el = document.activeElement; const from = document.documentElement.dataset.focusFrom ?? document.documentElement.getAttribute('data-focus-from'); return !!el && el !== document.body && from === 'keyboard' })()`,
+    { entro: 4_000, motivo: 'il fuoco passi in modalità «keyboard» con Tab' }).catch(() => false)
 }
-/** Aspetta che una valutazione torni un valore non nullo (il valore, o null a fine tempo). */
-const waitValue = async (cdp, expr, timeoutMs = 8_000, step = 250) => {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    try {
-      const v = await pageEval(cdp, `return (${expr})`)
-      if (v !== null && v !== undefined && v !== false) return v
-    } catch { /* si riprova */ }
-    if (Date.now() > deadline) return null
-    await sleep(step)
-  }
-}
-/** Il clic di un elemento per testid (porta al centro, eventi di puntatore, click). */
-const clickTestid = async (cdp, testid, timeoutMs = 5_000) => {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const ok = await pageEval(cdp, `
-      const el = document.querySelector('[data-testid=${JSON.stringify(testid)}]')
-      if (!el) return false
-      el.scrollIntoView({ block: 'center' })
-      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1 }))
-      el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 1 }))
-      el.click()
-      return true
-    `).catch(() => false)
-    if (ok) return true
-    if (Date.now() > deadline) return false
-    await sleep(250)
-  }
-}
-/** Il centro di un elemento (per il clic VERO del mouse di CDP). */
-const centerOf = (cdp, selectorExpr) => pageEval(cdp, `
-  const el = ${selectorExpr}
-  if (!el) return null
-  el.scrollIntoView({ block: 'nearest' })
-  const r = el.getBoundingClientRect()
-  return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), w: Math.round(r.width), h: Math.round(r.height) }
-`)
-/** Il clic VERO del mouse (CDP: moved, pressed, released) su un punto della finestra. */
-const realClick = async (cdp, point) => {
-  await cdp.send('Page.bringToFront', {}, 8_000).catch(() => undefined)
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y }, 8_000)
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1 }, 8_000)
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1 }, 8_000)
-  await sleep(350)
-}
-/** Il tasto Tab VERO (CDP). */
-const realTab = async (cdp) => {
-  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 }, 8_000)
-  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 }, 8_000)
-  await sleep(350)
+/** Un tasto VERO (CDP): poi due frame del renderer, così lo stato del fuoco letto dalla pagina è quello DOPO l'evento. */
+const realKey = async (key, code, vk) => {
+  await sonda.tasto({ type: 'keyDown', key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk })
+  await sonda.tasto({ type: 'keyUp', key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk })
+  await sonda.eval(`await Promise.race([new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))), new Promise((r) => setTimeout(r, 1500))]); return true`)
 }
 /**
  * L'anello di fuoco dell'elemento che ha il focus: outline e ombra calcolati,
  * se Chromium lo dichiara :focus-visible e la modalità segnata sull'<html>.
  */
-const ringOf = (cdp) => pageEval(cdp, `
+const ringOf = () => sonda.eval(`
   const el = document.activeElement
   if (!el || el === document.body) return null
   const cs = getComputedStyle(el)
@@ -487,64 +383,9 @@ const ringOf = (cdp) => pageEval(cdp, `
 `)
 /** True se l'elemento col focus mostra un anello (outline disegnato o ombra). */
 const ringShown = (r) => r !== null && ((r.outline.startsWith('none') === false && !/ 0px/.test(r.outline)) || (r.shadow && r.shadow !== 'none'))
-/** Il clic del primo bottone con quest'etichetta accessibile (aria-label o title). */
-const clickAria = async (cdp, label, timeoutMs = 5_000) => {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const ok = await pageEval(cdp, `
-      // due bottoni con la stessa etichetta (barra larga e barra stretta): si prende quello VISIBILE
-      const all = [...document.querySelectorAll('aside button, aside [role="button"], button, [role="button"]')].filter((x) => { const a = x.getAttribute('aria-label') ?? x.title ?? ''; return a === ${JSON.stringify(label)} || (x.textContent ?? '').trim() === ${JSON.stringify(label)} })
-      const b = all.find((x) => x.getClientRects().length > 0) ?? all[0]
-      if (!b) return false
-      b.click()
-      return true
-    `).catch(() => false)
-    if (ok) return true
-    if (Date.now() > deadline) return false
-    await sleep(250)
-  }
-}
-const setViewport = async (cdp, width, height) => {
-  await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, mobile: false, deviceScaleFactor: 2 })
-  await sleep(800)
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 }).catch(() => undefined)
-  await sleep(150)
-}
-const setDark = async (cdp, dark) => {
-  await pageEval(cdp, `document.documentElement.classList.${dark ? 'add' : 'remove'}('dark'); return true`)
-  await sleep(300)
-}
-const settle = async (cdp) => {
-  await cdp.send('Page.bringToFront').catch(() => undefined)
-  await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
-  await pageEval(cdp, `await Promise.race([new Promise((resolve) => { let n = 0; const step = () => { if (++n >= 2) resolve(); else requestAnimationFrame(step) }; requestAnimationFrame(step) }), new Promise((resolve) => setTimeout(resolve, 1500))])`)
-  await sleep(350)
-}
-const shot = async (cdp, name) => {
-  await settle(cdp)
-  const r = await cdp.send('Page.captureScreenshot', { format: 'png' })
-  writeFileSync(join(SHOTS, shotName(name)), Buffer.from(r.data, 'base64'))
+const shot = async (name) => {
+  await sonda.cattura(join(SHOTS, shotName(name)))
   log('cattura', shotName(name))
-}
-/** Il testo della colonna della chat (compattato). */
-const chatText = (cdp) => pageEval(cdp, `return (document.querySelector('main')?.textContent ?? '').replace(/\\s+/g, ' ').trim()`)
-const entriesOf = (cdp, agentId) => rpc(cdp, `getEntries(${JSON.stringify(agentId)})`)
-/** Un messaggio scritto nel campo di scrittura e inviato con Invio, come farebbe l'utente. */
-const uiSend = (cdp, text) => pageEval(cdp, `
-  const ta = document.querySelector('form textarea')
-  if (!ta) throw new Error('campo di scrittura non trovato')
-  const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
-  set.call(ta, ${JSON.stringify(text)})
-  ta.dispatchEvent(new Event('input', { bubbles: true }))
-  await new Promise((r) => setTimeout(r, 150))
-  ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-  return true
-`)
-/** Le ultime entry del transcript, per il log (kind · role · content · meta): la catena esatta la si legge qui. */
-const logTranscript = async (cdp, agentId, last = 14, tag = 'transcript') => {
-  const all = await entriesOf(cdp, agentId)
-  const rows = all.slice(-last).map((e) => `${e.id}:${e.kind}${e.role === 'user' ? '/user' : ''} ${JSON.stringify(String(e.content ?? '').slice(0, 46))} ${e.meta ? JSON.stringify(Object.fromEntries(Object.entries(e.meta).filter(([k]) => !['ui', 'retry'].includes(k)))).slice(0, 110) : ''}${e.meta?.ui ? ' ui=' + JSON.stringify(e.meta.ui) : ''}`)
-  log(tag, `(${all.length} entry)`, rows.join('\n  '))
 }
 const trySection = async (name, fn) => {
   try {
@@ -555,13 +396,13 @@ const trySection = async (name, fn) => {
   }
 }
 
-// ---- il database TEMPORANEO della sonda: una scritture alla volta, con retry (l'app scrive anche) ----
+// ---- il database TEMPORANEO della sonda (sonda.db): una scritture alla volta, con retry (l'app scrive anche) ----
 const withDb = (fn) => {
   let last = null
   for (let i = 0; i < 10; i++) {
     let db
     try {
-      db = new DatabaseSync(DB)
+      db = new DatabaseSync(sonda.db)
       return fn(db)
     } catch (e) {
       last = e
@@ -600,56 +441,46 @@ const queuedJobsOf = (agentId) => withDb((db) =>
   db.prepare('SELECT COUNT(*) AS n FROM jobs WHERE agent_id = ? AND status = ?').get(agentId, 'queued').n
 )
 
-let cdp = null
+let connessione = null
 try {
-  // difensiva: un residuo di una corsa precedente sulla STESSA porta va via
-  try {
-    const out = spawnSync('/usr/bin/pgrep', ['-f', `remote-debugging-port=${DEBUG_PORT}`], { encoding: 'utf8' })
-    for (const pid of (out.stdout ?? '').split('\n').filter(Boolean).map(Number)) {
-      try { process.kill(pid, 'SIGKILL') } catch { /* già via */ }
-    }
-  } catch { /* pgrep vuoto */ }
-  await sleep(500)
-  startApp()
-  const main = await waitForPage(30_000)
-  if (!main) throw new Error('nessuna pagina: ' + appLog.slice(-600))
-  cdp = main.cdp
-  log('pagina:', main.url)
+  connessione = await sonda.avvia()
+  log('pagina:', connessione.url)
 
   // ---- setup: provider finto, guida chiusa, il bot «Novità AI» ----
-  await rpc(cdp, `saveProvider(${JSON.stringify({ id: 'finto', name: 'Finto locale', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'chiave-finta-di-prova', enabled: true })})`)
-  await rpc(cdp, `settingsSet(${JSON.stringify('models.main')}, ${JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null })})`)
-  await rpc(cdp, `settingsSet(${JSON.stringify('sandbox.mode')}, ${JSON.stringify('host')})`).catch(() => undefined)
+  await sonda.attendi(`typeof window.sandbot !== 'undefined' && !!window.sandbot`, { entro: 40_000, motivo: 'il preload sia pronto' })
+  await sonda.rpc(`saveProvider(${JSON.stringify({ id: 'finto', name: 'Finto locale', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'chiave-finta-di-prova', enabled: true })})`)
+  await sonda.rpc(`settingsSet(${JSON.stringify('models.main')}, ${JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null })})`)
+  await sonda.rpc(`settingsSet(${JSON.stringify('sandbox.mode')}, ${JSON.stringify('host')})`).catch(() => undefined)
   for (let round = 0; round < 5; round++) {
     for (const step of ['welcome', 'model', 'computer', 'approvals']) {
-      await rpc(cdp, `onboardingAdvance(${JSON.stringify(step)}, 'skipped')`).catch(() => undefined)
-      await sleep(600)
+      await sonda.rpc(`onboardingAdvance(${JSON.stringify(step)}, 'skipped')`).catch(() => undefined)
+      await sonda.attendiRete({ quieta: 250, entro: 3_000 }).catch(() => undefined)
     }
-    if (await waitDom(cdp, `document.querySelector('aside')`, 15_000)) break
+    if (await sonda.eval(`return !!document.querySelector('aside')`).catch(() => false)) break
   }
-  if (!(await waitDom(cdp, `document.querySelector('form textarea')`, 10_000))) throw new Error('la chat non è comparsa: ' + appLog.slice(-600))
-  const bot = (await rpc(cdp, `listAgents()`))[0]
-  await rpc(cdp, `updateAgent(${JSON.stringify(bot.id)}, ${JSON.stringify({ name: 'Novità AI' })})`)
+  if (!(await sonda.attendi(`!!document.querySelector('form textarea')`, { entro: 10_000, motivo: 'la chat compaia' }).catch(() => false))) throw new Error('la chat non è comparsa: ' + sonda.appLog().slice(-600))
+  const bot = (await sonda.rpc(`listAgents()`))[0]
+  await sonda.rpc(`updateAgent(${JSON.stringify(bot.id)}, ${JSON.stringify({ name: 'Novità AI' })})`)
   // il pannello del bot si chiude: la chat resta tutta visibile nelle catture
-  await pageEval(cdp, `document.querySelector('button[aria-label="Chiudi il pannello"]')?.click(); return true`)
-  await setViewport(cdp, 1280, 800)
-  await cdp.send('Page.reload')
-  if (!(await waitDom(cdp, `document.querySelector('form textarea')`, 25_000))) throw new Error('la pagina non è tornata dopo il reload: ' + appLog.slice(-500))
+  await sonda.eval(`document.querySelector('button[aria-label="Chiudi il pannello"]')?.click(); return true`)
+  await sonda.viewport(1280, 800, { scala: 2 })
+  await ricarica()
+  if (!(await sonda.attendi(`!!document.querySelector('form textarea')`, { entro: 25_000, motivo: 'la pagina torni dopo il reload' }).catch(() => false))) throw new Error('la pagina non è tornata dopo il reload: ' + sonda.appLog().slice(-500))
   // BC3 (fase beta.4): il PRIMO messaggio scritto nella casella è la risposta alla card della presentazione del bot (non è una bolla). Il bot si presenta, poi la chat è una chat qualunque.
-  await uiSend(cdp, 'Presentati in una riga.')
-  await waitDom(cdp, `[...document.querySelectorAll('main h2')].some((h) => h.textContent?.trim() === 'Le novità')`, 30_000)
-  await sleep(600)
+  await sendMessage('Presentati in una riga.')
+  await sonda.attendi(`[...document.querySelectorAll('main h2')].some((h) => h.textContent?.trim() === 'Le novità')`, { entro: 30_000, motivo: 'la presentazione del bot in markdown' }).catch(() => undefined)
 
   // ============================ B1: il messaggio di un altro bot ============================
   await trySection('B1', async () => {
     const now = Date.now()
     seedAgentMessage(bot.id, agentMessage(RULE_PRE_D3), now)
     seedAgentMessage(bot.id, agentMessage(RULE_TODAY), now + 1)
-    await cdp.send('Page.reload')
-    if (!(await waitDom(cdp, `document.querySelector('form textarea')`, 25_000))) throw new Error('la pagina non è tornata dopo il reload')
-    await sleep(800)
-    const text = await chatText(cdp)
-    const rows = await pageEval(cdp, `return [...document.querySelectorAll('[data-testid="chat-from-bot"]')].map((r) => ({
+    await ricarica()
+    if (!(await sonda.attendi(`!!document.querySelector('form textarea')`, { entro: 25_000, motivo: 'la pagina torni dopo il reload' }).catch(() => false))) throw new Error('la pagina non è tornata dopo il reload')
+    // i messaggi seminati si vedono in chat: la condizione vera al posto del tempo fisso
+    await sonda.attendi(`(document.querySelector('main')?.textContent ?? '').includes('Novità di oggi')`, { entro: 15_000, motivo: 'i messaggi dell’altro bot compaiano in chat' }).catch(() => undefined)
+    const text = await chatText()
+    const rows = await sonda.eval(`return [...document.querySelectorAll('[data-testid="chat-from-bot"]')].map((r) => ({
       label: (r.querySelector('p')?.textContent ?? '').trim(),
       h2: [...r.querySelectorAll('h2')].map((h) => h.textContent),
       strong: [...r.querySelectorAll('strong')].map((s) => s.textContent),
@@ -658,7 +489,7 @@ try {
       td: [...r.querySelectorAll('td')].map((s) => s.textContent)
     }))`)
     // sulla base la riga non ha il testid: si contano le bolle del bot che iniziano con «Da »
-    const rowsAny = await pageEval(cdp, `return [...document.querySelectorAll('main div')].filter((r) => (r.getAttribute('class') ?? '').includes('max-w-[75%]') && (r.querySelector('p')?.textContent ?? '').startsWith('Da ')).length`)
+    const rowsAny = await sonda.eval(`return [...document.querySelectorAll('main div')].filter((r) => (r.getAttribute('class') ?? '').includes('max-w-[75%]') && (r.querySelector('p')?.textContent ?? '').startsWith('Da ')).length`)
     const howMany = PRIMA && rows.length === 0 ? rowsAny : rows.length
     check('B1: in chat ci sono DUE messaggi dell’altro bot («Da Ricerche»)', howMany === 2, `righe «Da …»: ${howMany}`)
     check('B1: la regola VECCHIA non compare (il messaggio salvato prima di D3)', !text.includes('This is a message from ANOTHER BOT'), text.includes('This is a message from ANOTHER BOT') ? 'la regola vecchia è in chat' : 'assente')
@@ -669,10 +500,10 @@ try {
     check('B1: il testo del bot è MARKDOWN come le risposte del bot (titolo, grassetto, elenco, tabella)', rows.length === 2 && rows.every((r) => r.h2.join() === '⚠️ Novità di oggi' && r.strong.join() === 'Importante' && r.li.length === 2 && r.th.join() === 'Fonte,Titolo' && r.td.length === 4),
       JSON.stringify(rows.length ? [first.label, first.h2, first.strong, first.li, first.th, first.td] : rows).slice(0, 260))
     check('B1: il markdown crudo non si vede (niente «##», niente «|---|»)', !text.includes('##') && !text.includes('|---|'), text.includes('##') ? 'il markdown crudo è in chat («##», «|---|»)' : 'assente')
-    await shot(cdp, '1-b1-messaggio-tra-bot-1280x800-chiaro')
-    await setDark(cdp, true)
-    await shot(cdp, '1-b1-messaggio-tra-bot-1280x800-scuro')
-    await setDark(cdp, false)
+    await shot('1-b1-messaggio-tra-bot-1280x800-chiaro')
+    await sonda.tema('scuro')
+    await shot('1-b1-messaggio-tra-bot-1280x800-scuro')
+    await sonda.tema('chiaro')
   })
 
   // ============================ B2: la risposta vuota ============================
@@ -681,10 +512,10 @@ try {
     mode = 'reasoning'
     const before = requests.length
     for (let i = 1; i <= 4; i++) enqueueWake(bot.id, i)
-    const notices = await waitValue(cdp, `(await window.sandbot.getEntries(${JSON.stringify(bot.id)})).filter((e) => e.kind === 'notice' && e.meta?.ui?.id === 'notice.modelEmpty').length >= 4 ? (await window.sandbot.getEntries(${JSON.stringify(bot.id)})).filter((e) => e.kind === 'notice' && e.meta?.ui?.id === 'notice.modelEmpty') : null`, 60_000, 400)
+    const notices = await sonda.attendi(`(await window.sandbot.getEntries(${JSON.stringify(bot.id)})).filter((e) => e.kind === 'notice' && e.meta?.ui?.id === 'notice.modelEmpty').length >= 4 ? (await window.sandbot.getEntries(${JSON.stringify(bot.id)})).filter((e) => e.kind === 'notice' && e.meta?.ui?.id === 'notice.modelEmpty') : null`, { entro: 60_000, motivo: 'i quattro avvisi di risposta vuota' }).catch(() => null)
     const wakes = requests.slice(before)
     check('B2: quattro risvegli automatici in fila (coda dei job) → quattro turni, quattro avvisi di risposta vuota', notices !== null && notices.length === 4, `${notices?.length ?? 0} avvisi`)
-    const openings = await pageEval(cdp, `return (await window.sandbot.getEntries(${JSON.stringify(bot.id)})).filter((e) => e.kind === 'message' && e.role === 'user' && e.meta?.initiator === 'SHELL_DONE').length`)
+    const openings = await sonda.eval(`return (await window.sandbot.getEntries(${JSON.stringify(bot.id)})).filter((e) => e.kind === 'message' && e.role === 'user' && e.meta?.initiator === 'SHELL_DONE').length`)
     check('B2: le quattro aperture sono nel transcript (SHELL_DONE)', openings === 4, `${openings} aperture`)
     check('B2: OGNI risveglio ha UN tentativo in più: 8 chiamate al modello (prima: 4, una per turno)', wakes.length === 8, `${wakes.length} chiamate`)
     const retries = wakes.filter((_, i) => i % 2 === 1)
@@ -696,57 +527,59 @@ try {
       JSON.stringify(ui[0]) + ' ' + String(notices?.[0]?.content).slice(0, 80))
     check('B2: l’avviso porta ciò che serve a «Riprova» (lo stesso turno: testo e origine)', notices?.every((n) => n.meta?.retry?.kind === 'user-message' && n.meta?.retry?.payload?.initiator === 'SHELL_DONE' && String(n.meta?.retry?.payload?.text ?? '').includes('comando_finito')) === true,
       JSON.stringify(notices?.[0]?.meta?.retry ?? null).slice(0, 200))
-    const lastEnd = await pageEval(cdp, `const e = await window.sandbot.getEntries(${JSON.stringify(bot.id)}); return e.findLast((x) => x.kind === 'event')?.meta ?? null`)
+    const lastEnd = await sonda.eval(`const e = await window.sandbot.getEntries(${JSON.stringify(bot.id)}); return e.findLast((x) => x.kind === 'event')?.meta ?? null`)
     check('B2: l’ultimo turno è STOPPED model-error', lastEnd?.turnEnd === 'STOPPED' && lastEnd?.stopReason === 'model-error', JSON.stringify(lastEnd))
-    await waitDom(cdp, `document.querySelectorAll('summary').length > 0`, 10_000)
-    await sleep(600)
-    const summaryRows = await pageEval(cdp, `return [...document.querySelectorAll('main summary')].map((s) => ({ text: s.textContent.trim(), svg: s.querySelectorAll('svg').length, emoji: /\\p{Extended_Pictographic}/u.test(s.textContent ?? '') }))`)
+    // la riga di apertura è in pagina: la condizione vera al posto del tempo fisso
+    await sonda.attendi(`[...document.querySelectorAll('main summary')].some((s) => s.textContent.includes('Avvio automatico'))`, { entro: 12_000, motivo: 'la riga di apertura «Avvio automatico»' }).catch(() => undefined)
+    const summaryRows = await sonda.eval(`return [...document.querySelectorAll('main summary')].map((s) => ({ text: s.textContent.trim(), svg: s.querySelectorAll('svg').length, emoji: /\\p{Extended_Pictographic}/u.test(s.textContent ?? '') }))`)
     const autoRows = summaryRows.filter((s) => s.text.includes('Avvio automatico'))
-    const text = await chatText(cdp)
+    const text = await chatText()
     check('B2: in chat UNA riga di apertura e UN avviso: «Risposta vuota: il modello ha restituito solo ragionamento · 4 volte»', autoRows.length === 1 && text.includes('Risposta vuota: il modello ha restituito solo ragionamento · 4 volte') && text.split('Risposta vuota').length - 1 === 1,
       `${autoRows.length} righe di avvio · ${text.slice(text.indexOf('Risposta') - 30, text.indexOf('Risposta') + 110)}`)
     // fase design: la riga d'apertura è il pezzo Notice dentro un <summary> richiudibile —
     // due icone lucide (la sua + il chevron), mai un'emoji: era «un solo <svg>»
     check('B2: l’apertura «Avvio automatico» ha le icone lucide (svg, zero emoji)', autoRows.length === 1 && autoRows[0].svg >= 1 && autoRows[0].emoji === false, JSON.stringify(autoRows).slice(0, 200))
-    const retryButtons = await pageEval(cdp, `return document.querySelectorAll('[data-testid="notice-retry"]').length`)
+    const retryButtons = await sonda.eval(`return document.querySelectorAll('[data-testid="notice-retry"]').length`)
     check('B2: l’avviso ha UN bottone «Riprova»', retryButtons === 1, `${retryButtons} bottoni`)
-    await shot(cdp, '2-b2-risposta-vuota-4-volte-1280x800-chiaro')
-    await setDark(cdp, true)
-    await shot(cdp, '2-b2-risposta-vuota-4-volte-1280x800-scuro')
-    await setDark(cdp, false)
+    await shot('2-b2-risposta-vuota-4-volte-1280x800-chiaro')
+    await sonda.tema('scuro')
+    await shot('2-b2-risposta-vuota-4-volte-1280x800-scuro')
+    await sonda.tema('chiaro')
 
     // ---- la domanda dell'utente, stesso modello: un avviso, la bolla resta una ----
     const beforeUser = requests.length
-    await uiSend(cdp, 'E le novità di ieri?')
-    const userNotice = await waitValue(cdp, `(await window.sandbot.getEntries(${JSON.stringify(bot.id)})).find((e) => e.id > ${(notices ?? []).at(-1)?.id ?? 0} && e.kind === 'notice' && e.meta?.ui?.id === 'notice.modelEmpty') ?? null`, 30_000, 300)
+    await sendMessage('E le novità di ieri?')
+    const userNotice = await sonda.attendi(`(await window.sandbot.getEntries(${JSON.stringify(bot.id)})).find((e) => e.id > ${(notices ?? []).at(-1)?.id ?? 0} && e.kind === 'notice' && e.meta?.ui?.id === 'notice.modelEmpty') ?? null`, { entro: 30_000, motivo: 'l’avviso di risposta vuota della domanda' }).catch(() => null)
     const userCalls = requests.slice(beforeUser)
     check('B2: la domanda dell’utente col modello muto → UN avviso col motivo (dopo l’unico tentativo)', userNotice !== null && userCalls.length === 2 && userCalls[1]?.lastUser.includes(NUDGE_RECOVERY) && userCalls[1]?.tools.length === 0,
       `${userCalls.length} chiamate · ${JSON.stringify(userNotice?.meta?.ui ?? null)}`)
-    await sleep(700)
-    await logTranscript(cdp, bot.id, 13, 'dopo la domanda dell’utente:')
+    // l’avviso della domanda sta in pagina col suo «Riprova» accanto alla bolla: la condizione vera al posto del tempo fisso
+    await sonda.attendi(`document.querySelectorAll('[data-testid="notice-retry"]').length === 2`, { entro: 15_000, motivo: 'l’avviso della domanda stia a parte col suo «Riprova»' }).catch(() => undefined)
+    await logTranscript(bot.id, 13, 'dopo la domanda dell’utente:')
     log('chiamate della domanda:', JSON.stringify(userCalls.map((r) => [r.tools.length, r.lastUser.slice(0, 60)])))
-    await sleep(700)
-    const bubbles = await pageEval(cdp, `return [...document.querySelectorAll('main [class*="--bubble-user"]')].length`)
+    const bubbles = await sonda.eval(`return [...document.querySelectorAll('main [class*="--bubble-user"]')].length`)
     check('B2: la bolla dell’utente è una sola', bubbles === 1, `${bubbles} bolle`)
-    const twoRows = await pageEval(cdp, `return { rows: document.querySelectorAll('[data-testid="notice-retry"]').length, text: (document.querySelector('main')?.textContent ?? '').replace(/\\s+/g, ' ') }`)
+    const twoRows = await sonda.eval(`return { rows: document.querySelectorAll('[data-testid="notice-retry"]').length, text: (document.querySelector('main')?.textContent ?? '').replace(/\\s+/g, ' ') }`)
     check('B2: l’avviso della domanda sta a parte (dopo la bolla dell’utente), con il suo «Riprova»', twoRows.rows === 2 && /· 4 volteRiprovaerrore del modelloE le novità di ieri\?Risposta vuota: il modello ha restituito solo ragionamentoRiprova/.test(twoRows.text),
       twoRows.text.slice(twoRows.text.indexOf('4 volte') - 20, twoRows.text.indexOf('4 volte') + 120))
 
     // ---- «Riprova»: lo stesso turno, un'altra volta; ora il modello risponde ----
     mode = 'md'
     const beforeRetry = requests.length
-    const doubleClick = await pageEval(cdp, `const b = [...document.querySelectorAll('[data-testid="notice-retry"]')].at(-1); if (!b) return null; const id = ${userNotice?.id}; const first = await window.sandbot.turnRetry(${JSON.stringify(bot.id)}, id); const second = await window.sandbot.turnRetry(${JSON.stringify(bot.id)}, id); return { first, second }`)
+    const doubleClick = await sonda.eval(`const b = [...document.querySelectorAll('[data-testid="notice-retry"]')].at(-1); if (!b) return null; const id = ${userNotice?.id}; const first = await window.sandbot.turnRetry(${JSON.stringify(bot.id)}, id); const second = await window.sandbot.turnRetry(${JSON.stringify(bot.id)}, id); return { first, second }`)
     check('B2: «Riprova» riaccoda lo stesso turno; un secondo clic subito non lo raddoppia (alreadyQueued)', doubleClick?.first?.ok === true && doubleClick?.second?.ok === false && doubleClick?.second?.error === 'alreadyQueued', JSON.stringify(doubleClick))
-    const answer = await waitDom(cdp, `[...document.querySelectorAll('main h2')].some((h) => h.textContent?.trim() === 'Le novità')`, 40_000)
-    check('B2: il turno rifatto arriva al modello: la riga «Riprovo» e la risposta in markdown', answer && (await chatText(cdp)).includes('Riprovo'), 'risposta in markdown dopo «Riprova»')
-    const after = await entriesOf(cdp, bot.id)
+    // il turno rifatto parte dal worker del daemon (il poke arriva con l'RPC): si aspetta la SUA apertura (l'entry con retryOf), non un tempo fisso
+    await sonda.attendi(`(await window.sandbot.getEntries(${JSON.stringify(bot.id)})).some((e) => e.kind === 'message' && e.role === 'user' && e.meta?.retryOf === ${JSON.stringify(userNotice?.id)})`, { entro: 20_000, motivo: 'l’apertura del turno rifatto (retryOf)' }).catch(() => undefined)
+    const answer = await sonda.attendi(`[...document.querySelectorAll('main h2')].some((h) => h.textContent?.trim() === 'Le novità')`, { entro: 40_000, motivo: 'la risposta rifatta in markdown' }).catch(() => false)
+    check('B2: il turno rifatto arriva al modello: la riga «Riprovo» e la risposta in markdown', answer && (await chatText()).includes('Riprovo'), 'risposta in markdown dopo «Riprova»')
+    const after = await entriesOf(bot.id)
     const retried = after.find((e) => e.kind === 'message' && e.role === 'user' && e.meta?.retryOf === userNotice?.id)
     check('B2: l’apertura del turno rifatto porta retryOf (l’id dell’avviso) e lo stesso testo della domanda', retried !== undefined && retried.content === 'E le novità di ieri?', JSON.stringify(retried ? { retryOf: retried.meta.retryOf, content: retried.content } : null))
-    const bubblesAfter = await pageEval(cdp, `return [...document.querySelectorAll('main [class*="--bubble-user"]')].length`)
+    const bubblesAfter = await sonda.eval(`return [...document.querySelectorAll('main [class*="--bubble-user"]')].length`)
     check('B2: dopo «Riprova» la bolla dell’utente è ancora una sola', bubblesAfter === 1, `${bubblesAfter} bolle`)
     const retryCalls = requests.slice(beforeRetry)
     check('B2: il turno rifatto riparte dalla DOMANDA (una chiamata, l’ultima richiesta comincia col suo testo)', retryCalls.length === 1 && retryCalls[0]?.lastUser.includes('E le novità di ieri?'), `${retryCalls.length} chiamate · ${retryCalls[0]?.lastUser.slice(-60) ?? ''}`)
-    await shot(cdp, '3-b2-riprova-1280x800-chiaro')
+    await shot('3-b2-riprova-1280x800-chiaro')
   })
 
   // ============================ B3: «Connetti» con il Composio FINTO ============================
@@ -758,27 +591,20 @@ try {
   // collegamento parte davvero (il «browser» finto completa il login).
   await trySection('B3', async () => {
     // si entra in Composio: il login OAuth gira tutto su 127.0.0.1 (AS finto, browser finto)
-    await rpc(cdp, `connectorsConnect('composio')`).catch(() => undefined)
-    const entered = await waitValue(cdp, `(async () => { const s = await window.sandbot.composioGatewayStatus(); return s?.active === true ? s : null })()`, 30_000, 400)
+    await sonda.rpc(`connectorsConnect('composio')`).catch(() => undefined)
+    const entered = await sonda.attendi(`(async () => { const s = await window.sandbot.composioGatewayStatus(); return s?.active === true ? s : null })()`, { entro: 30_000, motivo: 'l’ingresso in Composio (login OAuth sull’AS finto)' }).catch(() => null)
     check('B3: setup — Composio FINTO «entrato» (login OAuth sull’AS finto, nessuna rete fuori da 127.0.0.1)', entered !== null, JSON.stringify(entered).slice(0, 160))
     if (!entered) return
     // la pagina Plugin › Connettori, la riga di Spotify (cerca «spotify»)
-    check('B3: la pagina Plugin si apre', await clickTestid(cdp, 'sidebar-plugin') && await waitDom(cdp, `!!document.querySelector('[data-testid="plugin-page"]')`, 8_000))
-    await pageEval(cdp, `[...document.querySelectorAll('[data-testid="plugin-segments"] [role="tab"]')].find((x) => (x.textContent ?? '').trim() === 'Connettori')?.click(); return true`)
-    await waitDom(cdp, `!!document.querySelector('[data-testid="plugin-connectors"], [data-testid="plugin-search"]')`, 8_000)
-    await pageEval(cdp, `
-      const input = document.querySelector('[data-testid="plugin-search"]')
-      if (!input) return false
-      const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
-      set.call(input, 'spotify')
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-      return true
-    `)
-    const rowFound = await waitDom(cdp, `!!document.querySelector('[data-testid="app-row-spotify"]')`, 10_000)
+    check('B3: la pagina Plugin si apre', await clic('sidebar-plugin') && await sonda.attendi(`!!document.querySelector('[data-testid="plugin-page"]')`, { entro: 8_000, motivo: 'la pagina Plugin' }).catch(() => false))
+    await sonda.eval(`[...document.querySelectorAll('[data-testid="plugin-segments"] [role="tab"]')].find((x) => (x.textContent ?? '').trim() === 'Connettori')?.click(); return true`)
+    await sonda.attendi(`!!document.querySelector('[data-testid="plugin-connectors"], [data-testid="plugin-search"]')`, { entro: 8_000, motivo: 'l’elenco dei connettori' }).catch(() => undefined)
+    await sonda.scrivi('[data-testid="plugin-search"]', 'spotify').catch(() => false)
+    const rowFound = await sonda.attendi(`!!document.querySelector('[data-testid="app-row-spotify"]')`, { entro: 10_000, motivo: 'la riga di Spotify' }).catch(() => false)
     check('B3: la riga di Spotify c’è (Connettori, via Composio)', rowFound)
     if (!rowFound) return
     /** Lo stato della riga com’è nel DOM: data-flow, il testo di stato, il motivo, i bottoni. */
-    const rowState = () => pageEval(cdp, `
+    const rowState = () => sonda.eval(`
       const el = document.querySelector('[data-testid="app-state-spotify"]')
       const text = (sel) => (document.querySelector(sel)?.textContent ?? '').replace(/\\s+/g, ' ').trim()
       return {
@@ -793,8 +619,8 @@ try {
     const clickAndSettle = async () => {
       const before = composio.calls.length
       const t0 = Date.now()
-      const clicked = await pageEval(cdp, `const b = document.querySelector('[data-testid="app-retry-spotify"]') ?? document.querySelector('[data-testid="plugin-card-connect-spotify"]') ?? document.querySelector('[data-testid="app-connect-spotify"]'); if (!b) return false; b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1 })); b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 1 })); b.click(); return true`)
-      // lo stato STABILE: non più «starting» (o il tempo massimo della riga, 25 s, come tetto)
+      const clicked = await sonda.eval(`const b = document.querySelector('[data-testid="app-retry-spotify"]') ?? document.querySelector('[data-testid="plugin-card-connect-spotify"]') ?? document.querySelector('[data-testid="app-connect-spotify"]'); if (!b) return false; b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1 })); b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 1 })); b.click(); return true`)
+      // lo stato STABILE: non più «starting» — gli stati si registrano a ogni CAMBIO vero; il tetto dei 27 s è il tempo massimo della riga, misurato di proposito
       const deadline = Date.now() + 27_000
       const seen = []
       let st = null
@@ -802,7 +628,8 @@ try {
         st = await rowState()
         if (!seen.some((x) => x.flow === st.flow && x.reason === st.reason)) seen.push({ flow: st.flow, reason: st.reason, at: Date.now() - t0, row: st.row.slice(0, 80) })
         if (st.flow !== 'starting' || Date.now() > deadline) break
-        await sleep(60)
+        await sonda.attendi(`(() => { const el = document.querySelector('[data-testid="app-state-spotify"]'); return el?.getAttribute('data-flow') !== ${JSON.stringify(st.flow)} || el?.getAttribute('data-flow-reason') !== ${JSON.stringify(st.reason)} })()`,
+          { entro: Math.max(1, deadline - Date.now()), motivo: 'lo stato della riga cambi' }).catch(() => false)
       }
       return { clicked, first: seen[0] ?? st, state: st, seen, ms: Date.now() - t0, calls: composio.calls.slice(before) }
     }
@@ -816,26 +643,26 @@ try {
     check('B3: il Composio finto ha ricevuto l’«add» di Spotify (nessuna finestra: il login non è partito)', s1.calls.some((c) => c.actions.includes('add')), JSON.stringify(s1.calls))
     check('B3: app NON collegabile → la riga si sblocca: «Non si può collegare», il motivo in parole e «Come si risolve» (R6: PERMANENTE, niente «Riprova»)', s1.state.flow === 'failed' && s1.state.reason === 'not-connectable' && /Non si può collegare/.test(s1.state.status) && /non gestisce il login di Spotify/.test(s1.state.error) && s1.state.howto && !s1.state.retry && !s1.state.cancel, JSON.stringify(s1.state).slice(0, 300))
     check('B3: l’errore di apps:connect è arrivato alla riga in fretta (stato «failed» in meno di 5 secondi)', s1.state.flow === 'failed' && s1.ms < 5_000, `${s1.state.flow} in ${s1.ms} ms`)
-    await shot(cdp, '9-b3-spotify-non-si-puo-collegare-1280x800-chiaro')
-    await setDark(cdp, true)
-    await shot(cdp, '9-b3-spotify-non-si-puo-collegare-1280x800-scuro')
-    await setDark(cdp, false)
+    await shot('9-b3-spotify-non-si-puo-collegare-1280x800-chiaro')
+    await sonda.tema('scuro')
+    await shot('9-b3-spotify-non-si-puo-collegare-1280x800-scuro')
+    await sonda.tema('chiaro')
 
     // R6 (b20-ritocchi): dopo l'esito PERMANENTE la riga non ha più «Riprova»:
     // «Come si risolve» apre la scheda dell'app, e dalla scheda riparte il
     // collegamento (per gli errori temporanei «Riprova» resta in riga)
-    const howtoClicked = await pageEval(cdp, `const b = document.querySelector('[data-testid="app-howto-spotify"]'); if (!b) return false; b.click(); return true`)
-    const cardOpened = await waitDom(cdp, `!!document.querySelector('[data-testid="plugin-card-connect-spotify"]')`, 5_000).catch(() => false)
+    const howtoClicked = await sonda.eval(`const b = document.querySelector('[data-testid="app-howto-spotify"]'); if (!b) return false; b.click(); return true`)
+    const cardOpened = await sonda.attendi(`!!document.querySelector('[data-testid="plugin-card-connect-spotify"]')`, { entro: 5_000, motivo: 'la scheda dell’app si apra' }).catch(() => false)
     check('B3 (R6): «Come si risolve» apre la scheda dell\'app', howtoClicked === true && cardOpened === true, `howto ${howtoClicked} scheda ${cardOpened}`)
 
     // ---- 2. «Riprova» (dalla scheda) e il Composio fallisce in generale ----
     composioScenario = 'failed'
     const s2 = await clickAndSettle()
     // la scheda si richiude: le catture tornano sulla riga
-    await pageEval(cdp, `document.querySelector('button[aria-label="Torna ai plugin"]')?.click(); return true`)
-    await sleep(300)
+    await sonda.eval(`document.querySelector('button[aria-label="Torna ai plugin"]')?.click(); return true`)
+    await sonda.attendi(`!document.querySelector('[data-testid="plugin-card-connect-spotify"]')`, { entro: 4_000, motivo: 'la scheda si richiuda' }).catch(() => undefined)
     check('B3: «Riprova» con un errore qualunque → «Non riuscito», il motivo e «Riprova» (mai bloccata)', s2.clicked && s2.state.flow === 'failed' && s2.state.reason === 'connect-failed' && /Non riuscito/.test(s2.state.status) && /non ha aperto il login di Spotify/.test(s2.state.error) && s2.state.retry && !s2.state.cancel, JSON.stringify(s2.state).slice(0, 300))
-    await shot(cdp, '10-b3-spotify-non-riuscito-1280x800-chiaro')
+    await shot('10-b3-spotify-non-riuscito-1280x800-chiaro')
 
     // ---- 3. il Composio NON RISPONDE: il tempo massimo sblocca la riga ----
     composioScenario = 'hang'
@@ -843,21 +670,21 @@ try {
     log('B3 stato dopo il clic (non risponde):', JSON.stringify(s3.state), `in ${s3.ms} ms`)
     check('B3: il Composio finto NON risponde: la riga resta «Avvio del collegamento…» e poi si sblocca da sola', s3.clicked && s3.first.flow === 'starting' && /Avvio del collegamento/.test(s3.first.row) && s3.state.flow === 'failed' && s3.state.reason === 'timeout' && /Nessuna risposta/.test(s3.state.status) && /non ha risposto in tempo/.test(s3.state.error) && s3.state.retry && !s3.state.cancel, JSON.stringify(s3.state).slice(0, 300))
     check(`B3: lo sblocco arriva al tempo massimo (${APP_CONNECT_TIMEOUT_MS} ms), né subito né mai`, s3.ms >= APP_CONNECT_TIMEOUT_MS - 600 && s3.ms < 25_000, `${s3.ms} ms`)
-    await shot(cdp, '11-b3-spotify-nessuna-risposta-1280x800-chiaro')
+    await shot('11-b3-spotify-nessuna-risposta-1280x800-chiaro')
 
     // ---- 4. il Composio dà il link: il collegamento parte e il login finto riesce ----
     composioScenario = 'ok'
     const s4 = await clickAndSettle()
     log('B3 stati visti dalla riga (il Composio dà il link):', JSON.stringify(s4.seen), `in ${s4.ms} ms`)
     // con il «browser» finto il login riesce in pochi millisecondi: l'attesa («Completa il login…», con «Annulla») può durare meno di un giro di lettura; contano gli STATI visti (avvio, poi nessun errore) e il link seguito
-    const linked = await waitDom(cdp, `(() => { const el = document.querySelector('[data-testid="app-state-spotify"]'); return el?.getAttribute('data-flow') === 'idle' && !document.querySelector('[data-testid="app-cancel-spotify"]') && !document.querySelector('[data-testid="app-retry-spotify"]') })()`, 30_000)
+    const linked = await sonda.attendi(`(() => { const el = document.querySelector('[data-testid="app-state-spotify"]'); return el?.getAttribute('data-flow') === 'idle' && !document.querySelector('[data-testid="app-cancel-spotify"]') && !document.querySelector('[data-testid="app-retry-spotify"]') })()`, { entro: 30_000, motivo: 'l’attesa del collegamento si chiuda da sola' }).catch(() => false)
     const s4b = await rowState()
     check('B3: il Composio dà il link → il collegamento parte (mai un errore: nessuno stato «failed») e l’attesa si chiude da sola', s4.clicked && s4.seen[0]?.flow === 'starting' && !s4.seen.some((x) => x.flow === 'failed') && linked, JSON.stringify(s4.seen).slice(0, 300))
     check('B3: il «browser» finto ha seguito il link e Spotify risulta collegata (nessuna riga in attesa, nessun «Riprova»)', composio.linkOpened.has('spotify') && !s4b.retry && !s4b.cancel && s4b.flow === 'idle', JSON.stringify({ row: s4b.row, link: composio.linkOpened.has('spotify'), flow: s4b.flow }).slice(0, 260))
-    await shot(cdp, '12-b3-spotify-collegata-1280x800-chiaro')
+    await shot('12-b3-spotify-collegata-1280x800-chiaro')
     // si torna alla chat
-    await pageEval(cdp, `document.querySelector('[data-testid="plugin-page"] button[aria-label*="Torna"]')?.click(); return true`)
-    await sleep(400)
+    await sonda.eval(`document.querySelector('[data-testid="plugin-page"] button[aria-label*="Torna"]')?.click(); return true`)
+    await sonda.attendi(`!document.querySelector('[data-testid="plugin-page"]')`, { entro: 4_000, motivo: 'si torni alla chat' }).catch(() => undefined)
   })
 
   // ============================ B4: la Libreria ============================
@@ -869,13 +696,12 @@ try {
     for (const [title, content] of DOCS) script.push({ toolCalls: [{ name: 'write_document', args: { title, content } }] })
     script.push({ text: 'Ho salvato tre documenti in Libreria.' })
     const beforeDocs = requests.length
-    await uiSend(cdp, 'Salvami tre documenti in Libreria.')
-    const listed = await waitValue(cdp, `(async () => { const all = await window.sandbot.libraryList(); return all.length >= 3 ? all : null })()`, 45_000, 400)
+    await sendMessage('Salvami tre documenti in Libreria.')
+    const listed = await sonda.attendi(`(async () => { const all = await window.sandbot.libraryList(); return all.length >= 3 ? all : null })()`, { entro: 45_000, motivo: 'i tre documenti in Libreria' }).catch(() => null)
     check('B4: setup — tre documenti nella Libreria (un turno del bot, modello finto)', listed !== null && requests.length > beforeDocs, `${listed?.length ?? 0} documenti`)
     if (!listed) return
     mode = 'md'
-    await waitDom(cdp, `(await window.sandbot.getEntries(${JSON.stringify(bot.id)})).some((e) => e.kind === 'send-message' && e.content === 'Ho salvato tre documenti in Libreria.')`, 20_000)
-    await sleep(600)
+    await sonda.attendi(`(await window.sandbot.getEntries(${JSON.stringify(bot.id)})).some((e) => e.kind === 'send-message' && e.content === 'Ho salvato tre documenti in Libreria.')`, { entro: 20_000, motivo: 'il turno finisca col messaggio finale' }).catch(() => undefined)
     const docs = listed.filter((d) => DOCS.some(([title]) => title === d.title)).sort((a, b) => a.title.localeCompare(b.title))
     const byTitle = (title) => docs.find((d) => d.title === title)
     const ricette = byTitle('Ricette della settimana')
@@ -884,115 +710,110 @@ try {
     check('B4: i tre documenti hanno un titolo', [ricette, fornitori, note].every(Boolean), docs.map((d) => d.title).join(' · '))
 
     // ---- la griglia ----
-    const opened = await clickAria(cdp, 'Libreria') && await waitDom(cdp, `!!document.querySelector('[data-testid="library-panel"]')`, 8_000)
+    const opened = await clicAria('Libreria') && await sonda.attendi(`!!document.querySelector('[data-testid="library-panel"]')`, { entro: 8_000, motivo: 'il pannello della Libreria' }).catch(() => false)
     check('B4: la Libreria si apre dalla barra', opened)
     if (!opened) return
     // se la vista è quella a lista, si torna alla griglia (il pulsante «Griglia»)
-    await pageEval(cdp, `document.querySelector('[data-testid="library-panel"] button[aria-label="Griglia"]')?.click(); return true`)
-    await sleep(500)
-    const cards = await pageEval(cdp, `return [...document.querySelectorAll('[data-testid="library-card"]')].length`)
-    const gridMenus = await pageEval(cdp, `return [...document.querySelectorAll('[data-testid^="library-menu-grid-"]')].length`)
+    await sonda.eval(`document.querySelector('[data-testid="library-panel"] button[aria-label="Griglia"]')?.click(); return true`)
+    await sonda.attendi(`!!document.querySelector('[data-testid="library-card"]')`, { entro: 5_000, motivo: 'la vista a griglia' }).catch(() => undefined)
+    const cards = await sonda.eval(`return [...document.querySelectorAll('[data-testid="library-card"]')].length`)
+    const gridMenus = await sonda.eval(`return [...document.querySelectorAll('[data-testid^="library-menu-grid-"]')].length`)
     check('B4: OGNI documento in griglia ha il menu ⋯', cards >= 3 && gridMenus === cards, `${cards} schede, ${gridMenus} menu`)
-    const previews = await pageEval(cdp, `return [...document.querySelectorAll('[data-testid="page-card-preview"]')].map((p) => (p.textContent ?? '').replace(/\\s+/g, ' ').trim())`)
+    const previews = await sonda.eval(`return [...document.querySelectorAll('[data-testid="page-card-preview"]')].map((p) => (p.textContent ?? '').replace(/\\s+/g, ' ').trim())`)
     const rawTable = previews.filter((t) => t.includes('|---|') || t.includes('| Ricetta |'))
     check('B4: anteprima — le righe separatrici delle tabelle spariscono, le righe di tabella diventano celle separate da « · »', rawTable.length === 0 && previews.some((t) => t.includes('Ricetta · Data') && t.includes('Pastiera · 21/11')),
       JSON.stringify(previews.find((t) => /Ricetta/.test(t)) ?? previews).slice(0, 260))
-    await shot(cdp, '4-b4-libreria-griglia-1280x800-chiaro')
-    await setDark(cdp, true)
-    await shot(cdp, '4-b4-libreria-griglia-1280x800-scuro')
-    await setDark(cdp, false)
+    await shot('4-b4-libreria-griglia-1280x800-chiaro')
+    await sonda.tema('scuro')
+    await shot('4-b4-libreria-griglia-1280x800-scuro')
+    await sonda.tema('chiaro')
 
     // ---- il menu ⋯: le sei voci nell'ordine della spec ----
     const openMenu = async (where, id) => {
-      await pageEval(cdp, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true`)
-      await sleep(200)
-      const ok = await clickTestid(cdp, `library-menu-${where}-${id}`)
-      if (ok) await waitDom(cdp, `!!document.querySelector('[data-testid="library-menu-content-${where}-${id}"]')`, 4_000)
+      await sonda.eval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true`)
+      await sonda.attendi(`!document.querySelector('[data-testid^="library-menu-content-"]')`, { entro: 2_000, motivo: 'un eventuale menu aperto si chiuda' }).catch(() => undefined)
+      const ok = await clic(`library-menu-${where}-${id}`)
+      if (ok) await sonda.attendi(`!!document.querySelector('[data-testid="library-menu-content-${where}-${id}"]')`, { entro: 4_000, motivo: 'il menu si apra' }).catch(() => false)
       return ok
     }
-    const itemsOf = async (where, id) => pageEval(cdp, `const m = document.querySelector('[data-testid="library-menu-content-${where}-${id}"]'); return m ? [...m.querySelectorAll('[role="menuitem"]')].map((i) => (i.textContent ?? '').replace(/\\s+/g, ' ').trim()) : null`)
+    const itemsOf = async (where, id) => sonda.eval(`const m = document.querySelector('[data-testid="library-menu-content-${where}-${id}"]'); return m ? [...m.querySelectorAll('[role="menuitem"]')].map((i) => (i.textContent ?? '').replace(/\\s+/g, ' ').trim()) : null`)
     const menuOpened = ricette ? await openMenu('grid', ricette.id) : false
     const items = menuOpened && ricette ? await itemsOf('grid', ricette.id) : null
     check('B4: il menu ⋯ del documento si apre e ha le sei voci nell’ordine della spec: Apri · Rinomina · Fissa · Esporta · Archivia · Elimina', Array.isArray(items) && items.length === 6 && /^Apri/.test(items[0]) && /^Rinomina/.test(items[1]) && /^Fissa/.test(items[2]) && /^Esporta/.test(items[3]) && /^Archivia/.test(items[4]) && /^Elimina/.test(items[5]), JSON.stringify(items))
     if (menuOpened && ricette) {
-      await shot(cdp, '5-b4-menu-documento-1280x800-chiaro')
-      await pageEval(cdp, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true`)
-      await sleep(200)
+      await shot('5-b4-menu-documento-1280x800-chiaro')
+      await sonda.eval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true`)
+      await sonda.attendi(`!document.querySelector('[data-testid^="library-menu-content-"]')`, { entro: 2_000, motivo: 'il menu si chiuda' }).catch(() => undefined)
     }
 
     // ---- Archivia: sparisce dalla vista normale, sta sotto «Archiviati», da cui si ripristina ----
     if (!(ricette && await openMenu('grid', ricette.id))) { check('B4: il menu ⋯ si riapre per archiviare', false, 'menu non aperto'); return }
-    const archived = ricette ? await clickTestid(cdp, `library-menu-archive-${ricette.id}`) : false
-    const goneFromView = await waitValue(cdp, `(async () => { const all = await window.sandbot.libraryList(); return all.some((d) => d.id === ${JSON.stringify(ricette?.id ?? '')}) ? null : all })()`, 10_000, 250)
+    const archived = ricette ? await clic(`library-menu-archive-${ricette.id}`) : false
+    const goneFromView = await sonda.attendi(`(async () => { const all = await window.sandbot.libraryList(); return all.some((d) => d.id === ${JSON.stringify(ricette?.id ?? '')}) ? null : all })()`, { entro: 10_000, motivo: 'il documento sparisca dalla vista normale' }).catch(() => null)
     check('B4: Archivia — il documento sparisce dalla vista normale (library:list non lo elenca)', archived && goneFromView !== null, archived ? 'ancora in elenco' : 'voce Archivia assente')
-    const inArchive = await rpc(cdp, `libraryList(undefined, undefined, true)`)
+    const inArchive = await sonda.rpc(`libraryList(undefined, undefined, true)`)
     const archRow = (inArchive ?? []).find((d) => d.id === ricette?.id)
     check('B4: Archivia — è sotto «Archiviati» con archived = true (la RPC library:archive)', archRow?.archived === true, JSON.stringify(archRow ? { title: archRow.title, archived: archRow.archived } : inArchive).slice(0, 160))
-    const cardsAfterArchive = await pageEval(cdp, `return [...document.querySelectorAll('[data-testid="library-card"]')].length`)
+    const cardsAfterArchive = await sonda.eval(`return [...document.querySelectorAll('[data-testid="library-card"]')].length`)
     check('B4: in griglia c’è una scheda in meno', cardsAfterArchive === cards - 1, `${cardsAfterArchive} schede (erano ${cards})`)
-    const filterOn = await clickTestid(cdp, 'library-filter-archived')
-    await sleep(600)
-    const archivedShown = await waitDom(cdp, `!!document.querySelector('[data-testid="library-card"][data-id="${ricette?.id ?? ''}"], [data-testid="library-menu-grid-${ricette?.id ?? ''}"]')`, 6_000)
+    const filterOn = await clic('library-filter-archived')
+    const archivedShown = await sonda.attendi(`!!document.querySelector('[data-testid="library-card"][data-id="${ricette?.id ?? ''}"], [data-testid="library-menu-grid-${ricette?.id ?? ''}"]')`, { entro: 6_000, motivo: 'il documento archiviato compaia' }).catch(() => false)
     check('B4: il filtro «Archiviati» mostra il documento archiviato', filterOn && archivedShown, filterOn ? 'scheda non trovata' : 'filtro assente')
-    await shot(cdp, '7-b4-archiviati-1280x800-chiaro')
+    await shot('7-b4-archiviati-1280x800-chiaro')
     const restoredMenu = ricette ? await openMenu('grid', ricette.id) : false
     const restoreItems = restoredMenu ? await itemsOf('grid', ricette.id) : null
     check('B4: tra gli archiviati il menu dice «Ripristina» al posto di «Archivia»', Array.isArray(restoreItems) && restoreItems.some((t) => /^Ripristina/.test(t)) && !restoreItems.some((t) => /^Archivia/.test(t)), JSON.stringify(restoreItems))
-    const restored = ricette ? await clickTestid(cdp, `library-menu-restore-${ricette.id}`) : false
-    const backInView = await waitValue(cdp, `(async () => { const all = await window.sandbot.libraryList(); const d = all.find((x) => x.id === ${JSON.stringify(ricette?.id ?? '')}); return d && d.archived === false ? d : null })()`, 10_000, 250)
+    const restored = ricette ? await clic(`library-menu-restore-${ricette.id}`) : false
+    const backInView = await sonda.attendi(`(async () => { const all = await window.sandbot.libraryList(); const d = all.find((x) => x.id === ${JSON.stringify(ricette?.id ?? '')}); return d && d.archived === false ? d : null })()`, { entro: 10_000, motivo: 'il documento torni nella vista normale' }).catch(() => null)
     check('B4: Ripristina — il documento torna nella vista normale (archived = false)', restored && backInView !== null, restored ? 'non è tornato' : 'voce Ripristina assente')
-    await clickTestid(cdp, 'library-filter-archived')
-    await sleep(500)
+    await clic('library-filter-archived')
 
     // ---- Elimina: la conferma dice il titolo e «Non si può annullare» ----
     const delMenu = fornitori ? await openMenu('grid', fornitori.id) : false
-    const delClicked = delMenu ? await clickTestid(cdp, `library-menu-delete-${fornitori.id}`) : false
-    const confirmShown = await waitDom(cdp, `!!document.querySelector('[data-testid="library-delete-confirm"]')`, 5_000)
-    const confirmText = confirmShown ? await pageEval(cdp, `return (document.querySelector('[data-testid="library-delete-confirm"]')?.textContent ?? '').replace(/\\s+/g, ' ').trim()`) : ''
+    const delClicked = delMenu ? await clic(`library-menu-delete-${fornitori.id}`) : false
+    const confirmShown = await sonda.attendi(`!!document.querySelector('[data-testid="library-delete-confirm"]')`, { entro: 5_000, motivo: 'la conferma di eliminazione' }).catch(() => false)
+    const confirmText = confirmShown ? await sonda.eval(`return (document.querySelector('[data-testid="library-delete-confirm"]')?.textContent ?? '').replace(/\\s+/g, ' ').trim()`) : ''
     check('B4: Elimina chiede conferma («Eliminare «titolo»? Non si può annullare.») — niente confirm() del browser', delClicked && confirmShown && confirmText.includes('Eliminare') && confirmText.includes('Fornitori') && /Non si può annullare/.test(confirmText), confirmText.slice(0, 200))
-    await shot(cdp, '6-b4-conferma-elimina-1280x800-chiaro')
-    check('B4: Annulla non elimina nulla', await clickTestid(cdp, 'library-delete-confirm-cancel') && await waitDom(cdp, `!document.querySelector('[data-testid="library-delete-confirm"]')`, 4_000) && ((await rpc(cdp, `libraryList()`)).some((d) => d.id === fornitori?.id) === true))
+    await shot('6-b4-conferma-elimina-1280x800-chiaro')
+    check('B4: Annulla non elimina nulla', await clic('library-delete-confirm-cancel') && await sonda.attendi(`!document.querySelector('[data-testid="library-delete-confirm"]')`, { entro: 4_000, motivo: 'la conferma si chiuda' }).catch(() => false) && ((await sonda.rpc(`libraryList()`)).some((d) => d.id === fornitori?.id) === true))
     await openMenu('grid', fornitori.id)
-    await clickTestid(cdp, `library-menu-delete-${fornitori.id}`)
-    await waitDom(cdp, `!!document.querySelector('[data-testid="library-delete-confirm"]')`, 5_000)
-    await clickTestid(cdp, 'library-delete-confirm-ok')
-    const deleted = await waitValue(cdp, `(async () => { const all = await window.sandbot.libraryList(undefined, undefined, 'all'); return all.some((d) => d.id === ${JSON.stringify(fornitori?.id ?? '')}) ? null : true })()`, 10_000, 250)
+    await clic(`library-menu-delete-${fornitori.id}`)
+    await sonda.attendi(`!!document.querySelector('[data-testid="library-delete-confirm"]')`, { entro: 5_000, motivo: 'la conferma di eliminazione' }).catch(() => undefined)
+    await clic('library-delete-confirm-ok')
+    const deleted = await sonda.attendi(`(async () => { const all = await window.sandbot.libraryList(undefined, undefined, 'all'); return all.some((d) => d.id === ${JSON.stringify(fornitori?.id ?? '')}) ? null : true })()`, { entro: 10_000, motivo: 'il documento sia eliminato' }).catch(() => null)
     check('B4: confermato, il documento è eliminato (library:delete: nemmeno tra gli archiviati)', deleted === true, deleted === null ? 'ancora in elenco' : 'assente')
 
     // ---- la lista: la casella, la barra «N selezionati», Archivia ed Elimina per tutti ----
-    await pageEval(cdp, `document.querySelector('[data-testid="library-panel"] button[aria-label="Elenco"]')?.click(); return true`)
-    await sleep(600)
-    const rest = (await rpc(cdp, `libraryList()`)).filter((d) => DOCS.some(([title]) => title === d.title))
-    const rows = await pageEval(cdp, `return document.querySelectorAll('[data-testid="library-row"]').length`)
-    const rowMenus = await pageEval(cdp, `return [...document.querySelectorAll('[data-testid^="library-menu-list-"]')].length`)
+    await sonda.eval(`document.querySelector('[data-testid="library-panel"] button[aria-label="Elenco"]')?.click(); return true`)
+    await sonda.attendi(`!!document.querySelector('[data-testid="library-row"]')`, { entro: 5_000, motivo: 'la vista a elenco' }).catch(() => undefined)
+    const rest = (await sonda.rpc(`libraryList()`)).filter((d) => DOCS.some(([title]) => title === d.title))
+    const rows = await sonda.eval(`return document.querySelectorAll('[data-testid="library-row"]').length`)
+    const rowMenus = await sonda.eval(`return [...document.querySelectorAll('[data-testid^="library-menu-list-"]')].length`)
     check('B4: in lista ogni documento ha la riga e il menu ⋯', rows >= 2 && rowMenus === rows, `${rows} righe, ${rowMenus} menu`)
-    const listPreview = await pageEval(cdp, `return [...document.querySelectorAll('[data-testid="library-row"]')].map((r) => (r.textContent ?? '').replace(/\\s+/g, ' ')).join(' | ')`)
+    const listPreview = await sonda.eval(`return [...document.querySelectorAll('[data-testid="library-row"]')].map((r) => (r.textContent ?? '').replace(/\\s+/g, ' ')).join(' | ')`)
     check('B4: anche la lista non mostra le tabelle crude', !listPreview.includes('|---|') && !listPreview.includes('| Ricetta |'), listPreview.includes('|---|') ? 'tabelle crude in lista' : 'pulita')
-    check('B4: la barra della selezione multipla non c’è senza selezione', !(await pageEval(cdp, `return !!document.querySelector('[data-testid="library-bulk-bar"]')`)))
-    for (const d of rest) await clickTestid(cdp, `library-select-${d.id}`, 4_000)
-    const bulk = await waitDom(cdp, `!!document.querySelector('[data-testid="library-bulk-bar"]')`, 5_000)
-    const bulkText = bulk ? await pageEval(cdp, `return (document.querySelector('[data-testid="library-bulk-bar"]')?.textContent ?? '').replace(/\\s+/g, ' ').trim()`) : ''
+    check('B4: la barra della selezione multipla non c’è senza selezione', !(await sonda.eval(`return !!document.querySelector('[data-testid="library-bulk-bar"]')`)))
+    for (const d of rest) await clic(`library-select-${d.id}`, 4_000)
+    const bulk = await sonda.attendi(`!!document.querySelector('[data-testid="library-bulk-bar"]')`, { entro: 5_000, motivo: 'la barra della selezione multipla' }).catch(() => false)
+    const bulkText = bulk ? await sonda.eval(`return (document.querySelector('[data-testid="library-bulk-bar"]')?.textContent ?? '').replace(/\\s+/g, ' ').trim()`) : ''
     check('B4: con due selezionate compare la barra «N selezionati» con Archivia ed Elimina per tutti', bulk && bulkText.includes(`${rest.length}`) && /Archivia/.test(bulkText) && /Elimina/.test(bulkText), bulkText.slice(0, 160))
-    await shot(cdp, '8-b4-selezione-multipla-1280x800-chiaro')
-    const bulkArchived = await clickTestid(cdp, 'library-bulk-archive')
-    const allArchived = await waitValue(cdp, `(async () => { const all = await window.sandbot.libraryList(undefined, undefined, 'all'); return ${JSON.stringify(rest.map((d) => d.id))}.every((id) => all.find((x) => x.id === id)?.archived === true) ? true : null })()`, 10_000, 250)
+    await shot('8-b4-selezione-multipla-1280x800-chiaro')
+    const bulkArchived = await clic('library-bulk-archive')
+    const allArchived = await sonda.attendi(`(async () => { const all = await window.sandbot.libraryList(undefined, undefined, 'all'); return ${JSON.stringify(rest.map((d) => d.id))}.every((id) => all.find((x) => x.id === id)?.archived === true) ? true : null })()`, { entro: 10_000, motivo: 'tutti i selezionati siano archiviati' }).catch(() => null)
     check('B4: «Archivia» della barra archivia TUTTI i selezionati', bulkArchived && allArchived === true, allArchived === true ? '' : 'non tutti archiviati')
     // si ripristinano dal filtro, così la Libreria resta com'era
-    await clickTestid(cdp, 'library-filter-archived')
-    await sleep(500)
+    await clic('library-filter-archived')
     for (const d of rest) {
-      await pageEval(cdp, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true`)
-      await sleep(150)
+      await sonda.eval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true`)
       await openMenu('list', d.id)
-      await clickTestid(cdp, `library-menu-restore-${d.id}`)
-      await sleep(250)
+      await clic(`library-menu-restore-${d.id}`)
+      await sonda.attendi(`(await window.sandbot.libraryList()).find((x) => x.id === ${JSON.stringify(d.id)})?.archived === false`, { entro: 5_000, motivo: 'il documento torni in vista' }).catch(() => false)
     }
-    await clickTestid(cdp, 'library-filter-archived')
-    await pageEval(cdp, `document.querySelector('[data-testid="library-panel"] button[aria-label="Griglia"]')?.click(); return true`)
-    await sleep(300)
+    await clic('library-filter-archived')
+    await sonda.eval(`document.querySelector('[data-testid="library-panel"] button[aria-label="Griglia"]')?.click(); return true`)
     // la Libreria si chiude: si torna alla chat per B5
-    await clickAria(cdp, 'Libreria')
-    await sleep(400)
+    await clicAria('Libreria')
+    await sonda.attendi(`!document.querySelector('[data-testid="library-panel"]')`, { entro: 4_000, motivo: 'la Libreria si chiuda' }).catch(() => undefined)
   })
 
   // ============================ B5: l'anello del fuoco ============================
@@ -1004,22 +825,17 @@ try {
   // spenta (AppleKeyboardUIMode assente): l'anello visto «al clic» nasce da lì.
   await trySection('B5', async () => {
     const measure = async (label) => {
-      const r = await ringOf(cdp)
+      const r = await ringOf()
       log(`B5 misura ${label}:`, JSON.stringify(r))
       return r
     }
-    const realKey = async (key, code, vk) => {
-      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk }, 8_000)
-      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk }, 8_000)
-      await sleep(250)
-    }
     /** Una riga da cliccare: il clic vero, poi un tasto che non sposta il focus, poi Tab. */
     const ringChecks = async (what, selectorExpr, expectedText) => {
-      const point = await centerOf(cdp, selectorExpr)
+      const point = await sonda.centro(selectorExpr)
       check(`B5: ${what} c’è`, point !== null, JSON.stringify(point))
       if (!point) return
-      await pageEval(cdp, `document.activeElement?.blur?.(); return true`)
-      await realClick(cdp, point)
+      await sonda.eval(`document.activeElement?.blur?.(); return true`)
+      await realClick(point)
       const afterClick = await measure(`dopo il clic su ${what}`)
       check(`B5: dopo un clic VERO del mouse su ${what} nessun anello di fuoco`, afterClick !== null && (!expectedText || (afterClick.text ?? '').includes(expectedText)) && !ringShown(afterClick), JSON.stringify(afterClick))
       check(`B5: dopo il clic su ${what} la modalità segnata sul <html> è «pointer»`, afterClick?.focusFrom === 'pointer', `data-focus-from = ${afterClick?.focusFrom}`)
@@ -1027,12 +843,12 @@ try {
       await realKey('Shift', 'ShiftLeft', 16)
       const afterKey = await measure(`dopo un tasto (Shift) col focus su ${what}`)
       check(`B5: dopo il clic su ${what}, un tasto che NON sposta il focus NON accende l’anello sull’elemento preso col mouse`, !ringShown(afterKey) && (!expectedText || (afterKey?.text ?? '').includes(expectedText)) && afterKey?.focusFrom === 'pointer', JSON.stringify(afterKey))
-      await pageEval(cdp, `document.activeElement?.blur?.(); return true`)
+      await sonda.eval(`document.activeElement?.blur?.(); return true`)
       // il Tab vero finisce anche nei campi di testo (il loro fuoco è il cursore): si preme finché il fuoco è su un controllo
       let afterTab = null
       for (let i = 0; i < 6; i++) {
-        await realTab(cdp)
-        afterTab = await ringOf(cdp)
+        await realTab()
+        afterTab = await ringOf()
         if (afterTab && !/^(input|textarea)$/i.test(afterTab.tag)) break
       }
       const afterTabM = await measure('dopo Tab')
@@ -1040,44 +856,30 @@ try {
     }
     await ringChecks('la riga «Novità AI» della barra di sinistra', `[...document.querySelectorAll('aside button')].find((b) => (b.querySelector('span.truncate')?.textContent ?? '').trim() === 'Novità AI')`, 'Novità AI')
     // i bottoni griglia/lista della Libreria (l'altro posto del sintomo)
-    if (await clickAria(cdp, 'Libreria') && await waitDom(cdp, `!!document.querySelector('[data-testid="library-panel"] button[aria-label="Elenco"]')`, 8_000)) {
+    if (await clicAria('Libreria') && await sonda.attendi(`!!document.querySelector('[data-testid="library-panel"] button[aria-label="Elenco"]')`, { entro: 8_000, motivo: 'la Libreria con i suoi bottoni' }).catch(() => false)) {
       await ringChecks('il bottone «Elenco» della Libreria', `document.querySelector('[data-testid="library-panel"] button[aria-label="Elenco"]')`, '')
       await ringChecks('il bottone «Griglia» della Libreria', `document.querySelector('[data-testid="library-panel"] button[aria-label="Griglia"]')`, '')
-      await clickAria(cdp, 'Libreria')
+      await clicAria('Libreria')
     } else {
       check('B5: la Libreria si apre per provare i bottoni griglia/lista', false, 'Libreria non aperta')
     }
   })
-
-  // ---- pulizia ----
-  stopApp()
-  if (Number.isInteger(app?.pid)) await waitPidGone(app.pid)
-  const { stopProbeDaemons } = await import('./lib/probe-daemons.mjs')
-  const { cleanupProbeRun, countProbeDirs } = await import('./lib/probe-rm.mjs')
-  await stopProbeDaemons(PREFIX, { log: () => undefined }).catch(() => undefined)
-  await cleanupProbeRun({ pids: [], prefix: PREFIX, dirs: [], log: () => undefined, capMs: 20_000 }).catch((e) => log('pulizia:', e.message))
-  await cleanupProbeRun({ pids: [], prefix: PREFIX, dirs: [TMP], log: () => undefined, capMs: 20_000 }).catch((e) => log('pulizia:', e.message))
-  const left = countProbeDirs(PREFIX, [TMP])
-  check('pulizia: 0 cartelle sandbot-fase-b20-bug-* rimaste', left === 0, `rimaste ${left}`)
-  const daemons = await import('./lib/probe-daemons.mjs').then((m) => m.findProbeDaemons(PREFIX))
-  check('pulizia: 0 daemon della sonda', daemons.length === 0, JSON.stringify(daemons))
 } catch (e) {
   log('FATAL:', e.message)
-  log(appLog.slice(-1200))
+  log(sonda.appLog().slice(-1200))
   results.push({ name: 'la sonda è arrivata in fondo senza errori', ok: false, detail: e.message })
-  stopApp()
-  try {
-    const { stopProbeDaemons } = await import('./lib/probe-daemons.mjs')
-    const { cleanupProbeRun } = await import('./lib/probe-rm.mjs')
-    await stopProbeDaemons(PREFIX, { log: () => undefined }).catch(() => undefined)
-    await cleanupProbeRun({ pids: Number.isInteger(app?.pid) ? [app.pid] : [], prefix: PREFIX, dirs: [TMP], log: () => undefined, capMs: 20_000 }).catch(() => undefined)
-  } catch { /* già in corsa */ }
+} finally {
+  // ---- pulizia: app spenta, figli della porta di debug via, daemon chiusi, cartelle cancellate e CONTEGGIATE ----
+  const fine = await sonda.fine({ porta: connessione?.porta })
+  const left = fine.conteggio
+  check('pulizia: 0 cartelle sandbot-fase-b20-bug-* rimaste', left === 0, `rimaste ${left}`)
+  const daemons = findProbeDaemons(PREFIX)
+  check('pulizia: 0 daemon della sonda', daemons.length === 0, JSON.stringify(daemons))
+  for (const res of composio.hung) { try { res.destroy() } catch { /* già chiusa */ } }
+  provider.close()
+  composioMcp.close()
+  asServer.close()
 }
-try { cdp?.sock.close() } catch { /* già chiusa */ }
-for (const res of composio.hung) { try { res.destroy() } catch { /* già chiusa */ } }
-provider.close()
-composioMcp.close()
-asServer.close()
 
 const ok = results.filter((r) => r.ok).length
 log(`CORSA fase-b20-bug${PRIMA ? ' (PRIMA)' : ''}: ${ok}/${results.length} controlli OK`)

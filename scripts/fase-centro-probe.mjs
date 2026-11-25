@@ -24,20 +24,24 @@
 // Catture CDP delle tavole 4 e 5 in docs/catture/fase-centro/; quelle della
 // fase approvazioni-chiare (centro col Registro, chat con la richiesta in
 // basso) in docs/catture/fase-approvazioni-chiare/. VERDE in TRE corse di
-// fila: node scripts/fase-centro-probe.mjs --run 1|2|3. Attese dei click UI
-// ≤ 5 s (lezione di fase-squadra). Pulizia K4: 0 cartelle sandbot-fase-centro-*, 0
+// fila: node scripts/fase-centro-probe.mjs. Attese dei click UI ≤ 5 s
+// (lezione di fase-squadra). Pulizia K4: 0 cartelle sandbot-fase-centro-*, 0
 // daemon della sonda, 0 llama-server nati con la corsa.
-import { spawn, spawnSync } from 'node:child_process'
+//
+// F7 (fase fondamenta): la sonda usa il MOTORE comune (scripts/lib/sonda.mjs):
+// un avvio per corsa, porta CDP libera scelta a caso (niente --run), e le
+// attese sono su CONDIZIONE (s.attendi e varianti), non a tempo. Cosa
+// controlla NON cambia: stesse verifiche e stesso numero di controlli verdi
+// (55).
+import { spawnSync, execSync } from 'node:child_process'
 import { createServer } from 'node:http'
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, readdirSync } from 'node:fs'
+import { writeFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { findProbeDaemons, stopProbeDaemons } from './lib/probe-daemons.mjs'
-import { cleanupProbeRun, countProbeDirs } from './lib/probe-rm.mjs'
+import { avviaSonda } from './lib/sonda.mjs'
+import { findProbeDaemons } from './lib/probe-daemons.mjs'
 
-const runArg = process.argv.find((a) => /^--?run/.test(a))
-const run = runArg ? (Number(runArg.split('=')[1] ?? process.argv[process.argv.indexOf(runArg) + 1]) || 1) : 1
+const run = 1
 const ROOT = resolve(import.meta.dirname, '..')
-const TMP_BASE = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'
 const PREFIX = 'sandbot-fase-centro'
 const SHOTS = join(ROOT, 'docs', 'catture', 'fase-centro')
 mkdirSync(SHOTS, { recursive: true })
@@ -50,9 +54,6 @@ const SHOTS3 = join(ROOT, 'docs', 'catture', 'fase-ritocchi-beta18')
 mkdirSync(SHOTS3, { recursive: true })
 
 const log = (...a) => console.log(`[sonda r${run}]`, ...a)
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const withTimeout = (p, ms, what) =>
-  Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`timeout ${what} (${ms} ms)`)), ms))])
 
 let failed = 0
 const results = []
@@ -62,18 +63,7 @@ const check = (name, ok, detail = '') => {
   log(`${ok ? 'OK ' : 'KO '} ${name}${detail ? ` — ${detail}` : ''}`)
 }
 
-// ---- la CLI `container` FINTA (mai quella vera) ----
-const DATA = mkdtempSync(join(TMP_BASE, `${PREFIX}-`))
-const FAKE_CONTAINER = join(DATA, 'fake-container.sh')
-writeFileSync(FAKE_CONTAINER, [
-  '#!/bin/sh',
-  '# CLI container FINTA della sonda: niente docker, niente container vero',
-  'if [ "$1" = "--version" ]; then echo "container 1.7.1-finta"; exit 0; fi',
-  'echo "[]" ; exit 0'
-].join('\n'))
-chmodSync(FAKE_CONTAINER, 0o755)
-
-// ---- il modello FINTO: risposte a pattern sul body (quando `when` calza).
+// ---- il modello FINTO della sonda: risposte a pattern sul body (quando `when` calza).
 // `when` può essere una stringa, UNA LISTA (tutte presenti nel body) o una
 // FUNZIONE (body, tools) — il FIGLIO si riconosce dai tool (ha wake_parent,
 // come la sonda aiutanti: il suo prompt non porta un nome affidabile) ----
@@ -125,26 +115,26 @@ const providerServer = createServer((req, res) => {
 await new Promise((r) => providerServer.listen(0, '127.0.0.1', r))
 const providerPort = providerServer.address().port
 
-// ---- l'app Electron VERA (out/) con dati temporanei ----
-const ELECTRON = join(ROOT, 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
-const DEBUG_PORT = 9471 + run
-let appLog = ''
-const app = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`, '--lang=it'], {
-  cwd: ROOT,
-  env: {
-    HOME: process.env.HOME,
-    PATH: process.env.PATH,
-    SANDBOT_TEST_USER_DATA: DATA,
-    SANDBOT_TEST_FAKE_KEYCHAIN: join(DATA, 'keychain-finta.json'),
-    SANDBOT_TEST_FAKE_SAFESTORAGE: join(DATA, 'safestorage-finta.json'),
-    SANDBOT_TEST_FAKE_BROWSER_MCP: join(ROOT, 'scripts', 'fake-browser-mcp.mjs'),
-    HOMUN_CONTAINER_PATH: FAKE_CONTAINER
-  },
-  stdio: ['ignore', 'pipe', 'pipe']
+// ---- F7: il MOTORE comune — la CLI `container` FINTA (mai quella vera) e il
+// browser MCP FINTO nell'ENV dell'app: le cartelle le crea il motore, e i
+// valori si impostano su sonda.env PRIMA di sonda.avvia() ----
+const sonda = await avviaSonda({
+  prefix: PREFIX,
+  envExtra: {},
+  log
 })
-app.stdout.on('data', (d) => { appLog += d.toString() })
-app.stderr.on('data', (d) => { appLog += d.toString() })
-const stopApp = () => { try { app?.kill('SIGTERM') } catch { /* già via */ } }
+// la CLI `container` FINTA nella cartella dati del motore: impostata nell'ENV prima di avviare
+const FAKE_CONTAINER = join(sonda.data, 'fake-container.sh')
+writeFileSync(FAKE_CONTAINER, [
+  '#!/bin/sh',
+  '# CLI container FINTA della sonda: niente docker, niente container vero',
+  'if [ "$1" = "--version" ]; then echo "container 1.7.1-finta"; exit 0; fi',
+  'echo "[]" ; exit 0'
+].join('\n'))
+chmodSync(FAKE_CONTAINER, 0o755)
+sonda.env.HOMUN_CONTAINER_PATH = FAKE_CONTAINER
+sonda.env.SANDBOT_TEST_FAKE_BROWSER_MCP = join(ROOT, 'scripts', 'fake-browser-mcp.mjs')
+
 // i llama-server GIÀ in corsa (per esempio l'Ollama dell'utente) non sono
 // della sonda — il controllo di pulizia conta solo quelli NASCITI dopo
 const llamaBaseline = (() => {
@@ -153,211 +143,79 @@ const llamaBaseline = (() => {
     return new Set(String(out.stdout ?? '').trim().split('\n').filter(Boolean))
   } catch { return new Set() }
 })()
-process.on('SIGINT', () => { stopApp(); process.exit(130) })
-process.on('SIGTERM', () => { stopApp(); process.exit(143) })
 
-// ---- CDP ----
-const httpJson = async (path) => (await fetch(`http://127.0.0.1:${DEBUG_PORT}${path}`).then((r) => r.json()))
-async function openCdp(url) {
-  const sock = new WebSocket(url)
-  await new Promise((res, rej) => { sock.onopen = res; sock.onerror = rej })
-  let id = 0
-  const waits = new Map()
-  sock.onmessage = (m) => {
-    const v = JSON.parse(m.data)
-    if (v.id && waits.has(v.id)) { const w = waits.get(v.id); waits.delete(v.id); v.error ? w.rej(new Error(v.error.message)) : w.res(v.result) }
-  }
-  return {
-    send: (method, params = {}) => new Promise((res, rej) => {
-      const mid = ++id
-      waits.set(mid, { res, rej })
-      sock.send(JSON.stringify({ id: mid, method, params }))
-    })
-  }
-}
-const waitForPage = async (urlIncludes) => {
-  for (let i = 0; i < 150; i++) {
-    try {
-      const list = await httpJson('/json/list')
-      const target = list.find((t) => t.type === 'page' && (t.url ?? '').includes(urlIncludes))
-      if (target) return { cdp: await openCdp(target.webSocketDebuggerUrl), url: target.url }
-    } catch { /* il debugger non è ancora su */ }
-    await sleep(200)
-  }
-  throw new Error(`nessuna pagina CDP per ${urlIncludes}: log app:\n` + appLog.slice(-1500))
-}
-const main = await waitForPage('')
-const page = main.cdp
-log('CDP collegato al renderer')
-const pageEval = async (expr) => {
-  let r
-  for (let attempt = 0; attempt < 4; attempt++) {
-    try {
-      r = await withTimeout(page.send('Runtime.evaluate', {
-        expression: `((async () => { ${expr} })())`,
-        awaitPromise: true,
-        returnByValue: true
-      }), 35_000, 'Runtime.evaluate')
-      break
-    } catch (e) {
-      if (attempt === 3) throw e
-      await sleep(2500)
-    }
-  }
-  if (r.exceptionDetails) throw new Error('eccezione nel renderer: ' + JSON.stringify(r.exceptionDetails.exception?.description ?? r.exceptionDetails).slice(0, 400))
-  return r?.result?.value
-}
-const rpc = async (callExpr) => {
-  let lastErr = null
-  for (let i = 0; i < 3; i++) {
-    try {
-      return await pageEval(`return await window.sandbot.${callExpr}`)
-    } catch (e) {
-      lastErr = e
-      await sleep(1500)
-    }
-  }
-  throw lastErr
-}
-const waitDom = async (exprTrue, timeoutMs = 30_000, step = 250) => {
-  const deadline = Date.now() + timeoutMs
-  const fast = async () => {
-    try {
-      return await withTimeout(page.send('Runtime.evaluate', {
-        expression: `((async () => { return !!(${exprTrue}) })())`,
-        awaitPromise: true,
-        returnByValue: true
-      }), 8_000, 'fast eval').then((r) => {
-        if (r.exceptionDetails) return null
-        return r?.result?.value === true
-      })
-    } catch {
-      return null // occupata: si riprova
-    }
-  }
+const connessione = await sonda.avvia()
+const portaDebug = connessione.porta
+log('CDP collegato al renderer (porta', portaDebug + ')')
+
+/** fase barra-sobria: le squadre sono CHIUSE di default — i membri si
+ *  aprono dalla chevron, la strada di prodotto, prima di selezionarli */
+const openTeamMembers = async (teamName) => {
+  // il clic si RIPETE: la barra si remonta a ogni cambio di stato dei bot e la chevron può sparire fra un poll e l'altro
+  const fine = Date.now() + 10_000
   for (;;) {
-    const v = await fast()
-    if (v === true) return true
-    if (Date.now() > deadline) return false
-    await sleep(step)
-  }
-}
-const setViewport = async (width, height) => {
-  await page.send('Emulation.setDeviceMetricsOverride', { width, height, mobile: false, deviceScaleFactor: 2 })
-  await sleep(700)
-}
-const settle = async () => {
-  // la finestra in primo piano — coperta, Chromium sospende i rAF e il
-  // settle sottile non terminerebbe (falsa lentezza, non dell'app)
-  await page.send('Page.bringToFront').catch(() => undefined)
-  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
-  await pageEval(`await Promise.race([new Promise((resolve) => { let n = 0; const step = () => { if (++n >= 2) resolve(); else requestAnimationFrame(step) }; requestAnimationFrame(step) }), new Promise((resolve) => setTimeout(resolve, 1500))])`)
-  await sleep(350)
-}
-const shot = async (name) => {
-  await settle()
-  const r = await page.send('Page.captureScreenshot', { format: 'png' })
-  writeFileSync(join(SHOTS, name), Buffer.from(r.data, 'base64'))
-  log('cattura', name)
-}
-/** la cattura della fase approvazioni-chiare (cartella della fase) */
-const shot2 = async (name) => {
-  await settle()
-  const r = await page.send('Page.captureScreenshot', { format: 'png' })
-  writeFileSync(join(SHOTS2, name), Buffer.from(r.data, 'base64'))
-  log('cattura (fase approvazioni-chiare)', name)
-}
-/** la cattura della fase ritocchi-beta18 (R1) */
-const shot3 = async (name) => {
-  await settle()
-  const r = await page.send('Page.captureScreenshot', { format: 'png' })
-  writeFileSync(join(SHOTS3, name), Buffer.from(r.data, 'base64'))
-  log('cattura (fase ritocchi-beta18)', name)
-}
-/** click per testid (attesa ≤ 5 s: è un click UI, la sonda deve essere rossa se la UI rallenta) */
-const clickTestid = async (testid, timeoutMs = 5_000) => {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const ok = await pageEval(`
-      const el = document.querySelector('[data-testid=${JSON.stringify(testid)}]')
-      if (!el) return false
-      el.scrollIntoView({ block: 'center' })
-      el.click()
-      return true
-    `).catch(() => false)
-    if (ok) return true
-    if (Date.now() > deadline) return false
-    await sleep(300)
-  }
-}
-const clickText = async (text, { scope = 'document', exact = false, timeoutMs = 5_000 } = {}) => {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const ok = await pageEval(`
-      const root = ${scope}
-      const nodes = [...root.querySelectorAll('button, [role="menuitem"], [role="button"], a, .no-drag')]
-      const t = ${JSON.stringify(text)}
-      const b = nodes.find((x) => ${exact ? `x.textContent.trim() === t || x.getAttribute('aria-label') === t` : `x.textContent.trim().includes(t) || (x.getAttribute('aria-label') ?? '').includes(t)`})
+    const ok = await sonda.eval(`
+      const btns = [...document.querySelectorAll('aside button[aria-label]')]
+      const b = btns.find((x) => (x.getAttribute('aria-label') ?? '').includes(${JSON.stringify(`Apri i membri di ${teamName}`)}))
       if (!b) return false
-      b.scrollIntoView({ block: 'center' })
       b.click()
       return true
     `).catch(() => false)
-    if (ok) return true
-    if (Date.now() > deadline) return false
-    await sleep(300)
+    if (ok === true) return true
+    if (Date.now() > fine) {
+      log('DEBUG chevron assente entro 10 s:', JSON.stringify(await sonda.eval(`return [...document.querySelectorAll('aside button')].slice(0, 12).map((b) => (b.getAttribute('aria-label') ?? '') + ' | ' + (b.textContent ?? '').trim().slice(0, 30))`).catch((e2) => 'eval: ' + e2.message)))
+      return false
+    }
+    await new Promise((r) => setTimeout(r, 50))
   }
 }
 /** seleziona un bot nella barra laterale e aspetta il compositore privato.
  * La RIGA può arrivare col refresh coalescente (fino a 10 s per trovarla); la
  * REAZIONE al click — il compositore del bot — resta entro 5 s: se la UI
  * rallenta, la sonda deve essere rossa. */
-/** fase barra-sobria: le squadre sono CHIUSE di default — i membri si
- *  aprono dalla chevron, la strada di prodotto, prima di selezionarli */
-const openTeamMembers = async (teamName) => {
-  const ok = await pageEval(`
-    const btns = [...document.querySelectorAll('aside button[aria-label]')]
-    const b = btns.find((x) => (x.getAttribute('aria-label') ?? '').includes(${JSON.stringify(`Apri i membri di ${teamName}`)}))
-    if (!b) return false
-    b.click()
-    return true
-  `).catch(() => false)
-  return ok === true
-}
 const selectBot = async (name) => {
-  const findDeadline = Date.now() + 10_000
+  const fine = Date.now() + 10_000
   for (;;) {
-    const ok = await pageEval(`
+    const ok = await sonda.eval(`
       const rows = [...document.querySelectorAll('aside button')]
       const row = rows.find((b) => b.textContent.trim().startsWith(${JSON.stringify(name)}))
-      if (!row) return 'no-row'
+      if (!row) return false
       row.scrollIntoView({ block: 'center' })
       row.click()
-      return 'clicked'
-    `).catch(() => null)
-    if (ok === 'clicked' && await waitDom(`document.querySelector('form textarea') && (document.querySelector('form textarea').placeholder ?? '').includes(${JSON.stringify(name)})`, 5_000)) return true
-    if (Date.now() > findDeadline) {
-      const asideTexts = await pageEval(`return [...document.querySelectorAll('aside button')].map((b) => b.textContent.trim().slice(0, 40)).slice(0, 20)`).catch(() => '?')
-      log('selectBot DEBUG righe aside:', JSON.stringify(asideTexts), 'compositore:', await pageEval(`return document.querySelector('form textarea')?.placeholder ?? null`).catch(() => '?'))
-      return false
-    }
-    await sleep(300)
+      return true
+    `).catch(() => false)
+    if (ok && await sonda.attendi(`document.querySelector('form textarea') && (document.querySelector('form textarea').placeholder ?? '').includes(${JSON.stringify(name)})`, { entro: 5_000, motivo: 'il compositore privato di ' + name }).catch(() => false)) return true
+    if (Date.now() > fine) return false
+    await new Promise((r) => setTimeout(r, 300))
   }
 }
-const sendMessage = async (text) => pageEval(`
+/** il messaggio scritto e inviato col submit del form (come l'utente). */
+const sendMessage = async (text) => {
+  await sonda.scrivi('form textarea', text)
+  return sonda.eval(`
   const ta = document.querySelector('form textarea')
   if (!ta) return false
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
-  setter.call(ta, ${JSON.stringify(text)})
-  ta.dispatchEvent(new Event('input', { bubbles: true }))
   const form = ta.closest('form')
   form.requestSubmit()
   return true
 `)
+}
+/** il clic per testid: il loop di retry è nel motore (sonda.clic); qui resta
+ * solo la semantica della sonda — false, non throw, se non riesce (≤ 5 s) */
+const clickTestid = async (testid, entro = 5_000) => sonda.clic(testid, { entro }).catch(() => false)
+/** il clic di una voce per testo (i filtri del centro sono bottoni pilola):
+ * loop di retry nel motore (sonda.clicTesto), false se non riesce */
+const clickText = (text, { scope = 'document', exact = false, entro = 5_000 } = {}) =>
+  sonda.clicTesto(text, scope, { entro, esatto: exact }).catch(() => false)
+const shot = async (name) => { await sonda.cattura(join(SHOTS, name)); log('cattura', name) }
+/** la cattura della fase approvazioni-chiare (cartella della fase) */
+const shot2 = async (name) => { await sonda.cattura(join(SHOTS2, name)); log('cattura (fase approvazioni-chiare)', name) }
+/** la cattura della fase ritocchi-beta18 (R1) */
+const shot3 = async (name) => { await sonda.cattura(join(SHOTS3, name)); log('cattura (fase ritocchi-beta18)', name) }
 /** aprire un menu Radix (si apre col POINTERDOWN, non col solo click —
  *  lezione di fase uso-permessi) e aspettare le voci */
-const openMenu = async (testid, timeoutMs = 5_000) => {
-  const opened = await pageEval(`
+const openMenu = async (testid, entro = 5_000) => {
+  const opened = await sonda.eval(`
     const b = document.querySelector('[data-testid=${JSON.stringify(testid)}]')
     if (!b) return false
     b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, isPrimary: true, button: 0 }))
@@ -365,11 +223,11 @@ const openMenu = async (testid, timeoutMs = 5_000) => {
     return true
   `).catch(() => false)
   if (!opened) return false
-  return waitDom(`document.querySelectorAll('[role="menuitem"]').length > 0`, timeoutMs)
+  return sonda.attendi(`document.querySelectorAll('[role="menuitem"]').length > 0`, { entro, motivo: 'le voci del menu' }).catch(() => false)
 }
 /** aprire il menu Radix della CARD che contiene il testo cercato */
-const openMenuInCard = async (cardText, testid, timeoutMs = 5_000) => {
-  const opened = await pageEval(`
+const openMenuInCard = async (cardText, testid, entro = 5_000) => {
+  const opened = await sonda.eval(`
     const cards = [...document.querySelectorAll('[data-testid="approvals-center-card"]')]
     const card = cards.find((c) => c.textContent.includes(${JSON.stringify(cardText)}))
     const b = card?.querySelector('[data-testid=${JSON.stringify(testid)}]')
@@ -379,22 +237,22 @@ const openMenuInCard = async (cardText, testid, timeoutMs = 5_000) => {
     return true
   `).catch(() => false)
   if (!opened) return false
-  return waitDom(`document.querySelectorAll('[role="menuitem"]').length > 0`, timeoutMs)
+  return sonda.attendi(`document.querySelectorAll('[role="menuitem"]').length > 0`, { entro, motivo: 'le voci del menu della card' }).catch(() => false)
 }
 
 /** cliccare la voce del menu aperto col testid cercato */
-const clickMenuItem = (testid) => pageEval(`
+const clickMenuItem = (testid) => sonda.eval(`
   const b = document.querySelector('[data-testid=${JSON.stringify(testid)}]')
   if (!b) return false
   b.click()
   return true
 `).catch(() => false)
 
-/** click su un bottone dentro la CARD che contiene il testo cercato (per decidere LA richiesta giusta) */
-const clickInCard = async (cardText, testid, timeoutMs = 5_000) => {
-  const deadline = Date.now() + timeoutMs
+/** click su un bottone dentro la CARD che contiene il testo cercato (per decidere LA richiesta giusta) — si RIPETE: la lista si remonta a ogni decisione */
+const clickInCard = async (cardText, testid, entro = 5_000) => {
+  const fine = Date.now() + entro
   for (;;) {
-    const ok = await pageEval(`
+    const ok = await sonda.eval(`
       const cards = [...document.querySelectorAll('[data-testid="approvals-center-card"]')]
       const card = cards.find((c) => c.textContent.includes(${JSON.stringify(cardText)}))
       if (!card) return false
@@ -404,31 +262,31 @@ const clickInCard = async (cardText, testid, timeoutMs = 5_000) => {
       b.click()
       return true
     `).catch(() => false)
-    if (ok) return true
-    if (Date.now() > deadline) return false
-    await sleep(300)
+    if (ok === true) return true
+    if (Date.now() > fine) return false
+    await new Promise((r) => setTimeout(r, 50))
   }
 }
 
 try {
   // ---- setup: provider finto, guida chiusa, i bot, le squadre, l'MCP ufficio ----
-  if (!(await waitDom(`typeof window.sandbot !== 'undefined'`, 40_000))) throw new Error('window.sandbot non disponibile: ' + appLog.slice(-800))
-  await setViewport(1280, 860)
-  await rpc(`saveProvider(${JSON.stringify({ id: 'finto', name: 'Finto locale', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, enabled: true })})`)
-  await rpc(`settingsSet(${JSON.stringify('models.main')}, ${JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null })})`)
-  await rpc(`settingsSet(${JSON.stringify('sandbox.mode')}, ${JSON.stringify('host')})`).catch(() => undefined)
+  await sonda.attendi(`typeof window.sandbot !== 'undefined' && !!window.sandbot`, { entro: 40_000, motivo: 'il preload sia pronto' })
+  await sonda.viewport(1280, 860, { scala: 2 })
+  await sonda.rpc(`saveProvider(${JSON.stringify({ id: 'finto', name: 'Finto locale', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, enabled: true })})`)
+  await sonda.rpc(`settingsSet(${JSON.stringify('models.main')}, ${JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null })})`)
+  await sonda.rpc(`settingsSet(${JSON.stringify('sandbox.mode')}, ${JSON.stringify('host')})`).catch(() => undefined)
   for (let round = 0; round < 5; round++) {
     for (const step of ['welcome', 'model', 'computer', 'approvals']) {
-      await rpc(`onboardingAdvance(${JSON.stringify(step)}, 'skipped')`).catch(() => undefined)
-      await sleep(600)
+      await sonda.rpc(`onboardingAdvance(${JSON.stringify(step)}, 'skipped')`).catch(() => undefined)
+      await sonda.attendiRete({ quieta: 250, entro: 3_000 }).catch(() => undefined)
     }
-    if (await waitDom(`document.querySelector('aside')`, 15_000)) break
+    if (await sonda.eval(`return !!document.querySelector('aside')`).catch(() => false)) break
   }
-  if (!(await waitDom(`document.querySelector('aside')`, 1_000))) throw new Error('la guida non si è chiusa: ' + appLog.slice(-600))
+  if (!(await sonda.attendi(`!!document.querySelector('aside')`, { entro: 5_000, motivo: 'la guida si sia chiusa' }).catch(() => false))) throw new Error('la guida non si è chiusa: ' + sonda.appLog().slice(-600))
 
   const mkBot = async (name, role) => {
-    const a = await rpc(`createAgent(${JSON.stringify(name)}, ${JSON.stringify(role)})`)
-    await rpc(`updateAgent(${JSON.stringify(a.id)}, ${JSON.stringify({ providerId: 'finto', model: 'finto' })})`)
+    const a = await sonda.rpc(`createAgent(${JSON.stringify(name)}, ${JSON.stringify(role)})`)
+    await sonda.rpc(`updateAgent(${JSON.stringify(a.id)}, ${JSON.stringify({ providerId: 'finto', model: 'finto' })})`)
     return a
   }
   // i coordinatori non hanno riga propria nella barra (stanno nella riga
@@ -441,30 +299,30 @@ try {
   const archivio = await mkBot('Archivio', 'Documenti delle fatture')
   const solleciti = await mkBot('Solleciti', 'Email di sollecito')
   const ricerche = await mkBot('Ricerche', 'Ricerche online')
-  const wt = await rpc(`groupCreate(${JSON.stringify('Weekend Torino')}, ${JSON.stringify([capoWt.id, turismo.id, alloggio.id])}, ${JSON.stringify(capoWt.id)}, ${JSON.stringify('Guida del weekend')})`)
-  const fm = await rpc(`groupCreate(${JSON.stringify('Fatture marzo')}, ${JSON.stringify([capoFm.id, archivio.id, solleciti.id])}, ${JSON.stringify(capoFm.id)}, ${JSON.stringify('Contabilità')})`)
+  const wt = await sonda.rpc(`groupCreate(${JSON.stringify('Weekend Torino')}, ${JSON.stringify([capoWt.id, turismo.id, alloggio.id])}, ${JSON.stringify(capoWt.id)}, ${JSON.stringify('Guida del weekend')})`)
+  const fm = await sonda.rpc(`groupCreate(${JSON.stringify('Fatture marzo')}, ${JSON.stringify([capoFm.id, archivio.id, solleciti.id])}, ${JSON.stringify(capoFm.id)}, ${JSON.stringify('Contabilità')})`)
   check('setup: le due squadre e il bot singolo', !!wt?.id && !!fm?.id, `${wt?.name}/${fm?.name}`)
 
   // i login della Cassaforte (modulo del museo e login del sottoagente)
-  const museo = await rpc(`vaultSaveLogin(${JSON.stringify({ label: 'Museo Egizio', origins: ['https://spa.example'], username: 'utente-musei', password: 'pwd-musei-8a4b2c' })})`)
-  const linkedin = await rpc(`vaultSaveLogin(${JSON.stringify({ label: 'LinkedIn', origins: ['https://spa.example'], username: 'utente-linkedin', password: 'pwd-linkedin-9c1d3e' })})`)
+  const museo = await sonda.rpc(`vaultSaveLogin(${JSON.stringify({ label: 'Museo Egizio', origins: ['https://spa.example'], username: 'utente-musei', password: 'pwd-musei-8a4b2c' })})`)
+  const linkedin = await sonda.rpc(`vaultSaveLogin(${JSON.stringify({ label: 'LinkedIn', origins: ['https://spa.example'], username: 'utente-linkedin', password: 'pwd-linkedin-9c1d3e' })})`)
 
   // il server MCP «ufficio» FINTO: la bozza dell'invio (mai rete vera)
-  const mcpCallsFile = join(DATA, 'ufficio-calls.jsonl')
+  const mcpCallsFile = join(sonda.data, 'ufficio-calls.jsonl')
   const serverCfg = { id: 'srv-ufficio', name: 'ufficio', transport: 'stdio', command: process.execPath, args: [join(ROOT, 'scripts', 'fake-ufficio-mcp.mjs'), mcpCallsFile], enabled: true, enabledFor: ['*'] }
-  await rpc(`mcpSave(${JSON.stringify(serverCfg)})`)
-  const mcpOk = await rpc(`mcpTest('srv-ufficio')`)
+  await sonda.rpc(`mcpSave(${JSON.stringify(serverCfg)})`)
+  const mcpOk = await sonda.rpc(`mcpTest('srv-ufficio')`)
   check('setup: il server MCP «ufficio» è collegato (bozze senza rete)', mcpOk?.ok === true && (mcpOk.tools ?? []).some((t) => t.includes('send_email')), JSON.stringify(mcpOk)?.slice(0, 120))
   // come la sonda 0.3.1001: dopo il collegamento si ricarica la pagina perché
   // i tool del server siano offerti al modello
-  await page.send('Page.reload')
-  if (!(await waitDom(`document.querySelector('aside')`, 25_000))) throw new Error('la pagina non è tornata dopo il reload: ' + appLog.slice(-500))
+  await sonda.eval(`location.reload(); return true`).catch(() => undefined)
+  if (!(await sonda.attendi(`!!document.querySelector('aside')`, { entro: 25_000, motivo: 'la pagina torni dopo il reload' }).catch(() => false))) throw new Error('la pagina non è tornata dopo il reload: ' + sonda.appLog().slice(-500))
   // fase barra-sobria: le squadre sono chiuse di default e i turni della
   // sonda passano dai MEMBRI — si aprono dalla chevron (scelta che si ricorda)
   for (const teamName of ['Weekend Torino', 'Fatture marzo']) {
     if (!(await openTeamMembers(teamName))) throw new Error(`apertura membri di ${teamName} non riuscita`)
   }
-  if (!(await waitDom(`[...document.querySelectorAll('aside button')].some((b) => b.textContent.trim().startsWith('Turismo'))`, 5_000))) throw new Error('i membri aperti non si vedono')
+  if (!(await sonda.attendi(`[...document.querySelectorAll('aside button')].some((b) => b.textContent.trim().startsWith('Turismo'))`, { entro: 5_000, motivo: 'i membri aperti si vedano' }).catch(() => false))) throw new Error('i membri aperti non si vedono')
 
   // =========== lo script del modello: le 5 richieste ===========
   // 1. Turismo (Weekend Torino): fill_credential col login del museo → i tuoi dati
@@ -530,69 +388,83 @@ try {
   // suo login ne apre un quarto — prima si chiudono i browser FINTI dei due
   // bot la cui card resta comunque in attesa (le card sono entry: vivono
   // anche senza browser; quei due turni non eseguiranno mai l'azione) ----
-  const freeBrowserSlots = (keep) => {
+  const pidsBrowser = () => {
     const out = spawnSync('/usr/bin/pgrep', ['-f', 'fake-browser-mcp'], { encoding: 'utf8' })
-    const pids = String(out.stdout ?? '').trim().split('\n').filter(Boolean).map(Number).filter((p) => Number.isInteger(p) && p !== process.pid).sort((a, b) => a - b)
+    return String(out.stdout ?? '').trim().split('\n').filter(Boolean).map(Number).filter((p) => Number.isInteger(p) && p !== process.pid).sort((a, b) => a - b)
+  }
+  const freeBrowserSlots = (keep) => {
+    const pids = pidsBrowser()
     const toKill = keep > 0 ? pids.slice(keep) : pids
     for (const pid of toKill) {
       try { process.kill(pid, 'SIGKILL') } catch { /* già via */ }
     }
     return { totale: pids.length, chiusi: toKill.length }
   }
-  for (const [bot, msg] of [
-    [turismo, 'modulo-museo: compila il modulo del museo (https://spa.example/login) con i miei dati della Cassaforte'],
-    [alloggio, 'verifica-alloggio: scrivi la mia email nel modulo di verifica (https://spa.example/prenota) e invialo'],
-    [archivio, 'fatture-archivio: scrivi il nome Rossi Srl nel modulo della pagina (https://spa.example/prenota) e invialo'],
-    [solleciti, 'sollecito-rossi: manda la email di sollecito a Rossi Srl']
+  for (const [bot, msg, marker] of [
+    [turismo, 'modulo-museo: compila il modulo del museo (https://spa.example/login) con i miei dati della Cassaforte', 'modulo-museo'],
+    [alloggio, 'verifica-alloggio: scrivi la mia email nel modulo di verifica (https://spa.example/prenota) e invialo', 'verifica-alloggio'],
+    [archivio, 'fatture-archivio: scrivi il nome Rossi Srl nel modulo della pagina (https://spa.example/prenota) e invialo', 'fatture-archivio'],
+    [solleciti, 'sollecito-rossi: manda la email di sollecito a Rossi Srl', 'sollecito-rossi']
   ]) {
     if (!(await selectBot(bot.name))) throw new Error(`selezione di ${bot.name} non riuscita`)
     await sendMessage(msg)
-    await sleep(400)
+    // (era sleep(400)) il turno del bot parte dal messaggio RENDERizzato nella
+    // chat: si aspetta quello, non l'orologio
+    await sonda.attendi(`document.body.textContent.includes(${JSON.stringify(marker)})`, { entro: 10_000, motivo: `il messaggio ${marker} sia nella chat` }).catch(() => false)
   }
   // le prime 4 richieste (3 browser + la bozza)...
-  const quattro = await waitDom(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('4')`, 90_000, 500)
+  const quattro = await sonda.attendi(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('4')`, { entro: 90_000, passo: 500, motivo: 'le prime 4 richieste in barra' }).catch(() => false)
   check('le prime 4 richieste nascono (fill, 2 siti, bozza)', quattro,
-    (await pageEval(`return document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? ''`).catch(() => '')))
+    (await sonda.eval(`return document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? ''`).catch(() => '')))
   // ...si libera posto per il browser del login (resta vivo quello di Turismo,
   // il primo aperto: la sua card si deciderà davvero)
   const freed = freeBrowserSlots(1)
   log('browser finti chiusi per il login (limite 3 per computer):', JSON.stringify(freed))
-  await sleep(1_000)
+  // (era sleep(1000)) i browser finti chiusi devono essere DAVVERO andati: il
+  // limite di 3 per computer conta i processi vivi
+  {
+    const fine = Date.now() + 5_000
+    while (pidsBrowser().length > 1 && Date.now() < fine) await new Promise((r) => setTimeout(r, 100))
+  }
   // prima il FIGLIO (quel turno finisce in fretta), poi il login (che mette
   // il turno in pausa sulla card: i messaggi dopo resterebbero in coda)
-  for (const msg of ['compito-figlio: lancia l\'aiutante per il controllo della fattura', 'login-linkedin: accedi a LinkedIn (https://spa.example/login) col mio login della Cassaforte']) {
+  for (const [msg, marker] of [
+    ['compito-figlio: lancia l\'aiutante per il controllo della fattura', 'compito-figlio'],
+    ['login-linkedin: accedi a LinkedIn (https://spa.example/login) col mio login della Cassaforte', 'login-linkedin']
+  ]) {
     if (!(await selectBot(ricerche.name))) throw new Error('selezione di Ricerche non riuscita')
     await sendMessage(msg)
-    await sleep(400)
+    // (era sleep(400)) come sopra: il messaggio renderizzato
+    await sonda.attendi(`document.body.textContent.includes(${JSON.stringify(marker)})`, { entro: 10_000, motivo: `il messaggio ${marker} sia nella chat` }).catch(() => false)
   }
 
   // =========== 0. la richiesta del SOTTOAGENTE si rifiuta dal centro ===========
-  const six = await waitDom(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('6')`, 90_000, 500)
+  const six = await sonda.attendi(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('6')`, { entro: 90_000, passo: 500, motivo: 'le 6 richieste in barra' }).catch(() => false)
   check('le 6 richieste ci sono tutte (5 + quella del sottoagente)', six,
-    (await pageEval(`return document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? ''`).catch(() => '')))
+    (await sonda.eval(`return document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? ''`).catch(() => '')))
   check('il centro si apre dalla voce della barra', await clickTestid('sidebar-approvals') &&
-    await waitDom(`document.querySelector('[data-testid="approvals-center"]')`, 5_000))
+    await sonda.attendi(`!!document.querySelector('[data-testid="approvals-center"]')`, { entro: 5_000, motivo: 'il centro delle approvazioni' }).catch(() => false))
   check('la richiesta del sottoagente mostra il PADRE e «tramite un sottoagente»',
-    await waitDom(`[...document.querySelectorAll('[data-testid="approvals-center-card"]')].some((c) => c.textContent.includes('tramite un sottoagente') && c.textContent.includes('Ricerche'))`, 5_000))
+    await sonda.attendi(`[...document.querySelectorAll('[data-testid="approvals-center-card"]')].some((c) => c.textContent.includes('tramite un sottoagente') && c.textContent.includes('Ricerche'))`, { entro: 5_000, motivo: 'la card del sottoagente col padre' }).catch(() => false))
   check('si RIFIUTA dal centro la richiesta del sottoagente', await clickInCard('tramite un sottoagente', 'approval-deny'))
-  const figlioChiuso = await waitDom(`(await window.sandbot.listSubagents(${JSON.stringify(ricerche.id)})).every((s) => s.status !== 'running')`, 30_000, 500)
+  const figlioChiuso = await sonda.attendi(`(await window.sandbot.listSubagents(${JSON.stringify(ricerche.id)})).every((s) => s.status !== 'running')`, { entro: 30_000, passo: 500, motivo: 'il turno del sottoagente si chiuda' }).catch(() => false)
   check('rifiutata dal centro, il turno del sottoagente si chiude', figlioChiuso)
 
   // =========== 1. la voce «Da approvare» con 5 ===========
-  const five = await waitDom(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('5')`, 30_000, 500)
+  const five = await sonda.attendi(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('5')`, { entro: 30_000, passo: 500, motivo: 'la barra scenda a 5' }).catch(() => false)
   check('la voce «Da approvare» della barra mostra 5', five,
-    (await pageEval(`return document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? ''`).catch(() => '')))
-  const rows = five ? await rpc(`approvalsPendingAll()`) : []
+    (await sonda.eval(`return document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? ''`).catch(() => '')))
+  const rows = five ? await sonda.rpc(`approvalsPendingAll()`) : []
   if (!five) {
     // diagnostica: cosa è successo nei turni
     for (const [nome, id] of [['Solleciti', solleciti.id], ['Alloggio', alloggio.id], ['Ricerche', ricerche.id]]) {
-      const tail = (await rpc(`getEntries(${JSON.stringify(id)})`).catch(() => [])).slice(-16).map((e) => ({ k: e.kind, st: e.meta?.status, c: String(e.content).slice(0, 80) }))
+      const tail = (await sonda.rpc(`getEntries(${JSON.stringify(id)})`).catch(() => [])).slice(-16).map((e) => ({ k: e.kind, st: e.meta?.status, c: String(e.content).slice(0, 80) }))
       log('DEBUG entries', nome, JSON.stringify(tail))
     }
-    log('DEBUG tool-results Ricerche:', JSON.stringify((await rpc(`getEntries(${JSON.stringify(ricerche.id)})`).catch(() => [])).filter((e) => e.kind === 'tool-result').map((e) => String(e.content).slice(0, 110))))
-    const subs = await rpc(`listSubagents(${JSON.stringify(ricerche.id)})`).catch(() => [])
+    log('DEBUG tool-results Ricerche:', JSON.stringify((await sonda.rpc(`getEntries(${JSON.stringify(ricerche.id)})`).catch(() => [])).filter((e) => e.kind === 'tool-result').map((e) => String(e.content).slice(0, 110))))
+    const subs = await sonda.rpc(`listSubagents(${JSON.stringify(ricerche.id)})`).catch(() => [])
     for (const sub of subs) {
-      const tail = (await rpc(`getEntries(${JSON.stringify(sub.id)})`).catch(() => [])).slice(-6).map((e) => ({ k: e.kind, st: e.meta?.status, c: String(e.content).slice(0, 60) }))
+      const tail = (await sonda.rpc(`getEntries(${JSON.stringify(sub.id)})`).catch(() => [])).slice(-6).map((e) => ({ k: e.kind, st: e.meta?.status, c: String(e.content).slice(0, 60) }))
       log('DEBUG entries FIGLIO', sub.name ?? sub.id, JSON.stringify(tail))
     }
     const mcpFile = existsSync(mcpCallsFile) ? readFileSync(mcpCallsFile, 'utf8').trim() : '(nessuna chiamata)'
@@ -613,35 +485,35 @@ try {
   // ignorato: la beta.10 disegnava il centro per sempre e la cattura 5
   // mostrava il centro al posto della chat
   check('«Chiudi» chiude il centro e torna alla chat (composer visibile)', await clickTestid('approvals-center-close') &&
-    await waitDom(`!document.querySelector('[data-testid="approvals-center"]') && !!document.querySelector('form textarea')`, 5_000))
+    await sonda.attendi(`!document.querySelector('[data-testid="approvals-center"]') && !!document.querySelector('form textarea')`, { entro: 5_000, motivo: 'il centro chiuso e il composer' }).catch(() => false))
   // B1: dal centro RIAPERTO, il clic su un bot della barra laterale porta alla
   // SUA chat: composer di quel bot e centro assente
   const botViaSidebar = await clickTestid('sidebar-approvals') &&
-    await waitDom(`document.querySelector('[data-testid="approvals-center"]')`, 5_000) &&
+    await sonda.attendi(`!!document.querySelector('[data-testid="approvals-center"]')`, { entro: 5_000, motivo: 'il centro riaperto' }).catch(() => false) &&
     await selectBot('Bot') &&
-    await waitDom(`!document.querySelector('[data-testid="approvals-center"]') && (document.querySelector('form textarea')?.placeholder ?? '').includes('Bot')`, 5_000)
+    await sonda.attendi(`!document.querySelector('[data-testid="approvals-center"]') && (document.querySelector('form textarea')?.placeholder ?? '').includes('Bot')`, { entro: 5_000, motivo: 'la chat del bot dal centro' }).catch(() => false)
   check('dal centro aperto, il clic su un bot della barra laterale porta alla sua chat', botViaSidebar)
   // A3 (fase approvazioni-chiare): in cima SOLO il riquadro ridotto «+N
   // altrove» — tutte le richieste sono di ALTRI bot (la chat è del bot Bot)
-  const banner = await waitDom(`document.querySelector('[data-testid="approvals-banner"]')`, 10_000)
-  const bannerText = banner ? await pageEval(`return document.querySelector('[data-testid="approvals-banner"]').textContent`) : ''
+  const banner = await sonda.attendi(`!!document.querySelector('[data-testid="approvals-banner"]')`, { entro: 10_000, motivo: 'il riquadro in cima alla chat' }).catch(() => false)
+  const bannerText = banner ? await sonda.eval(`return document.querySelector('[data-testid="approvals-banner"]').textContent`) : ''
   check('il riquadro in cima alla chat principale è RIDOTTO: «+5 altrove»', banner && bannerText.includes('+5 altrove') && bannerText.includes('Apri'), String(bannerText).slice(0, 160))
   check('la richiesta del bot aperto NON sta nel riquadro in cima (nessun «Decidi»)', banner && (bannerText.match(/Decidi/g) ?? []).length === 0, String(bannerText).slice(0, 200))
   // B1: la cattura 5 è la CHAT col riquadro — il centro non deve esserci nel
   // DOM al momento dello shot
-  check('la cattura 5 mostra la chat col riquadro: il centro NON c\'è al momento dello shot', banner && !(await pageEval(`return document.querySelector('[data-testid="approvals-center"]') !== null`).catch(() => true)))
+  check('la cattura 5 mostra la chat col riquadro: il centro NON c\'è al momento dello shot', banner && !(await sonda.eval(`return document.querySelector('[data-testid="approvals-center"]') !== null`).catch(() => true)))
   await shot('5-chat-principale-riquadro.png')
 
   // =========== 2/3. il centro: gruppi e filtri ===========
-  // A3: il riquadro ridotto È il bottone («+N altrove · Apri "Da approvare"»)
-  const bannerOpened = await pageEval(`
+  // A3: il riquadro ridotto É il bottone («+N altrove · Apri "Da approvare"»)
+  const bannerOpened = await sonda.eval(`
     const b = document.querySelector('[data-testid="approvals-banner"] button')
     if (!b) return false
     b.click(); return true
   `).catch(() => false)
   check('«Apri «Da approvare»» del riquadro apre il centro', bannerOpened === true &&
-    await waitDom(`document.querySelector('[data-testid="approvals-center"]')`, 5_000))
-  const centerText = () => pageEval(`return document.querySelector('[data-testid="approvals-center"]').textContent`)
+    await sonda.attendi(`!!document.querySelector('[data-testid="approvals-center"]')`, { entro: 5_000, motivo: 'il centro dal riquadro' }).catch(() => false))
+  const centerText = () => sonda.eval(`return document.querySelector('[data-testid="approvals-center"]').textContent`)
   let text = await centerText()
   check('i gruppi giusti: Weekend Torino · 2, Fatture marzo · 2, Ricerche · 1',
     text.includes('Weekend Torino') && text.includes('team · 2') &&
@@ -650,18 +522,18 @@ try {
   check('i filtri con i conteggi: Tutte · 5, I tuoi dati · 2, Invii · 1, Siti · 2',
     text.includes('Tutte · 5') && text.includes('I tuoi dati · 2') && text.includes('Invii · 1') && text.includes('Siti · 2'))
   check('la bozza ha i bottoni di oggi: Invia, Modifica, Rifiuta',
-    (await pageEval(`return [...document.querySelectorAll('[data-testid="approvals-center-card"]')].filter((c) => c.textContent.includes('sollecito') || c.textContent.includes('Fattura 214')).map((c) => [...c.querySelectorAll('button')].map((b) => b.textContent.trim()).join('|')).join(' ; ')`)).includes('Invia'))
+    (await sonda.eval(`return [...document.querySelectorAll('[data-testid="approvals-center-card"]')].filter((c) => c.textContent.includes('sollecito') || c.textContent.includes('Fattura 214')).map((c) => [...c.querySelectorAll('button')].map((b) => b.textContent.trim()).join('|')).join(' ; ')`)).includes('Invia'))
   await shot('4-da-approvare-centro.png')
   // il filtro «Siti» lascia solo i 2 siti
   check('il filtro «Siti · 2» lascia solo i siti', await clickText('Siti · 2', { exact: true }) &&
-    await waitDom(`document.querySelectorAll('[data-testid="approvals-center-card"]').length === 2`, 5_000))
+    await sonda.attendi(`document.querySelectorAll('[data-testid="approvals-center-card"]').length === 2`, { entro: 5_000, motivo: 'solo le 2 card dei siti' }).catch(() => false))
   check('«Tutte · 5» torna tutto', await clickText('Tutte · 5', { exact: true }) &&
-    await waitDom(`document.querySelectorAll('[data-testid="approvals-center-card"]').length === 5`, 5_000))
+    await sonda.attendi(`document.querySelectorAll('[data-testid="approvals-center-card"]').length === 5`, { entro: 5_000, motivo: 'tutte le 5 card' }).catch(() => false))
 
   // =========== A1: il menu «Altre scelte ▾» del centro — le scelte del modello unico ===========
   const menuAperto = await openMenuInCard('Alloggio', 'approval-altre-scelte')
   const menuItems = menuAperto
-    ? await pageEval(`return [...document.querySelectorAll('[role="menuitem"]')].map((x) => x.textContent.trim())`)
+    ? await sonda.eval(`return [...document.querySelectorAll('[role="menuitem"]')].map((x) => x.textContent.trim())`)
     : []
   // il submit del modulo NON offre il grant di sito (copre navigazione e clic
   // non di conferma, mai le conferme): turno, sempre a <bot> e — in squadra —
@@ -670,43 +542,44 @@ try {
     menuAperto && menuItems.some((x) => x.includes('Per questo turno')) && menuItems.some((x) => x.includes('Consenti sempre a Alloggio')) && menuItems.some((x) => x.includes('Consenti per questa missione')),
     JSON.stringify(menuItems))
   // si chiude senza decidere (il tasto Esc)
-  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).catch(() => undefined)
-  await sleep(400)
+  await sonda.tasto({ type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).catch(() => undefined)
+  // (era sleep(400)) si aspetta che il menu sia DAVVERO chiuso
+  await sonda.attendi(`document.querySelectorAll('[role="menuitem"]').length === 0`, { entro: 3_000, motivo: 'il menu chiuso con Esc' }).catch(() => undefined)
 
   // =========== 8. «Rimanda» (solo la vista: il conteggio resta 5) ===========
   check('«Rimanda» toglie LA richiesta dalla vista', await clickInCard('Archivio', 'approval-snooze') &&
-    await waitDom(`![...document.querySelectorAll('[data-testid="approvals-center-card"]')].some((c) => c.textContent.includes('Archivio'))`, 5_000))
-  check('«Rimanda» è solo vista: la barra conta ancora 5', await waitDom(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('5')`, 5_000))
+    await sonda.attendi(`![...document.querySelectorAll('[data-testid="approvals-center-card"]')].some((c) => c.textContent.includes('Archivio'))`, { entro: 5_000, motivo: 'la card di Archivio via dalla vista' }).catch(() => false))
+  check('«Rimanda» è solo vista: la barra conta ancora 5', await sonda.attendi(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('5')`, { entro: 5_000, motivo: 'la barra conta ancora 5' }).catch(() => false))
 
   // =========== 4/5. la decisione dal centro sblocca il turno e chiude la card ===========
   check('si decide dal centro: «Consenti una volta» sulla card di Turismo', await clickInCard('Turismo', 'approval-allow-once'))
-  const sbloccato = await waitDom(`(await window.sandbot.getEntries(${JSON.stringify(turismo.id)})).some((e) => e.kind === 'send-message' && String(e.content).includes('Modulo del museo compilato'))`, 90_000, 500)
-  check('la decisione dal centro SBLLOCCA il turno del bot', sbloccato)
-  const cardDecisa = await waitDom(`(await window.sandbot.getEntries(${JSON.stringify(turismo.id)})).some((e) => e.meta?.approvalId && e.meta?.status === 'allowed')`, 30_000, 500)
+  const sbloccato = await sonda.attendi(`(await window.sandbot.getEntries(${JSON.stringify(turismo.id)})).some((e) => e.kind === 'send-message' && String(e.content).includes('Modulo del museo compilato'))`, { entro: 90_000, passo: 500, motivo: 'il turno di Turismo si sblocchi' }).catch(() => false)
+  check('la decisione dal centro SBLLOCA il turno del bot', sbloccato)
+  const cardDecisa = await sonda.attendi(`(await window.sandbot.getEntries(${JSON.stringify(turismo.id)})).some((e) => e.meta?.approvalId && e.meta?.status === 'allowed')`, { entro: 30_000, passo: 500, motivo: 'la card passi a decisa' }).catch(() => false)
   check('la card nella chat del bot è passata a decisa (allowed)', cardDecisa)
-  check('il conteggio della barra scende a 4', await waitDom(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('4')`, 15_000, 500))
+  check('il conteggio della barra scende a 4', await sonda.attendi(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('4')`, { entro: 15_000, passo: 500, motivo: 'la barra scenda a 4' }).catch(() => false))
 
   // =========== A3: la richiesta del bot aperto sta SOPRA il campo di scrittura ===========
   if (!(await selectBot('Alloggio'))) throw new Error('selezione di Alloggio non riuscita')
-  const composerBox = await waitDom(`document.querySelector('[data-testid="composer-approval"]')`, 5_000)
-  const composerText = composerBox ? await pageEval(`return document.querySelector('[data-testid="composer-approval"]').textContent`) : ''
+  const composerBox = await sonda.attendi(`!!document.querySelector('[data-testid="composer-approval"]')`, { entro: 5_000, motivo: 'il riquadro sopra il campo' }).catch(() => false)
+  const composerText = composerBox ? await sonda.eval(`return document.querySelector('[data-testid="composer-approval"]').textContent`) : ''
   check('A3: la richiesta di Alloggio sta nel riquadro SOPRA il campo (frase + Consenti/Rifiuta/Altre scelte)',
     composerBox && composerText.includes('Alloggio') && composerText.includes('vuole') && composerText.includes('Consenti') && composerText.includes('Rifiuta') && composerText.includes('Altre scelte'),
     String(composerText).slice(0, 160))
   // R1 (fase ritocchi-beta18): una richiesta, un posto solo — il difetto
   // della cattura 1 era DUE «Consenti» (card + riquadro) con testi diversi
-  const consentiInChat = await pageEval(`return [...document.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Consenti').length`).catch(() => -1)
+  const consentiInChat = await sonda.eval(`return [...document.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Consenti').length`).catch(() => -1)
   check('R1: nella chat del bot UN solo bottone «Consenti» (la card pendente è compatta)', consentiInChat === 1, `${consentiInChat} Consenti`)
-  const compatta = await waitDom(`!!document.querySelector('[data-testid="approval-compact-row"]')`, 5_000)
-  const compattaText = compatta ? await pageEval(`return document.querySelector('[data-testid="approval-compact-row"]').textContent`) : ''
+  const compatta = await sonda.attendi(`!!document.querySelector('[data-testid="approval-compact-row"]')`, { entro: 5_000, motivo: 'la riga compatta' }).catch(() => false)
+  const compattaText = compatta ? await sonda.eval(`return document.querySelector('[data-testid="approval-compact-row"]').textContent`) : ''
   check('R1: la riga compatta nei messaggi («In attesa della tua scelta · qui sotto»)',
     compatta && compattaText.includes('In attesa della tua scelta') && compattaText.includes('qui sotto'), String(compattaText).slice(0, 80))
   check('R1: il riquadro NON mostra la stringa grezza dello strumento (caso browser_type con submit)',
     composerBox && !composerText.includes('browser_type') && composerText.includes('vuole usare Azioni nel browser del bot'),
     String(composerText).slice(0, 160))
   check('A3: il campo di scrittura resta usabile, con la richiesta in attesa',
-    await waitDom(`!!document.querySelector('form textarea') && !!document.querySelector('[data-testid="composer-approval"]')`, 5_000))
-  const bannerAltrove = await pageEval(`return document.querySelector('[data-testid="approvals-banner"]')?.textContent ?? ''`)
+    await sonda.attendi(`!!document.querySelector('form textarea') && !!document.querySelector('[data-testid="composer-approval"]')`, { entro: 5_000, motivo: 'campo e riquadro insieme' }).catch(() => false))
+  const bannerAltrove = await sonda.eval(`return document.querySelector('[data-testid="approvals-banner"]')?.textContent ?? ''`)
   // Archivio è «Rimandata» (solo vista): nel riquadro ridotto contano le
   // ALTRE visibili — Solleciti e Ricerche
   check('A3: in cima solo «+2 altrove» (le altre visibili sono di altri bot)', bannerAltrove.includes('+2 altrove') && !bannerAltrove.includes('modulo di verifica'), bannerAltrove.slice(0, 120))
@@ -718,24 +591,26 @@ try {
   // le stesse voci della card e del centro)
   const menuComposer = await openMenu('approval-altre-scelte')
   const vociComposer = menuComposer
-    ? await pageEval(`return [...document.querySelectorAll('[role="menuitem"]')].map((x) => x.textContent.trim())`)
+    ? await sonda.eval(`return [...document.querySelectorAll('[role="menuitem"]')].map((x) => x.textContent.trim())`)
     : []
   check('A1: il menu del riquadro sopra il campo offre le STESSE scelte (turno, sempre a Alloggio, missione)',
     menuComposer && vociComposer.some((x) => x.includes('Consenti sempre a Alloggio')) && vociComposer.some((x) => x.includes('Per questo turno')) && vociComposer.some((x) => x.includes('Consenti per questa missione')),
     JSON.stringify(vociComposer))
   check('A1: la scelta «sempre» dal riquadro decide (il conteggio scende a 3)', await clickMenuItem('approval-choice-always') &&
-    await waitDom(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('3')`, 30_000, 500))
-  const grantsDopo = await rpc(`grantsList()`)
+    await sonda.attendi(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('3')`, { entro: 30_000, passo: 500, motivo: 'la barra scenda a 3' }).catch(() => false))
+  const grantsDopo = await sonda.rpc(`grantsList()`)
   check('A2: la grant è NATA (Consentiti sempre la conterrà)', (grantsDopo ?? []).length === 1, JSON.stringify(grantsDopo)?.slice(0, 140))
 
   // =========== A2: il REGISTRO nel centro ===========
   check('A2: il centro si riapre', await clickTestid('sidebar-approvals') &&
-    await waitDom(`document.querySelector('[data-testid="approvals-center"]')`, 5_000))
-  check('A2: le schede «Richieste | Registro»', await waitDom(`document.querySelector('[data-testid="approvals-tab-registro"]')`, 5_000))
+    await sonda.attendi(`!!document.querySelector('[data-testid="approvals-center"]')`, { entro: 5_000, motivo: 'il centro riaperto' }).catch(() => false))
+  check('A2: le schede «Richieste | Registro»', await sonda.attendi(`!!document.querySelector('[data-testid="approvals-tab-registro"]')`, { entro: 5_000, motivo: 'la scheda Registro' }).catch(() => false))
   check('A2: «Registro di oggi» (in fondo alle richieste) apre il Registro', await clickTestid('approvals-open-registro') &&
-    await waitDom(`document.querySelector('[data-testid="approvals-registro"]')`, 5_000))
-  await sleep(600)
-  const registroText = await pageEval(`return document.querySelector('[data-testid="approvals-registro"]')?.textContent ?? ''`)
+    await sonda.attendi(`!!document.querySelector('[data-testid="approvals-registro"]')`, { entro: 5_000, motivo: 'il Registro aperto' }).catch(() => false))
+  // (era sleep(600)) le righe delle decisioni entrano in un attimo: si
+  // aspetta che il pannello sia FERMO, poi si legge il testo
+  await sonda.attendiStabile('[data-testid="approvals-registro"]', { entro: 4_000 }).catch(() => undefined)
+  const registroText = await sonda.eval(`return document.querySelector('[data-testid="approvals-registro"]')?.textContent ?? ''`)
   check('A2: le decisioni complete — chi, scelta, da dove (Rifiutato dal centro, Consentito sempre dalla chat)',
     registroText.includes('Rifiutato') && registroText.includes('dal centro') && registroText.includes('Consentito sempre') && registroText.includes('dalla chat'),
     registroText.slice(0, 260))
@@ -746,13 +621,13 @@ try {
     registroText.includes('Approvate') && registroText.includes('Rifiutate'),
     registroText.slice(0, 160))
   // «Consentiti sempre» con Revoca
-  const grantsSez = await waitDom(`document.querySelector('[data-testid="approvals-registro-grants"]')`, 5_000)
-  const grantsText = grantsSez ? await pageEval(`return document.querySelector('[data-testid="approvals-registro-grants"]').textContent`) : ''
+  const grantsSez = await sonda.attendi(`!!document.querySelector('[data-testid="approvals-registro-grants"]')`, { entro: 5_000, motivo: 'la sezione Consentiti sempre' }).catch(() => false)
+  const grantsText = grantsSez ? await sonda.eval(`return document.querySelector('[data-testid="approvals-registro-grants"]').textContent`) : ''
   check('A2: «Consentiti sempre» elenca la grant di Alloggio con Revoca',
     grantsSez && grantsText.includes('Alloggio') && grantsText.includes('Revoca'), grantsText.slice(0, 160))
   await shot2('2-centro-registro.png')
   check('A2: Revoca cancella la grant', await clickTestid('grant-revoke') &&
-    await waitDom(`(await window.sandbot.grantsList()).length === 0`, 10_000, 500))
+    await sonda.attendi(`(await window.sandbot.grantsList()).length === 0`, { entro: 10_000, passo: 500, motivo: 'la grant sia cancellata' }).catch(() => false))
 
   // =========== A2: revocata, il GATE chiede di nuovo — con DUE richieste dello stesso bot ===========
   if (!(await selectBot('Alloggio'))) throw new Error('selezione di Alloggio non riuscita (2)')
@@ -760,90 +635,58 @@ try {
   // resta in attesa contando per il bot aperto), POI la verifica che si
   // blocca sul submit: due richieste dello stesso bot nel riquadro
   await sendMessage('figlio-alloggio: lancia l\'aiutante per il controllo della camera e aspetta il suo permesso')
-  const figliaInAttesa = await waitDom(
+  const figliaInAttesa = await sonda.attendi(
     `(await window.sandbot.approvalsPendingAll()).some((r) => r.botId === ${JSON.stringify(alloggio.id)} && r.fromSubagent === true)`,
-    90_000, 500)
+    { entro: 90_000, passo: 500, motivo: 'la richiesta dell\'aiutante di Alloggio' }).catch(() => false)
   check('R1: la richiesta dell\'aiutante di Alloggio è in attesa (conta per il bot aperto)', figliaInAttesa)
   await sendMessage('verifica-alloggio-2: scrivi di nuovo la mia email nel modulo (https://spa.example/prenota) e invialo')
   check('A2: revocata la grant, la STESSA azione torna a chiedere (+ l\'aiutante: conteggio a 5)',
-    await waitDom(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('5')`, 90_000, 500),
-    (await pageEval(`return document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? ''`).catch(() => '')))
+    await sonda.attendi(`(document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? '').includes('5')`, { entro: 90_000, passo: 500, motivo: 'il conteggio torni a 5' }).catch(() => false),
+    (await sonda.eval(`return document.querySelector('[data-testid="sidebar-approvals"]')?.textContent ?? ''`).catch(() => '')))
 
   // =========== R1: il riquadro «1 di 2» con le frecce; decidere la prima mostra la seconda ===========
-  const boxCount = await waitDom(`!!document.querySelector('[data-testid="composer-approval-count"]')`, 10_000)
-  const stepText = boxCount ? await pageEval(`return document.querySelector('[data-testid="composer-approval-step"]').textContent`) : ''
-  const cardText1 = boxCount ? await pageEval(`return document.querySelector('[data-testid="composer-approval-card"]').textContent`) : ''
+  const boxCount = await sonda.attendi(`!!document.querySelector('[data-testid="composer-approval-count"]')`, { entro: 10_000, motivo: 'il riquadro con il conteggio' }).catch(() => false)
+  const stepText = boxCount ? await sonda.eval(`return document.querySelector('[data-testid="composer-approval-step"]').textContent`) : ''
+  const cardText1 = boxCount ? await sonda.eval(`return document.querySelector('[data-testid="composer-approval-card"]').textContent`) : ''
   check('R1: due richieste dello stesso bot → «1 di 2» con le frecce, prima la più urgente (l\'aiutante, il più vecchio)',
     boxCount && stepText.includes('1 di 2') && cardText1.includes('tramite un sottoagente') && cardText1.includes('vuole eseguire un comando'),
     `${String(stepText).trim()} · ${String(cardText1).slice(0, 100)}`)
-  const consentiDue = await pageEval(`return [...document.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Consenti').length`).catch(() => -1)
+  const consentiDue = await sonda.eval(`return [...document.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Consenti').length`).catch(() => -1)
   check('R1: con due richieste dello stesso bot resta UN solo «Consenti»', consentiDue === 1, `${consentiDue} Consenti`)
-  const compactTwo = await pageEval(`return document.querySelectorAll('[data-testid="approval-compact-row"]').length`).catch(() => -1)
+  const compactTwo = await sonda.eval(`return document.querySelectorAll('[data-testid="approval-compact-row"]').length`).catch(() => -1)
   check('R1: TUTTE le richieste del bot aperto sono righe compatte nei messaggi', compactTwo === 2, `${compactTwo} righe compatte`)
   // la freccia passa alla seconda (il submit del modulo)
   const wentNext = await clickTestid('composer-approval-next')
-  const step2 = wentNext && await waitDom(
+  const step2 = wentNext && await sonda.attendi(
     `document.querySelector('[data-testid="composer-approval-step"]')?.textContent.includes('2 di 2') && document.querySelector('[data-testid="composer-approval-card"]').textContent.includes('Azioni nel browser del bot')`,
-    5_000)
+    { entro: 5_000, motivo: 'la seconda richiesta nel riquadro' }).catch(() => false)
   check('R1: la freccia passa alla seconda (il submit del modulo, senza stringa grezza)', step2)
   await shot3('2-riquadro-1-di-2.png')
   // decidere la PRIMA mostra la SECONDA: si torna alla prima e si consente
   const wentPrev = await clickTestid('composer-approval-prev')
-  const step1back = wentPrev && await waitDom(`document.querySelector('[data-testid="composer-approval-step"]')?.textContent.includes('1 di 2')`, 5_000)
+  const step1back = wentPrev && await sonda.attendi(`document.querySelector('[data-testid="composer-approval-step"]')?.textContent.includes('1 di 2')`, { entro: 5_000, motivo: 'tornati alla prima richiesta' }).catch(() => false)
   const decidedFirst = step1back && await clickTestid('approval-allow')
-  const showsSecond = decidedFirst && await waitDom(
+  const showsSecond = decidedFirst && await sonda.attendi(
     `!document.querySelector('[data-testid="composer-approval-count"]') && document.querySelector('[data-testid="composer-approval-card"]') !== null && document.querySelector('[data-testid="composer-approval-card"]').textContent.includes('Azioni nel browser del bot')`,
-    15_000)
+    { entro: 15_000, motivo: 'la seconda richiesta dopo la decisione' }).catch(() => false)
   check('R1: decisa la prima, il riquadro mostra la SECONDA (niente più frecce né «di 2»)', showsSecond)
 
   // =========== 9. nessun «approva tutto» ===========
-  const approveAll = await pageEval(`return [...document.querySelectorAll('button')].filter((b) => /approva tutto|approve all/i.test(b.textContent + ' ' + (b.getAttribute('aria-label') ?? ''))).length`)
+  const approveAll = await sonda.eval(`return [...document.querySelectorAll('button')].filter((b) => /approva tutto|approve all/i.test(b.textContent + ' ' + (b.getAttribute('aria-label') ?? ''))).length`)
   check('NESSUN bottone «approva tutto» nel DOM', approveAll === 0, `${approveAll} trovati`)
 } catch (e) {
   failed++
   log('DEBUG risposte servite:', JSON.stringify(served))
   log('ERRORE FATALE:', e instanceof Error ? e.message : e)
-  log('--- coda log app ---\n' + appLog.slice(-3000))
+  log('--- coda log app ---\n' + sonda.appLog().slice(-3000))
   results.push({ name: 'corsa completa senza errori fatali', ok: false, detail: String(e) })
 } finally {
-  // ---- pulizia K4: app giù, daemon via, cartelle via, 0 processi ----
-  stopApp()
-  try { await withTimeout(new Promise((r) => app.on('exit', r)), 8000, 'exit app') } catch {
-    try { app.kill('SIGKILL') } catch { /* già via */ }
-    await sleep(1000)
-  }
-  try {
-    const { execSync } = await import('node:child_process')
-    const apps = execSync(`pgrep -f "Electron .* --remote-debugging-port=${DEBUG_PORT}" || true`, { encoding: 'utf8' }).trim()
-    for (const pidStr of apps.split('\n').filter(Boolean)) {
-      const pid = Number(pidStr)
-      if (Number.isInteger(pid) && pid !== process.pid && pid !== app.pid) {
-        try { process.kill(pid, 'SIGKILL'); log('app residua chiusa:', pidStr) } catch { /* già via */ }
-      }
-    }
-  } catch { /* pgrep vuoto */ }
-  await stopProbeDaemons(PREFIX, { log }).catch((e) => log('stopProbeDaemons:', e.message))
-  await cleanupProbeRun({ pids: [app.pid], prefix: PREFIX, dirs: [DATA], log, capMs: 20_000 }).catch((e) => log('cleanupProbeRun:', e.message))
-  // seconda passata: un daemon lento a morire tiene la cartella
-  await stopProbeDaemons(PREFIX, { log }).catch(() => undefined)
-  await cleanupProbeRun({ pids: [], prefix: PREFIX, dirs: [], log, capMs: 10_000 }).catch(() => undefined)
-  let left = countProbeDirs(PREFIX, [DATA])
-  if (left > 0) {
-    await sleep(1500)
-    await cleanupProbeRun({ pids: [], prefix: PREFIX, dirs: [], log, capMs: 10_000 }).catch(() => undefined)
-    left = countProbeDirs(PREFIX, [DATA])
-  }
-  const leftDirs = left > 0 ? readdirSync(TMP_BASE).filter((d) => d.startsWith(PREFIX + '-')) : []
-  if (leftDirs.length > 0) {
-    for (const d of leftDirs) {
-      const inside = readdirSync(join(TMP_BASE, d)).slice(0, 15)
-      log('DEBUG cartella residua:', d, 'contenuto:', JSON.stringify(inside))
-    }
-  }
-  check('pulizia K4: 0 cartelle sandbot-fase-centro-* rimaste', leftDirs.length === 0, `${leftDirs.length} cartelle: ${leftDirs.join(', ')}`)
+  // ---- pulizia K4: app giù, daemon via, cartelle via, 0 processi (il motore) ----
+  const fine = await sonda.fine({ porta: portaDebug })
+  check('pulizia K4: 0 cartelle sandbot-fase-centro-* rimaste', fine.cartelleRimaste.length === 0 && fine.conteggio === 0, `${fine.cartelleRimaste.length} cartelle: ${fine.cartelleRimaste.join(', ')}`)
   const daemons = findProbeDaemons(PREFIX)
   check('pulizia K4: 0 daemon della sonda', daemons.length === 0, JSON.stringify(daemons))
-  const llamas = (await import('node:child_process').then((c) => c.execSync('pgrep -x llama-server || true', { encoding: 'utf8' }).trim().split('\n').filter(Boolean))).filter((pid) => !llamaBaseline.has(pid))
+  const llamas = execSync('pgrep -x llama-server || true', { encoding: 'utf8' }).trim().split('\n').filter(Boolean).filter((pid) => !llamaBaseline.has(pid))
   check('pulizia K4: 0 llama-server nati con la corsa', llamas.length === 0, `baseline ${llamaBaseline.size}, nuovi ${llamas.length}`)
   if (failed > 0) log('risposte servite (diagnostica):', JSON.stringify(served))
   await new Promise((r) => providerServer.close(r))
