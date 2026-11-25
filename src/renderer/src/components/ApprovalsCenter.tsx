@@ -398,9 +398,8 @@ export function ApprovalsCenter({ registroInitial }: { registroInitial?: Registr
             title={i18n.t(msg`Da approvare`)}
             icon={<ShieldCheck className="size-5" />}
             back={{ onClick: () => setApprovalsOpen(false), label: t`Chiudi`, testId: 'approvals-center-close' }}
-            description={registro ? undefined : rows.length > 0
-              ? <Trans>{rows.length} richieste da {bots} bot · solo tu puoi deciderle · ogni richiesta si decide anche dove è nata</Trans>
-              : <Trans>Nessuna richiesta in attesa.</Trans>}
+            // C2: NIENTE descrizione sotto il titolo (ListPage): la frase sta
+            // nella rassicurazione in fondo al corpo, che c'è già
             actions={registro ? undefined : (
               // A2: «Registro di oggi» porta al REGISTRO del centro (prima ad
               // Attività, che delle approvazioni non sapeva nulla).

@@ -208,10 +208,8 @@ describe('DS4: «Da approvare» — il guscio e la testata', () => {
     const azione = byTestid(head, 'approvals-open-registro')
     expect(textOf(azione)).toBe('Registro di oggi')
     expectHasAll(azione, ['bg-muted', 'no-drag', 'h-control-sm'])
-    // la descrizione sta SOTTO la riga dei 52, mai dentro: text-small grigio, alla larghezza del contenuto
-    const descrizione = ofText(slot(root, 'header'), '4 richieste da 4 bot · solo tu puoi deciderle · ogni richiesta si decide anche dove è nata')
-    expect(hasAncestor(descrizione, isColHead)).toBe(false)
-    expectHasAll(descrizione, ['text-small', 'text-muted-foreground', 'pb-3'])
+    // C2: NIENTE descrizione sotto il titolo (ListPage) — la barra sta a y=52 come ogni pagina
+    expect(findAll(slot(root, 'header'), (n) => textOf(n).includes('4 richieste da 4 bot'))).toHaveLength(0)
   })
 
   it('indietro chiude il centro; l\'azione «Registro di oggi» porta al Registro senza chiuderlo', () => {
@@ -339,6 +337,7 @@ describe('DS4: «Da approvare» — filtri, gruppi e card coi pezzi del sistema'
   })
 
   it('i testid e i testi delle sonde delle altre fasi (centro, uso-permessi, design): ci sono tutti e sono dove le sonde li cercano', () => {
+    // C2: la descrizione sotto il titolo non c'è più — il conteggio delle richieste lo dicono le pillole («Tutte · 4»)
     const root = renderCenter({ approvalsAll: RIGHE() })
     const ids = new Set(testidsOf(root))
     for (const id of [
@@ -351,7 +350,7 @@ describe('DS4: «Da approvare» — filtri, gruppi e card coi pezzi del sistema'
       for (const id of ['approval-deny', 'approval-snooze']) expect(withTestid(card, id).length, `${id} nella card`).toBeGreaterThan(0)
     }
     const text = textOf(root)
-    for (const t of ['4 richieste da 4 bot', 'Tutte · 4', 'I tuoi dati · 2', 'Invii · 1', 'Siti · 1', 'team · 2', 'team · 1', 'bot · 1', 'Apri il team', 'tramite un sottoagente', 'aspetta da 2 min', 'sempre a te', 'il revisore non è sicuro', 'A: amministrazione@rossi.example', 'Oggetto: Fattura 214', 'Nessuna richiesta di dati tuoi, pagamenti o invii passa senza di te.']) {
+    for (const t of ['Tutte · 4', 'I tuoi dati · 2', 'Invii · 1', 'Siti · 1', 'team · 2', 'team · 1', 'bot · 1', 'Apri il team', 'tramite un sottoagente', 'aspetta da 2 min', 'sempre a te', 'il revisore non è sicuro', 'A: amministrazione@rossi.example', 'Oggetto: Fattura 214', 'Nessuna richiesta di dati tuoi, pagamenti o invii passa senza di te.']) {
       expect(text, t).toContain(t)
     }
     for (const b of all(root, (n) => n.tag === 'button')) expect(textOf(b).toLowerCase()).not.toContain('approva tutto')

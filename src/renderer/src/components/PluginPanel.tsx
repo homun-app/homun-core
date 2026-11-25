@@ -616,10 +616,10 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
       )}
       toolbar={(
         <>
-          {/* i segmenti (tavola 8) — PP4: sono testo. Prendono lo spazio che
-              la ricerca lascia: la loro sottolineatura corre fino a lei, e se
-              non entrano scorrono da sole (mai a capo) */}
-          <div data-testid="plugin-segments" className="min-w-0 flex-1">
+          {/* i segmenti (tavola 8) — PP4: testo a larghezza naturale (se non
+              entrano scorrono da sole): la RICERCA sta sempre allo stesso
+              posto, cambia scheda o no (C5 la misura) */}
+          <div data-testid="plugin-segments" className="min-w-0">
             <UnderlineTabs<PluginSegment> tabs={segments} value={seg} onChange={setSeg} label={t`Visualizza`} />
           </div>
           {/* C3 (fase linguaggio): la ricerca è SearchField, l'unica dell'app (il testid plugin-search resta) */}

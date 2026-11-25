@@ -99,9 +99,8 @@ describe('A2: il centro «Da approvare» (tavola 4)', () => {
     const tree = renderCenter(rows)
     const text = textOf(tree)
     expect(text).toContain('Da approvare')
-    expect(text).toContain('4 richieste da 4 bot')
-    expect(text).toContain('solo tu puoi deciderle')
-    expect(text).toContain('ogni richiesta si decide anche dove è nata')
+    // C2: la descrizione sotto il titolo non c'è più — il conteggio lo dice la pillola «Tutte · 4»
+    expect(text).toContain('Tutte · 4')
     // i filtri per tipo con i conteggi
     expect(text).toContain('Tutte · 4')
     expect(text).toContain('I tuoi dati · 2')
@@ -224,7 +223,7 @@ describe('A2: il centro «Da approvare» (tavola 4)', () => {
   it('0 richieste: il messaggio vuoto, nessun gruppo', () => {
     const tree = renderCenter([])
     const text = textOf(tree)
-    expect(text).toContain('Nessuna richiesta in attesa')
+    expect(text).toContain('Tutte · 0')
     expect(text).not.toContain('Apri la squadra')
   })
 })
