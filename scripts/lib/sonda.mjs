@@ -14,6 +14,10 @@
 // navigando e con i dati finti, non riavviando l'app (una scena che vuole
 // davvero un'app nuova lo dichiara nella sua definizione).
 // La galleria (scripts/galleria.mjs) usa questo stesso motore.
+// L'app avviata qui muore CON la sonda, sempre: i gestori di segnale e di
+// uscita coprono SIGINT, SIGTERM, le eccezioni; la VEDUTTA qui sotto copre
+// i modi di morire che NESSUN gestore può prendere (SIGKILL alla sonda,
+// kill del padre che si porta via la catena).
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -71,6 +75,37 @@ const contatoreRete = (cdp) => {
 }
 
 /**
+ * La VEDUTTA: il controllo sul pid del padre, per i modi di morire che NESSUN
+ * gestore può prendere. Se la sonda (o la galleria) riceve un SIGKILL, non
+ * gira nessun gestore: l'app resta orfana con ppid 1, il daemon continua a
+ * girare sulla cartella dati e la temporanea resta a terra — trovato così un
+ * Electron della galleria acceso dalle 13:29 con il suo --homun-daemon e la
+ * sua cartella in T/. La vedetta è un processo node FIGLIO della sonda, con
+ * l'ambiente MINIMO (solo PATH: nessun SANDBOT_TEST_*, così findProbeDaemons
+ * non può mai trovarla al posto di un daemon): ogni 400 ms controlla che il
+ * padre sia ancora il suo pid (kill(pid,0) E process.ppid — un pid riusato
+ * non la inganna); quando il padre sparisce fa ciò che farebbe la pulizia:
+ * spegne l'app, chiude i daemon del prefisso e cancella la temporanea.
+ */
+const VEDUTTA_SRC = `
+const [padre, appPid, prefix, tmp] = process.argv.slice(1)
+const vivo = (p) => { try { process.kill(p, 0); return true } catch { return false } }
+const chiudi = async () => {
+  try { process.kill(appPid, 'SIGTERM') } catch { /* già via */ }
+  for (let i = 0; i < 20 && vivo(appPid); i++) await new Promise((r) => setTimeout(r, 200))
+  try { process.kill(appPid, 'SIGKILL') } catch { /* già via */ }
+  await import(${JSON.stringify(join(import.meta.dirname, 'probe-daemons.mjs'))})
+    .then((m) => m.stopProbeDaemons(prefix, { log: () => undefined }))
+    .catch(() => undefined)
+  try { require('node:fs').rmSync(tmp, { recursive: true, force: true }) } catch { /* meglio possibile */ }
+  process.exit(0)
+}
+setInterval(() => {
+  if (!vivo(padre) || process.ppid !== Number(padre)) chiudi()
+}, 400)
+`
+
+/**
  * Avvia una sonda: la cartella temporanea (mkdtemp nella base dei vincoli), i
  * dati, la HOME finta, l'app VERA di `appDir` su out/, la porta CDP libera
  * scelta a caso, il collegamento e i gestori di segnale. Torna un oggetto con
@@ -98,6 +133,7 @@ export async function avviaSonda({
   const T0 = Date.now()
   let appLog = ''
   let app = null
+  let vedetta = null
   let cdp = null
   let rete = null
   const env = {
@@ -112,6 +148,10 @@ export async function avviaSonda({
     ...(envExtra ?? {})
   }
   const stopApp = () => { try { app?.kill('SIGTERM') } catch { /* già via */ } }
+  // la vedetta si ferma SOLO a pulizia finita (o a fine sonda): se la sonda
+  // esce prima che la pulizia sia arrivata in fondo, la vedetta sopravvive
+  // un istante al processo, vede il padre sparire e COMPLETA lei la pulizia
+  const fermaVedetta = () => { try { vedetta?.kill('SIGTERM') } catch { /* già via */ } }
   const waitPidGone = async (pid, capMs = 15_000) => {
     const deadline = Date.now() + capMs
     while (pidAlive(pid)) {
@@ -127,6 +167,7 @@ export async function avviaSonda({
       await stopProbeDaemons(prefix, { log: () => undefined }).catch(() => undefined)
       if (!parziale) {
         const r = await cleanupProbeRun({ pids: [], prefix, dirs: [tmp], log: () => undefined, capMs: 20_000 }).catch(() => ({ left: ['?'] }))
+        fermaVedetta()
         return r
       }
     } catch { /* meglio possibile */ }
@@ -138,6 +179,10 @@ export async function avviaSonda({
     // un'eccezione non catturata (per esempio in un server finto della sonda) chiude app, daemon e cartella: una corsa caduta non lascia nulla
     process.on('uncaughtException', (e) => { console.error(`[${prefix}] eccezione non catturata:`, e?.stack ?? e); void pulizia().then(() => process.exit(1)) })
     process.on('unhandledRejection', (e) => { console.error(`[${prefix}] rifiuto non catturato:`, e instanceof Error ? e.stack : e); void pulizia().then(() => process.exit(1)) })
+    // l'USCITA è sincrona, niente attese: l'app va giù SUBITO, e se la
+    // pulizia non è mai partita (o non è arrivata in fondo) la vedetta
+    // sopravvive all'uscita del processo e la completa lei
+    process.on('exit', () => { try { app?.kill('SIGKILL') } catch { /* già via */ } })
   }
 
   const httpJson = async (port, path) => (await fetch(`http://127.0.0.1:${port}${path}`).then((r) => r.json()))
@@ -158,6 +203,11 @@ export async function avviaSonda({
       app = spawn(ELECTRON, ['.', `--remote-debugging-port=${debugPort}`, '--lang=it', ...CHROMIUM_COVERED, ...interruttoriChromium], { cwd: appDir, env, stdio: ['ignore', 'pipe', 'pipe'] })
       app.stdout.on('data', (d) => { appLog += d.toString() })
       app.stderr.on('data', (d) => { appLog += d.toString() })
+      // la vedetta si arma SUBITO, prima ancora del collegamento CDP: la
+      // finestra in cui la sonda può morire comincia con lo spawn. Niente
+      // listener dell'uscita: deve sopravviverle
+      vedetta = spawn(process.execPath, ['-e', VEDUTTA_SRC, String(process.pid), String(app.pid), prefix, tmp], { env: { PATH: process.env.PATH }, stdio: 'ignore' })
+      vedetta.on('error', () => { /* senza vedetta si vive come prima: i gestori restano */ })
       // difensiva: un residuo sulla STESSA porta (rischio di corsa appena caduta) va via
       const deadline = Date.now() + 30_000
       for (;;) {
@@ -540,6 +590,7 @@ export async function avviaSonda({
       await stopProbeDaemons(prefix, { log: () => undefined }).catch(() => undefined)
       const r = await cleanupProbeRun({ pids: [], prefix, dirs: [tmp], log: () => undefined, capMs: 20_000 }).catch(() => ({ left: ['?'] }))
       const left = countProbeDirs(prefix, [tmp])
+      fermaVedetta()
       return { cartelleRimaste: r?.left ?? [], conteggio: left }
     }
   }
