@@ -186,9 +186,9 @@ const renderRegistro = (grants: unknown[] = concessioni()): HtmlNode =>
   renderCenter({ approvalsView: 'registro', agents: [agente('a-bot', 'Alloggio')] }, { log: REGISTRO(), grants })
 
 describe('DS4: «Da approvare» — il guscio e la testata', () => {
-  it('è il guscio di DS2: radice approvals-center, il corpo che scorre largo quanto l\'area e DENTRO una colonna sola, larga al più quanto una pagina (880)', () => {
+  it('è il guscio di DS2: radice approvals-center, il corpo che scorre largo quanto l\'area e DENTRO una colonna sola, larga al più quanto l\'unica larghezza degli elenchi (wide, 1120: C2)', () => {
     const root = renderCenter({ approvalsAll: RIGHE() })
-    expectGuscio(root, 'approvals-center', 'page')
+    expectGuscio(root, 'approvals-center', 'wide')
     // la radice resta dentro la regione «Da approvare» (il nome accessibile di oggi)
     const regione = byTestid(root, 'approvals-center').parent!
     expect(regione.tag).toBe('section')
@@ -480,9 +480,9 @@ function renderCoda(pending: Array<Record<string, unknown>>): HtmlNode {
 }
 
 describe('DS4: la coda «Da approvare» della squadra', () => {
-  it('è il guscio di DS2 (approvals-queue, pagina 880) con la testata: indietro «Torna al team» (approvals-back), l\'icona, il titolo e sotto la descrizione', () => {
+  it('è il guscio di DS2 (approvals-queue, larghezza unica wide) con la testata: indietro «Torna al team» (approvals-back), l\'icona, il titolo e sotto la descrizione', () => {
     const root = renderCoda([])
-    expectGuscio(root, 'approvals-queue', 'page')
+    expectGuscio(root, 'approvals-queue', 'wide')
     const regione = byTestid(root, 'approvals-queue').parent!
     expect(regione.tag).toBe('section')
     expect(regione.attrs['aria-label']).toBe('Da approvare')

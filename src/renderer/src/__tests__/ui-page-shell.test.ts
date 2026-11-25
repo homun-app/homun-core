@@ -79,7 +79,7 @@ describe('DS2: PageShell — l’invaso di ogni pagina a tutta area', () => {
   }
   /** Un guscio con tutti gli slot pieni. */
   const full = (): Record<string, unknown> => ({
-    width: 'page',
+    width: 'wide',
     testId: 'pagina',
     header: createElement('h2', { 'data-testid': 'testata' }, 'Titolo'),
     description: 'La descrizione della pagina',
@@ -89,7 +89,7 @@ describe('DS2: PageShell — l’invaso di ogni pagina a tutta area', () => {
   })
 
   it('la radice: inchiodata all’area (absolute inset-0), colonna flex, sopra la chat (z-20), no-drag, un contenitore per le query — col testid', async () => {
-    const root = await render({ width: 'page', testId: 'plugin-page', children: 'corpo' })
+    const root = await render({ width: 'wide', testId: 'plugin-page', children: 'corpo' })
     const page = byTestid(root, 'plugin-page')
     expect(page.attrs['data-page-shell']).toBe('root')
     // no-drag: la pagina copre la fascia di trascinamento della chat sotto di lei
@@ -99,7 +99,7 @@ describe('DS2: PageShell — l’invaso di ogni pagina a tutta area', () => {
   })
 
   it('z=30: la scheda sta sopra la pagina (z-30) e non porta z-20', async () => {
-    const root = await render({ width: 'page', z: 30, testId: 'scheda', children: 'corpo' })
+    const root = await render({ width: 'wide', z: 30, testId: 'scheda', children: 'corpo' })
     const page = byTestid(root, 'scheda')
     expectHasAll(page, ['z-30'])
     expect(has(page, 'z-20')).toBe(false)
@@ -131,7 +131,7 @@ describe('DS2: PageShell — l’invaso di ogni pagina a tutta area', () => {
   })
 
   it('la testata è resa TAL QUALE nello slot: nessuna colonna intorno (il suo ColumnHead deve essere largo quanto l’area)', async () => {
-    const root = await render({ width: 'page', header: createElement('h2', { 'data-testid': 'testata' }, 'Titolo'), children: 'corpo' })
+    const root = await render({ width: 'wide', header: createElement('h2', { 'data-testid': 'testata' }, 'Titolo'), children: 'corpo' })
     const head = byTestid(root, 'testata')
     expect(head.tag).toBe('h2')
     expect(head.parent).toBe(slot(root, 'header'))
@@ -152,7 +152,7 @@ describe('DS2: PageShell — l’invaso di ogni pagina a tutta area', () => {
 
   it('la descrizione tiene la DIMENSIONE e il COLORE, tutte e due: ci vuole cn() che conosca le dimensioni di DS1 (quello di fabbrica scambiava text-small per un colore e, accanto a text-muted-foreground, lo toglieva)', async () => {
     const { PageShell, PageHeader } = await pieces()
-    const viaGuscio = parseHtml(renderHtml(createElement(PageShell, { width: 'page', description: 'descrizione', children: 'corpo' })))
+    const viaGuscio = parseHtml(renderHtml(createElement(PageShell, { width: 'wide', description: 'descrizione', children: 'corpo' })))
     const viaTestata = parseHtml(renderHtml(createElement(PageHeader, { title: 'Titolo', description: 'descrizione' })))
     for (const root of [viaGuscio, viaTestata]) {
       const marked = findAll(root, (n) => classes(n).some((c) => c === 'text-small' || c === 'text-muted-foreground'))
@@ -172,7 +172,7 @@ describe('DS2: PageShell — l’invaso di ogni pagina a tutta area', () => {
   })
 
   it('senza testata, descrizione e barra gli slot non nascono: resta solo il corpo che scorre (e niente attributi vuoti)', async () => {
-    const root = await render({ width: 'page', children: 'corpo' })
+    const root = await render({ width: 'wide', children: 'corpo' })
     const page = slot(root, 'root')
     expect(page.children.map((c) => c.attrs['data-page-shell'])).toEqual(['scroll'])
     expect(page.attrs['data-testid']).toBeUndefined()
@@ -185,7 +185,7 @@ describe('DS2: PageShell — l’invaso di ogni pagina a tutta area', () => {
 })
 
 describe('DS2: PageColumn — il gutter col margine, dentro il contenuto centrato', () => {
-  it.each((['reading', 'page', 'wide'] as const).map((width) => [width, width] as const))('larghezza %s: il contenuto è mx-auto w-full, largo al più var(--w-%s)', async (width) => {
+  it.each((['reading', 'wide'] as const).map((width) => [width, width] as const))('larghezza %s: il contenuto è mx-auto w-full, largo al più var(--w-%s)', async (width) => {
     const { PageColumn } = await pieces()
     const root = parseHtml(renderHtml(createElement(PageColumn, { width, children: 'testo', testId: 'colonna' })))
     // il gutter: largo quanto il suo contenitore, col margine della pagina (24 sotto i 900 px di area)
@@ -204,7 +204,7 @@ describe('DS2: PageColumn — il gutter col margine, dentro il contenuto centrat
   it('la larghezza viaggia nel contesto del guscio: dentro PageShell a reading OGNI colonna è da lettura; fuori dal guscio (o senza riceverla) vale page', async () => {
     const { PageShell, PageColumn } = await pieces()
     const alone = parseHtml(renderHtml(createElement(PageColumn, null, 'testo')))
-    expect(first(alone, isContent).attrs.style).toBe('max-width:var(--w-page)')
+    expect(first(alone, isContent).attrs.style).toBe('max-width:var(--w-wide)')
     const root = parseHtml(renderHtml(createElement(PageShell, {
       width: 'reading',
       description: 'descrizione',
@@ -220,15 +220,15 @@ describe('DS2: PageColumn — il gutter col margine, dentro il contenuto centrat
   it('la larghezza ricevuta vince sul contesto', async () => {
     const { PageShell, PageColumn } = await pieces()
     const root = parseHtml(renderHtml(createElement(PageShell, {
-      width: 'page',
+      width: 'wide',
       children: createElement(PageColumn, { width: 'wide', children: 'tabella' })
     })))
-    expect(findAll(root, isContent).map((n) => n.attrs.style)).toEqual(['max-width:var(--w-page)', 'max-width:var(--w-wide)'])
+    expect(findAll(root, isContent).map((n) => n.attrs.style)).toEqual(['max-width:var(--w-wide)', 'max-width:var(--w-wide)'])
   })
 
   it('contentClassName va sull’elemento del contenuto del corpo: è lì che chi elenca le sezioni decide il ritmo (flex flex-col gap-section)', async () => {
     const { PageShell } = await pieces()
-    const root = parseHtml(renderHtml(createElement(PageShell, { width: 'page', contentClassName: 'flex flex-col gap-section pb-6', children: 'corpo' })))
+    const root = parseHtml(renderHtml(createElement(PageShell, { width: 'wide', contentClassName: 'flex flex-col gap-section pb-6', children: 'corpo' })))
     const scroller = slot(root, 'scroll')
     const gutter = scroller.children[0]!
     const content = gutter.children[0]!
@@ -371,7 +371,7 @@ describe('DS2: PageHeader — indietro · icona · titolo · azioni, sotto la de
     const alone = await renderHeader({ title: 'Plugin' })
     expect(first(alone, isColHead).attrs['data-col-head']).toBe('pagina')
     const root = parseHtml(renderHtml(createElement(PageShell, {
-      width: 'page',
+      width: 'wide',
       headName: 'pannello',
       header: createElement(PageHeader, { title: 'Attività', back: { onClick: () => undefined, label: 'Indietro' } }),
       children: 'corpo'
@@ -381,7 +381,7 @@ describe('DS2: PageHeader — indietro · icona · titolo · azioni, sotto la de
     // la testata sta nello slot della testata, a stare sopra tutto il resto
     expect(hasAncestor(col, (n) => n.attrs['data-page-shell'] === 'header')).toBe(true)
     // e dentro il guscio la sua colonna è larga quanto il guscio (page: 880)
-    expect(first(col, isContent).attrs.style).toBe('max-width:var(--w-page)')
+    expect(first(col, isContent).attrs.style).toBe('max-width:var(--w-wide)')
   })
 })
 
@@ -488,9 +488,10 @@ describe('DS2: il CSS compilato (il CSS vero di styles.css, compilato da Tailwin
     expect(css).toContain('--spacing-page-margin-narrow: 24px;')
   })
 
-  it('le tre larghezze escono SEMPRE nel CSS: la colonna le legge con var(…) in uno stile in linea, senza chiedere nessuna utility', async () => {
+  it('le DUE larghezze escono SEMPRE nel CSS (C2: la page 880 è via): la colonna le legge con var(…) in uno stile in linea, senza chiedere nessuna utility', async () => {
     const css = await compileRenderer([])
-    for (const [name, px] of [['reading', 720], ['page', 880], ['wide', 1120]]) expect(css).toContain(`--w-${name}: ${px}px;`)
+    for (const [name, px] of [['reading', 720], ['wide', 1120]]) expect(css).toContain(`--w-${name}: ${px}px;`)
+    expect(css).not.toContain('--w-page:')
   })
 
   it('le misure dei pezzi, compilate: la riga in cima 52 (col-head), indietro 32 (control-sm), la barra degli strumenti 40 (min-h-10), dal titolo di sezione al contenuto 12, fra blocchi 16, fra sezioni 32', async () => {

@@ -10,7 +10,7 @@
 //                 respiro della riga 12, icona→testo 12, controlli 36 e 32,
 //                 la riga in cima a ogni colonna 52;
 //   raggi       — tre: control 8, surface 14, full;
-//   larghezze   — reading 720, page 880, wide 1120.
+//   larghezze   — reading 720, wide 1120 (C2: la page 880 è via, una larghezza sola per gli elenchi).
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { compileRenderer, CSS_PATH, deadClasses } from '../../renderer/src/__tests__/tailwind-compile'
@@ -44,7 +44,7 @@ export const NAMED_SPACING: Readonly<Record<string, number>> = {
 /** I tre raggi (px). */
 export const RADII: Readonly<Record<string, number>> = { control: 8, surface: 14 }
 /** Le larghezze del contenuto (px). */
-export const WIDTHS: Readonly<Record<string, number>> = { reading: 720, page: 880, wide: 1120 }
+export const WIDTHS: Readonly<Record<string, number>> = { reading: 720, wide: 1120 }
 
 /** Il valore di una variabile del tema nel CSS compilato (`--nome: valore;`). */
 const themeValue = (css: string, name: string): string | null => {
@@ -121,14 +121,17 @@ describe('DS1: i raggi', () => {
 })
 
 describe('DS1: le larghezze del contenuto', () => {
-  it('reading 720, page 880, wide 1120 — come variabili e come max-w-', async () => {
-    const css = await compileRenderer(['max-w-reading', 'max-w-page', 'max-w-wide'])
+  it('reading 720, wide 1120 — come variabili e come max-w- (e la page 880 NON esiste più)', async () => {
+    const css = await compileRenderer(['max-w-reading', 'max-w-wide'])
     for (const [name, px] of Object.entries(WIDTHS)) {
       expect(CSS, `--w-${name}`).toMatch(new RegExp(`--w-${name}:\\s*${px}px;`))
       expect(themeValue(css, `w-${name}`), `compilata --w-${name}`).toBe(`${px}px`)
       expect(css).toMatch(new RegExp(`\\.max-w-${name}\\s*\\{[^}]*max-width:\\s*var\\(--container-${name}\\)`))
       expect(themeValue(css, `container-${name}`)).toBe(`var(--w-${name})`)
     }
+    // C2 (fase linguaggio): la terza larghezza è vietata — nel css e come utility
+    expect(CSS).not.toMatch(/--w-page:/)
+    expect(css).not.toMatch(/\.max-w-page\b/)
   })
 })
 

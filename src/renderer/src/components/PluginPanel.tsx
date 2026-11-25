@@ -416,7 +416,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
   if (view === 'mcp') {
     return (
       <PageShell
-        width="page"
+        width="wide"
         testId="plugin-page"
         z={20}
         header={<PageHeader back={backToList} title={<Trans>Server MCP</Trans>} />}
@@ -431,7 +431,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
     const picked = rows.filter((r) => !r.existing && r.valid && importPicks[r.name] === true)
     return (
       <PageShell
-        width="page"
+        width="wide"
         testId="plugin-page"
         z={20}
         header={<PageHeader back={{ onClick: () => { setView('list'); setSeg('skills'); setImportRows(null) }, label: t`Torna ai plugin` }} title={<Trans>Importa skill</Trans>} />}
@@ -529,7 +529,7 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
   if (view === 'skill-new') {
     return (
       <PageShell
-        width="page"
+        width="wide"
         testId="plugin-page"
         z={20}
         header={<PageHeader back={backToList} title={<Trans>Crea una skill</Trans>} />}
@@ -544,8 +544,8 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
   return (
     <>
     <PageShell
-      // larga quanto la tabella SOLO su «Collegati»: negli altri segmenti la colonna è quella di pagina
-      width={seg === 'connected' ? 'wide' : 'page'}
+      // C2 (fase linguaggio): UNA larghezza sola (wide), che non cambia col segmento
+      width="wide"
       testId="plugin-page"
       z={20}
       header={(

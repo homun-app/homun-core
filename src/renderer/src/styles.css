@@ -86,7 +86,7 @@
  * dialoghi), rounded-full (pillole, interruttori, avatar).
  *
  * LARGHEZZE DEL CONTENUTO — tre: --w-reading 720 (chat, documenti),
- * --w-page 880 (liste, impostazioni, pagine di plugin), --w-wide 1120
+ * --w-wide 1120 (gli elenchi, le schede, le impostazioni: una larghezza sola)
  * (tabelle: Collegati, Uso e costi, Attività); anche come max-w-reading/page/wide.
  * Sotto quella larghezza il contenuto occupa l'area meno i margini.
  *
@@ -153,10 +153,8 @@
   --radius-surface: 14px;
   /* larghezze del contenuto */
   --w-reading: 720px;
-  --w-page: 880px;
   --w-wide: 1120px;
   --container-reading: var(--w-reading);
-  --container-page: var(--w-page);
   --container-wide: var(--w-wide);
 }
 

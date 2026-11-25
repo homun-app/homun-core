@@ -58,15 +58,13 @@ I valori sono i letterali di `styles.css`: quelli dei colori del tema chiaro sta
 | `--radius-control` | 8px | bottoni rettangolari, campi, menu, celle selezionate |
 | `--radius-surface` | 14px | schede, bolle della chat, popover, dialoghi |
 
-**Larghezze del contenuto** — sotto quella larghezza il contenuto occupa l'area meno i margini.
+**Larghezze del contenuto** — due, non di più (C2, fase linguaggio): sotto quella larghezza il contenuto occupa l'area meno i margini.
 
 | Token | Valore | Quando si usa |
 |---|---|---|
 | `--w-reading` | 720px | chat, documenti |
-| `--w-page` | 880px | liste, impostazioni, pagine di plugin |
-| `--w-wide` | 1120px | tabelle: Collegati, Uso e costi, Attività |
+| `--w-wide` | 1120px | OGNI elenco, scheda e impostazione: una larghezza sola, che non cambia con la scheda |
 | `--container-reading` | var(--w-reading) | la stessa misura come contenitore (max-w-reading) |
-| `--container-page` | var(--w-page) | la stessa misura come contenitore (max-w-page) |
 | `--container-wide` | var(--w-wide) | la stessa misura come contenitore (max-w-wide) |
 
 **Ombra**
@@ -365,12 +363,27 @@ Galleria: impostazioni-approvazioni, impostazioni-generali.
 Le schede come TESTO: l'attiva in primo piano con la sottolineatura di 2 px, le altre grigie; UNA riga sola, mai a capo — se non ci sta, scorre in orizzontale senza barra e le sfumature ai lati dicono che c'è altro; tastiera a frecce con tablist a scacchi. Non usarlo per navigazione di pagina (quella è la barra) né dove servono segmenti in pillola; il filetto di base sta sull'involucro, non sulla tablist.
 Galleria: plugin-connettori, impostazioni-cassaforte.
 
-## Schemi di pagina
+## Modelli di pagina
 
-- **Pagina di lista** (Plugin › lista, Da approvare, Attività, Libreria › lista): `PageShell` a larghezza `page` (880; `wide` 1120 per le tabelle: Collegati, Uso e costi). Testata `PageHeader` sulla riga `data-col-head` di 52 px, FERMA: è la fascia di trascinamento e (R2) il velo che separa ciò che scorre sotto; toolbar ferma da 40; il corpo scorre, figlio diretto della radice, con la barra di scorrimento sul bordo dell'area. Margine laterale `page-margin` 32, `page-margin-narrow` 24 sotto i 900 px di area.
-- **Pagina di dettaglio** (la scheda del plugin, il documento): stessa struttura a livello 30 sopra la pagina (20); testata con «indietro» tondo da 32 e logo da 40; il documento aperto sta nella colonna `reading` (720) col titolo `text-page` in font-display.
-- **Chat a colonne**: barra di sinistra (voci `row-nav` 36) · colonna di lettura `reading` 720 centrata (messaggi `text-reading`, bolla utente `--bubble-user`, card all'85%) · squadra · pannello destro. Ogni colonna ha la sua riga `data-col-head` a 52, ferma col velo `.col-head-velo` (R2): il transcript scorre SOTTO; il primo contenuto, a scorrimento zero, resta sotto la fascia. Il documento non scorre mai da solo (`overflow: clip`).
-- **Impostazioni**: un dialogo che non scorre per intero — navigazione ferma a sinistra, riga ferma col titolo di sezione e la ✕, sotto la colonna che scorre col margine dentro; contenuto a larghezza `page`, sezioni e righe a filo; Cassaforte a `UnderlineTabs`, «Uso e costi» in `DataTable`.
+Ogni pagina è un MODELLO: un componente di `components/ui/` che si riempie, non si ridisegna. Fuori dal catalogo non si disegna una pagina: si scelge il modello e gli si passano i pezzi (righe, sezioni, toolbar). Le larghezze sono DUE — `wide` per ogni elenco e impostazione, `reading` per i documenti — e non cambiano con la scheda.
+
+```
+┌───────────────────────────── wide 1120 ─────────────────────────────┐
+│ testata  (PageHeader sulla riga data-col-head di 52, FERMA)         │
+│ schede   (UnderlineTabs, UN livello — opzionali)                    │
+│ barra    (PageToolbar: ricerca · pillole · vista, FERMA da 40)      │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │
+│ corpo che scorre: ListGroup/ListRow, oppure DataTable               │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+- **ListPage** (pagina elenco: Plugin in ogni scheda, Attività, Libreria › lista, Da approvare, Registro): testata (titolo + azione principale) → schede opzionali (UN livello) → `PageToolbar` → corpo con `ListGroup`/`DataTable`. Larghezza **una sola**, `wide`, che non cambia con la scheda. Niente descrizione sotto il titolo: la frase va nello stato vuoto (EmptyState) o nell'aiuto del campo.
+- **DetailPage** (la scheda di un plugin, di un server): stessa testata (con «indietro»), stessa larghezza `wide`, schede, sezioni `ListGroup`. Sta a livello 30 sopra la pagina (20).
+- **DocumentPage** (il documento della Libreria): `PageShell` a larghezza `reading` (720), titolo `text-page` in font-display, «indietro» tondo da 32 e logo da 40.
+- **SettingsDialog**: navigazione a sinistra, titolo di sezione, corpo con `ListGroup` — le stesse righe e le stesse azioni delle pagine, niente riquadri grigi. Un dialogo che non scorre per intero: la navigazione è ferma, sotto la colonna scorre col margine dentro; contenuto a larghezza `wide`; Cassaforte a `UnderlineTabs`, «Uso e costi» in `DataTable`.
+- **ChatColumn** e le card in chat: le misure di oggi — barra di sinistra (voci `row-nav` 36) · colonna di lettura `reading` 720 centrata (messaggi `text-reading`, bolla utente `--bubble-user`, card all'85%) · squadra · pannello destro. Ogni colonna ha la sua riga `data-col-head` a 52, ferma col velo `.col-head-velo` (R2): il transcript scorre SOTTO. La conversione della chat è una fase successiva.
+
+`PageShell` accetta solo `width="wide" | "reading"`.
 
 ## Regole
 

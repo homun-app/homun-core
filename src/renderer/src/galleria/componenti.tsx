@@ -518,12 +518,12 @@ const Sezione = ({ id }: { id: IdSezione }) => {
       )}
 
       {id === 'gusci' && (
-        <Section title="page-shell — i tre gusci di larghezza" testId="galleria-section-shell">
+        <Section title="page-shell — i due gusci di larghezza (reading e wide: la page di una volta è via)" testId="galleria-section-shell">
           {/* G2: ogni guscio sta in un riquadro relative ad altezza FISSA con
               overflow-hidden: PageShell è absolute inset-0, senza il riquadro
               l'ultimo guscio si stenderebbe su tutta la pagina (page-shell.tsx
               non si tocca) */}
-          {(['reading', 'page', 'wide'] as PageWidth[]).map((w) => (
+          {(['reading', 'wide'] as PageWidth[]).map((w) => (
             <div key={w} className="relative mb-4 h-40 overflow-hidden rounded-surface border border-border">
               <PageShell width={w} testId={`galleria-shell-${w}`} headName="componenti"
                 header={<PageHeader title={`Il guscio «${w}»`} testId={`galleria-shell-header-${w}`} />}

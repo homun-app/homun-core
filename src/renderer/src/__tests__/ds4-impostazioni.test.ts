@@ -232,12 +232,13 @@ const classesInsideDialog = (root: HtmlNode): string[] => {
   return findAll(frame, () => true).filter((n) => n !== frame).flatMap(classes)
 }
 
+// C2 (fase linguaggio): UNA larghezza sola (wide) per ogni scheda delle Impostazioni
 const TABS = [
-  ['generale', 'Generali', 'page'],
-  ['modelli', 'Modelli', 'page'],
-  ['approvazioni', 'Approvazioni', 'page'],
-  ['vault', 'Cassaforte', 'page'],
-  ['routine', 'Routine', 'page'],
+  ['generale', 'Generali', 'wide'],
+  ['modelli', 'Modelli', 'wide'],
+  ['approvazioni', 'Approvazioni', 'wide'],
+  ['vault', 'Cassaforte', 'wide'],
+  ['routine', 'Routine', 'wide'],
   ['uso', 'Uso e costi', 'wide']
 ] as const
 

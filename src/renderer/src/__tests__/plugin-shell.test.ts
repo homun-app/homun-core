@@ -157,7 +157,7 @@ describe('PP1 → DS4: lista, viste e scheda montano PageShell', () => {
       // e ogni colonna del contenuto è larga quanto la pagina
       const widths = widthsOf(root, 'plugin-page')
       expect(widths, name).toHaveLength(columns)
-      for (const w of widths) expect(w, name).toBe('max-width:var(--w-page)')
+      for (const w of widths) expect(w, name).toBe('max-width:var(--w-wide)')
     }
   })
 
@@ -190,7 +190,7 @@ describe('PP1 → DS4: lista, viste e scheda montano PageShell', () => {
     expect(has(card, 'z-30')).toBe(true)
     expect(has(card, 'z-20')).toBe(false)
     expect(findAll(card, (n) => n.attrs['data-col-head'] !== undefined)).toHaveLength(1)
-    for (const w of widthsOf(root, 'plugin-card')) expect(w).toBe('max-width:var(--w-page)')
+    for (const w of widthsOf(root, 'plugin-card')) expect(w).toBe('max-width:var(--w-wide)')
     // il corpo contiene i tre pannelli: l'ultima azione e «Rimuovi» stanno nello scorribile
     const body = findAll(card, isSlot('scroll'))[0]!
     expect(findAll(body, (n) => n.attrs['data-testid'] === 'plugin-permissions')).toHaveLength(1)

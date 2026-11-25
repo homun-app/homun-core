@@ -404,7 +404,7 @@ function LibraryList({ initial }: { initial?: LibraryPanelInitial }) {
 
   return (
     <PageShell
-      width="page"
+      width="wide"
       testId="library-panel"
       header={
         <PageHeader
@@ -922,7 +922,7 @@ function LibraryItemView({ id }: { id: string }) {
   const body = !err && content
   return (
     <PageShell
-      width="page"
+      width="wide"
       testId="library-panel"
       header={
         <PageHeader

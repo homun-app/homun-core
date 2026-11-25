@@ -168,9 +168,9 @@ describe('DS4 Libreria: il guscio (PageShell, larghezza «page»)', () => {
     hasAll(scroll, ['flex-1', 'min-h-0', 'overflow-y-auto'])
     const columns = columnsOf(scroll)
     expect(columns).toHaveLength(1)
-    // la colonna: centrata (mx-auto), larga al più quanto --w-page (880), col ritmo del sistema
+    // la colonna: centrata (mx-auto), larga al più quanto --w-wide (1120), col ritmo del sistema
     hasAll(columns[0]!, ['mx-auto', 'w-full', 'flex', 'flex-col', 'gap-block'])
-    expect(columns[0]!.attrs.style).toContain('max-width:var(--w-page)')
+    expect(columns[0]!.attrs.style).toContain('max-width:var(--w-wide)')
     // il margine laterale dipende dall'AREA: 32 px, 24 sotto i 900 (sta sul gutter, attorno alla colonna)
     hasAll(columns[0]!.parent!, ['w-full', 'min-w-0', 'px-page-margin', '@max-[900px]:px-page-margin-narrow'])
   })
@@ -180,7 +180,7 @@ describe('DS4 Libreria: il guscio (PageShell, larghezza «page»)', () => {
     const shell = byId(root, 'library-panel')[0]!
     expect(shell.attrs['data-page-shell']).toBe('root')
     hasAll(shell, ['no-drag', 'absolute', 'inset-0', 'z-20'])
-    expect(columnsOf(bySlot(root, 'scroll')[0]!)[0]!.attrs.style).toContain('max-width:var(--w-page)')
+    expect(columnsOf(bySlot(root, 'scroll')[0]!)[0]!.attrs.style).toContain('max-width:var(--w-wide)')
   })
 })
 

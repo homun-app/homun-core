@@ -43,18 +43,20 @@ import { createContext, useContext, type ReactNode } from 'react'
 import { cn } from '../../lib/utils'
 
 /**
- * Le tre larghezze del contenuto (DS1): reading 720 (chat, documenti) ·
- * page 880 (liste, impostazioni, pagine di plugin) · wide 1120 (tabelle).
+ * Le DUE larghezze del contenuto (C2, fase linguaggio): reading 720 (chat,
+ * documenti) · wide 1120 (OGNI elenco, scheda e impostazione: una larghezza
+ * sola, che non cambia con la scheda). La terza di una volta, page 880, è
+ * via: era la larghezza che cambiava da pagina a pagina.
  */
-export type PageWidth = 'reading' | 'page' | 'wide'
+export type PageWidth = 'reading' | 'wide'
 
 /** Il livello della radice: la pagina sta sopra la chat (20), la scheda sopra la pagina (30). */
 const LAYER = { 20: 'z-20', 30: 'z-30' } as const
 
 // ciò che il guscio passa ai pezzi che ha dentro (PageColumn, PageHeader):
 // valori primitivi, così non c'è un oggetto da tenere stabile tra un render e l'altro
-/** La larghezza di colonna del guscio; fuori da un guscio vale «page». */
-const PageWidthContext = createContext<PageWidth>('page')
+/** La larghezza di colonna del guscio; fuori da un guscio vale «wide». */
+const PageWidthContext = createContext<PageWidth>('wide')
 /** Il nome della testata per la sonda; fuori da un guscio vale «pagina». */
 const HeadNameContext = createContext('pagina')
 
@@ -81,7 +83,7 @@ export function useHeadName(): string {
  * contano: un blocco è già largo quanto il suo contenitore.
  */
 export function PageColumn({ width, children, className, testId }: {
-  /** la larghezza scelta; se manca, quella del guscio che la contiene (fuori da un guscio: page) */
+  /** la larghezza scelta; se manca, quella del guscio che la contiene (fuori da un guscio: wide) */
   width?: PageWidth
   children: ReactNode
   /**

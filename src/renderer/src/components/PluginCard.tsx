@@ -266,7 +266,7 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
 
   return (
     <PageShell
-      width="page"
+      width="wide"
       testId="plugin-card"
       z={30}
       header={(

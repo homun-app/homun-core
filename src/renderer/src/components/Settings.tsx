@@ -119,7 +119,8 @@ export function Settings({ usageInitial }: { usageInitial?: UsageTabInitial } = 
   }, [pendingTab, setSettingsTab])
 
   // «Uso e costi» ha le tabelle: la colonna LARGA di DS1 (come «Collegati»); le altre pagine quella delle impostazioni
-  const width: PageWidth = tab === 'uso' ? 'wide' : 'page'
+  // C2 (fase linguaggio): UNA larghezza sola (wide), che non cambia con la scheda
+  const width: PageWidth = 'wide'
   // il titolo della sezione è la voce della navigazione (stesso msgid): una sola verità
   const title = i18n.t(SECTIONS[tab]!.label)
 

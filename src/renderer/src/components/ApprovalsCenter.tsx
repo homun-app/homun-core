@@ -396,7 +396,7 @@ export function ApprovalsCenter({ registroInitial }: { registroInitial?: Registr
     <section aria-label={i18n.t(msg`Da approvare`)}>
       <PageShell
         // le richieste stanno in una pagina (880); il Registro è una tabella: wide (1120)
-        width={registro ? 'wide' : 'page'}
+        width="wide"
         z={20}
         testId="approvals-center"
         header={

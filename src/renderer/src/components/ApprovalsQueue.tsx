@@ -100,7 +100,7 @@ export function ApprovalsQueue() {
     // la regione «Da approvare» (il nome accessibile di oggi) avvolge il guscio
     <section aria-label={i18n.t(msg`Da approvare`)}>
       <PageShell
-        width="page"
+        width="wide"
         z={20}
         testId="approvals-queue"
         header={

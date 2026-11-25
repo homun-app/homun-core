@@ -63,7 +63,7 @@ function LegacyHomun2Notice() {
   const text = t`Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac nella cartella di Homun 2.`
   return (
     <div
-      className="absolute right-4 top-16 z-30 flex max-w-page items-center gap-3 rounded-surface border bg-card p-3 pr-2 text-small text-muted-foreground shadow-soft"
+      className="absolute right-4 top-16 z-30 flex max-w-wide items-center gap-3 rounded-surface border bg-card p-3 pr-2 text-small text-muted-foreground shadow-soft"
       data-testid="legacy-homun2-notice"
     >
       <p className="min-w-0 flex-1" title={text}>
