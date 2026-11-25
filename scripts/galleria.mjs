@@ -61,53 +61,20 @@ const combinazioni = (page) => [
  * maschera va elencata nel REPORT della fase. Vuota alla prima corsa: si
  * aggiunge una maschera solo per una differenza che resta tra due corse di
  * fila identiche (mai per nascondere una differenza reale).
+ *
+ * G1 (fase fondamenta-galleria): le maschere delle ORE (registro, documento,
+ * chat, chat-avvisi, chat-bot, chat-team) sono state TOLTE: da G0 i dati sono
+ * seminati all'istante fermo e nessuna riga è più a orologio reale — il
+ * controllo a ogni cattura le dichiarava MORTE (0 elementi coperti), erano
+ * codice morto. Resta la mascotte del dialogo: il colore è hash dell'id del
+ * bot che verrà creato, casuale per definizione.
  */
 const MASCHERE = {
-  // le ORE del registro sono l'orologio REALE del main (le decisioni nascono durante
-  // la corsa): nessun orologio fermo del renderer le congela — si coprono
-  registro: [
-    { espr: `(() => { const sc = document.querySelector('[data-testid="approvals-registro"]'); return sc ? [...sc.querySelectorAll('*')].filter((e) => e.children.length === 0 && /^\\d{1,2}:\\d{2}$/.test((e.textContent ?? '').trim())) : [] })()`,
-      motivo: 'le ore delle decisioni (orologio reale del main)' }
-  ],
-  // la riga «versione · aggiornata alle hh:mm» della testata del documento: ora reale
   'dialogo-nuovo': [
     { espr: `(() => [...document.querySelectorAll('[role="dialog"] svg')].filter((sv) => { const r = sv.getBoundingClientRect(); return r.width >= 60 && r.height >= 60 }))()`,
       motivo: 'l\'anteprima della mascotte del nuovo bot: il colore è hash dell\'id casuale del bot che verrà creato — diverso a ogni corsa per definizione' }
-  ],
-  documento: [
-    { espr: `(() => [...document.querySelectorAll('[data-testid="page-view"] *')].filter((e) => e.children.length === 0 && /aggiornata alle \\d{1,2}:\\d{2}/.test((e.textContent ?? ''))))()`,
-      motivo: 'la riga «aggiornata alle hh:mm» della testata (orologio reale del main)' }
-  ],
-  // le ORE DEL TURNO mostrate in cima alla colonna della chat (orologio reale del main)
-  chat: [
-    { espr: `(() => [...document.querySelectorAll('main *')].filter((e) => e.children.length === 0 && /^\\d{1,2}:\\d{2}$/.test((e.textContent ?? '').trim())))()`,
-      motivo: 'l\'ora del turno mostrata nella colonna della chat (orologio reale del main)' }
-  ],
-  'chat-avvisi': [
-    { espr: `(() => [...document.querySelectorAll('main *')].filter((e) => e.children.length === 0 && /^\\d{1,2}:\\d{2}$/.test((e.textContent ?? '').trim())))()`,
-      motivo: 'l\'ora del turno mostrata nella colonna della chat (orologio reale del main)' }
-  ],
-  'chat-bot': [
-    { espr: `(() => [...document.querySelectorAll('main *')].filter((e) => e.children.length === 0 && /^\\d{1,2}:\\d{2}$/.test((e.textContent ?? '').trim())))()`,
-      motivo: 'l\'ora del turno mostrata nella colonna della chat (orologio reale del main)' }
-  ],
-  'chat-team': [
-    { espr: `(() => [...document.querySelectorAll('main *')].filter((e) => e.children.length === 0 && /^\\d{1,2}:\\d{2}$/.test((e.textContent ?? '').trim())))()`,
-      motivo: 'l\'ora del turno mostrata nella colonna della chat (orologio reale del main)' }
   ]
 }
-/** Applica le maschere della scena: un rettangolo pieno sopra ogni selettore, alle coordinate del suo rect. */
-const maschera = async (s, m) => s.eval(`
-  const el = document.querySelector(${JSON.stringify(m.selettore)})
-  if (!el) return false
-  const r = el.getBoundingClientRect()
-  const d = document.createElement('div')
-  d.dataset.galleriaMaschera = '1'
-  d.style.cssText = 'position:fixed;z-index:2147483646;background:#f0f;pointer-events:none'
-  d.style.left = r.left + 'px'; d.style.top = r.top + 'px'; d.style.width = r.width + 'px'; d.style.height = r.height + 'px'
-  document.body.appendChild(d)
-  return true`)
-
 /** La scena dei COMPONENTI (F2): esiste solo con SANDBOT_TEST_GALLERIA=1. */
 const SCENA_COMPONENTI = { id: 'componenti', label: 'La pagina dei componenti', group: 'Componenti', root: `document.querySelector('[data-testid="galleria-componenti"]')`, scene: true, withSidebar: true, open: 'componenti', focus: null }
 
@@ -116,8 +83,8 @@ const nomeCattura = (page, tema, w) => `${page.id}-${tema}${w !== 1280 ? `-${w}`
 const T0 = Date.now()
 const log = (...a) => console.log('[galleria]', `+${((Date.now() - T0) / 1000).toFixed(1)}s`, ...a)
 
-/** La cattura di UNA combinazione: viewport, tema, apertura della scena, preparazione, maschere, screenshot + strip. */
-const cattura = async (s, page, ctx, w, tema) => {
+/** La cattura di UNA combinazione: viewport, tema, apertura della scena, preparazione, maschere, screenshot + strip. I controlli delle maschere riempiono `errori`: una scena col vaso rotto è ROSSA, non catturata. */
+const cattura = async (s, page, ctx, w, tema, errori = []) => {
   await s.viewport(w, 800 - 800 + (w === 900 ? 640 : 800))
   await s.tema(tema)
   await closeOverlays(s)
@@ -132,8 +99,7 @@ const cattura = async (s, page, ctx, w, tema) => {
     // un REMOUNT pulito a ogni combinazione (chiudi+apri: come le altre pagine si riaprono)
     await s.eval(`window.__galleriaComponenti?.chiudi(); window.__galleriaComponenti?.apri(); return true`)
     await s.attendi(`(() => { const el = document.querySelector('[data-testid="galleria-componenti"]'); return !!(el && el.querySelector('[data-testid="galleria-componenti-contenuto"]')) })()`, { entro: 10_000, motivo: 'la pagina dei componenti si apra col suo contenuto' })
-    log('COMPONENTI DOM:', JSON.stringify(await s.eval(`return { hostRect: (() => { const el = document.querySelector('[data-testid="galleria-componenti"]'); if (!el) return null; const r = el.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height), getComputedStyle(el).backgroundColor] })(), bambini: document.querySelector('[data-testid="galleria-componenti"]')?.children.length ?? 0, testoLen: (document.querySelector('[data-testid="galleria-componenti"]')?.textContent ?? '').length }`)))
-  } else {
+    } else {
     await openPage(s, page, ctx)
   }
   if (page.overlay && page.open !== 'componenti') await openOverlay(s, page)
@@ -152,9 +118,11 @@ const cattura = async (s, page, ctx, w, tema) => {
       else sc.scrollTop = 0
     }
     return true`)
-  // le maschere della scena PRECEDENTE si togliono: i rettangoli sono fissi
-  // allo schermo e coprirebbero le scene successive
-  await s.eval(`document.querySelectorAll('[data-galleriaMaschera]').forEach((d) => d.remove()); return true`).catch(() => undefined)
+  // le maschere della scena PRECEDENTE si tolgono: i rettangoli sono fissi
+  // allo schermo e coprirebbero le scene successive. UNA funzione sola del
+  // motore (sonda.mjs), con lo stesso attributo della creazione — la copia
+  // che stava qui cercava «data-galleriaMaschera» e non toglieva mai nulla
+  await s.togliMaschere()
   // il POPOVER ⌘K si chiude da solo entro ~1 s dall'apertura (già nell'originale):
   // la cattura parte SUBITO dopo l'apertura, prima delle attese di stabilità
   const catturaPrima = page.id === 'popover-chiedi'
@@ -162,7 +130,26 @@ const cattura = async (s, page, ctx, w, tema) => {
     await s.attendiRete({ quieta: 300, entro: 8_000 }).catch(() => undefined)
     await s.attendiStabile('body', { entro: 4_000 }).catch(() => undefined)
   }
-  for (const m of MASCHERE[page.id] ?? []) m.espr ? await s.mascheraEspr(m.espr) : await maschera(s, m)
+  // G1: il CONTROLLO a ogni cattura — PRIMA delle maschere di questa scena,
+  // nel DOM non può esserci NESSUN rettangolo (con qualunque ortografia
+  // dell'attributo: un rettangolo che la pulizia non toglie è una maschera
+  // avanzata, e la scena sotto resta mezza invisibile al confronto)
+  const avanzano = await s.contaMaschere()
+  if (avanzano !== 0) errori.push(`avanzano ${avanzano} rettangoli di maschera dalla scena precedente`)
+  let coperti = 0
+  for (const m of MASCHERE[page.id] ?? []) {
+    const n = await s.mascheraEspr(m.espr)
+    coperti += n
+    log(`maschera ${page.id} ${w}/${tema}: ${n} elementi — ${m.motivo}`)
+    // una maschera dichiarata che copre 0 elementi è MORTA: o l'ora non è
+    // più a orologio reale (va tolta dalla configurazione) o l'espressione
+    // è sbagliata (va corretta) — non può passare in silenzio
+    if (n === 0) errori.push(`maschera morta (0 elementi coperti): ${m.motivo}`)
+  }
+  // il numero di rettangoli presenti dev'essere il numero di elementi coperti
+  // dalle maschere di QUESTA scena (per le scene senza maschere: 0)
+  const presenti = await s.contaMaschere()
+  if (presenti !== coperti) errori.push(`rettagli di maschera nel DOM ${presenti} ≠ elementi coperti ${coperti}`)
   const percorso = join(CATTURE, nomeCattura(page, tema, w))
   await s.cattura(percorso)
   // PNG senza metadati: strip subito dopo la cattura
@@ -252,7 +239,7 @@ try {
   for (const tema of ['chiaro', 'scuro']) {
     await s.tema(tema)
     await s.attendiRete({ quieta: 300, entro: 8_000 }).catch(() => undefined)
-    for (const m of MASCHERE.guida ?? []) await maschera(s, m)
+    for (const m of MASCHERE.guida ?? []) await s.mascheraEspr(m.espr)
     const percorso = join(CATTURE, nomeCattura(guida, tema, 1280))
     await s.cattura(percorso)
     spawnSync(MAGICK, [percorso, '-strip', percorso])
@@ -266,7 +253,14 @@ try {
   const vuole = (p) => !SOLO || SOLO.includes(p.id)
   for (const page of pages.filter(vuole)) {
     for (const [w, tema] of combinazioni(page)) {
-      await cattura(s, page, ctx, w, tema)
+      const errori = []
+      await cattura(s, page, ctx, w, tema, errori)
+      if (errori.length) {
+        // la scena è ROSSA col motivo: i controlli delle maschere non sono
+        // un test a parte, valgono a OGNI cattura
+        esiti.push({ nome: nomeCattura(page, tema, w), scena: page.id, esito: 'rossa', dettaglio: errori.join(' · ') })
+        continue
+      }
       esiti.push(confronta(page, tema, w))
     }
     log(page.id, '→', esiti.filter((e) => e.scena === page.id).map((e) => `${e.esito}${e.ae ? ` (${e.ae} px)` : ''}`).join(', '))
@@ -274,6 +268,7 @@ try {
 
   // index.html delle differenze (da aprire nel browser)
   const diverse = esiti.filter((e) => e.esito === 'diversa')
+  const rosse = esiti.filter((e) => e.esito === 'rossa')
   // G0: NESSUN TURNO DAL VIVO. Il modello finto registra ogni chiamata a
   // /chat/completions: il setup deterministico non ne fa nessuna e nessuna
   // scena deve farne partire uno. Se il registro non è vuoto la corsa è
@@ -310,8 +305,9 @@ try {
   const nuove = esiti.filter((e) => e.esito === 'nuova')
   const errs = esiti.filter((e) => e.esito === 'errore')
   const peso = readdirSync(APPROVATE).reduce((a, f) => a + statSync(join(APPROVATE, f)).size, 0)
-  log(`scene: ${esiti.length} · uguali ${esiti.length - diverse.length - nuove.length - errs.length} · diverse ${diverse.length} · nuove senza approvata ${nuove.length} · errori ${errs.length}${turniDalVivo ? ` · TURNI DAL VIVO ${turniDalVivo}` : ''}`)
+  log(`scene: ${esiti.length} · uguali ${esiti.length - diverse.length - nuove.length - errs.length - rosse.length} · diverse ${diverse.length} · ROSSE ${rosse.length} · nuove senza approvata ${nuove.length} · errori ${errs.length}${turniDalVivo ? ` · TURNI DAL VIVO ${turniDalVivo}` : ''}`)
   log(`peso di galleria/approvate/: ${(peso / 1024 / 1024).toFixed(1)} MB (limite 15 MB)`)
+  if (rosse.length) for (const e of rosse) log('  ✗', e.nome, 'ROSSA —', e.dettaglio ?? '')
   if (diverse.length || nuove.length || errs.length) {
     for (const e of [...errs, ...nuove, ...diverse]) log('  ✗', e.nome, e.esito, e.ae ? `${e.ae} px` : e.dettaglio ?? '')
     log('le differenze sono in', DIFF, '(apri index.html)')
@@ -325,7 +321,7 @@ try {
     rmSync(join(ROOT, 'out', 'renderer', 'galleria-componenti.js'))
     rmSync(join(ROOT, 'out', 'renderer', 'galleria-componenti.mjs')) // il nome della prima era: nessuna copia vecchia resta in out/
   } catch { /* già via */ }
-  process.exit(diverse.length || nuove.length || errs.length || turniDalVivo || fine.cartelleRimaste.length ? 1 : 0)
+  process.exit(diverse.length || rosse.length || nuove.length || errs.length || turniDalVivo || fine.cartelleRimaste.length ? 1 : 0)
 } catch (e) {
   log('FATAL:', e?.stack ?? e)
   try { rmSync(join(ROOT, 'out', 'renderer', 'galleria-componenti.js')) } catch { /* già via */ }

@@ -477,7 +477,15 @@ export async function avviaSonda({
       return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), w: Math.round(r.width), h: Math.round(r.height) }`),
     /** Evento del mouse alla posizione (per la pressione del fuoco). */
     mouse: async (desc) => cdp.send('Input.dispatchMouseEvent', desc),
-    /** La maschera per ESPRESSIONE: copre con un rettangolo pieno OGNI elemento tornato (i dati a ora reale che nessun orologio fermo può congelare). */
+    /**
+     * La maschera per ESPRESSIONE: copre con un rettangolo pieno OGNI
+     * elemento tornato (i dati a ora reale che nessun orologio fermo può
+     * congelare). Torna QUANTI elementi ha coperto. Il rettangolo porta
+     * l'attributo data-galleria-maschera: UN SOLO nome, lo stesso che tolgono
+     * togliMaschere e che conta contaMaschere (la copia che stava in
+     * galleria.mjs cercava «data-galleriaMaschera» — mai trovato, e i
+     * rettangoli restavano su tutte le scene successive).
+     */
     mascheraEspr: async (espr, { colore = '#f0f' } = {}) => s.eval(`
       const els = (${espr})
       if (!Array.isArray(els)) return 0
@@ -487,13 +495,26 @@ export async function avviaSonda({
         const r = el.getBoundingClientRect()
         if (r.width === 0 || r.height === 0) continue
         const d = document.createElement('div')
-        d.dataset.galleriaMaschera = '1'
+        d.setAttribute('data-galleria-maschera', '1')
         d.style.cssText = 'position:fixed;z-index:2147483646;background:${colore};pointer-events:none'
         d.style.left = r.left + 'px'; d.style.top = r.top + 'px'; d.style.width = r.width + 'px'; d.style.height = r.height + 'px'
         document.body.appendChild(d)
         n++
       }
       return n`),
+    /** Toglie TUTTI i rettangoli di maschera (l'attributo canonico) e torna quanti ne ha tolti. */
+    togliMaschere: async () => s.eval(`
+      const via = [...document.querySelectorAll('[data-galleria-maschera]')]
+      for (const d of via) d.remove()
+      return via.length`),
+    /**
+     * Quanti rettangoli di maschera ci sono nel DOM, con QUALUNQUE
+     * ortografia dell'attributo: il tripwire del controllo della galleria —
+     * un rettangolo scritto con un nome diverso da quello che la pulizia
+     * toglie non deve passare in silenzio (com'era successo).
+     */
+    contaMaschere: async () => s.eval(`
+      return document.querySelectorAll('[data-galleria-maschera],[data-galleriamaschera],[data-galleriaMaschera]').length`),
     /** La fine della sonda: app spenta, figli della porta di debug via, daemon chiusi, cartelle cancellate e CONTEGGIATE. */
     fine: async ({ porta } = {}) => {
       try { cdp?.sock.close() } catch { /* già chiusa */ }
