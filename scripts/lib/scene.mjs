@@ -446,6 +446,17 @@ export const ISTANTE_FERMO = Date.parse('2026-11-20T10:00:00Z')
  * Il provider/boti/asset/Team: come `prepara`.
  */
 export const preparaDeterministica = async (s, { providerPort }) => {
+  // i bot NASCONO PRIMA del provider: alla creazione il bot si presenta da
+  // solo (maybeEnqueueBotIntro, «solo se c'è un modello utilizzabile») e la
+  // presentazione è un TURNO DAL VIVO a orologio reale — col modello finto
+  // vuoto diventava «Risposta vuota · 2 volte» con orari che cambiano a ogni
+  // corsa (e a volte «Agente occupato» quando il giro si accavallava). Senza
+  // provider non c'è modello: nessun turno parte. Le loro chat si SEMINANO
+  // all'istante fermo, come quella del bot principale.
+  const others = []
+  for (const nome of [NOMI.bot, 'Ricerche', 'Scrittura']) {
+    others.push(await s.rpc(`createAgent(${JSON.stringify(nome)}, ${JSON.stringify('bot della galleria')})`))
+  }
   await s.rpc(`saveProvider(${JSON.stringify({ id: 'finto', name: 'Finto locale', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'chiave-finta-di-prova', enabled: true })})`)
   await s.rpc(`settingsSet(${JSON.stringify('models.main')}, ${JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null })})`)
   await s.rpc(`settingsSet(${JSON.stringify('sandbox.mode')}, ${JSON.stringify('host')})`).catch(() => undefined)
@@ -460,11 +471,8 @@ export const preparaDeterministica = async (s, { providerPort }) => {
   const bots = await s.rpc(`listAgents()`)
   const mainBot = bots[0]
   await s.rpc(`updateAgent(${JSON.stringify(mainBot.id)}, ${JSON.stringify({ name: NOMI.main })})`)
-  const others = []
-  for (const name of [NOMI.bot, 'Ricerche', 'Scrittura']) {
-    const bot = await s.rpc(`createAgent(${JSON.stringify(name)}, ${JSON.stringify('bot della galleria')})`)
+  for (const bot of others) {
     await s.rpc(`updateAgent(${JSON.stringify(bot.id)}, ${JSON.stringify({ providerId: 'finto', model: 'finto' })})`)
-    others.push(bot)
   }
   // gli avatar FISSI per TUTTI i bot creati: il default è hash dell'id (gli id
   // nascono casuali a ogni corsa) e la barra avrebbe avatar diversi a ogni corsa
@@ -473,9 +481,14 @@ export const preparaDeterministica = async (s, { providerPort }) => {
   await s.rpc(`updateAgent(${JSON.stringify(others[2].id)}, ${JSON.stringify({ avatar: { family: 'h-creature', color: 'c7' } })})`)
   // i plugin: SOLO srv-plugin-01 ATTIVO (le scene Autorizzazioni mostrano i suoi
   // 24 strumenti, che arrivano solo con la connessione); gli altri DISATTIVATI:
-  // nessuna connessione → nessun evento «Server MCP collegato» nel timeline
+  // nessuna connessione → nessun evento «Server MCP collegato» nel timeline.
+  // srv-plugin-01 ha enabledFor VUOTO: il test di connessione parte lo stesso
+  // (gli strumenti ci sono) ma notifyMcpServerState non trova nessun bot da
+  // notificare — la nota «[sistema] Server MCP collegato» era un TURNO DAL
+  // VIVO per ogni bot (entry a orologio reale + risposta del modello finto
+  // vuota = «Risposta vuota» con orari che cambiano a ogni corsa)
   const FAKE_MCP = join(ROOT, 'scripts', 'fake-plugin-pulita-mcp.mjs')
-  const pluginCfg = (i) => ({ id: `srv-plugin-${String(i).padStart(2, '0')}`, name: `plugin-${String(i).padStart(2, '0')}`, transport: 'stdio', command: process.execPath, args: [FAKE_MCP], enabled: i === 1, enabledFor: ['*'] })
+  const pluginCfg = (i) => ({ id: `srv-plugin-${String(i).padStart(2, '0')}`, name: `plugin-${String(i).padStart(2, '0')}`, transport: 'stdio', command: process.execPath, args: [FAKE_MCP], enabled: i === 1, enabledFor: i === 1 ? [] : ['*'] })
   for (let i = 1; i <= 12; i++) await s.rpc(`mcpSave(${JSON.stringify(pluginCfg(i))})`)
   await s.rpc(`mcpSave(${JSON.stringify({ id: 'srv-rotto', name: 'rotto', transport: 'stdio', command: '/non/esiste/prog', args: [], enabled: false, enabledFor: ['*'] })})`)
   await s.rpc(`mcpSave(${JSON.stringify({ id: 'srv-spento', name: 'spento', transport: 'stdio', command: process.execPath, args: [FAKE_MCP], enabled: false, disabledReason: 'user', enabledFor: ['*'] })})`)
@@ -527,8 +540,38 @@ export const preparaDeterministica = async (s, { providerPort }) => {
   seedGroupMessage(mainBot.id, NOMI.main, TEAM_MD, false, t0 + 10)
   seedGroupMessage(others[1].id, 'Ricerche', 'Il Museo Egizio apre alle 9; **la GAM** chiude il lunedì. @tutti confermate?', false, t0 + 11)
   seedGroupMessage(mainBot.id, NOMI.main, 'Sabato: Museo Egizio la mattina, il bicerin nel pomeriggio. Domenica: la GAM e il Po. Aspetto la conferma di @Ricerche.', true, t0 + 12)
+  // ---- le CHAT DEI BOT, seminate all'istante fermo come quella principale ----
+  // (niente presentazione dal vivo: senza turni le chat nascono qui, complete)
+  const seedBotChat = (botId, righe) => withDb(s, (db) => {
+    let at = ISTANTE_FERMO + 4000
+    for (const [role, content] of righe) {
+      db.prepare('INSERT INTO entries (agent_id, kind, role, content, meta, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(botId, 'message', role, content, '{}', at)
+      at += 1000
+    }
+  })
+  seedBotChat(others[0].id, [
+    ['user', 'Cosa è successo oggi mentre ero via?'],
+    ['assistant', '## Le novità di oggi\n\n- **Musei**: alla GAM aprono due sale nuove, ingresso libero la prima domenica.\n- **Traffico**: lavori in corso sulla tangenziale fino a venerdì.\n- **Meteo**: nuvoloso al mattino, sole nel pomeriggio.\n\nNient\'altro di rilevante: il resto era una giornata normale.']
+  ])
+  seedBotChat(others[1].id, [
+    ['user', 'Gli orari del Museo Egizio per sabato?'],
+    ['assistant', 'Il Museo Egizio apre alle **9:00** e chiude alle 18:30; sabato anche l\'ultimo ingresso è anticipato di un\'ora. La GAM, invece, chiude il lunedì.']
+  ])
+  seedBotChat(others[2].id, [
+    ['user', 'Una riga per l\'invito del weekend.'],
+    ['assistant', 'Torino ti aspetta: due giorni tra l\'Egizio, la GAM e un bicerin al Caffè Al Bicerin.']
+  ])
   // una routine e la Cassaforte con qualcosa dentro
-  await s.rpc(`createRoutine(${JSON.stringify(others[2].id)}, ${JSON.stringify('Riepilogo del giorno')}, ${JSON.stringify('Riassumi le novità di oggi.')}, ${JSON.stringify('0 9 * * *')}, undefined)})`).catch(() => undefined)
+  const routine = await s.rpc(`createRoutine(${JSON.stringify(others[2].id)}, ${JSON.stringify('Riepilogo del giorno')}, ${JSON.stringify('Riassumi le novità di oggi.')}, ${JSON.stringify('0 9 * * *')}, undefined)})`).catch(() => null)
+  // la routine non deve MAI scattare durante una corsa: lo scheduler dell'app
+  // gira all'orologio REALE e una corsa che attraversa le 9:00 la farebbe
+  // partire (un turno dal vivo). created_at nel FUTURO FISSO: il prossimo run
+  // calcolato dal daemon resta oltre ogni corsa plausibile (e la riga non
+  // mostra «ultima esecuzione», che resterebbe nel futuro)
+  if (routine?.id != null) {
+    withDb(s, (db) => db.prepare('UPDATE routines SET created_at = ? WHERE id = ?').run(Date.parse('2027-01-01T00:00:00Z'), routine.id))
+  }
   await s.rpc(`vaultSaveLogin(${JSON.stringify({ label: 'Museo Egizio', origins: ['https://spa.example'], username: 'utente-musei', password: 'pwd-musei-8a4b2c' })})`).catch(() => undefined)
   await s.rpc(`vaultStore(${JSON.stringify('chiave-di-prova')}, ${JSON.stringify('valore-di-prova')})`).catch(() => undefined)
   await s.eval(`location.reload(); return true`)

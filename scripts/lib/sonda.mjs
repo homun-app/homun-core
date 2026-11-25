@@ -181,7 +181,20 @@ export async function avviaSonda({
             if (foglioGalleria) {
               await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `
                 (() => {
-                  const css = '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}'
+                  // i <select> CHIUSI: il testo li dipinge il tema nativo di macOS
+                  // (NativeThemeMac), FUORI dalla rasterizzazione deterministica di
+                  // Blink — il suo antialiasing è cambiato tra la corsa che ha
+                  // generato le approvate e ogni corsa successiva, restando poi
+                  // fermo: la cattura non può dipendere dallo stato di sessione
+                  // della macchina. Con appearance:none il controllo lo dipinge
+                  // Blink come tutto il resto (byte-identico tra corse); il chevron
+                  // lo disegna questo foglio, che esiste SOLO nella galleria.
+                  const chevron = (c) => "url(\\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='" + c + "' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\\")"
+                  const css = [
+                    '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}',
+                    'select{-webkit-appearance:none;appearance:none;background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;background-image:' + chevron('%2371717a'),
+                    'html.dark select{background-image:' + chevron('%23a1a1aa')
+                  ].join('\\n')
                   const metti = () => { const st = document.createElement('style'); st.id = 'galleria-fermo'; st.textContent = css; document.documentElement.appendChild(st) }
                   if (document.documentElement) metti()
                   document.addEventListener('DOMContentLoaded', metti, { once: true })
@@ -405,10 +418,43 @@ export async function avviaSonda({
       await s.eval(`await Promise.race([new Promise((resolve) => { let n = 0; const step = () => { if (++n >= 2) resolve(); else requestAnimationFrame(step) }; requestAnimationFrame(step) }), new Promise((resolve) => setTimeout(resolve, 1500))])`)
       await s.attendiRete({ quieta: 300, entro: 3_000 }).catch(() => undefined)
     },
+    /**
+     * Il puntatore NEUTRO: lo sposta in un punto che non sta sopra NIENTE di
+     * interattivo e lo VERIFICA (la catena di elementi sotto il punto). Dove
+     * sta davvero il puntatore dell'utente non lo sa nessuno: se resta dove
+     * capita, l':hover disegna righe e bottoni evidenziati che cambiano da
+     * corsa a corsa (dove la finestra copre lo schermo). Un mouseMoved via
+     * CDP è un evento VERO: dopo di lui l'hover è dove lo abbiamo messo noi.
+     */
+    puntatoreNeutro: async () => {
+      const w = (await s.eval(`return window.innerWidth`)) ?? 1280
+      const h = (await s.eval(`return window.innerHeight`)) ?? 800
+      // (3,3) no: lassù stanno le luci di traffico hiddenInset, l'hover le ACCENDE
+      const punti = [[w - 3, 3], [Math.floor(w / 2), 3], [3, h - 3], [w - 3, h - 3], [w - 3, Math.floor(h / 2)]]
+      const sotto = []
+      for (const [x, y] of punti) {
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 })
+        const interattivo = await s.eval(`(() => {
+          let el = document.elementFromPoint(${x}, ${y})
+          while (el) {
+            if (el.matches?.('button, a, select, input, textarea, label, summary, option, [role="button"], [role="menuitem"], [role="tab"], [role="radio"], [role="switch"], [role="combobox"], [aria-haspopup], [data-state="open"], [data-state="delayed-open"], [class*="hover:"]')) return (el.tagName + '.' + String(el.className).slice(0, 60))
+            el = el.parentElement
+          }
+          return null
+        })()`).catch(() => null)
+        if (!interattivo) return { x, y }
+        sotto.push(`(${x},${y})→${interattivo}`)
+      }
+      throw new Error('nessun punto neutro per il puntatore: ' + sotto.join(' · '))
+    },
     /** cattura: assestamento + fonti + screenshot PNG (solo CDP), scritto su file. */
     cattura: async (percorso) => {
       await s.eval(`await document.fonts.ready; return true`)
       await s.assesta()
+      // il puntatore si mette al punto neutro per ULTIMO, vicino allo
+      // screenshot: un elemento montato dopo la verifica resterebbe coperto
+      // dall'hover senza che il controllo lo veda
+      await s.puntatoreNeutro()
       const r = await cdp.send('Page.captureScreenshot', { format: 'png' })
       writeFileSync(percorso, Buffer.from(r.data, 'base64'))
       return percorso

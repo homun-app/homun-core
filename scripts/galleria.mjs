@@ -234,9 +234,23 @@ try {
   // la GUIDA prima del setup (poi non si vede più)
   await s.viewport(1280, 800)
   const guida = PAGES.find((p) => p.id === 'guida')
+  await s.attendi(`!!document.querySelector('[data-testid="guide-view"]')`, { entro: 25_000, motivo: 'la guida iniziale compaia' })
+  // la STEPPER della guida: il passo «Computer» compare solo quando la sonda
+  // del motore Apple del daemon risponde (asincrona: una corsa catturava tre
+  // etichette, l'altra quattro). Si aspetta che la fila sia FERMA su due
+  // letture distanti — una CONDIZIONE, non un tempo fisso.
+  {
+    const railTesto = `(() => { const r = document.querySelector('[data-testid="guide-rail"]'); return r ? (r.textContent ?? '').trim() : null })()`
+    let prima = await s.eval(`return ${railTesto}`).catch(() => null)
+    for (let i = 0; i < 20; i++) {
+      await s.attendi(`(() => { return true })()`, { entro: 700, passo: 700 }).catch(() => undefined)
+      const seconda = await s.eval(`return ${railTesto}`).catch(() => null)
+      if (prima !== null && seconda === prima) break
+      prima = seconda
+    }
+  }
   for (const tema of ['chiaro', 'scuro']) {
     await s.tema(tema)
-    await s.attendi(`!!document.querySelector('[data-testid="guide-view"]')`, { entro: 25_000, motivo: 'la guida iniziale compaia' })
     await s.attendiRete({ quieta: 300, entro: 8_000 }).catch(() => undefined)
     for (const m of MASCHERE.guida ?? []) await maschera(s, m)
     const percorso = join(CATTURE, nomeCattura(guida, tema, 1280))
@@ -260,6 +274,13 @@ try {
 
   // index.html delle differenze (da aprire nel browser)
   const diverse = esiti.filter((e) => e.esito === 'diversa')
+  // G0: NESSUN TURNO DAL VIVO. Il modello finto registra ogni chiamata a
+  // /chat/completions: il setup deterministico non ne fa nessuna e nessuna
+  // scena deve farne partire uno. Se il registro non è vuoto la corsa è
+  // ROSSA col testo del turno (niente soglie, niente maschere: la causa si
+  // corregge — erano le presentazioni dei bot alla creazione).
+  const turniDalVivo = modello.requests.length
+  if (turniDalVivo) for (const r of modello.requests) log('  ✗ TURNO DAL VIVO: +' + ((r.at - T0) / 1000).toFixed(1) + 's', String(r.lastUser).replace(/\s+/g, ' ').slice(0, 100))
   writeFileSync(join(DIFF, 'index.html'), [
     '<!doctype html><meta charset="utf-8"><title>galleria — le scene diverse</title>',
     '<style>body{background:#141419;color:#eee;font:14px -apple-system,Helvetica,sans-serif;margin:24px}img{display:block;max-width:100%;margin:8px 0 32px;border:1px solid #444}h2{margin:32px 0 8px}</style>',
@@ -289,7 +310,7 @@ try {
   const nuove = esiti.filter((e) => e.esito === 'nuova')
   const errs = esiti.filter((e) => e.esito === 'errore')
   const peso = readdirSync(APPROVATE).reduce((a, f) => a + statSync(join(APPROVATE, f)).size, 0)
-  log(`scene: ${esiti.length} · uguali ${esiti.length - diverse.length - nuove.length - errs.length} · diverse ${diverse.length} · nuove senza approvata ${nuove.length} · errori ${errs.length}`)
+  log(`scene: ${esiti.length} · uguali ${esiti.length - diverse.length - nuove.length - errs.length} · diverse ${diverse.length} · nuove senza approvata ${nuove.length} · errori ${errs.length}${turniDalVivo ? ` · TURNI DAL VIVO ${turniDalVivo}` : ''}`)
   log(`peso di galleria/approvate/: ${(peso / 1024 / 1024).toFixed(1)} MB (limite 15 MB)`)
   if (diverse.length || nuove.length || errs.length) {
     for (const e of [...errs, ...nuove, ...diverse]) log('  ✗', e.nome, e.esito, e.ae ? `${e.ae} px` : e.dettaglio ?? '')
@@ -304,7 +325,7 @@ try {
     rmSync(join(ROOT, 'out', 'renderer', 'galleria-componenti.js'))
     rmSync(join(ROOT, 'out', 'renderer', 'galleria-componenti.mjs')) // il nome della prima era: nessuna copia vecchia resta in out/
   } catch { /* già via */ }
-  process.exit(diverse.length || nuove.length || errs.length || fine.cartelleRimaste.length ? 1 : 0)
+  process.exit(diverse.length || nuove.length || errs.length || turniDalVivo || fine.cartelleRimaste.length ? 1 : 0)
 } catch (e) {
   log('FATAL:', e?.stack ?? e)
   try { rmSync(join(ROOT, 'out', 'renderer', 'galleria-componenti.js')) } catch { /* già via */ }
