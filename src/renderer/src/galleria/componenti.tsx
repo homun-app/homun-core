@@ -50,6 +50,7 @@ import { Switch } from '../components/ui/switch'
 import { Segmented } from '../components/ui/segmented'
 import { SearchField } from '../components/ui/search-field'
 import { FilterChipsScelta, FilterChipsMenu, FilterChipsInterruttore } from '../components/ui/filter-chips'
+import { PageToolbar } from '../components/ui/page-toolbar'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -154,7 +155,7 @@ export const SEZIONI = [
   { id: 'tabella', titolo: 'data-table', componenti: ['data-table'] },
   { id: 'elenchi', titolo: 'flat-list, list-row e list-group', componenti: ['flat-list', 'list-row', 'list-group'] },
   { id: 'testate', titolo: 'section, page-header, column-head', componenti: ['section', 'page-header', 'column-head'] },
-  { id: 'ricerca', titolo: 'search-field e filter-chips — ricerca e filtri', componenti: ['search-field', 'filter-chips'] },
+  { id: 'ricerca', titolo: 'search-field, filter-chips e page-toolbar', componenti: ['search-field', 'filter-chips', 'page-toolbar'] },
   { id: 'superfici', titolo: 'card e empty-state — superfici', componenti: ['card', 'empty-state'] },
   { id: 'schede', titolo: 'underline-tabs', componenti: ['underline-tabs'] },
   { id: 'dialogo', titolo: 'dialog aperto', componenti: ['dialog'] },
@@ -348,6 +349,15 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               <FilterChipsMenu label="Bot" value="tutti" options={[{ value: 'tutti', label: 'tutti' }, { value: 'competitoor', label: 'Competitoor' }, { value: 'ricerche', label: 'Ricerche' }]} onSelect={() => undefined} />
               <FilterChipsInterruttore active={false} onToggle={() => undefined}>Archiviati</FilterChipsInterruttore>
               <FilterChipsInterruttore active onToggle={() => undefined}>Archiviati (acceso)</FilterChipsInterruttore>
+            </div>
+          </Riga>
+          <Riga label="page-toolbar — la barra della pagina: ricerca · pillole · vista">
+            <div className="w-full rounded-surface border border-border p-3">
+              <PageToolbar
+                ricerca={<SearchField value="mater" onChange={() => undefined} placeholder="Cerca tra plugin e skill" ariaLabel="Cerca tra plugin e skill" />}
+                pillole={<><FilterChipsScelta active count={12} onSelect={() => undefined}>Tutte</FilterChipsScelta><FilterChipsMenu label="Bot" value="tutti" options={[{ value: 'tutti', label: 'tutti' }]} onSelect={() => undefined} /></>}
+                vista={<UnderlineTabs tabs={[['griglia', 'Griglia'], ['lista', 'Lista']] as never} value="griglia" onChange={() => undefined} testId="galleria-toolbar-tabs" />}
+              />
             </div>
           </Riga>
         </Section>

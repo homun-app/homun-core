@@ -293,6 +293,10 @@ Galleria: superfici.
 Le pillole di filtro della barra, in TRE varianti chiuse: `Scelta` (la scelta singola col conteggio, accesa piena) · `Menu` (la pillola-menu «Bot: tutti ▾», che prende il posto dei `<select>` di filtro di Libreria) · `Interruttore` (la pillola che accende un filtro, «Archiviati»). Prendono il posto di FilterPill e dei Button shape="pill" usati come filtro. Sono FILTRI: la scelta di un'impostazione è Segmented; i conteggi li porta chi le usa.
 Galleria: ricerca.
 
+### page-toolbar
+La barra degli strumenti della pagina, FERMA sopra il corpo: `ricerca` (SearchField) a sinistra · `pillole` (FilterChips) accanto · `vista` a destra (le schede, il cambio di rappresentazione — ml-auto). Riga alta almeno 40 (min-h-10). La pagina la riempie, non la disegna: l'involupcro col margine lo dà PageShell, la barra la dà questo.
+Galleria: ricerca.
+
 ### search-field
 L'UNICA ricerca dell'app: la lente e il campo in una casa da 36 (h-control), fondo tenue, raggio dei controlli, larghezza 72 di default (chi la usa la allarga con className). Il valore è controllato; il testid va sul CAMPO (lo cercano le sonde); il segnaposto e il nome accessibile li porta chi la usa. Vietato scrivere un campo di ricerca fuori da qui (guardia di C4).
 Galleria: ricerca.
