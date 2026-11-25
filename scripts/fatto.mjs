@@ -129,6 +129,14 @@ const run = async () => {
   // della corsa (fatto-*, il TMPDIR dei passi) dev'essere VUOTA, e poi si
   // cancella.
   const t7 = Date.now()
+  // le CACHE dei tool di nodo (jiti, node-compile-cache) finiscono nella
+  // radice perché è il loro TMPDIR: non sono dati di un passo, si buttano
+  // prima di guardare — ciò che resta dopo è davvero un avanzo
+  if (radiceCorsa !== null) {
+    for (const cache of ['jiti', 'node-compile-cache']) {
+      try { rmSync(join(radiceCorsa, cache), { recursive: true, force: true }) } catch { /* non c'è */ }
+    }
+  }
   const fotoDopo = fotoTemporanei('finale')
   const nuove = nuoveDelRepo([...fotoPrima], [...fotoDopo])
   const residui = radiceCorsa === null ? [] : residuiRadice(readdirSync(radiceCorsa))

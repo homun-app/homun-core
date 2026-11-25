@@ -610,7 +610,9 @@ try {
   // (era sleep(600)) le righe delle decisioni entrano in un attimo: si
   // aspetta che il pannello sia FERMO, poi si legge il testo
   await sonda.attendiStabile('[data-testid="approvals-registro"]', { entro: 4_000 }).catch(() => undefined)
+  // C3 (fase linguaggio): i filtri del registro stanno nella BARRA del centro (approvals-filters), non più nel corpo
   const registroText = await sonda.eval(`return document.querySelector('[data-testid="approvals-registro"]')?.textContent ?? ''`)
+  const barraFiltriText = await sonda.eval(`return document.querySelector('[data-testid="approvals-filters"]')?.textContent ?? ''`)
   check('A2: le decisioni complete — chi, scelta, da dove (Rifiutato dal centro, Consentito sempre dalla chat)',
     registroText.includes('Rifiutato') && registroText.includes('dal centro') && registroText.includes('Consentito sempre') && registroText.includes('dalla chat'),
     registroText.slice(0, 260))
@@ -618,7 +620,7 @@ try {
   // Scadute e Passate da sole nascono quando succedono, i loro modelli sono
   // nei test)
   check('A2: i filtri del registro (Approvate · N, Rifiutate · 1)',
-    registroText.includes('Approvate') && registroText.includes('Rifiutate'),
+    barraFiltriText.includes('Approvate') && barraFiltriText.includes('Rifiutate'),
     registroText.slice(0, 160))
   // «Consentiti sempre» con Revoca
   const grantsSez = await sonda.attendi(`!!document.querySelector('[data-testid="approvals-registro-grants"]')`, { entro: 5_000, motivo: 'la sezione Consentiti sempre' }).catch(() => false)
