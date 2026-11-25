@@ -1,3 +1,144 @@
+# REPORT FASE FONDAMENTA-GALLERIA: la galleria vede davvero (maschere e pagina dei componenti)
+
+Base: tag `fase-fondamenta` (c71475f1), verifica fatta: HEAD era esattamente lì. La verifica aveva trovato che la galleria dichiarava 76/76 uguali ma NON vedeva: la maschera della mascotte di `dialogo-nuovo` restava su 54 approvate (il quadrato magenta 112×112 al centro: la pulizia cercava `data-galleriaMaschera`, il DOM ha `data-galleria-maschera`), la scena `componenti` non mostrava i componenti (il guscio `absolute inset-0` copriva la pagina e la finestra 1280×800 tagliava il resto), e la corsa del verificatore dava 18 scene diverse su 76. Questa fase chiude G0–G3 in sei commit, più due commit di chiusura di questa sessione (l'app che muore con la sonda; lo scroll della chat che faceva la corsa con l'app), più questo REPORT e il tag `fase-fondamenta-galleria`.
+
+## G0 — la stabilità VERA (d704a9d4 + correzione e1b127eb)
+
+Tre cause alle radice delle 18 differenze, tutte nell'attrezzatura della galleria:
+
+1. **Il puntatore** restava dove l'aveva lasciato la scena prima: l':hover evidenziava righe e bottoni a seconda della corsa. Ora `cattura` (sonda.mjs) lo sposta in un punto NEUTRO VERIFICATO subito prima dello screenshot — la catena di elementi sotto il punto non può contenere niente di interattivo, e il punto si cerca fra cinque angoli sicuri.
+2. **I `<select>` chiusi** li dipingeva il tema nativo di macOS (fuori dalla rasterizzazione deterministica di Blink): il loro testo cambiava tra la corsa delle approvate e le successive, restando poi fermo. Ora li dipinge Blink col solo foglio della galleria (`appearance:none` + chevron disegnato nel foglio). La correzione e1b127eb: le due regole select non chiudevano la graffa e il parser buttava la `background-image` — il chevron non si vedeva; scoperto guardando le approvate rigenerate, non dai confronti (le due corse erano coerenti).
+3. **Turni dal vivo**: la presentazione BOT_INTRO dei bot era 6 chiamate al modello a orologio reale («Risposta vuota»), la nota «Server MCP collegato» era un turno per OGNI bot, le chat dei bot e della squadra non erano seminate, la stepper della guida aspettava la sonda asincrona del motore Apple. Ora nessun turno dal vivo esiste in nessuna scena e il CANARINO conta le chiamate a /chat/completions del modello finto: rosso sul setup vecchio (14), verde ora (0) — la corsa è ROSSA se il registro non è vuoto.
+
+## G1 — le maschere di nuovo sotto controllo (b90fa967)
+
+Un solo attributo (`data-galleria-maschera`), scritto uguale dove il rettangolo si crea (`mascheraEspr` di sonda.mjs, l'unica funzione: la copia che stava in galleria.mjs è via) e dove si toglie (`togliMaschere`). A OGNI cattura, dentro la galleria: il TRIPWIRE conta i rettangoli presenti con qualunque ortografia dell'attributo (uno scritto con un nome che la pulizia non toglie non passa più in silenzio); una maschera dichiarata che copre 0 elementi è ROSSA («maschera morta»); i rettangoli presenti devono essere esattamente gli elementi coperti di quella scena (0 per le scene senza maschere). Vista ROSSA prima con la pulizia vecchia: `dialogo-nuovo-scuro` «avanzano 1», `attivita` «avanzano 2». Le maschere delle ORE (registro, documento, chat, chat-avvisi, chat-bot, chat-team) sono TOLTE: i dati sono seminati all'istante fermo e il controllo le dichiarava morte (0 elementi) — codice morto via.
+
+## G2 — la pagina dei componenti, una sezione per scena (aa378980)
+
+14 scene `componenti-<sezione>` in chiaro e scuro a 1280×800, come Storybook/Chromatic: una cattura per storia, non la pagina lunga in una foto. L'elenco delle sezioni lo dichiara la PAGINA (`sezioni()`), la galleria non tiene liste sue. Le demo di PageShell stanno in riquadri `relative` ad alta altezza fissa con `overflow-hidden` (l'ultimo guscio `absolute inset-0` non copre più la pagina; `page-shell.tsx` intatto). Il dialogo e il menu aperti sono scene loro; il markdown è diviso in due parti (una sola non stava in 800 px). Il controllo in corsa: la radice della sezione deve stare INTERA nel viewport (`getBoundingClientRect`), altrimenti la scena è ROSSA col nome — vista ROSSA prima sulla pagina di oggi («bottom 4301 su 800») e col catch in corsa (markdown-1 bottom 810). La guardia controlla che ogni file di `components/ui/` sia dichiarato nei componenti di almeno una sezione e che gli id siano unici.
+
+## G3 — le approvate rigenerate e guardate davvero (86fb64e3 + correzione 0a0c2971)
+
+`--approva tutte` ora SOPRASCRIVE e toglie le orfane: 102 scene rifatte col motivo richiesto («la maschera di dialogo-nuovo copriva il centro di 54 scene; la pagina dei componenti divisa per sezioni»). La guardia `galleria-approvate.test.ts` (vista ROSSA prima: 52 file col magenta fuori eccezione + i 2 di dialogo-nuovo) conta i pixel `#ff00ff` con magick: solo le scene con maschera dichiarata possono averne. `--foglio` scrive `galleria/.diff/foglio.html` (in .gitignore) con tutte le approvate in miniatura a gruppi. L'attesa di CONDIZIONE su impostazioni-generali (Spazio su disco e motore si riempiono da RPC fuori dalla rete del renderer: la cattura cadeva a metà e la barra 6×17 andava e venuta). La correzione 0a0c2971: l'host della pagina componenti a z-index 40, SOTTO il livello dei portali (z-50) — le scene dialogo e menu finalmente si vedono (il backdrop scurisce, la card sta al centro; con l'host a z-index massimo il portale c'era ma restava sotto: le due scene erano vuote); rigenerate le 102 approvate, 102/102.
+
+## La correzione G0-bis: lo scroll della chat non fa più la corsa con l'app (904832b5)
+
+La prova di stabilità vera l'ha trovata subito, la scena che ancora cambiava: **chat-scuro-900, 1,6e9 livelli di differenza** nella terza corsa (quella DENTRO fatto.mjs, con la macchina che aveva appena finito le suite). L'immagine di differenza diceva cosa: la VISTA era scorsa diversamente — l'approvata mostra il FONDO del messaggio lungo («2. I numeri», «3. Da decidere», l'avviso «Risposta vuota · 4 volte»), la cattura della corsa lo mostrava in CIMA (l'intestazione «Riepilogo del mese»). La causa: **due scrittori di scrollTop in corsa**. Il `prepare: 'chat-md'` ancorava il titolo del messaggio in cima, ma l'app tiene la chat incollata al fondo (stick-to-bottom: le notizie raggruppate fanno un secondo passo di rendering e l'app riscorre); in cinque corse vinceva l'app (le approvate mostrano il fondo), nella sesta — sotto carico — vinceva l'ancora. La correzione, alla radice (niente soglie, niente maschere): la scena dichiara lo stato a cui l'app converge comunque (**il fondo**: i due scrittori sono d'accordo, la corsa diventa innocua) e lo RI-ANCORA per ultimo, dopo tutte le attese e i controlli, subito prima dello screenshot (se il contenuto cresce dopo il prepare, lo scrollTop assoluto messo allora non è più il fondo). Le approvate NON cambiano: 3 corse di `--solo chat` → 12/12 uguali, e le tre corse di stabilità qui sotto sono tutte a 102/102.
+
+## La correzione della chiusura: l'app muore con la sonda, SEMPRE (593670a2)
+
+**Perché era rimasto l'orfano.** I gestori di segnale (SIGINT, SIGTERM, eccezioni) c'erano già, ma un SIGKILL alla galleria non gira NESSUN gestore: il Electron restava orfano con ppid 1, il suo `--homun-daemon` continuava a girare sulla cartella dati e la temporanea restava a terra (trovato così: pid 35748 acceso dalle 13:29, HOME in `T/sandbot-galleria-ZaOjQb`, daemon 68870). La correzione sta in `sonda.mjs`:
+
+- **gestore di USCITA** sincrono: l'app va giù subito; se la pulizia non era arrivata in fondo, la vedetta sopravvive un istante al processo e la completa lei;
+- **la VEDUTTA, il controllo sul pid del padre**: un processo node figlio della sonda, env minimo (solo PATH: nessun `SANDBOT_TEST_*`, così `findProbeDaemons` non può mai trovarla al posto di un daemon), controlla ogni 400 ms che il padre sia ancora il suo pid — `kill(pid,0)` E `process.ppid` (un pid riusato non la inganna); quando il padre sparisce spegne l'app (SIGTERM, poi SIGKILL), chiude i daemon del prefisso con `stopProbeDaemons` e cancella la temporanea. `fermaVedetta` solo a pulizia FINITA (`pulizia` e `fine`), mai prima.
+
+**Prova ROSSA prima** (col codice di prima del commit):
+
+```
+node scripts/galleria.mjs --solo plugin-lista &   # SIGKILL a metà corsa, dopo il setup
+→ Electron del repo rimasti: 2 · daemon --homun-daemon rimasti: 1 · cartelle sandbot-galleria-*: 1
+```
+
+**Prova VERDE con la correzione**, stessa procedura: `Electron 0 · daemon 0 · cartelle 0`, e la vedetta stessa uscita. (Residuo dichiarato: dopo un SIGKILL resta in `out/renderer/galleria-componenti.js`, che la corsa dopo toglie a fine giro; nella prova l'ho tolto a mano. La vedetta copre app, daemon e temporanea, che è ciò che la chiusura conta.)
+
+## Le prove (con i comandi e le uscite)
+
+1. **La stabilità di G0** — tre corse, ognuna con l'app riavviata da capo, la terza DENTRO `fatto.mjs` dopo le suite, 11 min e 30 s fra l'inizio della prima e l'inizio della terza:
+   - corsa A: 15:55:41 → 16:00:18 · `scene: 102 · uguali 102 · diverse 0 · ROSSE 0 · nuove senza approvata 0 · errori 0` · uscita 0
+   - corsa B: 16:00:25 → 16:04:59 · `scene: 102 · uguali 102 · diverse 0 …` · uscita 0
+   - corsa C (dentro fatto.mjs, dopo typecheck+suite+ci-sim+build, ~2 minuti dopo il suo avvio): il passo «galleria» della tabella qui sotto — 102/102, uscita 0.
+   La prova è costata una correzione in corsa (G0-bis qui sopra): al primo giro la terza corsa dava `chat-scuro-900` diversa (1,6e9 livelli); corretta la causa dello scroll, le tre corse sono state rifatte da capo al codice finale.
+2. **Il token +1 px** (`--radius-control: 8px` → `9px` in styles.css, build diretto `node_modules/.bin/electron-vite build`, poi `node scripts/galleria.mjs --solo <le 14 componenti-*>`; token annullato subito dopo con `git checkout` e rebuild):
+   - **ROSSE (16 scene)**: `componenti-bottoni` (3.080.660 / 3.339.290 px), `componenti-campi` (2.389.670 / 3.207.700), `componenti-avvisi` (40.948,7 / 171.762 — il bottone «Riprova»), `componenti-dialogo` (10.572.500 / 13.123.800 — i bottoni del footer), `componenti-menu` (197.205 / 417.454), `componenti-modelli` (90.892,3 / 392.182), `componenti-markdown-1` (43.690 / 171.162), `componenti-markdown-2` (44.803,7 / 171.505 — i blocchi di codice), sempre chiaro e scuro;
+   - **UGUALI (12)**: `componenti-tabella`, `componenti-elenchi`, `componenti-testate`, `componenti-schede`, `componenti-pillole`, `componenti-gusci` — le scene SENZA controlli col raggio dei controlli: il guscio NON si muove, come vuole la spec.
+3. **Il ritocco finto al centro di plugin-lista** (il testo della riga `plugin-08` nel seme di `preparaDeterministica`: `plugin-08 RITOCCO FINTO`, solo nella prova e poi annullato con `git checkout scripts/lib/scene.mjs`): `node scripts/galleria.mjs --solo plugin-lista` → `plugin-lista → diversa (22207500 px), diversa (27751800 px), uguale, uguale`, uscita 1. Le due −640 restano uguali perché a 900×640 la lista si taglia a `plugin-07` (verificato sull'approvata: la riga ritoccata non entra in quelle catture) — il centro della scena a 1280, quello che la maschera copriva prima, ora è VISTO.
+4. **`node scripts/fatto.mjs` intero** (senza `--sonde`): VERDE — la tabella in «Numeri».
+5. **Il peso di `galleria/approvate/`**: 7,3 MB (limite 15 MB) — contato dalla galleria a fine di ogni corsa (i file sono 104: 102 scene + le 2 della guida; nessuna orfana).
+
+## Le 28 scene componenti-*, guardate una per una
+
+Guardate col modello di visione, UNA PER SCENA (non per gruppo), in chiaro e in scuro. Due approvate (markdown-1-scuro e plugin-lista-chiaro-900) davano errore di parse sul lato del servizio di visione: le ho analizzate come copie ricodificate (stessi pixel, compressione diversa). Cosa si vede, scena per scena:
+
+| scena | cosa si vede | nota |
+|---|---|---|
+| componenti-bottoni-chiaro / -scuro | le quattro varianti (primaria, secondaria, ghost, distruttiva) in taglia normale e piccola, disattivate, «In caricamento» con spinner, e la riga «solo icona» (+ e ingranaggio) | in scuro il primario è bianco e il distruttivo salmone, leggibili |
+| componenti-campi-chiaro / -scuro | input vuoto (placeholder), pieno, con errore, disattivato; select «Scegli…», «Scelta A», con errore; e il «campo grezzo» (FIELD_CLASS) | i bordi d'errore rossi si distinguono anche in scuro |
+| componenti-avvisi-chiaro / -scuro | notice neutro («Tutto a posto»), giallo, errore permanente, errore con «Riprova» e contatore «· 4 volte», errore con «Come si risolve» | giallo e rosso leggibili sul fondo scuro |
+| componenti-tabella-chiaro / -scuro | data-table a 4 colonne (Ricetta/Data/Giudizio/Nota), 2 righe, la nota lunga troncata con ellissi, e lo stato vuoto «Nessuna ricetta» | niente righe selezionate né ordinamento: la demo non li copre |
+| componenti-elenchi-chiaro / -scuro | flat-list a 3 righe: con sottotitolo e azione «Apri», cliccabile, minimale; separatori sottili | |
+| componenti-testate-chiaro / -scuro | page-header (titolo + descrizione) e column-head con l'azione «Mostra tutto» a destra | l'icona «+» della colonna appare staccata dal suo blocco: da guardare nella prossima fase |
+| componenti-schede-chiaro / -scuro | underline-tabs a OTTO voci con la seconda attiva e il filetto sotto l'attiva («con molte schede», come F2) | |
+| componenti-dialogo-chiaro / -scuro | il dialogo aperto sopra il backdrop scurito: titolo, descrizione, corpo, Annulla/Conferma, × di chiusura — intero e centrato | prima della correzione 0a0c2971 queste due scene erano VUOTE (il portale sotto l'host) |
+| componenti-menu-chiaro / -scuro | il dropdown APERTO: Apri, Rinomina, separatore, Archivia, Elimina (rossa); sopra, il trigger «Il menu aperto ▾» | |
+| componenti-modelli-chiaro / -scuro | 4 ModelPicker (valore «finto», «nessun modello», disabilitato, «Altri modelli…») e 2 ModelSelect a pillola («Come gli altri», «finto finto») | lo stato APERTO dei selettori non è tra le scene: manca |
+| componenti-pillole-chiaro / -scuro | pillola scura, badge neutro, badge rosso, i 7 puntini c1–c7, le 5 famiglie di avatar (h-creature, h-robo, h-device, jelly, pixel) | le 5 famiglie rendono lo STESSO cerchio rosso-arancio: o il demo non le distingue o l'avatar non le distingue — da verificare |
+| componenti-gusci-chiaro / -scuro | i tre gusci reading/page/wide, ciascuno DENTRO il suo riquadro `relative` con overflow-hidden: nessuno copre la pagina | larghezze progressive visibili; il testo dimostrativo è a sinistra nel page/wide |
+| componenti-markdown-1-chiaro / -scuro | h1, h2, paragrafi con grassetti, corsivo, link, codice inline, elenco stretto e largo col grassetto che non spezza le voci | il link non si distingue dal testo normale (niente colore/sottolineatura): da guardare |
+| componenti-markdown-2-chiaro / -scuro | l'elenco numerato annidato (2 passi con sotto-punti), la tabella a 3 colonne con la riga Totale, la citazione con barra, il blocco di codice | |
+
+**Rispetto all'elenco di F2 della spec fase-fondamenta non manca niente** (button, input, select, notice, data-table, flat-list, section, page-header, column-head, underline-tabs, dialog, dropdown-menu aperto, ModelPicker, pillole/badge, puntini, avatar, DocumentBody con tutti i casi); la pagina va OLTRE la spec con l'input disabilitato, il ModelSelect e il campo grezzo. Tre cose da portare alla prossima fase: lo stato aperto dei selettori di modello non è una scena, il link del markdown non ha stile proprio, le famiglie di avatar rendono tutte uguali nella demo.
+
+## Le maschere rimaste
+
+| scena | elementi coperti | motivo |
+|---|---|---|
+| dialogo-nuovo (1280/chiaro) | 1 | l'anteprima della mascotte del nuovo bot: il colore è hash dell'id casuale del bot che verrà creato — diverso a ogni corsa per definizione |
+| dialogo-nuovo (1280/scuro) | 1 | idem |
+
+È l'UNICA maschera rimasta (i conteggi vengono dal log della corsa: «maschera dialogo-nuovo 1280/chiaro: 1 elementi»). Le maschere delle ore sono state tolte in G1: dopo la semina all'istante fermo il controllo le dichiarava morte (0 elementi coperti) — erano codice morto.
+
+## Le 18 differenze della corsa del verificatore: da dove venivano e come sono chiuse
+
+La corsa era a HEAD `fase-fondamenta`, la mattina dopo quella delle approvate. Le cause sono le tre di G0 (l'analisi viene dalle immagini di differenza della corsa del verificatore, citate nella spec; l'attribuzione scena-per-scena è ricostruzione da quelle immagini e dai commit di G0):
+
+| scene | causa | chiusa da |
+|---|---|---|
+| chat-bot-chiaro/scuro, chat-team-chiaro (3) | turni dal vivo: la chat di Novità AI non era seminata («Risposta vuota · 2 volte» in una corsa, «Agente occupato: messaggio in coda (posizione 1)» nell'altra) | G0: le chat dei bot e della squadra seminate all'istante fermo; il canarino conta le chiamate al modello (0) |
+| plugin-lista-chiaro/chiaro-900/scuro-900 (3) | il puntatore: la riga plugin-08 evidenziata dall'hover in una corsa e non nell'altra | G0: puntatore neutro VERIFICATO prima di ogni cattura |
+| plugin-autorizzazioni-chiaro/scuro (2) | il puntatore sulle righe degli strumenti della pagina di autorizzazione (stessa causa) | G0: idem |
+| libreria-griglia ×4, libreria-lista ×2 (6) | i `<select>` nativi: il testo di «Tutti i bot» e «Tutti i tipi» dipinto dal tema nativo di macOS, diverso tra le corse | G0: i select chiusi li dipinge Blink col foglio della galleria (+ e1b127eb: le graffe) |
+| impostazioni-generali ×2 (2) | i `<select>` nativi: «Sistema» della lingua e il fuso orario | G0: idem; e in G3 l'attesa di condizione per le sezioni asincrone (la barra 6×17 che andava e venuta) |
+| componenti-chiaro/scuro (2) | la pagina intera di allora portava gli stessi select nativi e i controlli in hover (le due cause di sopra, nella pagina non ancora divisa) | G0 alla radice + G2: la pagina ora è 14 scene per sezione |
+| **totale** | **18 scene su 76** | **tre corse di fila 102/102** |
+
+## La pulizia dell'orfano trovato dalla verifica
+
+L'Electron orfano della galleria (pid 35748, ppid 1, dalle 13:29, HOME in `T/sandbot-galleria-ZaOjQb`) e il suo `--homun-daemon` (pid 68870) spenti con le funzioni di `probe-daemons.mjs` (`stopProbeDaemons('sandbot-galleria')`: «1 trovati, 1 chiusi», poi SIGTERM/SIGKILL all'app e verifica: 0 e 0); cancellate `T/sandbot-galleria-ZaOjQb` (6,8 MB) e `T/diagnosi-d37MTa` (15 MB), `/tmp/prova-rossa-galleria.sh` e `/tmp/finalizza-report.sh` (gli script della corsa precedente, contro i vincoli). Altri avanzi di agenti in /tmp, cancellati e dichiarati qui: `/tmp/report-nuova-sezione.md`, `/tmp/report-nuovo.md`, `/tmp/coda-originale.bin`, `/tmp/coda-nuova.bin` (dalla chiusura della fase fondamenta: la «sezione nuova» era la copia del REPORT già committato), `/tmp/analizza-catture.mjs` (un appunto di quattro righe dell'agente della galleria), i sette `prova-*` dello sviluppo di fatto.mjs e dei documenti (`prova-esegui.code`/`.log`, `prova-spawn.log`, `prova-bg-npmv.log`, `prova-bg-tsc.log` del 24/11 ore 19; `prova-doc.mjs` e `prova2.mjs` delle 20:48 — riconosciuti dal contenuto: la funzione `esegui` e le bozze di docs/FATTO.md) e `/tmp/brb-report-section.md` (bozza della fase browser-riavvio-box sopravanzata dalla versione committata nel REPORT: 12241 contro 12347 caratteri, confronto fatto prima di cancellarla — non identica). Due errori MIEI, entrambi chiusi subito e nessuno con effetti: ho scritto `/tmp/dir-prova.txt` (una riga col percorso della mia cartella di prove) e `/tmp/niente.txt` (redirezione sbagliata di un elenco), cancellati rispettivamente entro un minuto e entro pochi secondi.
+
+## Numeri
+
+Tutte le corse DOPO l'ultimo commit di codice (904832b5). Il contenuto di `fatto-esito.md` della corsa finale:
+
+Tempo totale: 6 min 36 s · esito: VERDE (corsa del 16:05:08–16:11:44, macchina ferma, nessun altro comando della shell durante — vedi la nota qui sotto).
+
+| passo | esito | durata | uscita | nota |
+|---|---|---|---|---|
+| typecheck | OK | 1.6 s | fatto-uscite/typecheck.log | |
+| suite: npm test | OK | 1 min 1 s | fatto-uscite/suite-npm-test.log | |
+| suite: ci-sim | OK | 57.2 s | fatto-uscite/suite-ci-sim.log | |
+| build | OK | 3.3 s | fatto-uscite/build.log | |
+| galleria | OK | 4 min 33 s | fatto-uscite/galleria.log | 102/102 uguali |
+| sonde: nessuna sonda indicata | OK | 0 s | fatto-uscite/sonde.log | --sonde non usato |
+| processi del repo a 0 | OK | 0.1 s | fatto-uscite/processi.txt | 0 Electron, 0 daemon |
+| nessuna temporanea nuova | OK | 0 s | fatto-uscite/temporanei.txt | 0 nuove |
+
+Nota sulla corsa di fatto.mjs: va lasciata SOLA — il passo 7 fotografa i temporanei all'inizio e conta come nuove anche le cartelle `atuin-hook-exec-*` che l'hook della shell dell'utente crea a OGNI comando (32 byte l'una; in T ce ne sono di tutta la giornata, dalle 9:05 in poi). Il mio primo giro di fatto.mjs l'avevo monitorato con altri comandi della shell: 3 cartelle atuin nuove, passo 7 KO per quello (e la galleria di quel giro è quella che ha scoperto chat-scuro-900). Il giro finale è partito senza toccare la shell fino alla notifica di fine.
+
+## Vincoli e pulizia
+
+Niente Docker né `container` vero, niente eval col modello, niente dist firmata; nessun download vero, niente Composio vero, nessun pacchetto npm nuovo (per le immagini `/opt/homebrew/bin/magick`); rete solo su 127.0.0.1, mai le porte 11434 e 1234; MAI `open` vero dell'Installer, MAI `osascript` vero, MAI `sudo`; temporanei solo con mktemp -d nella base dei vincoli (mai $TMPDIR, mai /tmp — le due scritture sbagliate mie sono sopra, cancellate e dichiarate); mai l'app o il daemon su ~/Library/Application Support/sandbot; non toccati ~/Library/Application Support/com.apple.container/, /Applications/Homun.app né il daemon che gira da lì; niente screencapture (catture solo via CDP); mai --update-lock di prepare-engramma (build diretto, senza hook); non toccati vendor/llama, vendor/engramma, dist-installers/, ~/Projects/Bot/engramma, ~/Projects/Homun/homun2 né l'Homebrew llama-server; out-review/ e scripts/vetrina/ intatti (i non tracciati di sempre); migrazioni DB nessuna; le catture e le misure delle altre fasi mai toccate (git status pulito su docs/); REPORT.md con la sezione in cima e coda byte-identica; CHANGELOG invariato; nessun push, nessun tag v*. Le sonde una alla volta con uscita su file, mai `| grep | tail` su processi vivi.
+
+## Chiusura
+
+Processi Electron e `--homun-daemon` DEL REPO, contati per eseguibile (`ps -axo pid=,comm=` e `pid,args=`): **0 e 0** (passo 6 della corsa finale). Nessuna cartella temporanea nuova rispetto alla fotografia iniziale (passo 7). `out/` senza il modulo dei componenti a fine corsa (la galleria lo toglie; `galleria/.modulo/` in .gitignore). git status pulito (restano solo i non tracciati di sempre `out-review/` e `scripts/vetrina/`, non miei). Tag annotato `fase-fondamenta-galleria` dopo il commit di questo REPORT. Nessun push, nessun tag v*.
+
+## Cose non fatte e domande aperte
+
+- **Le prove ROSSA delle guardie di G1/G2/G3** sono quelle dei commit originali della fase (documentate lì e qui sopra); questa sessione di chiusura non le ha rigenerate.
+- **L'attribuzione scena-per-scena delle 18 differenze** è ricostruzione dalle immagini di differenza del verificatore e dai commit G0 (la tabella lo dichiara); non ho rigirato la corsa alla base per ricalarla.
+- **Il residuo del SIGKILL**: `out/renderer/galleria-componenti.js` resta se la galleria viene ammazzata a metà corsa (la vedetta copre app, daemon e temporanea); lo toglie la corsa dopo. Se si vuole coperto anche quello, va chiesto alla prossima fase.
+- **Nessuna domanda aperta**: le decisioni (la vedetta come controllo del pid del padre, le maschere delle ore tolte perché morte, il foglio dei select, il z-index 40 dell'host) sono tutte nei commit e qui con il loro perché.
 # REPORT FASE FONDAMENTA: verificare tutto in automatico, regole nel codice, un solo «fatto»
 
 Base: `main` a `v0.3.1001-beta.20` (7822e1f0 = il tag `fase-b20-chiusura` più il commit del CHANGELOG). Verifica fatta: HEAD era esattamente lì (gli unici non tracciati `out-review/` e `scripts/vetrina/`, mai toccati). Freeze 0.3.1002: questa fase NON cambia il comportamento dell'app — aggiunge strumenti di verifica, guardie nei test e documenti; l'unico codice nuovo nel renderer è la pagina dei componenti (F2), che non entra nel build di produzione (la guardia del marcatore lo verifica a ogni corsa).
