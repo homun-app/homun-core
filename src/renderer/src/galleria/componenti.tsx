@@ -424,15 +424,13 @@ const apri = (id?: IdSezione) => {
   host = document.createElement('div')
   host.dataset.testid = 'galleria-componenti'
   // la pagina di test sta sopra tutto; il tema (la classe dark) lo decide la galleria sull'<html>
-  host.style.cssText = 'position:fixed;inset:0;z-index:2147483600;background:var(--background);color:var(--foreground);overflow:auto'
+  // z-index 40: SOPRA il contenuto normale dell'app (z-auto), SOTTO il livello
+  // dei portali (z-50) — così i dialoghi e i menu APERTI delle sezioni loro si
+  // vedono (montano a livello body e prima finivano sotto l'host). Gli overlay
+  // dell'app sono chiusi da closeOverlays prima di ogni scena: nulla passa
+  // sopra la pagina di test
+  host.style.cssText = 'position:fixed;inset:0;z-index:40;background:var(--background);color:var(--foreground);overflow:auto'
   document.body.appendChild(host)
-  // i PORTALI di dialog e menu montano a livello body, SOTTO l'host di questa
-  // pagina: senza questa regola le sezioni con l'overlay aperto (dialogo,
-  // menu) resterebbero vuote — il portale c'è, ma coperto dall'host
-  const st = document.createElement('style')
-  st.id = 'galleria-componenti-portali'
-  st.textContent = '[data-slot="dialog-overlay"],[data-slot="dialog-content"],[data-radix-popper-content-wrapper"]{z-index:2147483647!important}'
-  document.head.appendChild(st)
   monta(SEZIONI.find((s) => s.id === id) ? id! : SEZIONI[0]!.id)
 }
 
@@ -441,7 +439,6 @@ const chiudi = () => {
   radice = null
   host?.remove()
   host = null
-  document.getElementById('galleria-componenti-portali')?.remove()
 }
 
 /** L'API che la galleria usa: apri(sezione)/chiudi() tra le scene, sezioni() per l'elenco. L'import del modulo NON apre nulla. */
