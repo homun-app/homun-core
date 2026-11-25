@@ -398,7 +398,13 @@ export function EnablePluginCard({ entry }: { entry: TranscriptEntry }) {
   )
 }
 
-export function PluginCard({ entry }: { entry: TranscriptEntry }) {
+/**
+ * C0 (fase linguaggio): era «PluginCard» — due componenti con lo stesso nome
+ * (questa e la scheda della pagina Plugin) si cercano male. Il nome nuovo
+ * dice cosa fa: la PROPOSTA DI INSTALLARE un plugin di marketplace che il bot
+ * lascia in chat («Installa plugin: …»). La scheda della pagina resta PluginCard.
+ */
+export function PluginInstallProposal({ entry }: { entry: TranscriptEntry }) {
   const { t } = useLingui()
   const message = (entry.meta?.message ?? {}) as PluginMessage
   const [status, setStatus] = useState<'pending' | 'installing' | 'installed' | 'error'>(

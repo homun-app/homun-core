@@ -59,7 +59,7 @@ import { delegationRowState, formatDelegationClock } from '../lib/delegation-sta
 import { RoutineCreatedRow } from './RoutineCreatedRow'
 import { DraftCard } from './DraftCard'
 import { ConnectorCard } from './ConnectorCard'
-import { McpServerCard, PluginCard, McpWindowCard, EnablePluginCard } from './ConnectorCards13'
+import { McpServerCard, PluginInstallProposal, McpWindowCard, EnablePluginCard } from './ConnectorCards13'
 import { RuleProposalCard } from './RuleProposalCard'
 import { TaskCard } from './TaskCard'
 import { SubagentCard } from './SubagentCard'
@@ -1114,7 +1114,7 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps, modelOpenings 
       if (message?.type === 'connector') return <ConnectorCard entry={entry} />
       // fase 13: proposte di server del registro e di plugin
       if (message?.type === 'mcp-server') return <McpServerCard entry={entry} />
-      if (message?.type === 'plugin') return <PluginCard entry={entry} />
+      if (message?.type === 'plugin') return <PluginInstallProposal entry={entry} />
       // M3 (fase beta12-correzioni): il rimando alla finestra «Server MCP»
       if (message?.type === 'mcp-window') return <McpWindowCard entry={entry} />
       // V6 (fase stato-vivo): la scheda per accendere un plugin spento
