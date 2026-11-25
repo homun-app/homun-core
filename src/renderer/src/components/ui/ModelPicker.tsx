@@ -56,11 +56,13 @@ export interface ModelPickerProps {
    * stato scelto vive nelle pillole attorno, come nella guida.
    */
   pillTrigger?: { label: string }
+  /** C1 (fase linguaggio): aperto in partenza — lo stato APERTO ha la sua scena nella pagina dei componenti (come il dialogo e il menu); il default è chiuso */
+  defaultOpen?: boolean
 }
 
-export function ModelPicker({ models, value, onChange, placeholder, disabled, className, size = 'sm', pillTrigger }: ModelPickerProps) {
+export function ModelPicker({ models, value, onChange, placeholder, disabled, className, size = 'sm', pillTrigger, defaultOpen }: ModelPickerProps) {
   const { t } = useLingui()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen ?? false)
   // null = il campo mostra il valore scelto; stringa = l'utente sta cercando
   const [query, setQuery] = useState<string | null>(null)
   const [hi, setHi] = useState(0)

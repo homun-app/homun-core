@@ -163,6 +163,7 @@ export const SEZIONI = [
   { id: 'dialogo', titolo: 'dialog aperto', componenti: ['dialog'] },
   { id: 'menu', titolo: 'dropdown-menu aperto', componenti: ['dropdown-menu'] },
   { id: 'modelli', titolo: 'ModelPicker e ModelSelect', componenti: ['ModelPicker', 'ModelSelect'] },
+  { id: 'modelli-aperto', titolo: 'i selettori APERTI', componenti: ['ModelPicker', 'ModelSelect'] },
   { id: 'pillole', titolo: 'pillole e badge', componenti: [] },
   { id: 'gusci', titolo: 'page-shell — i tre gusci di larghezza', componenti: ['page-shell'] },
   { id: 'markdown-1', titolo: 'DocumentBody — titoli, grassetti ed elenchi', componenti: [] },
@@ -449,6 +450,26 @@ const Sezione = ({ id }: { id: IdSezione }) => {
           <Riga label="ModelSelect">
             <ModelSelect value={null} onChange={() => undefined} allowNone allowFollowMain />
             <ModelSelect value={{ providerId: 'finto', model: 'finto' }} onChange={() => undefined} />
+          </Riga>
+        </Section>
+      )}
+
+      {id === 'modelli-aperto' && (
+        <Section title="i selettori di modello APERTI (scena loro, come il dialogo e il menu)" testId="galleria-section-model-open">
+          <Riga label="ModelPicker aperto (l'elenco con la ricerca scritta dentro)">
+            <div className="relative h-80 w-96">
+              <ModelPicker models={MODELLI} value="finto" onChange={() => undefined} placeholder="predefinito…" defaultOpen />
+            </div>
+          </Riga>
+          <Riga label="ModelPicker a pillola aperto (il «valore scelto non si mostra mai nel trigger»)">
+            <div className="relative h-80 w-96">
+              <ModelPicker models={MODELLI} value={null} onChange={() => undefined} pillTrigger={{ label: 'Altri modelli…' }} defaultOpen />
+            </div>
+          </Riga>
+          <Riga label="ModelSelect aperto (riga chiusa col popover, i provider sotto)">
+            <div className="relative h-96 w-96">
+              <ModelSelect value={null} onChange={() => undefined} allowNone allowFollowMain defaultOpen />
+            </div>
           </Riga>
         </Section>
       )}
