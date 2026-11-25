@@ -27,7 +27,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from '@babel/parser'
-import { DESIGN_EXCEPTIONS, type DesignRule } from '../../renderer/src/lib/design-exceptions'
+import { DESIGN_EXCEPTIONS, type DesignRule } from '../lib/design-exceptions'
 
 export const SRC = fileURLToPath(new URL('../../renderer/src', import.meta.url)) // src/renderer/src (il sorgente guardato, dal nuovo posto delle guardie)
 export const CSS_PATH = join(SRC, 'styles.css')

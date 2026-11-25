@@ -27,7 +27,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DESIGN_EXCEPTIONS, type DesignRule } from '../../renderer/src/lib/design-exceptions'
-import { CSS_PATH, SRC, iconViolations, isClassList, rel, scan, sourceFiles, stringsOf, violationsOfString } from './design-scan'
+import { CSS_PATH, SRC, iconViolations, isClassList, rel, scan, sourceFiles, stringsOf, violationsOfString } from '../../renderer/src/__tests__/design-scan'
 
 const CSS = readFileSync(CSS_PATH, 'utf8')
 const none = (_rule: DesignRule, token: string): string => token

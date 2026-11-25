@@ -89,7 +89,7 @@ describe('BAV1: le fixture della CLI vera 1.7.1, byte per byte', () => {
   it('la radice NEUTRA: nessun /Users/test nelle fixture del repo (solo /Users/test/)', () => {
     for (const f of Object.keys(SHA256)) {
       const text = readFileSync(join(FIXTURES, f), 'utf8')
-      expect(text, f).not.toContain('/Users/test')
+      expect(text, f).not.toContain('/Users/fabio')
     }
     expect(readFileSync(join(FIXTURES, 'inspect-box.txt'), 'utf8')).toContain('/Users/test/Library/Application Support/com.apple.container/volumes/sandbot-box/volume.img')
   })

@@ -103,7 +103,7 @@ describe('U4: la cartella del comando risolto va IN TESTA al PATH del figlio', (
     const first = (r.tools ?? []).find((t) => t.includes('first_')) ?? ''
     const second = (r.tools ?? []).find((t) => t.includes('second_')) ?? ''
     expect(first.endsWith(`first_${fnmBin.replace(/[^a-zA-Z0-9]/g, '_')}`)).toBe(true)
-    expect(second.endsWith('second__Users_prova_bin')).toBe(true)
+    expect(second.endsWith('second__Users_test_bin')).toBe(true)
     disconnectServer(id)
   })
 })

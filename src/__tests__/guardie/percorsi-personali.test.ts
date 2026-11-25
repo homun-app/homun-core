@@ -27,6 +27,10 @@ const ECCEZIONI: ReadonlyArray<{ file: string; perché: string }> = [
     perché: 'lo script RIPULISCE le fixture (i file portano la radice del vecchio Mac — non sono sorgente): la radice da sostituire è scritta letterale perché è il FORMATO dei file che legge'
   },
   {
+    file: 'src/main/sandbox/__tests__/container-fixtures.test.ts',
+    perché: 'l\'asserzione che VERIFICA l\'assenza della radice personale nelle fixture porta il nome nel suo testo (il nome cercato)'
+  },
+  {
     file: 'src/__tests__/guardie/percorsi-personali.test.ts',
     perché: 'la guardia porta i NOMI esclusi nel suo testo (la regola e il perché)'
   }

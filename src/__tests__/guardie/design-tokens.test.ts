@@ -13,7 +13,7 @@
 //   larghezze   — reading 720, page 880, wide 1120.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { compileRenderer, CSS_PATH, deadClasses } from './tailwind-compile'
+import { compileRenderer, CSS_PATH, deadClasses } from '../../renderer/src/__tests__/tailwind-compile'
 
 const CSS = readFileSync(CSS_PATH, 'utf8')
 
