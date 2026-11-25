@@ -297,7 +297,10 @@ try {
   if (fine.cartelleRimaste.length) log('ERRORE DI PULIZIA:', fine.cartelleRimaste.join(', '))
   // il modulo della pagina componenti si TIRA GIÙ da out/: il build deve restare
   // senza il marcatore (la guardia componenti.test.ts lo verifica a ogni corsa)
-  try { rmSync(join(ROOT, 'out', 'renderer', 'galleria-componenti.js')) } catch { /* già via */ }
+  try {
+    rmSync(join(ROOT, 'out', 'renderer', 'galleria-componenti.js'))
+    rmSync(join(ROOT, 'out', 'renderer', 'galleria-componenti.mjs')) // il nome della prima era: nessuna copia vecchia resta in out/
+  } catch { /* già via */ }
   process.exit(diverse.length || nuove.length || errs.length || fine.cartelleRimaste.length ? 1 : 0)
 } catch (e) {
   log('FATAL:', e?.stack ?? e)
