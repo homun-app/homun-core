@@ -75,14 +75,14 @@ export const ROSSA_AL_PASSAGGIO = 'hover:text-destructive'
  * con i segmenti). Stesse misure di SettingsGroup/SettingsRow — alta almeno
  * 52, respiro 12, 16 ai lati — col filetto SOTTO se non è l'ultima.
  */
-export const CARD_ROW_CLS = 'flex min-h-row items-center justify-between gap-3 px-4 py-row-pad [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border/40'
+export const CARD_ROW_CLS = 'flex min-h-row items-center justify-between gap-3 py-row-pad [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border/40'
 
 /**
  * Il filetto sotto una frase che sta fra due righe (senza, se è l'ultima cosa della scheda). Serve
  * nudo a chi dentro la frase ci mette un <p> (un testo col suo link, che non deve entrare nel
  * messaggio di Lingui); per una frase sola c'è SettingsNote.
  */
-export const CARD_NOTE_CLS = 'px-4 pb-3 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border/40'
+export const CARD_NOTE_CLS = 'pb-3 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border/40'
 
 /**
  * La frase sotto una riga di una scheda: è la spiegazione di quella riga, e
@@ -138,10 +138,11 @@ export function SettingsRow({ title, description, control, children, clickable, 
       {children}
     </>
   )
+  // C3 (fase linguaggio): la riga è A FILO come quelle delle pagine (nessun
+  // riquadro, nessun respiro laterale: il filetto lo porta il gruppo)
   const cls =
-    'flex min-h-row w-full flex-col gap-2 px-4 py-row-pad text-left ' +
+    'flex min-h-row w-full flex-col gap-2 py-row-pad text-left ' +
     (stacked === true ? '' : '@[420px]:flex-row @[420px]:items-center @[420px]:gap-4 ') +
-    '[&:not(:first-child)]:border-t [&:not(:first-child)]:border-border/40 ' +
     (muted === true ? 'opacity-55 transition-opacity ' : '')
   if (clickable || onClick) {
     return (

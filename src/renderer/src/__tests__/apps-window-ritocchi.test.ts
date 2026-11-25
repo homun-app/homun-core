@@ -72,7 +72,7 @@ describe('U3 → PL7: la pagina Plugin non è un Dialog (niente anello di focus)
   it('nessun onOpenAutoFocus da compensare: la ricerca della pagina è SearchField col testid plugin-search (C3)', () => {
     const panel = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
     expect(panel).not.toContain('onOpenAutoFocus')
-    expect(panel).toMatch(/<SearchField[^>]*testId="plugin-search"/) || expect(panel).toContain('plugin-search')
+    expect(panel).toMatch(/<SearchField[^>]*testId="plugin-search"/)
     expect(src).not.toContain('data-testid="apps-search"')
   })
 

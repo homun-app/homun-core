@@ -98,7 +98,7 @@ function renderTab(tab: string): HtmlNode {
 }
 
 describe('DS4 Impostazioni: i pezzi — SettingsGroup, SettingsRow, SettingsPage, SettingsAdvanced', () => {
-  it('SettingsGroup: etichetta text-caption grigia 500 (niente 13 px, niente maiuscoletto), scheda rounded-surface, footer text-small, distanze di Section', () => {
+  it('SettingsGroup: etichetta text-caption grigia 500 (niente 13 px, niente maiuscoletto), righe A FILO (C3: niente scheda grigia), footer text-small, distanze di Section', () => {
     const root = htmlOf(createElement(SettingsGroup, { label: 'Aspetto', footer: 'una frase', children: createElement('div', null, 'riga') }))
     const section = byTag(root, 'section')[0]!
     expect(has(section, 'flex', 'flex-col', 'gap-section-head')).toBe(true)
@@ -107,7 +107,7 @@ describe('DS4 Impostazioni: i pezzi — SettingsGroup, SettingsRow, SettingsPage
     expect(has(label!, 'text-caption', 'font-medium', 'text-muted-foreground')).toBe(true)
     expect(textOf(label!)).toBe('Aspetto')
     const card = section.children[1]!
-    expect(has(card, 'overflow-hidden', 'rounded-surface', 'bg-muted/60')).toBe(true)
+    expect(has(card, 'divide-y', 'divide-border/50'), 'C3: righe a filo, NESSUNA scheda grigia').toBe(true)
     expect(card.attrs.class).not.toContain('rounded-2xl')
     expect(has(footer!, 'text-small', 'text-muted-foreground')).toBe(true)
     expect(textOffSystem(root)).toEqual([])
@@ -126,9 +126,10 @@ describe('DS4 Impostazioni: i pezzi — SettingsGroup, SettingsRow, SettingsPage
     const rows = byTag(root, 'div').filter((n) => has(n, 'min-h-row'))
     expect(rows).toHaveLength(2)
     for (const row of rows) {
-      expect(has(row, 'min-h-row', 'py-row-pad', 'px-4', 'flex', 'flex-col', 'gap-2')).toBe(true)
+      expect(has(row, 'min-h-row', 'py-row-pad', 'flex', 'flex-col', 'gap-2')).toBe(true)
       expect(has(row, '@[420px]:flex-row', '@[420px]:items-center')).toBe(true)
-      expect(row.attrs.class).toContain('[&:not(:first-child)]:border-t [&:not(:first-child)]:border-border/40')
+      // C3: il filetto lo porta il GRUPPO (divide-y), non la riga
+      expect(row.attrs.class).not.toContain('border-t')
     }
     const name = byText(root, 'Tema')!
     expect(has(name, 'block', 'text-body', 'font-medium', 'truncate')).toBe(true)
@@ -404,8 +405,8 @@ describe('DS4 Impostazioni: Generali', () => {
     expect(has(riprendi, 'h-control-sm', 'rounded-full', 'bg-foreground')).toBe(true)
     // la riga della versione porta LEI il testid (prima un div intorno: la riga era il primo figlio di quel div, e sopra non c'era il filetto)
     const versione = byTestId(root, 'settings-update-row')[0]!
-    expect(has(versione, 'min-h-row', '[&:not(:first-child)]:border-t')).toBe(true)
-    expect(has(versione.parent!, 'rounded-surface', 'bg-muted/60'), 'figlia diretta della scheda').toBe(true)
+    expect(has(versione, 'min-h-row')).toBe(true)
+    expect(has(versione.parent!, 'divide-y'), 'figlia diretta delle righe a filo').toBe(true)
     // i due della guida stanno nella riga con il testid di sempre
     const [rigaGuida] = byTestId(root, 'settings-guide-row')
     expect(rigaGuida!.children.map((c) => textOf(c))).toEqual(['Riprendi', 'Rifai da capo'])
@@ -430,7 +431,7 @@ describe('DS4 Impostazioni: Generali', () => {
     expect(classi).not.toContain('max-w-3xl')
   })
 
-  it('«Spazio su disco» e «Computer dei bot» sono gruppi come gli altri: etichetta text-caption grigia 500 (prima in maiuscoletto), scheda rounded-surface senza bordo', () => {
+  it('«Spazio su disco» e «Computer dei bot» sono gruppi come gli altri: etichetta text-caption grigia 500 (prima in maiuscoletto), righe a filo senza riquadro', () => {
     const root = renderGenerale()
     for (const id of ['disk-space-section', 'engine-section']) {
       const [sezione] = byTestId(root, id)
@@ -440,7 +441,7 @@ describe('DS4 Impostazioni: Generali', () => {
       const etichetta = gruppo.children[0]!
       expect(has(etichetta, 'text-caption', 'font-medium', 'text-muted-foreground'), id).toBe(true)
       const scheda = gruppo.children[1]!
-      expect(has(scheda, 'rounded-surface', 'bg-muted/60', 'overflow-hidden'), id).toBe(true)
+      expect(has(scheda, 'divide-y', 'divide-border/50'), id).toBe(true)
       expect(classes(scheda), id).not.toContain('border')
     }
     expect(byText(root, 'Spazio su disco')).not.toBe(null)
@@ -481,13 +482,13 @@ describe('DS4 Impostazioni: «Spazio su disco» e «Computer dei bot» in Genera
     expect(textOf(gruppo.children[0]!)).toBe('Spazio su disco')
     const scheda = gruppo.children[1]!
     // niente più la scheda bordata col respiro di 4: la scheda tenue di ogni gruppo
-    expect(has(scheda, 'overflow-hidden', 'rounded-surface', 'bg-muted/60')).toBe(true)
+    expect(has(scheda, 'divide-y', 'divide-border/50')).toBe(true)
     expect(classes(scheda)).not.toContain('border')
     expect(classes(scheda)).not.toContain('p-1')
 
     const modello = byTestId(root, 'disk-space-model')[0]!
     expect(byTag(modello, 'p').map(textOf), 'il nome e la misura: due <p>, in quest\u2019ordine').toEqual(['Modello locale', '2.5 GB'])
-    expect(has(modello, 'min-h-row', 'py-row-pad', 'px-4')).toBe(true)
+    expect(has(modello, 'min-h-row', 'py-row-pad')).toBe(true)
     const bottone = byTag(modello, 'button')[0]!
     expect(textOf(bottone)).toBe('Rimuovi')
     expect(has(bottone, 'h-control-sm', 'rounded-full', 'bg-foreground', 'text-background', 'text-body')).toBe(true)
@@ -530,7 +531,7 @@ describe('DS4 Impostazioni: «Spazio su disco» e «Computer dei bot» in Genera
     expect(gruppo.tag).toBe('section')
     expect(has(gruppo.children[0]!, 'text-caption', 'font-medium', 'text-muted-foreground')).toBe(true)
     expect(textOf(gruppo.children[0]!)).toBe('Computer dei bot')
-    expect(has(gruppo.children[1]!, 'rounded-surface', 'bg-muted/60')).toBe(true)
+    expect(has(gruppo.children[1]!, 'divide-y')).toBe(true)
 
     // lo stato: la riga di stato è la stessa di sempre (testid), il testo in primo piano
     const stato = byTestId(root, 'engine-status-text')[0]!
@@ -780,7 +781,7 @@ describe('DS4 Impostazioni: Modelli', () => {
     const righe = findAll(settingsScroller(root), (n) => n.attrs.role === 'button')
     expect(righe).toHaveLength(2)
     for (const [i, riga] of righe.entries()) {
-      expect(has(riga, 'min-h-row', 'py-row-pad', 'px-4', 'gap-row-gap', 'cursor-pointer'), String(i)).toBe(true)
+      expect(has(riga, 'min-h-row', 'py-row-pad', 'gap-row-gap', 'cursor-pointer'), String(i)).toBe(true)
       expect(riga.attrs.tabindex, String(i)).toBe('0')
       // l'anello del fuoco verso l'interno (la scheda ritaglia ai suoi angoli), e mai `focus:`
       expect(has(riga, 'outline-none', 'focus-visible:outline-2', 'focus-visible:-outline-offset-2', 'focus-visible:outline-ring'), String(i)).toBe(true)
@@ -796,7 +797,7 @@ describe('DS4 Impostazioni: Modelli', () => {
     const conCatena = htmlOf(createElement(ModelsPage, { initial: { chain: [] } }))
     const riserva = byTag(conCatena, 'button').filter((b) => textOf(b) === 'Aggiungi riserva')[0]
     expect(riserva, '«Aggiungi riserva» con la catena letta').toBeTruthy()
-    expect(has(riserva!, 'min-h-row', 'py-row-pad', 'px-4', 'text-body', 'text-muted-foreground', 'outline-none')).toBe(true)
+    expect(has(riserva!, 'min-h-row', 'py-row-pad', 'text-body', 'text-muted-foreground', 'outline-none')).toBe(true)
     expect(has(byTag(riserva!, 'svg')[0]!, 'size-4')).toBe(true)
     // con una riserva: il suo posto è un dettaglio grigio, e il menu «Altre azioni» è un'icona lucide (non più il segno «⋯»)
     const conRiserva = htmlOf(createElement(ModelsPage, { initial: { chain: [{ providerId: 'ollama', model: 'x' }] } }))
@@ -811,7 +812,7 @@ describe('DS4 Impostazioni: Modelli', () => {
     expect(bottoni).not.toContain('Aggiungi riserva')
     // la scheda dei provider: tutto ai token (dentro c'\u00e8 solo ciò che è di questa pagina)
     const scheda = righe[0]!.parent!.parent!
-    expect(has(scheda, 'rounded-surface', 'bg-muted/60', 'overflow-hidden')).toBe(true)
+    expect(has(scheda, 'divide-y', 'divide-border/50')).toBe(true)
     const classi = findAll(scheda, () => true).flatMap(classes)
     expect(classi.filter((c) => OFF_SYSTEM_SIZE.test(c))).toEqual([])
     expect(classi.filter((c) => RADIUS_OFF_SYSTEM.test(c))).toEqual([])
