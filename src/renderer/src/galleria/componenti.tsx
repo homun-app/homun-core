@@ -33,6 +33,7 @@ import '../styles.css'
 import { Loader2, TriangleAlert, CircleHelp, CheckCircle2, Plus, Settings } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Stack } from '../components/ui/stack'
+import { Row } from '../components/ui/row'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -128,7 +129,7 @@ const MODELLI: ModelInfo[] = [
  * entra qui con tutti i suoi stati.
  */
 export const SEZIONI = [
-  { id: 'impaginazione', titolo: 'stack — la colonna', componenti: ['stack'] },
+  { id: 'impaginazione', titolo: 'stack e row — colonna e riga', componenti: ['stack', 'row'] },
   { id: 'bottoni', titolo: 'button', componenti: ['button'] },
   { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
@@ -404,6 +405,19 @@ const Sezione = ({ id }: { id: IdSezione }) => {
                 <div className="rounded-control bg-muted px-3 py-2 text-body">il secondo</div>
                 <div className="rounded-control bg-muted px-3 py-2 text-body">il terzo</div>
               </Stack>
+            </div>
+          </Riga>
+          <Riga label="row — la riga: allineamento e distanza una volta sola">
+            <div className="flex flex-col gap-2">
+              <Row>
+                <Button variant="secondary" size="sm">un controllo</Button>
+                <Button variant="ghost" size="sm">l'altro</Button>
+                <span className="text-caption text-muted-foreground">e un metadato</span>
+              </Row>
+              <Row gap="block" align="baseline">
+                <span className="text-title font-semibold">Un titolo</span>
+                <span className="text-small text-muted-foreground">con la sua riga grigia, alla base</span>
+              </Row>
             </div>
           </Riga>
           <Riga label="gap tight (8) e section (32)">

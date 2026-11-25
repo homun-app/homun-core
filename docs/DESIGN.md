@@ -229,6 +229,10 @@ I valori sono i letterali di `styles.css`: quelli dei colori del tema chiaro sta
 La colonna dell'impaginazione: i figli uno sotto l'altro alla distanza di una variante chiusa delle token — `gap` tight 8 · block 16 (default, fra i blocchi) · section 32 · none. È il pezzo che toglie i `className` di disposizione dalle pagine: fuori da `components/ui/` non si decide più la distanza fra i blocchi. Non usarlo per righe (quella è Row) né per contenere ciò che deve scorrere (lo decide il guscio della pagina).
 Galleria: impaginazione.
 
+### row
+La riga dell'impaginazione (NON la riga di elenco: quella è ListRow): figli uno accanto all'altro, allineati una volta per tutti (`align` start · center · baseline · stretch) e alla distanza di una variante chiusa — `gap` tight 8 · item 12 (default) · block 16 · section 32 · none; `wrap` per mandare a capo. Chi scrive «flex items-center gap-3» fuori da ui/ sta riscrivendo questo pezzo.
+Galleria: impaginazione.
+
 ### ModelPicker
 Il combobox con ricerca per scegliere un modello a mano: ogni riga mostra id, finestra di contesto, le etichette visione/ragionamento/niente tool e il prezzo $/M; si può scrivere un id libero e confermare con Invio; `pillTrigger` lo riduce a una pillola che apre l'elenco. Non usarlo dove i modelli arrivano da provider da collegare (quello è ModelSelect, che offre «Collega»), né come campo di testo qualunque.
 Galleria: impostazioni-routine.
