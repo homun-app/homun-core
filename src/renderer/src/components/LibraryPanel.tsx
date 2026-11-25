@@ -75,6 +75,10 @@ import {
 import { FlatList, FlatRow } from './ui/flat-list'
 import { PageHeader } from './ui/page-header'
 import { PageShell } from './ui/page-shell'
+// C3 (fase linguaggio): la barra coi pezzi del catalogo
+import { PageToolbar } from './ui/page-toolbar'
+import { SearchField } from './ui/search-field'
+import { FilterChipsMenu, FilterChipsInterruttore } from './ui/filter-chips'
 import type { LibraryItemInfo, LibraryContentInfo, SandbotApi } from '../../../shared/types'
 
 /** La scelta griglia/elenco resta nel localStorage (try/catch: può mancare). */
@@ -414,52 +418,33 @@ function LibraryList({ initial }: { initial?: LibraryPanelInitial }) {
           actions={viewToggle}
         />
       }
-      // la riga va a capo da sola dove l'area è stretta (il pannello del bot
-      // agganciato accanto): la ricerca resta intera, i filtri passano sotto
+      // C3 (fase linguaggio): la barra è PageToolbar — la ricerca (SearchField,
+      // l'unica dell'app), i filtri come PILLOLE (menu per bot e tipo,
+      // interruttore per «Archiviati»), la vista a destra
       toolbar={
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
-          <div className="relative min-w-48 flex-1">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <input
-              className={cn(FIELD, FIELD_FOCUS, 'w-full pl-10 placeholder:text-muted-foreground')}
-              placeholder={t`Cerca per titolo…`}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
+        <PageToolbar
+          ricerca={<SearchField value={q} onChange={setQ} placeholder={t`Cerca per titolo…`} ariaLabel={t`Cerca per titolo…`} testId="library-search" className="min-w-48 flex-1" />}
+          pillole={<>
+            <FilterChipsMenu
+              label={t`Bot`}
+              value={author}
+              options={[{ value: '', label: t`Tutti i bot` }, ...authors.map((a) => ({ value: a, label: nameOf(a) }))]}
+              onSelect={(v) => setAuthor(v)}
+              testId="library-filter-bot"
             />
-          </div>
-          <select
-            className={cn(FIELD, FIELD_FOCUS, 'max-w-48')}
-            value={author}
-            aria-label={t`Tutti i bot`}
-            data-testid="library-filter-bot"
-            onChange={(e) => setAuthor(e.target.value)}
-          >
-            <option value="">{t`Tutti i bot`}</option>
-            {authors.map((a) => <option key={a} value={a}>{nameOf(a)}</option>)}
-          </select>
-          <select
-            className={cn(FIELD, FIELD_FOCUS)}
-            value={kind}
-            aria-label={t`Tutti i tipi`}
-            onChange={(e) => setKind(e.target.value as LibraryKindFilter)}
-          >
-            <option value="">{t`Tutti i tipi`}</option>
-            <option value="document">{i18n.t(msg`Pagina`)}</option>
-            <option value="chart">{i18n.t(msg`Grafico`)}</option>
-            <option value="file">{i18n.t(msg`File`)}</option>
-          </select>
-          {/* B4: il filtro «Archiviati» — un interruttore; acceso, la vista mostra solo le archiviate.
-              Il bordo c'è sempre (trasparente, da spento): così acceso e spento hanno la stessa misura */}
-          <button
-            type="button"
-            aria-pressed={archived}
-            data-testid="library-filter-archived"
-            className={cn(FIELD, FIELD_FOCUS, 'border', archived ? 'border-border bg-card text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
-            onClick={toggleArchived}
-          >
-            <Trans>Archiviati</Trans>
-          </button>
-        </div>
+            <FilterChipsMenu
+              label={t`Tipo`}
+              value={kind}
+              options={[{ value: '', label: t`Tutti i tipi` }, { value: 'document', label: i18n.t(msg`Pagina`) }, { value: 'chart', label: i18n.t(msg`Grafico`) }, { value: 'file', label: i18n.t(msg`File`) }]}
+              onSelect={(v) => setKind(v as LibraryKindFilter)}
+            />
+            {/* B4: il filtro «Archiviati» — l'interruttore a pillola del catalogo; acceso, la vista mostra solo le archiviate */}
+            <FilterChipsInterruttore active={archived} onToggle={toggleArchived} testId="library-filter-archived">
+              <Trans>Archiviati</Trans>
+            </FilterChipsInterruttore>
+          </>}
+          vista={viewToggle}
+        />
       }
       contentClassName="flex flex-col gap-block pt-4 pb-6"
     >

@@ -248,26 +248,26 @@ describe('DS4 Libreria: la testata', () => {
 })
 
 describe('DS4 Libreria: la barra degli strumenti', () => {
-  it('ferma sotto la testata e PRIMA del corpo che scorre: la ricerca, il filtro per bot, quello per tipo e «Archiviati» — tutti il campo di DS1 (36 px, il raggio dei campi, text-body)', () => {
+  it('ferma sotto la testata e PRIMA del corpo che scorre: la ricerca (SearchField), i filtri come PILLOLE (menu per bot e tipo) e «Archiviati» l\'interruttore a pillola — C3', () => {
     const { root } = renderLibrary({ items: [DOC] })
     const toolbar = bySlot(root, 'toolbar')[0]!
     expect(toolbar.parent!.attrs['data-page-shell']).toBe('root')
     expect(has(toolbar, 'shrink-0')).toBe(true)
+    // la ricerca è l'UNICA dell'app: SearchField, 36 px, fondo tenue
     const search = findAll(toolbar, (n) => n.tag === 'input')[0]!
     expect(search.attrs.placeholder).toBe('Cerca per titolo…')
-    const selects = findAll(toolbar, (n) => n.tag === 'select')
-    expect(selects.map((s) => s.attrs['aria-label'])).toEqual(['Tutti i bot', 'Tutti i tipi'])
-    expect(selects[0]!.attrs['data-testid']).toBe('library-filter-bot')
+    hasAll(search.parent!, ['h-control', 'rounded-control', 'bg-muted'])
+    // i filtri per bot e tipo sono pillole-MENU («Bot: tutti ▾»): il testid del filtro bot resta
+    const menuBot = byId(root, 'library-filter-bot')[0]!
+    expect(textOf(menuBot)).toContain('Bot: ')
+    const menuTipo = findAll(toolbar, (n) => (n.attrs['data-mock'] ?? '') === 'dropdown-trigger').at(1)!
+    expect(textOf(menuTipo)).toContain('Tipo: ')
+    // «Archiviati» è la pillola-interruttore del catalogo
     const archived = byId(root, 'library-filter-archived')[0]!
-    expect(archived.tag).toBe('button')
+    expect(archived.attrs['data-slot']).toBe('button')
     expect(archived.attrs['aria-pressed']).toBe('false')
     expect(textOf(archived)).toBe('Archiviati')
-    for (const field of [search, ...selects, archived]) {
-      hasAll(field, ['h-control', 'rounded-control', 'text-body'])
-      // l'anello del fuoco SOLO da tastiera: focus-visible, mai un focus: che scatta anche col mouse
-      expect(has(field, 'focus-visible:ring-2'), `fuoco da tastiera su «${field.attrs.placeholder ?? field.attrs['aria-label']}»`).toBe(true)
-      expect((field.attrs.class ?? '').split(/\s+/).some((c) => /(^|:)focus:/.test(c)), `nessun focus: su «${field.attrs['aria-label'] ?? ''}»`).toBe(false)
-    }
+    hasAll(archived, ['rounded-full', 'h-control-sm'])
     // l'icona della ricerca è da 16, dentro il campo
     hasAll(svgsIn(toolbar)[0]!, ['size-4'])
   })

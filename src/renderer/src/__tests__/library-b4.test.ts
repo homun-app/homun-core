@@ -352,10 +352,10 @@ describe('B4 render: Archivia e il filtro «Archiviati»', () => {
       items: [ARCH, item('lib_z2', { title: 'Altro vecchio', archived: true, kind: 'chart', authorAgentId: 'altro' })],
       archived: true
     })
-    // senza escolte si vedono entrambe; il filtro per bot è dei bot che hanno voci in questa vista
+    // senza escolte si vedono entrambe; il filtro per bot (C3: la pillola-menu) offre i bot che hanno voci in questa vista
     expect(cardIds(root, 'card')).toEqual(['lib_z', 'lib_z2'])
-    const authors = findAll(byId(root, 'library-filter-bot')[0]!, (n) => n.tag === 'option').map((o) => o.attrs.value)
-    expect(authors).toEqual(['', 'bot', 'altro'])
+    const voci = findAll(root, (n) => (n.attrs['data-mock'] ?? '') === 'dropdown-item').map((o) => textOf(o)).slice(0, 3)
+    expect(voci).toEqual(['Tutti i bot', 'Competitoor', 'altro'])
   })
 })
 
