@@ -293,6 +293,10 @@ Galleria: superfici.
 Le pillole di filtro della barra, in TRE varianti chiuse: `Scelta` (la scelta singola col conteggio, accesa piena) · `Menu` (la pillola-menu «Bot: tutti ▾», che prende il posto dei `<select>` di filtro di Libreria) · `Interruttore` (la pillola che accende un filtro, «Archiviati»). Prendono il posto di FilterPill e dei Button shape="pill" usati come filtro. Sono FILTRI: la scelta di un'impostazione è Segmented; i conteggi li porta chi le usa.
 Galleria: ricerca.
 
+### proposal-card
+LA card di proposta in chat — un oggetto solo per «il bot propone, tu clicchi», nelle varianti app Composio · server MCP · plugin da accendere · plugin da installare. Gli slot sono delimitati: `testata` (logo 32 + titolo) · `righe` (la COSA: fiducia, dove gira, accesso — testo small grigio) · `perché` (la frase del bot) · `avviso` (le letture esterne in cima, l'ambra dei terzi) · `configurazione` (il modulo quando manca qualcosa) · `stato` (gli esiti finali: Collegata, Non riuscito) · `azioni` (i bottoni, in fila in fondo). La forma è quella delle card in chat (rounded-surface, fondo tenue, il lungo va a capo dentro). ConnectorCard.tsx e ConnectorCards13.tsx restano LOGICA — i dati e i clic — sopra questa card.
+Galleria: proposta.
+
 ### page-toolbar
 La barra degli strumenti della pagina, FERMA sopra il corpo: `ricerca` (SearchField) a sinistra · `pillole` (FilterChips) accanto · `vista` a destra (le schede, il cambio di rappresentazione — ml-auto). Riga alta almeno 40 (min-h-10). La pagina la riempie, non la disegna: l'involupcro col margine lo dà PageShell, la barra la dà questo.
 Galleria: ricerca.

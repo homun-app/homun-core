@@ -51,6 +51,7 @@ import { Segmented } from '../components/ui/segmented'
 import { SearchField } from '../components/ui/search-field'
 import { FilterChipsScelta, FilterChipsMenu, FilterChipsInterruttore } from '../components/ui/filter-chips'
 import { PageToolbar } from '../components/ui/page-toolbar'
+import { ProposalCard } from '../components/ui/proposal-card'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -156,6 +157,7 @@ export const SEZIONI = [
   { id: 'elenchi', titolo: 'flat-list, list-row e list-group', componenti: ['flat-list', 'list-row', 'list-group'] },
   { id: 'testate', titolo: 'section, page-header, column-head', componenti: ['section', 'page-header', 'column-head'] },
   { id: 'ricerca', titolo: 'search-field, filter-chips e page-toolbar', componenti: ['search-field', 'filter-chips', 'page-toolbar'] },
+  { id: 'proposta', titolo: 'proposal-card — il bot propone, tu clicchi', componenti: ['proposal-card'] },
   { id: 'superfici', titolo: 'card e empty-state — superfici', componenti: ['card', 'empty-state'] },
   { id: 'schede', titolo: 'underline-tabs', componenti: ['underline-tabs'] },
   { id: 'dialogo', titolo: 'dialog aperto', componenti: ['dialog'] },
@@ -497,6 +499,52 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               </PageShell>
             </div>
           ))}
+        </Section>
+      )}
+
+      {id === 'proposta' && (
+        <Section title="proposal-card — le quattro varianti della proposta in chat" testId="galleria-section-proposal">
+          <div className="flex flex-col gap-6">
+            <div>
+              <Etichetta>server MCP (in attesa e collegata)</Etichetta>
+              <div className="flex flex-col gap-4 lg:flex-row">
+                <ProposalCard
+                  testata={<div className="flex items-center gap-2"><AppLogo logo="asana.svg" name="Asana" className="size-8 text-body" /><Text weight="semibold">Aggiungi server MCP: Asana</Text></div>}
+                  righe={<><Text size="small" tone="muted">Pubblicato da asana (dominio verificato) · remoto</Text><Text size="small" tone="muted">Accesso: con il tuo account (si apre il browser)</Text></>}
+                  perché={<Text>Per cercare i task del tuo piano senza lasciare la chat.</Text>}
+                  azioni={<><Button>Aggiungi</Button><Button variant="ghost">No</Button></>}
+                />
+                <ProposalCard
+                  testata={<div className="flex items-center gap-2"><AppLogo logo="asana.svg" name="Asana" className="size-8 text-body" /><Text weight="semibold">Aggiungi server MCP: Asana</Text></div>}
+                  stato={<Text size="small" tone="muted">✓ Asana collegato · 12 strumenti</Text>}
+                />
+              </div>
+            </div>
+            <div>
+              <Etichetta>plugin da installare · plugin da accendere · app Composio</Etichetta>
+              <div className="flex flex-col gap-4 lg:flex-row">
+                <ProposalCard
+                  testata={<div className="flex items-center gap-2"><AppLogo logo={null} name="Ricette" className="size-8 text-body" /><Text weight="semibold">Installa plugin: ricette-claude</Text></div>}
+                  righe={<Text size="small" tone="muted">fiducia: marketplace ufficiale · commit 9c31f0aa2b4c · skill: ricette, spesa</Text>}
+                  perché={<Text>Mi serve per salvare le ricette che trovi nei documenti.</Text>}
+                  azioni={<><Button>Installa</Button><Button variant="ghost">No</Button></>}
+                />
+                <ProposalCard
+                  testata={<div className="flex items-center gap-2"><AppLogo logo={null} name="Posta" className="size-8 text-body" /><Text weight="semibold">Accendi il plugin Posta</Text></div>}
+                  righe={<Text size="small" tone="muted">Server MCP · sul Mac · spento</Text>}
+                  perché={<Text>Per cercare la mail della prenotazione che ti ho chiesto.</Text>}
+                  azioni={<><Button>Attiva</Button><Button variant="ghost">Non ora</Button></>}
+                />
+                <ProposalCard
+                  avviso={<p className="rounded-control bg-destructive/15 px-3 py-2 text-small text-destructive">Proposta fatta dopo aver letto contenuti esterni: controlla che sia quello che volevi</p>}
+                  testata={<div className="flex items-center gap-2"><AppLogo logo="gmail.svg" name="Gmail" className="size-8 text-body" /><Text weight="semibold">Collega Gmail</Text></div>}
+                  righe={<Text size="small" tone="muted">App del catalogo · tramite Composio</Text>}
+                  perché={<Text>Così posso cercare i messaggi quando me lo chiedi.</Text>}
+                  azioni={<><Button>Connetti</Button><Button variant="ghost">No</Button></>}
+                />
+              </div>
+            </div>
+          </div>
         </Section>
       )}
 
