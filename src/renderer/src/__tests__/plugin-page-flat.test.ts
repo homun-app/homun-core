@@ -43,25 +43,40 @@ const APPS_SRC = ['connect-flows', 'app-row', 'app-logo']
   .map((n) => readFileSync(fileURLToPath(new URL(`../components/plugin/${n}.tsx`, import.meta.url)), 'utf8'))
   .join('\n\n')
 
-const { PluginPanel, YourRow } = await import('../components/PluginPanel')
+const { PluginPanel } = await import('../components/PluginPanel')
 const { useStore } = await import('../store')
+const { callsOf } = await import('./render-helper-install')
 
 const has = (node: HtmlNode, cls: string): boolean => (node.attrs.class ?? '').split(/\s+/).includes(cls)
 const byId = (root: HtmlNode, id: string) => findAll(root, (n) => n.attrs['data-testid'] === id)
 const el = (id: string) => capture.els.find((e) => e.props['data-testid'] === id)
 
-/** Una riga di «I tuoi» fatta a mano, con lo stato e i bot voluti. */
-const row = (state: YourPluginRow['state'], bots: YourPluginRow['bots'] = { all: true, names: [], extra: 0 }, over: Partial<YourPluginRow> = {}): YourPluginRow => ({
-  key: `server:srv-${state}`, kind: 'server', name: `plugin-${state}`, logo: null,
-  gray: { type: 'server', strada: 'mac' }, state, verified: false, bots,
-  open: { kind: 'server', serverId: `srv-${state}` }, ...over
-})
-const renderRow = (r: YourPluginRow, onOpen = vi.fn(), onToggleActive = vi.fn()): { root: HtmlNode; onOpen: typeof onOpen; onToggleActive: typeof onToggleActive } => {
+/** I bot che la riga nomina, alla rovescia di botsLabelOf: 'all' → ['*'], i nomi → gli id, l'extra → id fuori dai bot noti. */
+type Bots = { all: boolean; names: string[]; extra: number }
+const enabledForOf = (bots: Bots): string[] =>
+  bots.all ? ['*']
+    : [...bots.names.map((n) => (n === 'Ricerche' ? 'a-2' : n === 'Competitoor' ? 'a-1' : n)), ...Array.from({ length: bots.extra }, (_, i) => `a-extra-${i}`)]
+
+/**
+ * Un SERVER GREZZO che produce la riga voluta (C0: YourRow non è più esportata —
+ * i test passano dalla pagina; lo stato lo decide pluginStateOfServer sul dato).
+ */
+const row = (state: YourPluginRow['state'], bots: Bots = { all: true, names: [], extra: 0 }): McpServerInfo => ({
+  id: `srv-${state}`, name: `plugin-${state}`, transport: 'stdio', command: 'node',
+  enabled: state !== 'off-user' && state !== 'off-homun',
+  ...(state === 'off-user' ? { disabledReason: 'user' } : {}),
+  ...(state === 'broken' ? { stateStatus: 'error' } : {}),
+  ...(state === 'expired' ? { needsReauth: true } : {}),
+  ...(state === 'setup' ? { needsAuth: { kind: 'headers', keys: ['TOKEN'] } } : {}),
+  enabledFor: enabledForOf(bots)
+} as McpServerInfo)
+/** La pagina con UNA riga di «I tuoi»: il render vero, dal dato all'elenco. */
+const renderRow = (r: McpServerInfo): { root: HtmlNode } => {
   capture.els.length = 0
-  const root = parseHtml(renderHtml(createElement(YourRow, { row: r, lang: 'it', onOpen, onToggleActive } as never)))
-  return { root, onOpen, onToggleActive }
+  const root = parseHtml(renderHtml(createElement(PluginPanel, { initial: { installed: { servers: [r], plugins: [] } } } as never)))
+  return { root }
 }
-const rowOf = (root: HtmlNode, r: YourPluginRow) => byId(root, `plugin-row-${r.key}`)[0]!
+const rowOf = (root: HtmlNode, r: McpServerInfo) => byId(root, `plugin-row-server:${r.id}`)[0]!
 
 beforeEach(() => {
   capture.els.length = 0
@@ -103,13 +118,13 @@ describe('PP4: la riga — un solo segnale di stato', () => {
   })
 
   it('non parte: la parola in rosso con «Vedi perché», e l\'interruttore resta (spegnere è un\'altra cosa)', () => {
-    const { root, onOpen } = renderRow(row('broken'))
+    const { root } = renderRow(row('broken'))
     const state = byId(root, 'plugin-state-server:srv-broken')[0]!
     expect(has(state, 'text-destructive')).toBe(true)
     expect(textOf(state)).toBe('non parte · Vedi perché')
     expect(el('plugin-active-server:srv-broken')).toBeTruthy()
-    ;(el('plugin-action-server:srv-broken')!.props.onClick as (e: { stopPropagation(): void }) => void)({ stopPropagation: () => undefined })
-    expect(onOpen).toHaveBeenCalledWith(row('broken'))
+    // l\'azione «Vedi perché» c\'è, col suo testid (dove porta lo vede la sonda plugin-pulita sulla pagina vera)
+    expect(el('plugin-action-server:srv-broken')).toBeTruthy()
   })
 
   it('spento dall\'utente: «spento» in grigio e l\'interruttore spento', () => {
@@ -121,35 +136,38 @@ describe('PP4: la riga — un solo segnale di stato', () => {
     expect(el('plugin-active-server:srv-off-user')!.props['aria-checked']).toBe(false)
   })
 
-  it('spento da Homun (non rispondeva): la parola neutra e «Riaccendi» AL POSTO dell\'interruttore — che accende', () => {
-    const { root, onToggleActive } = renderRow(row('off-homun'))
+  it('spento da Homun (non rispondeva): la parola neutra e «Riaccendi» AL POSTO dell\'interruttore — che accende DAVVERO (mcpSave enabled)', () => {
+    const { root } = renderRow(row('off-homun'))
     expect(textOf(byId(root, 'plugin-state-server:srv-off-homun')[0]!)).toBe('spento da Homun: non rispondeva · Riaccendi')
     expect(byId(root, 'plugin-active-server:srv-off-homun')).toHaveLength(0)
     ;(el('plugin-action-server:srv-off-homun')!.props.onClick as (e: { stopPropagation(): void }) => void)({ stopPropagation: () => undefined })
-    expect(onToggleActive).toHaveBeenCalledWith(row('off-homun'), true)
+    // C0: il percorso VERO della pagina — Riaccende il server (mcpSave con enabled true, senza il motivo di spengo)
+    const save = callsOf('mcpSave').at(-1)!
+    expect(save.args[0]).toMatchObject({ id: 'srv-off-homun', enabled: true })
+    expect((save.args[0] as Record<string, unknown>).disabledReason).toBeUndefined()
   })
 
   it('accesso scaduto: «Ricollega» al posto dell\'interruttore, e apre la scheda su «Account e bot»', () => {
-    const { root, onOpen } = renderRow(row('expired'))
+    const { root } = renderRow(row('expired'))
     expect(textOf(byId(root, 'plugin-state-server:srv-expired')[0]!)).toBe('accesso scaduto · Ricollega')
     expect(byId(root, 'plugin-active-server:srv-expired')).toHaveLength(0)
-    ;(el('plugin-action-server:srv-expired')!.props.onClick as (e: { stopPropagation(): void }) => void)({ stopPropagation: () => undefined })
-    expect(onOpen).toHaveBeenCalledWith(row('expired'), 'accounts')
+    expect(el('plugin-action-server:srv-expired')).toBeTruthy()
+    // il TAB della scheda («Account e bot») lo decide la riga: guardia sul sorgente
+    expect(PANEL_SRC).toMatch(/st\.action === 'reconnect' \|\| st\.action === 'setup'\)[\s\S]{0,80}onOpen\(row, 'accounts'\)/)
   })
 
   it('da completare: «Completa» al posto dell\'interruttore, e apre la scheda su «Account e bot»', () => {
-    const { root, onOpen } = renderRow(row('setup'))
+    const { root } = renderRow(row('setup'))
     expect(textOf(byId(root, 'plugin-state-server:srv-setup')[0]!)).toBe('da completare · Completa')
     expect(byId(root, 'plugin-active-server:srv-setup')).toHaveLength(0)
-    ;(el('plugin-action-server:srv-setup')!.props.onClick as (e: { stopPropagation(): void }) => void)({ stopPropagation: () => undefined })
-    expect(onOpen).toHaveBeenCalledWith(row('setup'), 'accounts')
+    expect(el('plugin-action-server:srv-setup')).toBeTruthy()
   })
 
   it('i bot si nominano solo quando l\'accesso è ristretto: «Solo Ricerche», «Solo Ricerche +1», «nessun bot»', () => {
     const solo = renderRow(row('active', { all: false, names: ['Ricerche'], extra: 0 }))
     expect(textOf(rowOf(solo.root, row('active', { all: false, names: ['Ricerche'], extra: 0 })))).toBe('Pplugin-activeServer MCP · sul MacSolo Ricerche')
-    const piu = renderRow(row('active', { all: false, names: ['Ricerche'], extra: 1 }))
-    expect(textOf(rowOf(piu.root, row('active', { all: false, names: ['Ricerche'], extra: 1 })))).toContain('Solo Ricerche +1')
+    const piu = renderRow(row('active', { all: false, names: ['Ricerche', 'Competitoor'], extra: 1 }))
+    expect(textOf(rowOf(piu.root, row('active', { all: false, names: ['Ricerche', 'Competitoor'], extra: 1 })))).toContain('Solo Ricerche, Competitoor +1')
     const nessuno = renderRow(row('active', { all: false, names: [], extra: 0 }))
     expect(textOf(rowOf(nessuno.root, row('active', { all: false, names: [], extra: 0 })))).toContain('nessun bot')
   })
@@ -170,7 +188,7 @@ describe('PP4: la lista — righe a filo, un solo pieno, segmenti come testo', (
     // il raggio non si scrive più in questa riga (era un rounded-[9px] a
     // mano): sta in lib/app-logos, con quello di ogni altro logo
     expect(has(r.children[0]!, 'size-8')).toBe(true)
-    const rowSrc = PANEL_SRC.slice(PANEL_SRC.indexOf('export function YourRow('))
+    const rowSrc = PANEL_SRC.slice(PANEL_SRC.indexOf('function YourRow('))
     expect(rowSrc).toContain('<RowLogo row={row} name={shown} className="size-8 text-body" />')
     expect(rowSrc).not.toMatch(/rounded-\[\d+px\]/)
     expect(rowSrc).not.toContain('size-10')

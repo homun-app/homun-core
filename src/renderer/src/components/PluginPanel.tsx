@@ -967,9 +967,11 @@ function RowLogo({ row, name, className }: { row: Pick<YourPluginRow, 'kind' | '
  *    ricollegare, completare); «Vedi perché» lo lascia (spegnere è un'altra cosa);
  *  - spento dall'utente: «spento» in grigio e l'interruttore spento.
  * «Tutti i bot» non si scrive: i bot si nominano solo quando l'accesso è
- * ristretto («Solo Ricerca, Scrittura», o «nessun bot»). Esportata per i test.
+ * ristretto («Solo Ricerca, Scrittura», o «nessun bot»). LOCALE dal C0 della
+ * fase linguaggio (l'export serviva solo ai test): i test passano dalla
+ * pagina con i dati iniziali.
  */
-export function YourRow({ row, lang, onOpen, onToggleActive }: {
+function YourRow({ row, lang, onOpen, onToggleActive }: {
   row: YourPluginRow
   lang: 'it' | 'en'
   /** apre la scheda; `tab` la scheda interna («Ricollega» e «Completa» portano a «Account e bot») */
