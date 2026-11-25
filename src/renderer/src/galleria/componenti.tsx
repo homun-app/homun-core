@@ -48,6 +48,7 @@ import { Field } from '../components/ui/field'
 import { Textarea } from '../components/ui/textarea'
 import { Switch } from '../components/ui/switch'
 import { Segmented } from '../components/ui/segmented'
+import { SearchField } from '../components/ui/search-field'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -152,6 +153,7 @@ export const SEZIONI = [
   { id: 'tabella', titolo: 'data-table', componenti: ['data-table'] },
   { id: 'elenchi', titolo: 'flat-list, list-row e list-group', componenti: ['flat-list', 'list-row', 'list-group'] },
   { id: 'testate', titolo: 'section, page-header, column-head', componenti: ['section', 'page-header', 'column-head'] },
+  { id: 'ricerca', titolo: 'search-field — l\'unica ricerca', componenti: ['search-field'] },
   { id: 'superfici', titolo: 'card e empty-state — superfici', componenti: ['card', 'empty-state'] },
   { id: 'schede', titolo: 'underline-tabs', componenti: ['underline-tabs'] },
   { id: 'dialogo', titolo: 'dialog aperto', componenti: ['dialog'] },
@@ -327,6 +329,16 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               </Section>
             </div>
           </div>
+        </Section>
+      )}
+
+      {id === 'ricerca' && (
+        <Section title="search-field — l'unica ricerca dell'app" testId="galleria-section-search">
+          <Riga label="vuota, piena, e più larga (chi la usa lo decide)">
+            <SearchField value="" onChange={() => undefined} placeholder="Cerca tra plugin e skill" ariaLabel="Cerca tra plugin e skill" testId="galleria-search" />
+            <SearchField value="mater" onChange={() => undefined} placeholder="Cerca tra i documenti" ariaLabel="Cerca tra i documenti" />
+            <SearchField value="" onChange={() => undefined} className="w-96" placeholder="Cerca in tutte le attività" ariaLabel="Cerca in tutte le attività" />
+          </Riga>
         </Section>
       )}
 

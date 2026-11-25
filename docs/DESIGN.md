@@ -289,6 +289,10 @@ Galleria: menu-account, chat (menu «Ragiona»).
 La superficie del catalogo: UNA forma sola — rounded-surface, bordo del tema, fondo card, NESSUNA ombra — per le card in chat e le schede della griglia. Il respiro interno è una variante chiusa (`padding` block 16 di default · none per chi lo decide da sé); il ritmo del contenuto lo decide chi la riempie (Stack). Non usarla per gli elenchi (righe a filo: ListGroup) né per i menu (popover).
 Galleria: superfici.
 
+### search-field
+L'UNICA ricerca dell'app: la lente e il campo in una casa da 36 (h-control), fondo tenue, raggio dei controlli, larghezza 72 di default (chi la usa la allarga con className). Il valore è controllato; il testid va sul CAMPO (lo cercano le sonde); il segnaposto e il nome accessibile li porta chi la usa. Vietato scrivere un campo di ricerca fuori da qui (guardia di C4).
+Galleria: ricerca.
+
 ### segmented
 La scelta ESCLUSIVA in una pillola, alta 36 (h-control): la scelta di un'impostazione («Sistema · Chiaro · Scuro»), NON un filtro (quelli sono FilterChips). Radiogroup col nome accessibile, la voce attiva piena, le altre grigie, ognuna raggiungibile col Tab; `fill` divide la larghezza. Porta al catalogo il pezzo che le Impostazioni chiamavano SettingsSegments.
 Galleria: campi.
