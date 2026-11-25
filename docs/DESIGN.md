@@ -347,6 +347,10 @@ Galleria: chat-avvisi.
 La testata di una pagina a tutta area: indietro · icona (20, grigia) o logo (40) · titolo `text-page` in font-display · azioni a destra; la descrizione sta sotto, in una riga sua, mai dentro la riga dei 52. Le misure le decide la testata, non chi la usa. Non usarlo per le testate di colonna di chat, barra e pannelli (lì ColumnHead senza PageHeader); i controlli nelle azioni portano `no-drag`.
 Galleria: plugin-lista, documento.
 
+### detail-page
+Il MODELLO della scheda di una cosa (plugin, server): la testata della pagina di elenco con «indietro» tondo, icona o logo, titolo e azioni; la STESSA larghezza wide (la scheda non è più stretta dell'elenco che l'ha aperta); le schede sue nella barra; il corpo con le sezioni ListGroup. Sta a livello 30 sopra la pagina (20).
+Galleria: gusci.
+
 ### list-page
 Il MODELLO della pagina di elenco (Plugin, Attività, Libreria, Da approvare, Registro): testata col titolo e l'azione principale → UNA barra di 40 con le schede (UnderlineTabs, UN livello) a sinistra — o la ricerca quando le schede non ci sono — più pillole e vista a destra → il corpo che scorre con ListGroup/ListRow o DataTable. Larghezza UNA, wide. Niente descrizione sotto il titolo (la frase va nell'EmptyState o nell'aiuto), mai due file di barra. La pagina si riempie, non si ridisegna.
 Galleria: gusci.

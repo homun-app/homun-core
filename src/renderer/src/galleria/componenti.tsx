@@ -53,6 +53,7 @@ import { FilterChipsScelta, FilterChipsMenu, FilterChipsInterruttore } from '../
 import { PageToolbar } from '../components/ui/page-toolbar'
 import { ProposalCard } from '../components/ui/proposal-card'
 import { ListPage } from '../components/ui/list-page'
+import { DetailPage } from '../components/ui/detail-page'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -167,7 +168,7 @@ export const SEZIONI = [
   { id: 'modelli', titolo: 'ModelPicker e ModelSelect', componenti: ['ModelPicker', 'ModelSelect'] },
   { id: 'modelli-aperto', titolo: 'i selettori APERTI', componenti: ['ModelPicker', 'ModelSelect'] },
   { id: 'pillole', titolo: 'pillole e badge', componenti: [] },
-  { id: 'gusci', titolo: 'page-shell e list-page — i gusci e il modello di elenco', componenti: ['page-shell', 'list-page'] },
+  { id: 'gusci', titolo: 'page-shell, list-page e detail-page — i modelli', componenti: ['page-shell', 'list-page', 'detail-page'] },
   { id: 'markdown-1', titolo: 'DocumentBody — titoli, grassetti ed elenchi', componenti: [] },
   { id: 'markdown-2', titolo: 'DocumentBody — elenchi annidati, tabella, citazione e codice', componenti: [] }
 ] as const
@@ -532,6 +533,18 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               >
                 <div className="text-body">Il corpo dell'elenco: ListGroup e righe, nel modello che non si ridisegna.</div>
               </ListPage>
+            </div>
+          </div>
+          <div className="mb-2">
+            <Etichetta>detail-page — la scheda di una cosa (indietro, stessa larghezza wide, sopra la pagina)</Etichetta>
+            <div className="relative h-72 overflow-hidden rounded-surface border border-border">
+              <DetailPage
+                titolo="Mattermost" testId="galleria-detail-page" headName="componenti"
+                indietro={{ onClick: () => undefined, label: 'Torna ai plugin' }}
+                contentClassName="py-4"
+              >
+                <div className="text-body">Le sezioni della scheda: ListGroup, righe e azioni come le pagine.</div>
+              </DetailPage>
             </div>
           </div>
           {/* G2: ogni guscio sta in un riquadro relative ad altezza FISSA con
