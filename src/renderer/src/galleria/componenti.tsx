@@ -321,9 +321,18 @@ const Sezione = ({ id }: { id: IdSezione }) => {
         <Section title="section, page-header, column-head" testId="galleria-section-section">
           <div className="grid grid-cols-2 gap-8 items-start">
             <div>
-              <div data-testid="galleria-column-head"><ColumnHead name="Le colonne di prova">
-                <Button variant="ghost" icon aria-label="Aggiungi"><Plus className="size-4" /></Button>
-              </ColumnHead></div>
+              {/* C1: la «+» sembrava staccata dal suo blocco perché la demo metteva la fascia VUOTA col solo bottone — nel catalogo la riga si vede come la usa l'app: titolo a sinistra, azione a destra, il corpo sotto */}
+              <div data-testid="galleria-column-head" className="overflow-hidden rounded-surface border border-border">
+                <ColumnHead name="Le colonne di prova">
+                  <PageColumn>
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <span className="truncate text-title font-semibold">Una colonna</span>
+                    </div>
+                    <Button variant="ghost" icon aria-label="Aggiungi" className="no-drag"><Plus className="size-4" /></Button>
+                  </PageColumn>
+                </ColumnHead>
+                <div className="flex h-24 items-center justify-center text-small text-muted-foreground">il corpo della colonna, sotto la fascia dei 52</div>
+              </div>
               <div className="mt-4">
                 <PageHeader title="Una testata di pagina" description="La descrizione sotto la testata." testId="galleria-page-header-2" />
               </div>
