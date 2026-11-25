@@ -1,5 +1,5 @@
 // U2 (fase mcp-ui): il render dell'elenco di import — componente VERO
-// (ImportList esportata da McpWindow) con righe fintre, come gli altri test
+// (plugin/import-list.tsx, dal C0 della fase linguaggio) con righe fintre, come gli altri test
 // del renderer senza DOM: raggruppato per origine con intestazione (nome
 // dell'app + percorso del file), icone del tipo (Terminal/Globe), segreti
 // con l'icona lucide e il conteggio col plurale, doppione esatto unito con
@@ -13,7 +13,7 @@ import { groupImportRows, type ImportScanRow, type ImportSkipRow } from '../lib/
 
 vi.mock('../components/ui/dialog', () => dialogPassThroughMock())
 
-const { ImportList } = await import('../components/McpWindow')
+const { ImportList } = await import('../components/plugin/import-list')
 
 const rows: ImportScanRow[] = [
   { source: 'cursor', name: 'mattermost', transport: 'stdio', envNames: [], secretNames: ['MATTERMOST_TOKEN'], commandLine: 'npx -y @donach/mattermost-mcp', sourcePath: '/Users/test/.cursor/mcp.json' },
@@ -99,7 +99,7 @@ describe('U2: il render dell\'elenco import — raggruppato per origine, curato'
 // la guardia sulle classi di spaziatura sta qui: leggere il sorgente
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-const WIN_SRC = readFileSync(fileURLToPath(new URL('../components/McpWindow.tsx', import.meta.url)), 'utf8')
+const WIN_SRC = readFileSync(fileURLToPath(new URL('../components/plugin/import-list.tsx', import.meta.url)), 'utf8')
 describe('U2: le classi di impaginazione dell\'elenco import (guardia sul sorgente)', () => {
   // fase design (DS4): le righe sono quelle di sistema (min-h-row, 52: la riga
   // con un'icona) dentro un FlatList — separate da un filetto, senza spazio fra

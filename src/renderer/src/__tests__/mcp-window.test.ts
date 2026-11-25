@@ -24,7 +24,8 @@ describe('PL7: la finestra «Server MCP» non c\'è più', () => {
     expect(src).not.toMatch(/export function McpWindow\b/)
     expect(src).not.toContain('Dialog open')
     expect(src).toContain('export function ManualServers()')
-    expect(src).toContain('export function ImportList(')
+    // C0 (fase linguaggio): l'elenco di import è un file suo in plugin/
+    expect(src).toMatch(/import \{ ImportList \} from '\.\/plugin\/import-list'/)
   })
 
   it('lo store NON ha più mcpOpen/setMcpOpen né i flag del foglio sviluppatori', () => {

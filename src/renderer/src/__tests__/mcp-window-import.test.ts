@@ -7,7 +7,10 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
+// C0 (fase linguaggio): l'elenco di import sta in plugin/import-list.tsx, il
+// bottone e la scansione in McpWindow: le guardie li leggono insieme
 const WIN_SRC = readFileSync(fileURLToPath(new URL('../components/McpWindow.tsx', import.meta.url)), 'utf8')
+  + readFileSync(fileURLToPath(new URL('../components/plugin/import-list.tsx', import.meta.url)), 'utf8')
 const PRELOAD_SRC = readFileSync(fileURLToPath(new URL('../../../preload/index.ts', import.meta.url)), 'utf8')
 
 describe('E2: il bottone Importa e il suo elenco (guardie sul sorgente)', () => {
