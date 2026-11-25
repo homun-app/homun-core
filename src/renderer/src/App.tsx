@@ -120,6 +120,16 @@ export function App() {
     void init()
   }, [init])
 
+  // F2 (fase fondamenta): la pagina dei COMPONENTI, SOLO con la galleria di
+  // test. Il modulo NON entra nel bundle di produzione: il nome del file lo
+  // scrive la galleria a runtime (Page.addScriptToEvaluateOnNewDocument) e
+  // vite non segue l'import — out/ resta senza il marcatore della pagina.
+  useEffect(() => {
+    const tipo = window as unknown as { sandbotTest?: { galleria?: boolean }, __galleriaUrl?: string }
+    if (!tipo.sandbotTest?.galleria || !tipo.__galleriaUrl) return
+    import(/* @vite-ignore */ tipo.__galleriaUrl).catch(() => undefined)
+  }, [])
+
   // fase 6 (§3ter T2): segnali di presenza al daemon — 'active' su focus e
   // input da tastiera/mouse (al massimo uno ogni 30 s), 'typing' quando si
   // scrive nel campo della chat. Il daemon calcola l'ultimo momento di

@@ -1,0 +1,353 @@
+// F2 (fase fondamenta): LA PAGINA DEI COMPONENTI — solo di sviluppo e di
+// test. Mostra OGNI componente di components/ui/ in OGNI stato, in chiaro e
+// in scuro (il tema lo cambia la galleria con la classe `dark`): gli stati
+// difficili da raggiungere navigando l'app si vedono qui, isolati.
+//
+// NON entra nel build di produzione: la galleria compila questo modulo a
+// parte (scripts/galleria-modulo.config.mjs) e lo carica con un import()
+// dinamico dietro il controllo SANDBOT_TEST_GALLERIA=1 (App.tsx). Il
+// marcatore «galleria-componenti» NON deve comparire in out/ — il test lo
+// verifica a ogni fase.
+//
+// Regola per il futuro (docs/FATTO.md): un componente NUOVO in
+// components/ui/ entra in questa pagina con tutti i suoi stati. La guardia
+// (src/__tests__/guardie/componenti.test.ts) fallisce se un file di
+// components/ui/ non è importato qui.
+import { useState } from 'react'
+import { createRoot } from 'react-dom/client'
+import { I18nProvider } from '@lingui/react'
+import { i18n, activateUiLanguage } from '../lib/i18n'
+// il CSS del modulo: tailwind lo scansiona dal sorgente; la galleria lo
+// inietta a runtime (è un sovrainsieme identico del foglio dell'app: i token
+// e le utility, già deduplicati per nome)
+import '../styles.css'
+import { Loader2, TriangleAlert, CircleHelp, CheckCircle2, Plus, Settings } from 'lucide-react'
+import { Button } from '../components/ui/button'
+import { Input, FIELD_CLASS } from '../components/ui/input'
+import { Select } from '../components/ui/select'
+import { Notice } from '../components/ui/notice'
+import { DataTable, Cell } from '../components/ui/data-table'
+import { FlatList, FlatRow } from '../components/ui/flat-list'
+import { Section } from '../components/ui/section'
+import { PageHeader } from '../components/ui/page-header'
+import { ColumnHead } from '../components/ui/column-head'
+import { UnderlineTabs } from '../components/ui/underline-tabs'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '../components/ui/dialog'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '../components/ui/dropdown-menu'
+import { ModelPicker } from '../components/ui/ModelPicker'
+import { ModelSelect } from '../components/ui/ModelSelect'
+import { PageShell, PageColumn, type PageWidth } from '../components/ui/page-shell'
+import { DocumentBody } from '../components/DocumentMarkdown'
+import { BOT_FAMILIES, BOT_COLORS } from '../../../shared/avatar'
+
+/** Le stesse tinte dei puntini di stato dei bot (Sidebar, ColorDot): 8 px, contrasto ≥ 3:1 in entrambi i temi. */
+const PUNTINI = BOT_COLORS
+
+const MD_TUTTI_I_CASI = `# Il documento di prova
+
+Tutti i casi del markdown, in una pagina sola.
+
+## Titolo di secondo livello
+
+Un paragrafo con del **grassetto** e del *corsivo* e un [collegamento](https://esempio.invalid), e un pezzo di \`codice in linea\`.
+
+## Gli elenchi
+
+Stretti (una riga per voce, con grassetto che NON deve spezzarli):
+
+- la **prima** voce dell'elenco
+- la seconda voce, pure con **due parole in grassetto**
+- la terza
+
+Larghi (più testo per voce):
+
+- una voce con un testo molto più lungo che racconta due righe e ci sta, con **grassetto** in mezzo, perché la larghezza della pagina lo consente
+- l'altra voce lunga, che si spezza quando serve e non prima
+
+Annidati:
+
+1. il primo passo
+   - il primo sotto-passo
+   - il secondo sotto-passo
+2. il secondo passo
+
+## Una tabella
+
+| Voce | Importo | Nota |
+|---|---|---|
+| Materiali | 1.240 € | consegnati |
+| Trasporti | 310 € | in ritardo |
+| Totale | 1.550 € | |
+
+## Una citazione
+
+> Chi scrive regole piccole, le rispetta piccole.
+
+\`\`\`sh
+curl -s https://esempio.invalid/feed | head -n 20
+\`\`\`
+`
+
+/** Una riga di etichetta: la scritta corta grigia sopra ogni campione. */
+const Etichetta = ({ children }: { children: React.ReactNode }) => (
+  <div className="text-caption text-muted-foreground mb-2">{children}</div>
+)
+
+/** Una riga di campioni: i pezzi affiancati, il testo sotto. */
+const Riga = ({ label, children }: { label: string; children: React.ReactNode }) => (
+  <div className="mb-8">
+    <Etichetta>{label}</Etichetta>
+    <div className="flex flex-wrap items-center gap-4">{children}</div>
+  </div>
+)
+
+import type { ModelInfo } from '../../../shared/types'
+const MODELLI: ModelInfo[] = [
+  { id: 'finto', label: 'Finto locale', source: 'live', contextWindow: 131_072, vision: null, tools: null, thinkingLevels: [], cost: null, costSource: null, local: true },
+  { id: 'finto-grande', label: 'Finto grande', source: 'live', contextWindow: 262_144, vision: null, tools: null, thinkingLevels: [], cost: null, costSource: null, local: true },
+  { id: 'finto-remoto', label: 'Finto remoto', source: 'live', contextWindow: 65_536, vision: null, tools: null, thinkingLevels: [], cost: null, costSource: null, local: false }
+]
+
+/** La pagina VERA dei componenti, tutti gli stati, dal vivo. */
+const Pagina = () => {
+  const [tab, setTab] = useState('una')
+  const [dialogo, setDialogo] = useState(true)
+  const [menu, setMenu] = useState(true)
+  const [modello, setModello] = useState<string | null>('finto')
+  const righeVuote: typeof righe = []
+  const righe = [
+    { id: 'r1', nome: 'Pastiera', data: '21/11', giudizio: 'ottima', lungo: 'un giudizio molto lungo che deve andare a capo troncato senza spingere la colonna di seguito oltre la sua larghezza' },
+    { id: 'r2', nome: 'Risotto allo zafferano', data: '22/11', giudizio: 'buona', lungo: 'breve' }
+  ]
+  const colonne = [
+    { id: 'nome', header: 'Ricetta', width: 200, cell: (r: typeof righe[0]) => <Cell>{r.nome}</Cell> },
+    { id: 'data', header: 'Data', width: 90, cell: (r: typeof righe[0]) => <Cell secondary>{r.data}</Cell> },
+    { id: 'giudizio', header: 'Giudizio', width: 110, cell: (r: typeof righe[0]) => <Cell>{r.giudizio}</Cell> },
+    { id: 'lungo', header: 'Nota', width: 320, cell: (r: typeof righe[0]) => <Cell secondary>{r.lungo}</Cell> }
+  ]
+  return (
+    <div className="p-8" data-testid="galleria-componenti-contenuto">
+      <PageHeader title="I componenti, uno per uno" description="Tutti gli stati, dal vivo: la pagina dei componenti è solo di sviluppo e di test." testId="galleria-page-header" />
+
+      <div className="mt-6">
+        <UnderlineTabs
+          tabs={[['una', 'Prima'], ['due', 'Seconda'], ['tre', 'Terza'], ['quattro', 'Quarta scheda'], ['cinque', 'Quinta scheda'], ['sei', 'Sesta scheda'], ['sette', 'Settima scheda'], ['otto', 'Ottava scheda']]}
+          value={tab}
+          onChange={setTab}
+          label="Le schede di prova"
+          testId="galleria-tabs"
+        />
+      </div>
+
+      <Section title="button — tutte le varianti e taglie" testId="galleria-section-button">
+        <Riga label="primary">
+          <Button variant="primary">Aggiungi</Button>
+          <Button variant="primary" size="sm">Piccolo</Button>
+          <Button variant="primary" shape="control">Controllo</Button>
+          <Button variant="primary" disabled>Disattivato</Button>
+          <Button variant="primary" disabled><Loader2 className="size-4" />In caricamento</Button>
+        </Riga>
+        <Riga label="secondary">
+          <Button variant="secondary">Secondario</Button>
+          <Button variant="secondary" size="sm" shape="control">Controllo piccolo</Button>
+          <Button variant="secondary" disabled>Disattivato</Button>
+        </Riga>
+        <Riga label="ghost">
+          <Button variant="ghost">Fantasma</Button>
+          <Button variant="ghost" size="sm">Piccolo</Button>
+        </Riga>
+        <Riga label="destructive">
+          <Button variant="destructive">Elimina</Button>
+          <Button variant="destructive" size="sm" shape="control">Piccolo</Button>
+        </Riga>
+        <Riga label="solo icona (aria-label)">
+          <Button variant="ghost" icon aria-label="Aggiungi qualcosa"><Plus className="size-4" /></Button>
+          <Button variant="secondary" icon aria-label="Impostazioni"><Settings className="size-4" /></Button>
+        </Riga>
+        <Riga label="pillole e badge">
+          <Button variant="primary" size="sm">Pillola</Button>
+          <span className="inline-flex items-center rounded-full bg-muted px-2 h-control-sm text-caption">badge neutro</span>
+          <span className="inline-flex items-center rounded-full bg-destructive text-destructive-foreground px-2 h-control-sm text-caption">badge rosso</span>
+        </Riga>
+      </Section>
+
+      <Section title="input e select — vuoto, pieno, con errore" testId="galleria-section-input">
+        <Riga label="input">
+          <Input className="w-56" placeholder="Vuoto" />
+          <Input className="w-56" defaultValue="Pieno" />
+          <Input className="w-56" placeholder="Con errore" aria-invalid="true" />
+          <Input className="w-56" disabled defaultValue="Disattivato" />
+        </Riga>
+        <Riga label="select">
+          <Select className="w-56" defaultValue=""><option value="">Scegli…</option><option value="a">Scelta A</option></Select>
+          <Select className="w-56" defaultValue="a"><option value="a">Scelta A</option></Select>
+          <Select className="w-56" defaultValue="a" aria-invalid="true"><option value="a">Con errore</option></Select>
+        </Riga>
+        <Riga label="le classi del campo da sole (FIELD_CLASS)">
+          <input className="h-control w-56 rounded-control border border-input px-3 text-body" placeholder="campo grezzo" />
+        </Riga>
+      </Section>
+
+      <Section title="notice — ogni gravità, con e senza azione" testId="galleria-section-notice">
+        <div className="flex flex-col gap-3">
+          <Notice icon={<CheckCircle2 className="size-4" />}>Tutto a posto: nessuna azione da fare.</Notice>
+          <Notice icon={<TriangleAlert className="size-4" />} tone="warning">Un avviso giallo, senza azione.</Notice>
+          <Notice icon={<TriangleAlert className="size-4" />} tone="destructive">Un errore permanente senza azione.</Notice>
+          <Notice icon={<TriangleAlert className="size-4" />} tone="destructive" repeat={4} action={<Button variant="secondary" size="sm">Riprova</Button>}>
+            Risposta vuota: il modello ha restituito solo ragionamento
+          </Notice>
+          <Notice icon={<CircleHelp className="size-4" />} tone="destructive" action={<Button variant="ghost" size="sm">Come si risolve</Button>}>
+            Il comando non è riuscito
+          </Notice>
+        </div>
+      </Section>
+
+      <Section title="data-table — righe, vuota, testo lungo" testId="galleria-section-data-table">
+        <DataTable columns={colonne} rows={righe} rowKey={(r: typeof righe[0]) => r.id} testId="galleria-tabella" />
+        <div className="mt-6">
+          <DataTable columns={colonne} rows={righeVuote} rowKey={(r: typeof righe[0]) => r.id} empty="Nessuna ricetta: la tabella vuota." testId="galleria-tabella-vuota" />
+        </div>
+      </Section>
+
+      <Section title="flat-list" testId="galleria-section-flat-list">
+        <FlatList testId="galleria-flat-list">
+          <FlatRow title="La prima riga" subtitle="con un sottotitolo" trailing={<Button variant="ghost" size="sm" shape="control">Apri</Button>} />
+          <FlatRow title="La seconda riga" subtitle="cliccabile" clickable onClick={() => undefined} />
+          <FlatRow title="La terza riga" />
+        </FlatList>
+      </Section>
+
+      <Section title="section, page-header, column-head" testId="galleria-section-section">
+        <div className="grid grid-cols-2 gap-8 items-start">
+          <div>
+            <div data-testid="galleria-column-head"><ColumnHead name="Le colonne di prova">
+              <Button variant="ghost" icon aria-label="Aggiungi"><Plus className="size-4" /></Button>
+            </ColumnHead></div>
+            <div className="mt-4">
+              <PageHeader title="Una testata di pagina" description="La descrizione sotto la testata." testId="galleria-page-header-2" />
+            </div>
+          </div>
+          <div>
+            <Section title="Una sezione con azione" action={<Button variant="ghost" size="sm">Mostra tutto</Button>}>
+              <div className="text-body">Il contenuto della sezione.</div>
+            </Section>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="dialog e dropdown-menu aperti" testId="galleria-section-dialog">
+        <div className="h-64 relative">
+          <Dialog open={dialogo} onOpenChange={setDialogo}>
+            <DialogContent data-testid="galleria-dialogo">
+              <DialogHeader>
+                <DialogTitle>Il dialogo di prova</DialogTitle>
+                <DialogDescription>La descrizione che spiega cosa fa.</DialogDescription>
+              </DialogHeader>
+              <div className="text-body">Il corpo del dialogo.</div>
+              <DialogFooter>
+                <DialogClose asChild><Button variant="ghost">Annulla</Button></DialogClose>
+                <DialogClose asChild><Button variant="primary">Conferma</Button></DialogClose>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+          <DropdownMenu open={menu} onOpenChange={setMenu}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="secondary" size="sm">Il menu aperto ▾</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent data-testid="galleria-menu">
+              <DropdownMenuItem>Apri</DropdownMenuItem>
+              <DropdownMenuItem>Rinomina</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem>Archivia</DropdownMenuItem>
+              <DropdownMenuItem className="text-destructive">Elimina</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </Section>
+
+      <Section title="ModelPicker e ModelSelect" testId="galleria-section-model">
+        <Riga label="ModelPicker">
+          <ModelPicker models={MODELLI} value={modello} onChange={setModello} placeholder="predefinito…" />
+          <ModelPicker models={MODELLI} value={null} onChange={() => undefined} placeholder="nessun modello" />
+          <ModelPicker models={MODELLI} value={modello} onChange={() => undefined} disabled />
+          <ModelPicker models={MODELLI} value={null} onChange={() => undefined} pillTrigger={{ label: 'Altri modelli…' }} />
+        </Riga>
+        <Riga label="ModelSelect">
+          <ModelSelect value={null} onChange={() => undefined} allowNone allowFollowMain />
+          <ModelSelect value={{ providerId: 'finto', model: 'finto' }} onChange={() => undefined} />
+        </Riga>
+      </Section>
+
+      <Section title="puntini di stato dei bot — tutti i colori, 8 px" testId="galleria-section-puntini">
+        <div className="flex items-center gap-4">
+          {PUNTINI.map((c) => (
+            <div key={c} className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
+              <span data-testid={`bot-dot-${c}`} aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ background: `var(--bot-dot-${c})` }} />
+              <span className="text-caption">{c}</span>
+            </div>
+          ))}
+        </div>
+        <Riga label="famiglie dell'avatar">
+          {BOT_FAMILIES.map((f) => (
+            <div key={f} className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
+              <span aria-hidden="true" className="size-5 shrink-0 rounded-full" style={{ background: 'var(--bot-dot-c1)' }} />
+              <span className="text-caption">{f}</span>
+            </div>
+          ))}
+        </Riga>
+      </Section>
+
+      <Section title="DocumentBody — tutti i casi del markdown" testId="galleria-section-markdown">
+        <PageColumn width="reading">
+          <DocumentBody markdown={MD_TUTTI_I_CASI} />
+        </PageColumn>
+      </Section>
+
+      <Section title="PageShell — i tre gusci di larghezza" testId="galleria-section-shell">
+        {(['reading', 'page', 'wide'] as PageWidth[]).map((w) => (
+          <div key={w} className="mb-6 h-40">
+            <PageShell width={w} testId={`galleria-shell-${w}`} headName="componenti"
+              header={<PageHeader title={`Il guscio «${w}»`} testId={`galleria-shell-header-${w}`} />}
+              contentClassName="py-4">
+              <PageColumn width={w}>
+                <div className="text-body">Il contenuto del guscio «{w}»: la colonna centrata alla larghezza scelta.</div>
+              </PageColumn>
+            </PageShell>
+          </div>
+        ))}
+      </Section>
+    </div>
+  )
+}
+
+/** L'host della pagina: un vaso fixed a tutta finestra, che la galleria apre e chiude tra le scene. */
+let host: HTMLDivElement | null = null
+let radice: ReturnType<typeof createRoot> | null = null
+
+const apri = () => {
+  if (host) return
+  host = document.createElement('div')
+  host.dataset.testid = 'galleria-componenti'
+  // la pagina di test sta sopra tutto; il tema (la classe dark) lo decide la galleria sull'<html>
+  host.style.cssText = 'position:fixed;inset:0;z-index:2147483600;background:var(--background);color:var(--foreground);overflow:auto'
+  document.body.appendChild(host)
+  radice = createRoot(host)
+  radice.render(
+    <I18nProvider i18n={i18n}>
+      <Pagina />
+    </I18nProvider>
+  )
+}
+
+const chiudi = () => {
+  radice?.unmount()
+  radice = null
+  host?.remove()
+  host = null
+}
+
+/** L'API che la galleria usa: apri()/chiudi() tra le scene. L'import del modulo NON apre nulla. */
+;(window as unknown as Record<string, unknown>).__galleriaComponenti = { apri, chiudi }
+
+// la lingua dell'interfaccia di prova (il sorgente è italiano: anche senza catalogo i testi sono giusti)
+void activateUiLanguage('it')

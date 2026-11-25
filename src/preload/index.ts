@@ -365,3 +365,10 @@ const api: SandbotApi = {
 }
 
 contextBridge.exposeInMainWorld('sandbot', api)
+
+// F2 (fase fondamenta): la pagina dei componenti esiste SOLO con la galleria
+// di test (SANDBOT_TEST_GALLERIA=1, che imposta la galleria). Il NOME del
+// modulo non sta qui: lo scrive la galleria a runtime sul renderer, così il
+// bundle del preload non contiene il marcatore della pagina.
+contextBridge.exposeInMainWorld('sandbotTest', { galleria: process.env.SANDBOT_TEST_GALLERIA === '1' })
+
