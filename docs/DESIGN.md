@@ -285,6 +285,10 @@ Galleria: dialogo-nuovo, impostazioni-generali.
 Il menu a comparsa (Radix): voci `text-body` con icone a 16, variante destructive, checkbox e radio col segno disegnato, etichette `text-caption`, scorciatoie; resta dentro la finestra (collisionPadding 12). Non usarlo per scegliere un modello (ModelSelect), per azioni sempre visibili (button) o per schede (UnderlineTabs).
 Galleria: menu-account, chat (menu «Ragiona»).
 
+### list-row
+LA riga di elenco dell'app, un solo oggetto per ogni elenco: `segno` (icona, logo, puntino o mascotte nella casa da 32) · `titolo` (text-body 500, si tronca) · `sottotitolo` (la riga grigia) · `metadato` (il dato grigio ai caption, a destra) · `azione` (a destra: in una riga è sempre Button secondary sm; Switch solo per acceso/spento; i link di testo spariscono) · `below` (ciò che sta sotto, all'ascissa del titolo). Misure fisse: min-h-row 52 col segno, 40 senza; respiro py-row-pad. `clickable` fa della riga un bottone con hover tenue solo dove si clicca. Prende il posto di SettingsRow, AppRow, YourRow e delle righe scritte a mano.
+Galleria: elenchi.
+
 ### flat-list
 Le righe a filo: `FlatList` è l'elenco col filetto tra le righe, `FlatRow` la riga (leading nello slot da 32, title `text-body` peso 500, subtitle grigia `text-small`, trailing a destra; min-h-row 52 con leading, 40 senza). Nessun fondo, nessun riquadro: l'hover solo dove si clicca. Non usarlo dove servono colonne (DataTable) o vere card (`rounded-surface bg-card`).
 Galleria: impostazioni-cassaforte-plugin, plugin-server.

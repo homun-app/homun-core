@@ -40,6 +40,7 @@ import { Icon } from '../components/ui/icon'
 import { AppLogo } from '../components/ui/app-logo'
 import { BotDot } from '../components/ui/bot-dot'
 import { Avatar } from '../components/ui/avatar'
+import { ListRow } from '../components/ui/list-row'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -142,7 +143,7 @@ export const SEZIONI = [
   { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
   { id: 'tabella', titolo: 'data-table', componenti: ['data-table'] },
-  { id: 'elenchi', titolo: 'flat-list', componenti: ['flat-list'] },
+  { id: 'elenchi', titolo: 'flat-list e list-row', componenti: ['flat-list', 'list-row'] },
   { id: 'testate', titolo: 'section, page-header, column-head', componenti: ['section', 'page-header', 'column-head'] },
   { id: 'schede', titolo: 'underline-tabs', componenti: ['underline-tabs'] },
   { id: 'dialogo', titolo: 'dialog aperto', componenti: ['dialog'] },
@@ -250,7 +251,19 @@ const Sezione = ({ id }: { id: IdSezione }) => {
       )}
 
       {id === 'elenchi' && (
-        <Section title="flat-list" testId="galleria-section-flat-list">
+        <Section title="flat-list e list-row — le righe di elenco" testId="galleria-section-flat-list">
+          <div className="mb-8">
+            <Etichetta>list-row — segno · titolo · sottotitolo · metadato · azione (l'oggetto unico degli elenchi)</Etichetta>
+            <div className="divide-y divide-border/50">
+              <ListRow segno={<Avatar family="h-creature" color="c1" />} titolo="Turismo" sottotitolo="Server MCP · sul Mac" metadato="2 min fa" azione={<Button variant="secondary" size="sm">Apri</Button>} clickable />
+              <ListRow segno={<AppLogo logo="gmail.svg" name="Gmail" className="size-8 text-body" />} titolo="Gmail" sottotitolo="Connettore · tramite Composio" azione={<Button variant="secondary" size="sm">Ricollega</Button>} />
+              <ListRow titolo="Una riga di solo testo" metadato="40" />
+              <ListRow segno={<BotDot color="c3" />} titolo="Ricerche" sottotitolo="ha finito: 3 documenti nuovi" below="il motivo per esteso sta sotto, all'ascissa del titolo" />
+            </div>
+          </div>
+          <div className="mb-2">
+            <Etichetta>flat-list (il pezzo di prima, finché le pagine non convertono)</Etichetta>
+          </div>
           <FlatList testId="galleria-flat-list">
             <FlatRow title="La prima riga" subtitle="con un sottotitolo" trailing={<Button variant="ghost" size="sm" shape="control">Apri</Button>} />
             <FlatRow title="La seconda riga" subtitle="cliccabile" clickable onClick={() => undefined} />
