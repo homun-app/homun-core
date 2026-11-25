@@ -160,14 +160,18 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
     if (sc && n) sc.scrollTop = Math.max(0, n.getBoundingClientRect().top - sc.getBoundingClientRect().top - 60)
     else if (sc) sc.scrollTop = sc.scrollHeight
     return true`)
-  // il messaggio lungo in markdown in cima alla finestra (la cattura lo deve mostrare)
+  // la chat col messaggio lungo: lo scroll dichiara il FONDO, lo stato a cui
+  // l'app converge comunque (stick-to-bottom: le notizie raggruppate fanno
+  // un secondo passo di rendering e l'app riscorre). L'ancora al TITOLO di
+  // prima faceva la CORSA con l'app: in una corsa su sei (la terza di
+  // stabilità, dentro fatto.mjs con la macchina che aveva appena lavorato)
+  // vinceva lei e la scena finiva col messaggio in CIMA, rossa (1,6e9
+  // livelli). Con entrambi gli scrittori d'accordo sul fondo la corsa è
+  // innocua; il ri-ancoraggio per ULTIMO (qui sotto, in cattura) chiude il
+  // caso del contenuto che cresce DOPO il prepare.
   if (page.prepare === 'chat-md') await s.eval(`
     const sc = document.querySelector('main .overflow-y-auto')
-    if (sc) {
-      const h = [...sc.querySelectorAll('h2, h3')].find((x) => (x.textContent ?? '').includes('Riepilogo del mese'))
-      if (h) sc.scrollTop = Math.max(0, sc.scrollTop + h.getBoundingClientRect().top - sc.getBoundingClientRect().top - 16)
-      else sc.scrollTop = 0
-    }
+    if (sc) sc.scrollTop = sc.scrollHeight
     return true`)
   // le sezioni ASINCRONE delle Impostazioni › Generali (Spazio su disco, il
   // motore del computer dei bot) si riempiono da RPC che NON passano dalla
@@ -216,6 +220,14 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
   // dalle maschere di QUESTA scena (per le scene senza maschere: 0)
   const presenti = await s.contaMaschere()
   if (presenti !== coperti) errori.push(`rettagli di maschera nel DOM ${presenti} ≠ elementi coperti ${coperti}`)
+  // lo scroll della chat si RI-ANCORA al fondo per ULTIMO, dopo tutte le
+  // attese e i controlli: se il contenuto è cresciuto dopo il prepare (il
+  // secondo passo delle notizie raggruppate), lo scrollTop assoluto messo
+  // allora non è più il fondo — e l'ancora dev'essere l'ULTIMO scrittore
+  // prima dello screenshot
+  if (page.prepare === 'chat-md') {
+    await s.eval(`const sc = document.querySelector('main .overflow-y-auto'); if (sc) sc.scrollTop = sc.scrollHeight; return true`)
+  }
   const percorso = join(CATTURE, nomeCattura(page, tema, w))
   await s.cattura(percorso)
   // PNG senza metadati: strip subito dopo la cattura
