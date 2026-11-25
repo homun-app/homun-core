@@ -15,6 +15,8 @@ const MODEL = fileURLToPath(new URL('../components/GuideModelStep.tsx', import.m
 const css = readFileSync(CSS, 'utf8')
 const guideSrc = readFileSync(GUIDE, 'utf8')
 const modelSrc = readFileSync(MODEL, 'utf8')
+  // C0 (fase linguaggio): le pillole dei modelli stanno in un file loro
+  + readFileSync(fileURLToPath(new URL('../components/guide-model-pills.tsx', import.meta.url)), 'utf8')
 
 function cssBlock(selector: string): string {
   const start = css.indexOf(`${selector} {`)

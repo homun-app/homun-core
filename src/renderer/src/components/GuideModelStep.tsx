@@ -22,6 +22,8 @@ import { guideModelPills } from '../lib/guide-model-pills'
 import { openAiCompatBase } from '../../../main/agent/live-models'
 import { runLocalModelPolling } from '../lib/guide-local-model'
 import { ModelPicker } from './ui/ModelPicker'
+// C0 (fase linguaggio): le pillole dei modelli del pannello con chiave, in un file loro
+import { GuideModelPills } from './guide-model-pills'
 import { ProviderMark } from './settings/AddProviderSheet'
 
 /** I fatti del passo modello per la scena (umore e nuvoletta). */
@@ -89,40 +91,6 @@ function ProviderCard({ id, label, desc, badge, logoKind, icon, onPick }: {
  * Un modello scelto dal picker che non è fra le pillole diventa una pillola,
  * selezionata, al posto dell'ultima.
  */
-export function GuideModelPills({ kind, models, selected, onSelect, pickerLabel }: {
-  kind: string
-  models: readonly string[]
-  selected: string | null
-  onSelect(id: string): void
-  pickerLabel: string
-}) {
-  const pills = guideModelPills(kind, models, selected)
-  const pillCls = 'max-w-full min-h-[44px] truncate rounded-full px-4 py-2 text-small font-semibold transition'
-  return (
-    <>
-      {pills.map((m) => (
-        <button
-          key={m}
-          type="button"
-          data-testid={`guide-model-${m}`}
-          aria-pressed={selected === m}
-          className={`${pillCls} ${selected === m ? 'bg-foreground text-background' : 'bg-background text-foreground hover:bg-accent'}`}
-          onClick={() => onSelect(m)}
-        >
-          {m}
-        </button>
-      ))}
-      <ModelPicker
-        pillTrigger={{ label: pickerLabel }}
-        className={`${pillCls} bg-background text-foreground hover:bg-accent`}
-        models={models.map((id): ModelInfo => ({ id, source: 'live', vision: false, tools: true, thinkingLevels: [], cost: null, costSource: null, local: false }))}
-        value={selected}
-        onChange={(id) => { if (id) onSelect(id) }}
-      />
-    </>
-  )
-}
-
 export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerContinue }: GuideModelStepProps) {
   const { t } = useLingui()
   const providers = useStore((s) => s.providers)

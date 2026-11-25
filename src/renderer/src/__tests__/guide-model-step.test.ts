@@ -157,7 +157,7 @@ describe('OBV4: il pannello Integrato pronto ha la SUA Continua', () => {
 
 describe('GC2: le pillole dei modelli del pannello con chiave', () => {
   it('un SOLO controllo «Altri modelli…» e nessun testo di modello ripetuto', async () => {
-    const { GuideModelPills } = await import('../components/GuideModelStep')
+    const { GuideModelPills } = await import('../components/guide-model-pills')
     const { createElement: ce } = await import('react')
     const html = renderHtml(ce(GuideModelPills, {
       kind: 'anthropic',
@@ -178,7 +178,7 @@ describe('GC2: le pillole dei modelli del pannello con chiave', () => {
   })
 
   it('la scelta evidenzia la pillola giusta; dal picker una pillola NUOVA, selezionata, al posto dell\'ultima', async () => {
-    const { GuideModelPills } = await import('../components/GuideModelStep')
+    const { GuideModelPills } = await import('../components/guide-model-pills')
     const { createElement: ce } = await import('react')
     const render = (selected: string | null) => {
       // come nel pannello: le pillole stanno nel contenitore guide-model-pills

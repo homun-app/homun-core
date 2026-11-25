@@ -26,6 +26,10 @@ const ECCEZIONI: ReadonlyArray<{ file: string; perché: string }> = [
     perché: 'le stesse min-h-[44px] della guida (i passi del computer): stessa ragione'
   },
   {
+    file: 'src/renderer/src/components/guide-model-pills.tsx',
+    perché: 'le pillole dei modelli della guida (min-h-[44px]): C0 della fase linguaggio le ha estratte da GuideModelStep in un file loro — la misura è la stessa, voluta della fase guida'
+  },
+  {
     file: 'src/renderer/src/components/GuideView.tsx',
     perché: 'le misure della guida (top-[62px] la fascia del passo, size-[34px]/size-[30px] gli anelli dei passi, min-h-[44px] le pillole): volute della fase guida — stessa ragione'
   }
