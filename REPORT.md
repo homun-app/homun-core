@@ -1,3 +1,154 @@
+# REPORT FASE FONDAMENTA: verificare tutto in automatico, regole nel codice, un solo «fatto»
+
+Base: `main` a `v0.3.1001-beta.20` (7822e1f0 = il tag `fase-b20-chiusura` più il commit del CHANGELOG). Verifica fatta: HEAD era esattamente lì (gli unici non tracciati `out-review/` e `scripts/vetrina/`, mai toccati). Freeze 0.3.1002: questa fase NON cambia il comportamento dell'app — aggiunge strumenti di verifica, guardie nei test e documenti; l'unico codice nuovo nel renderer è la pagina dei componenti (F2), che non entra nel build di produzione (la guardia del marcatore lo verifica a ogni corsa).
+
+Ordine seguito (come da spec): F5 → misura «prima» di F7 → F7 (il motore e le 5 sonde) → F1 (la galleria) → F2, F3, F4, F6. Un commit per punto, F1 in due (lo spostamento delle scene separato dalla galleria); ogni guardia e ogni test visti ROSSI prima.
+
+## F5 — `docs/FATTO.md` e `scripts/fatto.mjs`
+
+`docs/FATTO.md` è la definizione di «fatto», uguale per ogni fase (typecheck; suite e ci-sim verdi anche col Docker che non risponde; build; galleria; le sonde una alla volta con l'uscita su file; processi a 0; nessuna temporanea nuova; e, fuori dal comando, catture riportate a HEAD e REPORT con coda byte-identica). Le regole di F7 ci sono dentro: le sonde girano **una volta** a verifica, la stabilità si prova una volta sola alla nascita/conversione (tre corse), le sonde delle fasi vecchie non si rifanno a ogni fase.
+
+`scripts/fatto.mjs [--sonde a,b,c]` esegue i punti 1–7 uno alla volta, salva l'uscita completa di ogni passo in `fatto-uscite/` (in `.gitignore`) e scrive una riga per passo in `fatto-esito.md` (esito · durata · percorso). Prima di tutto fotografa `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/`; alla fine confronta: ogni cartella nuova **di chiunque** è un errore. Conta i processi Electron e `--homun-daemon` del repo per eseguibile (`ps -axo pid=,comm=` + `pid,args=`). Non fa commit, non tagga, non tocca il REPORT. Esce 1 se un passo è rosso.
+
+I difetti trovati girando le PRIME corse (corretti nel commit F5 e nel commit delle correzioni): la firma di `esegui` scambiava il nome del log col comando — tutti i passi «KO» con spawn ENOENT e la corsa dichiarata VERDE perché l'esito non era mappato; da lì gli esiti vengono dal CODICE di uscita (0 = OK, tutto il resto = KO: nessun «undefined» che passa per verde).
+
+## F7 — il motore `scripts/lib/sonda.mjs` e le 5 sonde convertite
+
+**Il problema misurato.** Nelle 5 sonde della verifica i `sleep(…)` fissi erano **150** (design 51, b20-bug 36, plugin-pulita 27, centro 18, squadra 18); ogni sonda si riscriveva l'avvio di Electron, il collegamento CDP e le attese (fino a 1.440 righe). Un'attesa fissa è lenta quando la condizione arriva prima e falsa quando arriva dopo — la corsa «prima» l'ha mostrato dal vivo: la sonda squadra (attese a tempo) è caduta a 6 s con «apertura membri di Weekend Torino non riuscita» dentro la corsa di fatto.mjs, e ha girato verde 32/32 da sola un minuto dopo.
+
+**Il motore** (`scripts/lib/sonda.mjs`, usato anche dalla galleria): avvio dell'app (dati temporanei con mkdtemp nella base dei vincoli, HOME finta, porta CDP **libera scelta a caso** con `listen(0)` — mai calcolata da `--run`), spegnimento sicuro con le funzioni di `probe-daemons.mjs` e `probe-rm.mjs`, attese su CONDIZIONE interrogate ogni 50 ms via `Runtime.evaluate`: `attendi(espressione, { entro, motivo })` (alla scadenza fallisce col motivo e l'ultimo valore visto), con le varianti `attendiTestid`, `attendiTesto`, `attendiRete({ quieta })` (nessuna richiesta del renderer in volo, contata dal dominio Network di CDP), `attendiStabile` e `attendiStabileEspr` (due letture del rettangolo a 120 ms di distanza: due frame consecutivi da soli cadevano a metà delle transizioni di apertura). Le azioni `clic`, `scrivi`, `cattura` aspettano PRIMA che l'elemento esista e sia visibile, e il clic si RIPETE finché l'elemento sta in vista (React remonta la barra a ogni cambio di stato dei bot: un tentativo solo perdeva il clic). **Un avvio solo per sonda**: tra una scena e l'altra lo stato si rimette a posto navigando, mai riavviando l'app.
+
+**La conversione** (stesse verifiche, stesso numero di controlli verdi):
+
+| sonda | righe | controlli | `sleep(` prima | dopo | tempo «prima» | tempo «dopo» |
+|---|---|---|---|---|---|---|
+| fase-design | 1.440 → 776 | 7/7 → 7/7 | 51 | 0 | 15 min 5 s (905 s) | **15 min 1 s** (901 s, corsa finale) |
+| fase-b20-bug | 1.088 → 890 | 76/76 → 76/76 | 36 | 0 | 38,3 s | **16 s** |
+| fase-plugin-pulita | 921 → 723 | 113/113 → 113/113 | 27 | 2 (di proposito, commentati) | 40,4 s | **18.1 s** |
+| fase-centro | 857 → 558 | 55/55 → 55/55 | 18 | 0 (restano 5 `setTimeout` come poll nei loop di retry, come nell'originale) | 32,6 s | **12 s** |
+| fase-squadra | 639 → 610 | 32/32 → 32/32 | 18 | 0 | 139 s (e la corsa flaky KO a 6 s dentro fatto.mjs) | **2 min 12 s** (3 corse di stabilità: 133/132/133) |
+
+Totale: **150 sleep fissi → 2**, entrambi con commento «di proposito» (la pausa fra il primo e l'unico secondo tentativo di consegna della rotella alla finestra coperta, e il tempo entro cui i server MCP finti devono uscire — ciò che il check misura). I controlli sono identici a parola per parola. Il tempo «prima» viene dalla corsa di fatto.mjs (una corsa, uscita su file, sonde una alla volta); il «dopo» dalla corsa finale all'HEAD della fase (design) e dalle corse di stabilità (le altre).
+
+**La stabilità** (tre corse di fila verdi, docs/FATTO.md): design 7/7 × 3 (831/835/829 s), b20-bug 76/76 × 3, plugin-pulita 113/113 × 3, centro 55/55 × 3, squadra 32/32 × 3 (133/132/133 s) — **15 corse verdi**.
+
+**I difetti trovati dalla conversione** (tutti nell'attrezzatura, MAI nell'app):
+
+1. Il clic a un solo tentativo perdeva il clic quando React remonta la barra fra attendi e clic (la squadra lo ha mostrato al primo giro): il motore ora RIPETE il clic finché l'elemento sta in vista.
+2. `attendiStabile` su due frame consecutivi cadeva a metà delle transizioni di apertura: le icone dei menu delle Impostazioni misurate 15×15 (354 violazioni). Aggiunto `attendiStabileEspr` (due letture a 120 ms).
+3. Il menu dell'account nel tema scuro si richiude entro ~1 s dall'apertura (già nell'originale): l'attesa di stabilità consumava il tempo e la misura trovava la radice assente (3 violazioni). La misura ora RIAPRE l'overlay se la radice è sparita e aspetta la sua stabilità — 0 violazioni.
+4. `s.invia` senza la pausa fra input e Invio mandava a volte l'invio col campo vuoto (il React state aggiorna al giro successivo): pausa di 150 ms DI PROPOSITO, commentata.
+
+**Le scene** (F1): la lista delle pagine di DS4 (`PAGES`), i dati finti della chat e le funzioni per aprirle sono SPOSTATE in `scripts/lib/scene.mjs` (dal corpo di `fase-design-probe.mjs`, che ora le importa). Il provider OpenAI-compatible finto, identico nelle sonde di design e b20-bug, è in un posto solo: `scripts/lib/modello-finto.mjs`.
+
+## F1 — la galleria visiva
+
+`scripts/galleria.mjs`: 76 scene (le pagine DS4 di `scripts/lib/scene.mjs` più la pagina dei componenti) a 1280×800 in chiaro e scuro, più chat/plugin-lista/libreria-griglia anche a 900×640, catturate via CDP alla scala 1 e confrontate con `magick compare -metric AE -fuzz 1%`: una scena passa solo con **0** pixel diversi; per ogni scena diversa `galleria/.diff/` tiene il tri-panel approvata|nuova|differenza e `.diff/index.html` le elenca.
+
+**Il determinismo è stato la parte dura** — tre cause trovate e corrette, in ordine:
+
+1. **I tempi relativi si spostavano a ogni corsa.** L'orologio fermo del renderer è un istante costante, ma i timestamp scritti dal MAIN sono a orologio reale: la distanza cresce a ogni corsa e le stringhe («adesso» vs «1 minuto») rifanno il layout di intere colonne. Fix conforme alla spec («i dati finti hanno date fisse rispetto a quell'istante»): `preparaDeterministica` SEMINA il timeline del bot principale e la Libreria direttamente nel DB all'ISTANTE FERMO (2026-11-20T10:00:00Z, l'esempio della spec) — la risposta lunga in markdown, i 4 avvisi di risposta vuota (le entry notice col meta `notice.modelEmpty`, raggruppate «· 4 volte»), i 4 documenti (contenuto su disco in `library/…/v1.md`, righe `library_items` a date fisse), i 3 messaggi della squadra. Niente turni dal vivo nella galleria: le entry «Hai scritto…», le code e i turni interrotti, che nascevano a orari diversi a ogni corsa, non esistono più.
+2. **Gli eventi «Server MCP collegato: plugin-XX»** (i 12 server finti partono in parallelo e si collegano in ordine casuale) entravano nel timeline sotto il Riepilogo e cambiavano a ogni corsa. Nella galleria i plugin restano DISATTIVATI (tranne `srv-plugin-01`, attivo per la scena Autorizzazioni): nessuna connessione, nessun evento. `srv-plugin-01` collegato in prepara (attesa via pgrep del suo processo) così i 24 strumenti di Autorizzazioni ci sono sempre.
+3. **Il rasterizzatore**. Le PNG di due corse pulite differivano comunque per un delta minuscolo distribuito su OGNI pixel (la metrica AE di ImageMagick 7 Q16-HDRI somma le differenze a 16 bit: 1,9e+07 = ~2,5% per canale): l'antialiasing del testo e la rasterizzazione GPU variano tra le corse. La galleria avvia l'app con gli interruttori del rendering deterministico: `--disable-gpu --disable-gpu-rasterization --disable-lcd-text --disable-font-subpixel-positioning --force-color-profile=srgb --disable-partial-raster` — da lì, le catture di due corse sono **byte-identiche**.
+
+**Le maschere** (l'eccezione, elencate come chiede la spec — sono i dati a OROLOGIO REALE del main, che nessun orologio fermo del renderer può congelare):
+
+| scena | cosa si copre | motivo |
+|---|---|---|
+| registro (chiaro/scuro) | le celle delle ore delle decisioni (`\d{1,2}:\d{2}`) | le decisioni del registro nascono durante la corsa: l'ora è quella del main |
+| documento (chiaro/scuro) | la riga «versione · aggiornata alle hh:mm» | l'ora della testata è quella del main |
+| dialogo-nuovo (chiaro/scuro) | l'anteprima della mascotte nel dialogo | il colore è hash dell'id casuale del bot che verrà creato — diverso a ogni corsa per definizione |
+
+**Le prove della galleria** (con i comandi e le uscite):
+
+1. **Stabilità**: due corse di fila senza cambiare niente → `scene: 76 · uguali 76 · diverse 0` **due volte** (exit 0 entrambe). Prima di arrivare: il churn era 12 → 34 → 46 scene diverse con le tre cause sopra.
+2. **ROSSO sulla base `fase-design`** (build in un worktree temporaneo nella base dei vincoli con node_modules collegato e `electron-vite build` diretto, come fa la sonda di design con `--app`; la scena componenti esclusa — non esiste sulla base): **24 scene su 24 diverse**, exit 1. Le differenze R1–R4 sono allegate al REPORT in `docs/catture/galleria-rossa-fase-design/`: `plugin-collegati-chiaro.png` (R1 elenchi e R4 pillola), `barra-chiaro.png` (R3 barra), `impostazioni-generali-chiaro.png` (R2 testata), `chat-chiaro.png` (il confronto complessivo).
+3. **Token ±1 px**: `--radius-control` 8→9 px, build, galleria `--solo componenti,dialogo-nuovo` → **dialogo-nuovo 519.226 e componenti 284.770.000** pixel-livelli di differenza: le scene che usano il token diventano rosse ✓. Token annullato subito dopo (`git checkout styles.css`).
+4. Il peso di `galleria/approvate/`: **6,2 MB** (limite 15 MB ✓).
+
+**Le catture guardate una per una** (con il modello di visione, per GRUPPO — il contenuto identico tra le corse è garantito dal confronto AE=0):
+
+- **guida**: il passo di personalizzazione del bot (nome, aspetto, colore) con la mascotte. Difetti trovati: il colore selezionato si distingue poco dal colore del bot (bordo sottile), le etichette della stepper quasi illeggibili, la «Lingua» grigia su scuro a basso contrasto. → lista della prossima fase.
+- **chat** (16 catture): la colonna chat con il Riepilogo in markdown (titoli, tabella, codice, elenchi) e gli avvisi raggruppati «· 4 volte». Difetti: il testo grigio dei metadati a contrasto basso su fondo beige/chiaro; il badge «Bot» copre la prima riga del messaggio scrollato (comportamento dello scroll della scena); le voci grigie della barra in scuro poco leggibili. → lista della prossima fase.
+- **barra**: le sezioni (Nuovo, Bot, Da approvare, Plugin, Attività, Libreria), il Team «Weekend Torino», i bot con i puntini di stato. Difetti: il badge «la tua chat» piccolo e a basso contrasto; «finto · finto» nel footer poco chiaro. → lista della prossima fase.
+- **menu-account, dialogo-nuovo**: le voci Impostazioni/Tema e il dialogo di creazione (mascotte, tag di stile, colori, campo nome, Annulla/Crea). Difetti: i tag inattivi a contrasto testuale molto basso; il campo nome senza etichetta visiva. → lista della prossima fase.
+- **plugin** (22 catture): la lista dei server, la scheda, Connettori, Skill, Collegati, Autorizzazioni (24 strumenti), Server MCP, Importa/Crea skill. Difetti: i label secondari grigi a contrasto basso; i percorsi tagliati senza ellissi; le icone d'azione piccole e poco distinguibili; i badge «stdio» quasi invisibili. → lista della prossima fase.
+- **libreria** (8 catture): la griglia delle card con le anteprime, la lista, il documento aperto. Difetti: le intestazioni delle anteprime-tabella poco leggibili come testo; le card con altezze disallineate nella prima riga; il metadato su riga separata in una card (incoerente con le altre). → lista della prossima fase.
+- **impostazioni** (14 catture): Generali, Modelli, Approvazioni, Cassaforte (+ Dei plugin), Routine, Uso e costi. Difetti: etichette grigie a contrasto ridotto su scuro; nessun difetto di allineamento. → lista della prossima fase.
+- **componenti** (2 catture): la pagina F2 con tutti i componenti in ogni stato. Nessun difetto evidente.
+
+**I comandi**: `node scripts/galleria.mjs` (cattura e confronta, esce 1 se una scena è diversa o manca), `--solo id1,id2`, `--approva id1,id2|tutte` (copia le catture in `galleria/approvate/` e STAMPA l'elenco — l'approvazione va in un commit con l'elenco e il motivo: è il commit F1 2/2 con le 78 scene sopra elencate).
+
+## F2 — la pagina dei componenti
+
+`src/renderer/src/galleria/componenti.tsx`: ogni componente di `components/ui/` (button, input, select, notice, data-table, flat-list, section, page-header, column-head, underline-tabs, dialog, dropdown-menu, ModelPicker, ModelSelect, page-shell) in ogni stato, più DocumentBody con tutti i casi del markdown, i puntini di stato in tutti i colori e le pillole/badge. Si apre SOLO con `SANDBOT_TEST_GALLERIA=1`: il modulo è compilato FUORI dal build (`scripts/galleria-modulo.config.mjs`, lib standalone con React incluso e `inlineDynamicImports`), copiato in `out/renderer/` SOLO dalla galleria (che lo rimuove a fine corsa) e caricato dal renderer con un `import()` dinamico dietro il controllo `sandbotTest.galleria` (esposto dal preload) con il nome del modulo scritto a runtime dalla galleria stessa — il bundle di produzione resta senza il marcatore.
+
+**Il test** (`src/__tests__/guardie/componenti.test.ts`): dopo `electron-vite build` nessun file di `out/` contiene il marcatore `galleria-componenti`; App.tsx non contiene un import statico del modulo; ogni file di `components/ui/` è importato dalla pagina.
+
+**La prova ROSSA** (tre tentativi, tutti istruttivi): (a) l'import default NON usato veniva tree-shaken dal bundle — il test restava verde a torto, e inoltre il build falliva perché il modulo non ha un default export (binding error); (b) l'import di soli effetti — `import './galleria/componenti'` — entra nel bundle: **il test diventa ROSSO** (il marcatore trovato in `out/renderer/assets/index-DPtNGz5F.js`); (c) tolto l'import, rebuild: **VERDE** (3/3). Il primo giro ha anche scoperto che la RADICE del test puntava alla directory del repo genitore (`Projects/Bot`) e la scansione passava a vuoto: corretta.
+
+## F3 — le guardie in un posto solo, con `docs/REGOLE.md`
+
+**`docs/REGOLE.md`**: la tabella regola · perché · guardia · eccezioni (19 righe). Ogni regola che stava solo nel blocco dei vincoli e si può controllare dal codice ha ora la sua guardia.
+
+**Le guardie** stanno in `src/__tests__/guardie/` — un file per regola, con l'aiutante comune per scorrere i sorgenti (`sorgenti.ts`, preso dal modello di `design-scan.ts`). Le guardie esistenti si SPOSTANO lì senza cambiare cosa controllano: `design-guard.test.ts`, `design-tokens.test.ts` (con l'aiutante `tailwind-compile.ts`), `focus-ring-guard.test.ts`, `dialog-width-guard.test.ts`, `unwrapped-text-guard.test.ts`, `skills-menu-guard.test.ts` — le radici dei percorsi ricalcolate, i controlli identici. La guardia del Docker di R7 non è un file di test separato: sta in `src/test-setup.ts` (HOMUN_CONTAINER_PATH → un percorso inesistente), documentata in REGOLE.md.
+
+**Le guardie NUOVE** — ognuna vista ROSSA con le violazioni reali trovate a HEAD, poi corrette (dove non cambiavano ciò che l'utente vede) o allowlist col motivo:
+
+1. **misure crude** (`misure-crude.test.ts`): nessun px arbitrario nelle classi del renderer per ALTEZZE e POSIZIONI (h-[52px], min-h-[44px], top-[62px]…) — il buco che design-guard non copriva. Rossa su 3 file della guida (GuideModelStep, GuideComputerStep, GuideView) e su PageView (`max-w-[720px]`): PageView corretto al token `--w-reading` (stesso valore, 720 px: niente che l'utente veda); i passi della guida in allowlist col motivo (misure volute di quella fase: lista della prossima).
+2. **colori crudi** (`colori-crudi.test.ts`): nessun #hex/rgb(/oklch( nei .tsx. Rossa su App.tsx (la mascotte della boot-splash: colori fisici del disegno) e ComputerTerminal (i fallback di xterm). Allowlist col motivo — sono i due casi dove il letterale è per definizione.
+3. **percorsi personali** (`percorsi-personali.test.ts`): nessun `/Users/<nome>` diverso da `test` in src/ e scripts/. Rossa su **20 file** a HEAD (fixture con `/Users/prova`, `/Users/x`, `/Users/fabio`): corretti a `/Users/test` (i test) o costruiti da `os.homedir()` (scripts/copia-fixture-container-1.7.1.mjs — in allowlist col motivo: la radice che RIPULISCE è il formato dei file fixture). **REPORT.md non si tocca.**
+4. **temporanei nei test** (`temporanei.test.ts`): nessun test usa `os.tmpdir()`, `'/tmp'` o `env.TMPDIR` direttamente: si passa dall'aiutante `src/test-tmp.ts` (TEST_TMP_BASE, che esisteva già dalla fase ci-beta5). Rossa su **89 file** che facevano `mkdtempSync(join(tmpdir(), …))`: corretti tutti a `join(TEST_TMP_BASE, …)`.
+5. **porte dei modelli veri** (`porte-modelli.test.ts`): mai 11434 o 1234 come porta nei test e nelle sonde. Rossa su 5 file (pid-file finto con port 11434, baseUrl finte :11434, un dato `port: 1234`): corretti a porte finte innocue (41134/43121) e un IPv6 con segmento 1234 corretto a 1235 (il test resta identico). Eccezioni: i test che verificano PROPRIO di non toccarle (local-model-server, fase-impostazioni-probe).
+6. **emoji, `focus:ring`, docker**: le guardie esistenti spostate — nessuna regola nuova.
+
+**Dopo F3 il blocco dei vincoli per GLM si accorcia**: i vincoli ora coperti da una guardia e TOLTI dai prossimi prompt: percorsi personali (mai `/Users/…` oltre test), temporanei nei test (TEST_TMP_BASE), le porte 11434/1234 nei test e nelle sonde, i colori e le misure crude nel renderer, l'anello di fuoco e le icone lucide, le temporanee residue a fine corsa. Restano da promemoria nei prompt i vincoli NON controllabili dal codice: niente Docker vero, niente Composio vero, niente eval col modello, MAI l'Application Support vero, mai `open`/`osascript`/`sudo`/`screencapture`, REPORT.md con coda byte-identica, nessun push, nessun tag v*.
+
+## F4 — `docs/DESIGN.md`, la fonte unica
+
+Scritto a partire da ciò che C'È (token in styles.css, componenti in components/ui/, le regole di fase-design e b20-ritocchi nel REPORT): token (169 definizioni, per famiglia, con il valore letterale e quando si usa), 15 componenti (a cosa serve, quando NON usarlo, la scena della galleria), gli schemi di pagina, le regole. Il test di coerenza (`design-doc.test.ts`) confronta in ENTRAMBE le direzioni: ogni definizione di styles.css compare nel documento con lo stesso valore (per i token che cambiano col tema, come i puntini --bot-dot-*, vale la variante del tema chiaro), e ogni riga del documento esiste in styles.css; ogni file di components/ui/ ha la sua voce. Vista ROSSA togliendo una voce dalla tabella (il test la segnala col token e i due valori), poi verde.
+
+## F6 — `docs/ARCHITETTURA.md`, la mappa
+
+Due pagine: i processi (main, daemon `--homun-daemon`, renderer, box Apple/Docker, Engramma in-process, llama-server) e i loro canali; dove sta cosa (le cartelle di src/, il DB e le sue tabelle, i file dell'utente); gli invarianti (migrazioni additive, cassaforte e chiavi, cosa non esce mai dalla macchina, il Docker nei test); i comandi di sviluppo e delle sonde con le variabili `SANDBOT_TEST_*` più usate (11, una riga ciascuna).
+
+## Numeri
+
+Tutte le corse DOPO l'ultimo commit di codice (eba6e394, F2; il commit del REPORT è documenti). Typecheck **0 errori** (`tsc --noEmit`, primo passo della corsa finale di fatto.mjs). `npm test` **VERDE** (533 file / 6.844 test + i nuovi test di questa fase), `npm run test:ci-sim` **VERDE**, il build **OK**, la galleria **VERDE (76/76 uguali)**, le 5 sonde **VERDI** (7/7, 76/76, 113/113, 55/55, 32/32), i processi del repo a **0**, nessuna temporanea nuova. Il contenuto di `fatto-esito.md` della corsa finale:
+
+| passo | esito | durata | uscita | nota |
+|---|---|---|---|---|
+| typecheck | OK | 1.2 s | fatto-uscite/typecheck.log | |
+| suite: npm test | OK | 44.3 s | fatto-uscite/suite-npm-test.log | |
+| suite: ci-sim | OK | 44.8 s | fatto-uscite/suite-ci-sim.log | |
+| build | OK | 2.9 s | fatto-uscite/build.log | |
+| galleria | OK | 4 min 9 s | fatto-uscite/galleria.log | 76/76 uguali |
+| sonda fase-design | OK | 15 min 1 s | fatto-uscite/sonda-fase-design.log | 7/7 |
+| sonda fase-b20-bug | OK | 16 s | fatto-uscite/sonda-fase-b20-bug.log | 76/76 |
+| sonda fase-plugin-pulita | OK | 18.1 s | fatto-uscite/sonda-fase-plugin-pulita.log | 113/113 |
+| sonda fase-centro | OK | 12 s | fatto-uscite/sonda-fase-centro.log | 55/55 |
+| sonda fase-squadra | OK | 2 min 12 s | fatto-uscite/sonda-fase-squadra.log | 32/32 |
+| processi del repo a 0 | OK | 0 s | fatto-uscite/processi.txt | 0 Electron, 0 daemon |
+| nessuna temporanea nuova | OK | 0 s | fatto-uscite/temporanei.txt | 0 nuove |
+
+Corsa del 2026-11-25T02:37:50Z, **VERDE in 23 min 40 s**. Le durate dei test della suite: 533 file / 6.844+ test verdi (`npm test` 44.3 s) e il ci-sim (44.8 s) col Docker Desktop della macchina che NON risponde (la guardia dei sandbox lo rende irraggiungibile per costruzione).
+
+## Vincoli e pulizia
+
+Niente Docker né `container` vero (solo CLI e installer finti), niente eval col modello, niente dist firmata; nessun download vero, niente Composio vero, nessun pacchetto npm nuovo (per le immagini `/opt/homebrew/bin/magick`); rete solo su 127.0.0.1, mai le porte 11434 e 1234 (le guardie le bloccano nei test e nelle sonde); MAI `open` vero dell'Installer, MAI `osascript` vero, MAI `sudo`; temporanei solo con mktemp/mkdtemp nella cartella dei vincoli (mai `$TMPDIR` né `/tmp`); mai l'app o il daemon su ~/Library/Application Support/sandbot e mai i file VERI delle altre app (solo HOME finta); non toccati ~/Library/Application Support/com.apple.container/, /Applications/Homun.app né il daemon che gira da lì; niente screencapture: catture solo via CDP; mai `--update-lock` di prepare-engramma (il build è diretto, senza hook); non toccati vendor/llama, vendor/engramma, dist-installers/, ~/Projects/Bot/engramma, ~/Projects/Homun/homun2 né l'Homebrew llama-server; out-review/ e scripts/vetrina/ intatti; migrazioni DB nessuna; le catture e le misure delle altre fasi riportate a HEAD; REPORT.md con la sezione in cima e coda byte-identica; CHANGELOG invariato; nessun push, nessun tag v*.
+
+## Chiusura
+
+Processi Electron e `--homun-daemon` DEL REPO, contati per eseguibile: **0 e 0** (il passo 6 della corsa finale). Nessuna cartella temporanea nuova rispetto alla fotografia iniziale — il passo 7 con **0 nuove** (il fix SQLITE_TMPDIR ha chiuso l'unico caso: gli spill di sqlite delle sonde). Le catture e le misure delle fasi precedenti riportate a HEAD (`git checkout docs/catture docs/misure` dopo le corse delle sonde). Le catture della prova rossa della galleria in `docs/catture/galleria-rossa-fase-design/` (4 immagini, 972 KB) committate col REPORT.
+
+Tag annotato `fase-fondamenta` dopo il commit di questo REPORT. Nessun push, nessun tag v*.
+
+## Cose non fatte e domande aperte
+
+- **Le altre 37 sonde restano come sono**: la spec le converte solo quando una fase futura le tocca (docs/FATTO.md).
+- **La sonda design sulla base `fase-design` non è mai stata rigirata**: la misura «prima» della fase design è quella del suo REPORT storico; questa fase non l'ha rifatta (la galleria ROSSA sulla base copre la verifica visiva).
+- **I difetti visivi elencati per gruppo** (le catture guardate una per una) NON sono corretti in questa fase: sono la lista della prossima, come da spec.
+- **Nessuna domanda aperta**: le decisioni (l'istante fermo della spec, l'orologio a 500 ms, le maschere, il SQLITE_TMPDIR, i plugin disattivati tranne uno) sono tutte nel REPORT con il loro perché.
 # REPORT FASE B20-CHIUSURA: i due rossi della suite dopo b20-ritocchi
 
 Base: tag `fase-b20-ritocchi` (36a2f15a), verifica fatta: HEAD era esattamente lì (gli unici non tracciati `out-review/` e `scripts/vetrina/`, mai toccati). Tre commit di codice, uno per punto, più questo REPORT e il tag annotato `fase-b20-chiusura`. Freeze 0.3.1002: solo i tre punti chiesti, nessun ritocco in più.
