@@ -347,6 +347,10 @@ Galleria: chat-avvisi.
 La testata di una pagina a tutta area: indietro · icona (20, grigia) o logo (40) · titolo `text-page` in font-display · azioni a destra; la descrizione sta sotto, in una riga sua, mai dentro la riga dei 52. Le misure le decide la testata, non chi la usa. Non usarlo per le testate di colonna di chat, barra e pannelli (lì ColumnHead senza PageHeader); i controlli nelle azioni portano `no-drag`.
 Galleria: plugin-lista, documento.
 
+### list-page
+Il MODELLO della pagina di elenco (Plugin, Attività, Libreria, Da approvare, Registro): testata col titolo e l'azione principale → UNA barra di 40 con le schede (UnderlineTabs, UN livello) a sinistra — o la ricerca quando le schede non ci sono — più pillole e vista a destra → il corpo che scorre con ListGroup/ListRow o DataTable. Larghezza UNA, wide. Niente descrizione sotto il titolo (la frase va nell'EmptyState o nell'aiuto), mai due file di barra. La pagina si riempie, non si ridisegna.
+Galleria: gusci.
+
 ### page-shell
 Il guscio di ogni pagina a tutta area: `PageShell` (radice inchiodata all'area, testata/descrizione/toolbar ferme, corpo che scorre figlio diretto della radice, barra di scorrimento sul bordo) e `PageColumn` (gutter col margine della pagina, contenuto centrato a reading/page/wide; margine 32, 24 sotto i 900 px di area — container query, non media query). Non usarlo per la chat a colonne e i pannelli laterali, né centrare il corpo a mano: la larghezza la dà il guscio.
 Galleria: plugin-lista, libreria-griglia.

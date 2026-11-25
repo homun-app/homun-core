@@ -52,6 +52,7 @@ import { SearchField } from '../components/ui/search-field'
 import { FilterChipsScelta, FilterChipsMenu, FilterChipsInterruttore } from '../components/ui/filter-chips'
 import { PageToolbar } from '../components/ui/page-toolbar'
 import { ProposalCard } from '../components/ui/proposal-card'
+import { ListPage } from '../components/ui/list-page'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -166,7 +167,7 @@ export const SEZIONI = [
   { id: 'modelli', titolo: 'ModelPicker e ModelSelect', componenti: ['ModelPicker', 'ModelSelect'] },
   { id: 'modelli-aperto', titolo: 'i selettori APERTI', componenti: ['ModelPicker', 'ModelSelect'] },
   { id: 'pillole', titolo: 'pillole e badge', componenti: [] },
-  { id: 'gusci', titolo: 'page-shell — i tre gusci di larghezza', componenti: ['page-shell'] },
+  { id: 'gusci', titolo: 'page-shell e list-page — i gusci e il modello di elenco', componenti: ['page-shell', 'list-page'] },
   { id: 'markdown-1', titolo: 'DocumentBody — titoli, grassetti ed elenchi', componenti: [] },
   { id: 'markdown-2', titolo: 'DocumentBody — elenchi annidati, tabella, citazione e codice', componenti: [] }
 ] as const
@@ -518,7 +519,21 @@ const Sezione = ({ id }: { id: IdSezione }) => {
       )}
 
       {id === 'gusci' && (
-        <Section title="page-shell — i due gusci di larghezza (reading e wide: la page di una volta è via)" testId="galleria-section-shell">
+        <Section title="page-shell e list-page — i gusci e il modello di elenco" testId="galleria-section-shell">
+          <div className="mb-2">
+            <Etichetta>list-page — il modello della pagina di elenco (nel suo riquadro, come i gusci)</Etichetta>
+            <div className="relative h-72 overflow-hidden rounded-surface border border-border">
+              <ListPage
+                titolo="Plugin"
+                testId="galleria-list-page"
+                schede={{ tabs: [['tutto', 'Tutto'], ['connettori', 'Connettori'], ['skill', 'Skill'], ['collegati', 'Collegati · 12']] as never, value: 'tutto', onChange: () => undefined }}
+                headName="componenti"
+                contentClassName="py-4"
+              >
+                <div className="text-body">Il corpo dell'elenco: ListGroup e righe, nel modello che non si ridisegna.</div>
+              </ListPage>
+            </div>
+          </div>
           {/* G2: ogni guscio sta in un riquadro relative ad altezza FISSA con
               overflow-hidden: PageShell è absolute inset-0, senza il riquadro
               l'ultimo guscio si stenderebbe su tutta la pagina (page-shell.tsx
