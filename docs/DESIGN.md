@@ -237,6 +237,10 @@ Galleria: impaginazione.
 Il testo del catalogo: le sei taglie dei token (page 28 · title 20 · body 14, il default · small 13 · caption 12 · reading 16), ognuna con la sua interlinea; `tone` normale · grigio (le seconde righe) · errore; `weight` i tre pesi del tema (400 · 500 etichette e titoli di riga · 600 titoli); `truncate` per la riga che si taglia. Fuori da ui/ non si sceglie più la taglia di un testo col className.
 Galleria: testo.
 
+### icon
+L'icona del catalogo: SOLO Lucide, con la misura scritta dal pezzo — `size` sm 16 (default: il testo e i bottoni) · lg 20 (le testate). Senza misura lucide disegna 24, e la regola del tema è che la misura si scrive sempre: fuori da ui/ non si scrive più, la scrive questa. aria-hidden di default: l'etichetta accessibile sta nel controllo che la porta.
+Galleria: testo.
+
 ### grid
 La griglia dell'impaginazione: figli in colonne uguali (2 di default, oppure 3 · 4 · 6) alla distanza dei token (`gap` tight 8 · item 12 · block 16 default · section 32). Le card della Libreria e i riquadri a colonne si compongono con questa, non con una griglia scritta in pagina.
 Galleria: impaginazione.

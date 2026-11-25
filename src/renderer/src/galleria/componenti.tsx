@@ -36,6 +36,7 @@ import { Stack } from '../components/ui/stack'
 import { Row } from '../components/ui/row'
 import { Grid } from '../components/ui/grid'
 import { Text } from '../components/ui/text'
+import { Icon } from '../components/ui/icon'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -132,7 +133,7 @@ const MODELLI: ModelInfo[] = [
  */
 export const SEZIONI = [
   { id: 'impaginazione', titolo: 'stack, row e grid — impaginare', componenti: ['stack', 'row', 'grid'] },
-  { id: 'testo', titolo: 'text — le sei taglie e i toni', componenti: ['text'] },
+  { id: 'testo', titolo: 'text e icon — testo e icone', componenti: ['text', 'icon'] },
   { id: 'bottoni', titolo: 'button', componenti: ['button'] },
   { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
@@ -415,6 +416,11 @@ const Sezione = ({ id }: { id: IdSezione }) => {
             <Text>normale</Text>
             <Text tone="muted">grigio</Text>
             <Text tone="destructive">errore</Text>
+          </Riga>
+          <Riga label="icon — le due misure dei token (16 nel testo, 20 nelle testate)">
+            <div className="flex items-center gap-4 text-body">
+              <Icon icon={Loader2} /> <Icon icon={TriangleAlert} size="lg" /> <Icon icon={CircleHelp} /> <Icon icon={CheckCircle2} size="lg" /> <Icon icon={Plus} /> <Icon icon={Settings} size="lg" />
+            </div>
           </Riga>
           <Riga label="truncate: la riga che non ci sta si taglia col ellissi">
             <div className="w-56">
