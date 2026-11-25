@@ -37,6 +37,7 @@ import { Row } from '../components/ui/row'
 import { Grid } from '../components/ui/grid'
 import { Text } from '../components/ui/text'
 import { Icon } from '../components/ui/icon'
+import { AppLogo } from '../components/ui/app-logo'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -134,6 +135,7 @@ const MODELLI: ModelInfo[] = [
 export const SEZIONI = [
   { id: 'impaginazione', titolo: 'stack, row e grid — impaginare', componenti: ['stack', 'row', 'grid'] },
   { id: 'testo', titolo: 'text e icon — testo e icone', componenti: ['text', 'icon'] },
+  { id: 'identita', titolo: 'app-logo — i loghi delle app', componenti: ['app-logo'] },
   { id: 'bottoni', titolo: 'button', componenti: ['button'] },
   { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
@@ -397,6 +399,18 @@ const Sezione = ({ id }: { id: IdSezione }) => {
           <PageColumn width="reading">
             <DocumentBody markdown={MD_PRIMA_PARTE} />
           </PageColumn>
+        </Section>
+      )}
+
+      {id === 'identita' && (
+        <Section title="app-logo — il file del catalogo o l'iniziale" testId="galleria-section-app-logo">
+          <Riga label="da 32 (le righe) e da 40 (le testate di scheda)">
+            <AppLogo logo="gmail.svg" name="Gmail" className="size-8 text-body" />
+            <AppLogo logo="slack.svg" name="Slack" className="size-8 text-body" />
+            <AppLogo logo="asana.svg" name="Asana" className="size-10 text-reading" />
+            <AppLogo logo={null} name="Sconosciuta" className="size-8 text-body" />
+            <AppLogo logo={null} name="App Nuova" className="size-10 text-reading" />
+          </Riga>
         </Section>
       )}
 

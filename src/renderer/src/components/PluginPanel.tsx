@@ -55,7 +55,7 @@ import { humanizeSkillName } from '../../../shared/skill-md'
 import { Toggle } from './Settings'
 import { AppRow } from './plugin/app-row'
 import { useConnectFlows } from './plugin/connect-flows'
-import { AppLogo } from './plugin/app-logo'
+import { AppLogo } from './ui/app-logo'
 import { DevelopersContent } from './plugin/developers-content'
 // Fase design (DS2): il guscio di OGNI pagina a tutta area e la sua testata — al posto di PluginShell
 import { PageShell } from './ui/page-shell'

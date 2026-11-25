@@ -237,6 +237,10 @@ Galleria: impaginazione.
 Il testo del catalogo: le sei taglie dei token (page 28 · title 20 · body 14, il default · small 13 · caption 12 · reading 16), ognuna con la sua interlinea; `tone` normale · grigio (le seconde righe) · errore; `weight` i tre pesi del tema (400 · 500 etichette e titoli di riga · 600 titoli); `truncate` per la riga che si taglia. Fuori da ui/ non si sceglie più la taglia di un testo col className.
 Galleria: testo.
 
+### app-logo
+Il logo di un'app del catalogo: il file del repo (o un data: URL), e quando manca l'iniziale su una piastrella tenue — mai un'emoji. La misura la dà chi lo rende con `className` (size-8 nelle righe, size-10 nelle testate di scheda); il raggio e il fondo del tema scuro stanno in lib/app-logos, in un posto solo.
+Galleria: identita.
+
 ### icon
 L'icona del catalogo: SOLO Lucide, con la misura scritta dal pezzo — `size` sm 16 (default: il testo e i bottoni) · lg 20 (le testate). Senza misura lucide disegna 24, e la regola del tema è che la misura si scrive sempre: fuori da ui/ non si scrive più, la scrive questa. aria-hidden di default: l'etichetta accessibile sta nel controllo che la porta.
 Galleria: testo.

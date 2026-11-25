@@ -11,7 +11,7 @@ import { useLingui, Trans } from '@lingui/react/macro'
 import type { ReactNode } from 'react'
 import type { CatalogRowView } from '../../lib/apps-view'
 import type { AppFlowFailure, AppFlowKind } from './connect-flows'
-import { AppLogo } from './app-logo'
+import { AppLogo } from '../ui/app-logo'
 import { FlatRow } from '../ui/flat-list'
 import { Button } from '../ui/button'
 

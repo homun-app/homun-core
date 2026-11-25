@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 // C0 (fase linguaggio): AppsWindow.tsx è smontato in components/plugin/ — i
 // pezzi si leggono lì, uniti
 const src = [
-  '../components/plugin/app-logo.tsx',
+  '../components/ui/app-logo.tsx',
   '../components/plugin/app-row.tsx',
   '../components/plugin/connect-flows.tsx',
   '../components/plugin/developers-content.tsx',

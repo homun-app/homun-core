@@ -39,8 +39,9 @@ vi.mock('../components/ui/dialog', () => ({}) as never)
 
 const PANEL_SRC = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
 // C0 (fase linguaggio): AppsWindow è smontato — i pezzi si leggono uniti
-const APPS_SRC = ['connect-flows', 'app-row', 'app-logo']
+const APPS_SRC = ['connect-flows', 'app-row']
   .map((n) => readFileSync(fileURLToPath(new URL(`../components/plugin/${n}.tsx`, import.meta.url)), 'utf8'))
+  .concat(readFileSync(fileURLToPath(new URL('../components/ui/app-logo.tsx', import.meta.url)), 'utf8'))
   .join('\n\n')
 
 const { PluginPanel } = await import('../components/PluginPanel')
@@ -377,7 +378,7 @@ describe('DS4 (fase design): la pagina è nel guscio di sistema', () => {
   })
 
   it('il logo di ripiego è l\'iniziale: niente emoji al posto di un logo (DS1: nell\'interfaccia solo icone)', async () => {
-    const { AppLogo } = await import('../components/plugin/app-logo')
+    const { AppLogo } = await import('../components/ui/app-logo')
     const html = renderHtml(createElement(AppLogo, { logo: '🧩', name: 'Zed' }))
     expect(textOf(parseHtml(html))).toBe('Z')
     expect(html).not.toContain('🧩')

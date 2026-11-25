@@ -47,7 +47,7 @@ import { PageHeader } from './ui/page-header'
 import { ServerAccountRow } from './plugin/ServerSecretRows'
 import { SECRET_EDIT_INITIAL, secretEditReducer, type SecretEditState, type ServerSecretNames } from '../lib/plugin-secret'
 import { Toggle } from './Settings'
-import { AppLogo } from './plugin/app-logo'
+import { AppLogo } from './ui/app-logo'
 import { GatewayAccountsSection } from './plugin/gateway-accounts'
 // PP4 (fase plugin-pulita): la scheda a filo — righe e schede come testo, niente riquadri
 import { FlatList, FlatRow } from './ui/flat-list'

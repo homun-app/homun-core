@@ -13,8 +13,9 @@ import { createElement } from 'react'
 import { renderHtml, parseHtml, textOf, findAll, hasAncestor, type HtmlNode } from './render-helper'
 
 // C0 (fase linguaggio): AppsWindow è smontato — i pezzi si leggono uniti
-const APPS_SRC = ['connect-flows', 'app-row', 'app-logo']
+const APPS_SRC = ['connect-flows', 'app-row']
   .map((n) => readFileSync(fileURLToPath(new URL(`../components/plugin/${n}.tsx`, import.meta.url)), 'utf8'))
+  .concat(readFileSync(fileURLToPath(new URL('../components/ui/app-logo.tsx', import.meta.url)), 'utf8'))
   .join('\n\n')
 const PANEL_SRC = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
 const CARD_SRC = readFileSync(fileURLToPath(new URL('../components/ConnectorCard.tsx', import.meta.url)), 'utf8')
