@@ -393,7 +393,7 @@ export async function avviaSonda({
       await s.eval(`document.documentElement.classList.${t === 'scuro' ? 'add' : 'remove'}('dark'); return true`)
       // attesa DI PROPOSITO: le transizioni del tema durano fino a ~250 ms (le misure di colore
       // e le catture devono vedere il tema STABILE, come l'originale con sleep(280))
-      await sleep(280)
+      await sleep(500)
     },
     /** L'attesa di assestamento prima di ogni cattura: fonti caricate, due frame, e la rete quieta (l'originale aspettava 350 ms dopo i frame). */
     assesta: async () => {

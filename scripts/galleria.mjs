@@ -152,6 +152,9 @@ const cattura = async (s, page, ctx, w, tema) => {
       else sc.scrollTop = 0
     }
     return true`)
+  // le maschere della scena PRECEDENTE si togliono: i rettangoli sono fissi
+  // allo schermo e coprirebbero le scene successive
+  await s.eval(`document.querySelectorAll('[data-galleriaMaschera]').forEach((d) => d.remove()); return true`).catch(() => undefined)
   // il POPOVER ⌘K si chiude da solo entro ~1 s dall'apertura (già nell'originale):
   // la cattura parte SUBITO dopo l'apertura, prima delle attese di stabilità
   const catturaPrima = page.id === 'popover-chiedi'
