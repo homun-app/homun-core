@@ -120,6 +120,16 @@ const run = async () => {
         await openPage(s, page, ctx)
         if (page.overlay) await openOverlay(s, page)
         await s.attendiRete({ quieta: 250, entro: 8_000 }).catch(() => undefined)
+        // l'apertura del dialogo ANIMA (scale/fade di Radix): si misura da
+        // trasformazione finita, o l'1 px della scala a metà corsa sembra
+        // una differenza di lingua grafica
+        await s.attendi(`(() => {
+          const animati = [...document.querySelectorAll('[role="dialog"], [data-state="open"]')]
+            .filter((e) => e.getClientRects().length > 0)
+            .filter((e) => { const c = getComputedStyle(e); return c.transform !== 'none' || c.opacity !== '1' })
+          return animati.length === 0
+        })()`, { entro: 3_000, motivo: 'le animazioni del dialogo finiscano', passo: 100 }).catch(() => undefined)
+        await s.eval(`await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`).catch(() => undefined)
         const misure = await s.eval(MISURA_JS)
         // la composizione della barra (che pezzi ha): due pagine con pezzi
         // diversi non possono coincidere nella x della ricerca — il confronto
