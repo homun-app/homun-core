@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const WINDOW = fileURLToPath(new URL('../components/SkillsWindow.tsx', import.meta.url))
+const WINDOW = fileURLToPath(new URL('../components/plugin/catalog-preview.tsx', import.meta.url))
 const PANEL = fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url))
 const src = readFileSync(PANEL, 'utf8')
 const preview = readFileSync(WINDOW, 'utf8')
@@ -16,7 +16,7 @@ const preview = readFileSync(WINDOW, 'utf8')
 /** Il blocco di un componente interno (dalla `function Nome` al successivo). */
 function block(name: string): string {
   const start = src.indexOf(`function ${name}`)
-  if (start < 0) throw new Error(`componente ${name} non trovato in SkillsWindow.tsx`)
+  if (start < 0) throw new Error(`componente ${name} non trovato nei pezzi della skill (plugin/)`)
   const next = src.indexOf('\nfunction ', start + 10)
   return src.slice(start, next > 0 ? next : undefined)
 }
@@ -74,9 +74,11 @@ describe('K2 → PL5: la sezione «Sfoglia» sta nella pagina Plugin (segmento S
 })
 
 describe('K2 → PL7: l\'anteprima della voce è un pezzo riusato dalla pagina', () => {
-  it('CatalogPreview vive in SkillsWindow.tsx e la pagina la apre dalla riga', () => {
+  it('CatalogPreview vive in plugin/catalog-preview.tsx e la pagina la apre dalla riga', () => {
     expect(preview).toMatch(/export function CatalogPreview/)
-    expect(src).toMatch(/import \{ SkillEditor, PluginDetail, CatalogPreview \} from '\.\/SkillsWindow'/)
+    expect(src).toMatch(/import \{ SkillEditor \} from '\.\/plugin\/skill-editor'/)
+    expect(src).toMatch(/import \{ PluginDetail \} from '\.\/plugin\/plugin-detail'/)
+    expect(src).toMatch(/import \{ CatalogPreview \} from '\.\/plugin\/catalog-preview'/)
     expect(src).toMatch(/<CatalogPreview/)
   })
 })

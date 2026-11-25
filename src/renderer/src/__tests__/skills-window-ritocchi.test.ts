@@ -15,15 +15,22 @@ import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
 import { renderHtml, parseHtml, findAll } from './render-helper'
 
-const WINDOW = fileURLToPath(new URL('../components/SkillsWindow.tsx', import.meta.url))
+// C0 (fase linguaggio): SkillsWindow.tsx è smontato in components/plugin/ —
+// skill-editor, plugin-detail e catalog-preview — e i pezzi si leggono lì
+const PIECES = [
+  '../components/plugin/skill-editor.tsx',
+  '../components/plugin/plugin-detail.tsx',
+  '../components/plugin/catalog-preview.tsx',
+  '../components/plugin/skill-bits.ts'
+].map((rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
 const PANEL = fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url))
 const src = readFileSync(PANEL, 'utf8')
-const pieces = readFileSync(WINDOW, 'utf8')
+const pieces = PIECES.join('\n\n')
 
 /** Il blocco di un componente interno dei PEZZI (dalla `function Nome` al successivo). */
 function block(name: string): string {
   const start = pieces.indexOf(`function ${name}`)
-  if (start < 0) throw new Error(`componente ${name} non trovato in SkillsWindow.tsx`)
+  if (start < 0) throw new Error(`componente ${name} non trovato nei pezzi della skill (plugin/)`)
   const next = pieces.indexOf('\nfunction ', start + 10)
   return pieces.slice(start, next > 0 ? next : undefined)
 }
@@ -131,7 +138,7 @@ describe('T1–T5 → DS4 (fase design): i pezzi delle skill ai token', () => {
   })
 
   it('l\'editor di una skill nuova: i campi sono alti 36 col raggio dei controlli; «Salva» è l\'unico pieno; «Indietro» sta in una casa alta 32', async () => {
-    const { SkillEditor } = await import('../components/SkillsWindow')
+    const { SkillEditor } = await import('../components/plugin/skill-editor')
     const root = parseHtml(renderHtml(createElement(SkillEditor, { folder: null, onDone: () => undefined, onCancel: () => undefined })))
     // il campo su una riga: 36. Le aree di testo (descrizione, istruzioni) non hanno un'altezza fissa —
     // crescono col testo — ma il raggio e il testo sono quelli dei campi

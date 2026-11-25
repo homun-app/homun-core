@@ -67,8 +67,11 @@ import { Button } from './ui/button'
 // PL2 (fase plugin): la scheda del plugin (tavola 9) — clic su una riga
 import { PluginCard } from './PluginCard'
 import { ManualServers } from './plugin/manual-servers'
-// PL5: l'editor, il dettaglio delle skill di plugin e l'anteprima del catalogo — riusati
-import { SkillEditor, PluginDetail, CatalogPreview } from './SkillsWindow'
+// PL5 → C0 (fase linguaggio): l'editor, il dettaglio delle skill di plugin e
+// l'anteprima del catalogo — riusati, ognuno nel suo file di plugin/
+import { SkillEditor } from './plugin/skill-editor'
+import { PluginDetail } from './plugin/plugin-detail'
+import { CatalogPreview } from './plugin/catalog-preview'
 import { SKILL_CATEGORIES, searchSkillCatalog, skillCatalogDescription, skillCatalogInstallState, type SkillCategoryId } from '../../../shared/skill-catalog'
 import { humanizeSkillName as humanize } from '../../../shared/skill-md'
 import { logoUrlForName, LOGO_CLASS } from '../lib/app-logos'

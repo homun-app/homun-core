@@ -1,73 +1,23 @@
-// Fase skill (S4/S5/S6): la finestra «Skill» — la LIBRERIA UNICA al posto
-// della copia per bot. Come la finestra App: Dialog grande, stile delle
-// Impostazioni (SettingsGroup, SettingsRow, SettingsAdvanced, Toggle); il
-// foglio del dettaglio segue il modello di ServerSheet. Ci si arriva dalla
-// riga «Skill · N» della finestra App, dal pannello Skill della chat (rimando
-// filtrato sul bot) e dalla voce nel menu in basso (B1).
-//
-//   elenco     ricerca, filtri (Tutte · Mie · Create dai bot · Importate ·
-//              Da plugin), nome umanizzato + descrizione + origine + «Bot
-//              che la usano» in breve; in testa «+ Nuova skill» e «Da GitHub»;
-//   dettaglio  nome, descrizione e istruzioni modificabili con anteprima
-//              markdown (renderer già nell'app), salvataggio con validazione
-//              S1 ed errori sul campo, gruppo «Bot che la usano», «File» in
-//              sola lettura, «Avanzate» (nome tecnico, origine, licenza,
-//              Mostra nel Finder, Esporta, Versioni precedenti), «Rimuovi»;
-//   plugin     in sola lettura («si aggiorna aggiornando il plugin»);
-//   importate  modificabili: diventano source 'user' con origin conservato;
-//              «Aggiorna da GitHub» avvisa che sovrascrive le modifiche.
-//   sfoglia    (fase skill · catalogo, K2) la terza sezione: il CATALOGO
-//              CURATO che vive nel repo (src/shared/skill-catalog) — niente
-//              rete per l'elenco, titoletti per categoria, filtri a pillola e
-//              righe con fonte e «Aggiunta». Prima mostrava i pacchetti dei
-//              marketplace: i plugin restano in Collega app › Marketplace.
-//              L'anteprima (K3) scarica la voce al COMMIT FISSATO e mostra
-//              fonte, licenza, i file che entreranno e gli «Adattamenti di
-//              Homun»; «Aggiornamento disponibile» usa il flusso di oggi.
-//   ritocchi   (fase skill · Sfoglia, T1–T5) un solo campo di ricerca (il
-//              campo in alto filtra ANCHE il catalogo), il contenuto della
-//              finestra è un @container (le righe col controllo a destra),
-//              «‹ Indietro» in alto nell'anteprima (UN solo «Annulla»),
-//              focus d'apertura sul campo.
-//
-// Fase design (DS4): la finestra non c'è più — restano i PEZZI che la pagina
-// Plugin riusa (l'editor per «Crea una skill» e per il dettaglio, il dettaglio
-// di una skill di plugin, l'anteprima del catalogo) e passano ai token:
-//  - i campi sono alti 36, col raggio dei controlli e il testo di riga (prima
-//    ogni campo aveva la sua altezza e le sue taglie: 14, 13, 12, 11 px);
-//  - i bottoni sono Button: l'azione che salva è l'unica piena (Salva,
-//    Aggiorna, Aggiungi), le altre sono testo;
-//  - il codice (istruzioni, file, versioni) è a 13 px: sotto si faticava;
-//  - la piastrella davanti al nome, nell'anteprima e nel dettaglio di plugin,
-//    è un'icona lucide in una casa da 40 (il logo delle testate di scheda):
-//    prima erano l'emoji del puzzle e un ✦ scritti nel testo;
-//  - i gruppi di impostazioni (SettingsGroup/SettingsRow/SettingsAdvanced)
-//    restano quelli delle Impostazioni, com'erano: li porta ai token chi li
-//    possiede.
+// C0 (fase linguaggio): pezzo di SkillsWindow.tsx (smontato: non era più una
+// finestra, nessuno la montava) — va in un file suo di components/plugin/.
+// L'editor delle skill: crea (folder null), modifica (folder) o mostra il
+// dettaglio (embedded). Salvataggio con validazione S1 ed errori sul campo;
+// «Bot che la usano»; File in sola lettura; Avanzate con versioni, Finder,
+// esporta; Rimuovi rosso con conferma. PL1 (fase plugin): la pagina Plugin
+// lo riusa per «Crea una skill».
 import { useEffect, useMemo, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
-import { msg } from '@lingui/core/macro'
+import { ChevronLeft } from 'lucide-react'
+import { api, useStore } from '../../store'
+import type { SkillLibraryItem, SkillGithubUpdatePreview, SkillVersion } from '../../../../shared/types'
+import { parseSkillMd } from '../../../../shared/skill-md'
 import ReactMarkdown from 'react-markdown'
-import { ChevronLeft, Puzzle, Sparkles } from 'lucide-react'
-import { api, useStore } from '../store'
-import type {
-  SkillLibraryItem, SkillGithubUpdatePreview, SkillVersion,
-  SkillCatalogEntry, SkillCatalogPreview
-} from '../../../shared/types'
-import { humanizeSkillName, parseSkillMd } from '../../../shared/skill-md'
-import {
-  skillCatalogDescription,
-  type SkillCatalogInstallState
-} from '../../../shared/skill-catalog'
-import { SettingsAdvanced } from './settings/SettingsAdvanced'
-import { SettingsGroup } from './settings/SettingsGroup'
-import { SettingsRow } from './settings/SettingsRow'
-import { Toggle } from './Settings'
-import { Button } from './ui/button'
-
-function issueText(i: { uiId: string; values?: Record<string, string | number> }, i18n: { _(m: unknown, values?: Record<string, unknown>): string }): string {
-  return i18n._({ id: i.uiId }, i.values)
-}
+import { SettingsAdvanced } from '../settings/SettingsAdvanced'
+import { SettingsGroup } from '../settings/SettingsGroup'
+import { SettingsRow } from '../settings/SettingsRow'
+import { Toggle } from '../Settings'
+import { Button } from '../ui/button'
+import { BACK, issueText } from './skill-bits'
 
 /**
  * Il campo dell'editor (DS1): 36 px — la misura dei campi — col raggio dei
@@ -77,47 +27,7 @@ function issueText(i: { uiId: string; values?: Record<string, string | number> }
 const FIELD = 'h-control w-full rounded-control bg-background px-3 text-body outline-none placeholder:text-muted-foreground'
 /** L'azione rossa che non riempie: testo (ghost) nel colore del distruttivo, anche al passaggio. */
 const QUIET_RED = 'text-destructive hover:bg-destructive/10 hover:text-destructive'
-/** «‹ Indietro» in cima a un foglio: testo grigio, in una casa alta 32 (un bottone, non una riga di testo da 18 px). */
-const BACK = 'flex h-control-sm items-center gap-1 text-small text-muted-foreground transition hover:text-foreground'
-/** La piastrella davanti al nome di una skill del catalogo o di un plugin (40: il logo delle testate di scheda). */
-const TILE = 'grid size-10 shrink-0 place-items-center rounded-surface bg-muted text-muted-foreground'
 
-export function PluginDetail({ name, plugins, onClose }: { name: string; plugins: Array<{ plugin: string; skills: Array<{ name: string; description: string }> }>; onClose(): void }): React.ReactNode {
-  const { i18n } = useLingui()
-  const group = plugins.find((g) => g.skills.some((s) => s.name === name))
-  const skill = group?.skills.find((s) => s.name === name)
-  return (
-    <div className="flex flex-col gap-block" data-testid="skill-plugin-detail">
-      <button type="button" className={BACK} onClick={onClose}>
-        <ChevronLeft className="size-4" /><Trans>Indietro</Trans>
-      </button>
-      <div className="flex items-center gap-row-gap">
-        <span className={TILE} aria-hidden="true"><Puzzle className="size-5" /></span>
-        <span className="min-w-0 flex-1">
-          {/* il nome è il titolo del foglio (text-title: titoli di dialoghi e schede) */}
-          <span className="block truncate text-title font-semibold">{humanizeSkillName(name)}</span>
-          <span className="mt-0.5 block truncate text-small text-muted-foreground">{skill?.description}</span>
-        </span>
-      </div>
-      <p className="rounded-surface bg-muted/60 px-3 py-2 text-small text-muted-foreground">
-        <Trans>Viene dal plugin {group?.plugin}: si aggiorna aggiornando il plugin.</Trans>
-      </p>
-      <SettingsAdvanced label={i18n._(msg`Istruzioni`)}>
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-surface bg-muted/60 px-3 py-2 text-small text-muted-foreground">
-          {i18n._(msg`(le istruzioni complete le vede il bot col tool skill)`)}
-        </pre>
-      </SettingsAdvanced>
-    </div>
-  )
-}
-
-/**
- * L'editor: crea (folder null), modifica (folder) o mostra il dettaglio
- * (embedded, dentro il foglio). Salvataggio con validazione S1 ed errori sul
- * campo; «Bot che la usano»; File in sola lettura; Avanzate con versioni,
- * Finder, esporta; Rimuovi rosso con conferma.
- * PL1 (fase plugin): esportato — la pagina Plugin lo riusa per «Crea una skill».
- */
 export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
   folder: string | null
   onDone(): void
@@ -508,200 +418,6 @@ export function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
             )}
           </div>
         </>
-      )}
-    </div>
-  )
-}
-
-/**
- * L'anteprima di una VOCE del catalogo (K3): nome e descrizione, fonte e
- * licenza, l'elenco dei file che entreranno e le note per Homun nel riquadro
- * «Adattamenti di Homun»; «Bot che la usano» (predefinito «Tutti i bot», e
- * quando è acceso i toggle dei singoli si SPENGONO e si DISATTIVANO).
- * «Aggiungi» scarica la voce al COMMIT FISSATO; «‹ Indietro» chiude (lo
- * staging scade da solo col TTL). Se la voce installata ha un commit diverso
- * da quello del catalogo («Aggiornamento disponibile»), l'aggiornamento usa
- * il flusso di oggi: diff vecchio → nuovo, versione vecchia conservata.
- */
-export function CatalogPreview({ entry, state, installedFolder, onClose, onChanged }: {
-  entry: SkillCatalogEntry
-  state: SkillCatalogInstallState
-  installedFolder: string | null
-  onClose(): void
-  onChanged(): void
-}): React.ReactNode {
-  const { i18n, t } = useLingui()
-  const agents = useStore((s) => s.agents)
-  const [preview, setPreview] = useState<SkillCatalogPreview | null>(null)
-  const [error, setError] = useState('')
-  const [enabledFor, setEnabledFor] = useState<string[]>(['*'])
-  const [adding, setAdding] = useState(false)
-  // lo staging vive nel daemon sotto un id OPACO (mai path al renderer)
-  const [previewId, setPreviewId] = useState<string | null>(null)
-  // «Aggiorna» (flusso di oggi): anteprima del diff, poi applica
-  const [updateDiff, setUpdateDiff] = useState<{ id: string; diff: SkillGithubUpdatePreview } | null>(null)
-  const [updateNote, setUpdateNote] = useState('')
-
-  useEffect(() => {
-    setError('')
-    setPreview(null)
-    setPreviewId(null)
-    setUpdateDiff(null)
-    setUpdateNote('')
-    void api.skillsCatalogPreview(entry.id)
-      .then((r) => { setPreviewId(r.previewId); setPreview(r.preview) })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-  }, [entry.id])
-
-  const allBots = enabledFor.includes('*')
-  const toggleBot = (agentId: string, on: boolean): void => {
-    if (allBots) { setEnabledFor(on ? ['*'] : [agentId]); return }
-    const next = on ? [...new Set([...enabledFor, agentId])] : enabledFor.filter((x) => x !== agentId)
-    setEnabledFor(next.length === agents.length ? ['*'] : next)
-  }
-
-  const add = (): void => {
-    if (!preview || !previewId) return
-    setAdding(true)
-    void api.skillsCatalogInstall(previewId, enabledFor)
-      .then(() => {
-        onChanged()
-        onClose()
-      })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setAdding(false))
-  }
-
-  return (
-    <div className="flex flex-col gap-block" data-testid="skills-catalog-preview">
-      <button type="button" className={BACK} onClick={onClose} data-testid="skills-catalog-back">
-        <ChevronLeft className="size-4" /><Trans>Indietro</Trans>
-      </button>
-      {error && <p role="alert" className="rounded-control bg-destructive/10 px-3 py-2 text-small text-destructive" data-testid="skills-catalog-preview-error">{error}</p>}
-      {!preview && !error && <p className="py-6 text-center text-small text-muted-foreground"><Trans>caricamento…</Trans></p>}
-      {preview && (
-        <div className="flex flex-col gap-block">
-          <div className="flex items-center gap-row-gap">
-            <span className={TILE} aria-hidden="true"><Sparkles className="size-5" /></span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-title font-semibold" data-testid="skills-catalog-preview-title">{humanizeSkillName(entry.id)}</span>
-              <span className="mt-0.5 block truncate text-small text-muted-foreground">
-                <span className="font-mono" data-testid="skills-catalog-preview-source">{entry.source.repo}</span> · <span data-testid="skills-catalog-preview-commit" className="font-mono">{preview.commit.slice(0, 12)}</span>
-              </span>
-            </span>
-          </div>
-          <p className="text-small text-muted-foreground" data-testid="skills-catalog-preview-description">
-            {skillCatalogDescription(entry, i18n.locale === 'en' ? 'en' : 'it')}
-          </p>
-          <p className="text-small text-muted-foreground" data-testid="skills-catalog-preview-license">
-            <Trans>Licenza</Trans>: <span className="font-mono">{preview.license}</span>
-          </p>
-          {preview.invocation === 'user' && (
-            <p className="rounded-surface bg-muted/60 px-3 py-2 text-small text-muted-foreground"><Trans>solo con /</Trans></p>
-          )}
-          {/* i file che entreranno (le esclusioni del catalogo sono già applicate) */}
-          <div className="flex flex-col gap-1" data-testid="skills-catalog-preview-files">
-            <p className="text-small text-muted-foreground"><Trans>File che entrano</Trans> ({preview.files.length})</p>
-            <ul className="max-h-40 space-y-0.5 overflow-y-auto scroll-thin rounded-surface bg-muted/40 px-3 py-2">
-              {preview.files.map((f) => (
-                <li key={f} className="truncate font-mono text-small text-muted-foreground">{f}</li>
-              ))}
-            </ul>
-          </div>
-          {/* K4: le note per Homun, in un riquadro piccolo, sola lettura */}
-          {preview.homunNotes && (
-            <div className="flex flex-col gap-1" data-testid="skills-catalog-preview-notes">
-              <p className="text-small text-muted-foreground"><Trans>Adattamenti di Homun</Trans></p>
-              <p className="max-h-40 overflow-y-auto scroll-thin whitespace-pre-wrap rounded-surface bg-muted/40 px-3 py-2 text-small text-muted-foreground">{preview.homunNotes}</p>
-            </div>
-          )}
-          {!preview.valid && preview.issues.length > 0 && (
-            <div className="flex flex-col gap-1 rounded-control bg-destructive/10 px-3 py-2" role="alert">
-              {preview.issues.map((i, idx) => <p key={idx} className="text-small text-destructive">{issueText(i, i18n)}</p>)}
-            </div>
-          )}
-
-          {/* «Aggiornamento disponibile»: il flusso di oggi (diff, versione vecchia conservata) */}
-          {state === 'update' && installedFolder && (
-            <SettingsGroup label={<Trans>Aggiornamento disponibile</Trans>}>
-              {updateDiff === null ? (
-                <div className="px-4 py-3">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    data-testid="skills-catalog-update-preview"
-                    onClick={() => {
-                      setUpdateNote('')
-                      void api.skillsGithubUpdatePreview(installedFolder)
-                        .then((r) => setUpdateDiff(r))
-                        .catch((e: unknown) => setUpdateNote(e instanceof Error ? e.message : String(e)))
-                    }}
-                  >
-                    <Trans>Controlla aggiornamenti</Trans>
-                  </Button>
-                  {updateNote && <p className="mt-2 text-small text-destructive">{updateNote}</p>}
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2 px-4 py-3 text-body" data-testid="skills-catalog-update-diff">
-                  <p className="font-mono text-small text-muted-foreground">
-                    {updateDiff.diff.oldCommit.slice(0, 8)} → {updateDiff.diff.newCommit.slice(0, 8)}
-                  </p>
-                  {updateDiff.diff.added.length > 0 && <p><Trans>File aggiunti: {updateDiff.diff.added.join(', ')}</Trans></p>}
-                  {updateDiff.diff.removed.length > 0 && <p><Trans>File tolti: {updateDiff.diff.removed.join(', ')}</Trans></p>}
-                  {updateDiff.diff.changed.length > 0 && <p><Trans>File cambiati: {updateDiff.diff.changed.join(', ')}</Trans></p>}
-                  <div className="flex justify-end gap-2 pt-1">
-                    <Button variant="ghost" onClick={() => setUpdateDiff(null)}>
-                      <Trans>Annulla</Trans>
-                    </Button>
-                    <Button
-                      data-testid="skills-catalog-update-apply"
-                      onClick={() => {
-                        void api.skillsGithubUpdateApply(updateDiff.id, installedFolder).then(() => {
-                          setUpdateDiff(null)
-                          setUpdateNote(t`aggiornata`)
-                          onChanged()
-                          void api.skillsCatalogPreview(entry.id).then((r) => setPreview(r.preview)).catch(() => undefined)
-                        }).catch((e: unknown) => setUpdateNote(e instanceof Error ? e.message : String(e)))
-                      }}
-                    >
-                      <Trans>Aggiorna</Trans>
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </SettingsGroup>
-          )}
-
-          <SettingsGroup label={<Trans>Bot che la usano</Trans>}>
-            <SettingsRow
-              title={<Trans>Tutti i bot</Trans>}
-              control={<Toggle label={t`Tutti i bot`} checked={allBots} onChange={(v) => setEnabledFor(v ? ['*'] : [])} />}
-            />
-            {agents.map((a) => (
-              <SettingsRow
-                key={a.id}
-                title={a.name}
-                control={<Toggle label={a.name} checked={allBots ? false : enabledFor.includes(a.id)} disabled={allBots} onChange={(v) => toggleBot(a.id, v)} />}
-              />
-            ))}
-          </SettingsGroup>
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="ghost"
-              onClick={onClose}
-              data-testid="skills-catalog-cancel"
-            >
-              <Trans>Annulla</Trans>
-            </Button>
-            <Button
-              disabled={adding || !preview.valid}
-              data-testid="skills-catalog-add"
-              onClick={add}
-            >
-              <Trans>Aggiungi</Trans>
-            </Button>
-          </div>
-        </div>
       )}
     </div>
   )
