@@ -103,6 +103,9 @@ export async function avviaSonda({
   const env = {
     HOME: home,
     PATH: process.env.PATH,
+    // gli spill dei sort di SQLite (file -shm/-wal nella temporanea di sistema)
+    // finiscono DENTRO la cartella della sonda, che la pulizia si cancella
+    SQLITE_TMPDIR: tmp,
     SANDBOT_TEST_USER_DATA: data,
     SANDBOT_TEST_FAKE_KEYCHAIN: join(data, 'keychain-finta.json'),
     SANDBOT_TEST_FAKE_SAFESTORAGE: join(data, 'safestorage-finta.json'),
