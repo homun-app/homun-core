@@ -42,6 +42,7 @@ import { BotDot } from '../components/ui/bot-dot'
 import { Avatar } from '../components/ui/avatar'
 import { ListRow } from '../components/ui/list-row'
 import { ListGroup } from '../components/ui/list-group'
+import { Card } from '../components/ui/card'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -146,6 +147,7 @@ export const SEZIONI = [
   { id: 'tabella', titolo: 'data-table', componenti: ['data-table'] },
   { id: 'elenchi', titolo: 'flat-list, list-row e list-group', componenti: ['flat-list', 'list-row', 'list-group'] },
   { id: 'testate', titolo: 'section, page-header, column-head', componenti: ['section', 'page-header', 'column-head'] },
+  { id: 'superfici', titolo: 'card — la superficie', componenti: ['card'] },
   { id: 'schede', titolo: 'underline-tabs', componenti: ['underline-tabs'] },
   { id: 'dialogo', titolo: 'dialog aperto', componenti: ['dialog'] },
   { id: 'menu', titolo: 'dropdown-menu aperto', componenti: ['dropdown-menu'] },
@@ -297,6 +299,22 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               </Section>
             </div>
           </div>
+        </Section>
+      )}
+
+      {id === 'superfici' && (
+        <Section title="card — una forma sola per le card in chat e le schede della griglia" testId="galleria-section-card">
+          <Riga label="col respiro di default (16) e senza">
+            <Card>
+              <Stack gap="tight">
+                <Text weight="semibold">Una card in chat</Text>
+                <Text size="small" tone="muted">Il contenuto decide il ritmo: il catalogo decide la forma.</Text>
+              </Stack>
+            </Card>
+            <Card padding="none" className="w-40">
+              <div className="flex h-16 items-center justify-center text-small text-muted-foreground">senza respiro</div>
+            </Card>
+          </Riga>
         </Section>
       )}
 

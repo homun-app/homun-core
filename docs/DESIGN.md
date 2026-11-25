@@ -285,6 +285,10 @@ Galleria: dialogo-nuovo, impostazioni-generali.
 Il menu a comparsa (Radix): voci `text-body` con icone a 16, variante destructive, checkbox e radio col segno disegnato, etichette `text-caption`, scorciatoie; resta dentro la finestra (collisionPadding 12). Non usarlo per scegliere un modello (ModelSelect), per azioni sempre visibili (button) o per schede (UnderlineTabs).
 Galleria: menu-account, chat (menu «Ragiona»).
 
+### card
+La superficie del catalogo: UNA forma sola — rounded-surface, bordo del tema, fondo card, NESSUNA ombra — per le card in chat e le schede della griglia. Il respiro interno è una variante chiusa (`padding` block 16 di default · none per chi lo decide da sé); il ritmo del contenuto lo decide chi la riempie (Stack). Non usarla per gli elenchi (righe a filo: ListGroup) né per i menu (popover).
+Galleria: superfici.
+
 ### list-group
 Il gruppo di righe a filo: il titolo di sezione (text-caption grigio, peso 500) con l'azione a destra, e sotto le righe divise da un filetto (divide-border/50) — NESSUN riquadro grigio attorno alle righe, né nelle pagine né nelle Impostazioni. La distanza dal titolo alle righe è gap-section-head (12); fra un gruppo e l'altro la decide chi li elenca (Stack gap-section). Prende il posto di SettingsGroup e FlatList.
 Galleria: elenchi.
