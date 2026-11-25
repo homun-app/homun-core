@@ -870,11 +870,10 @@ describe('DS4 Impostazioni: il foglio «Aggiungi provider»', () => {
     expect(has(titolo, 'text-title', 'font-semibold')).toBe(true)
     expect(classes(titolo)).not.toContain('font-display')
     expect(textOf(titolo)).toBe('Aggiungi provider')
-    // la ricerca: una pillola alta 36 col campo dentro (senza bordi suoi)
+    // C4: la ricerca è SearchField (l'unica dell'app): la casa da 36 col fondo tenue e il raggio dei controlli
     const cerca = byTag(root, 'input')[0]!
     expect(cerca.attrs.placeholder).toBe('Cerca (Ollama, Anthropic…)')
-    expect(has(cerca.parent!, 'h-control', 'rounded-full')).toBe(true)
-    expect(has(cerca, 'text-body', 'outline-none', 'bg-transparent')).toBe(true)
+    expect(has(cerca.parent!, 'h-control', 'rounded-control', 'bg-muted')).toBe(true)
     // le etichette di gruppo: l\u2019intestazione di gruppo del sistema
     for (const nome of ['Sul tuo Mac', 'Con una chiave', 'Un altro server']) {
       const etichetta = byTag(root, 'h3').filter((n) => textOf(n) === nome)[0]

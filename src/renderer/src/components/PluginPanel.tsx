@@ -703,14 +703,13 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
       {/* --- CONNETTORI: il catalogo di oggi (righe e flussi riusati) --- */}
       {seg === 'connectors' && (
         <Section testId="plugin-connectors">
-          {/* le categorie su UNA riga: se non entrano scorrono da sole (prima andavano a capo: «Posta e / calendario») */}
-          <UnderlineTabs<AppsFilter>
-            tabs={[['all', t`Tutte`], ...model.categoriesPresent.map((c) => [c, appCategoryLabel(c, lang)] as const)]}
-            value={category}
-            onChange={setCategory}
-            label={t`Categorie`}
-            testId="plugin-connector-filters"
-          />
+          {/* C4: le categorie sono un FILTRO — pillole del catalogo (una UnderlineTabs sola per pagina) */}
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t`Categorie`} data-testid="plugin-connector-filters">
+            <FilterChipsScelta active={category === 'all'} onSelect={() => setCategory('all')}><Trans>Tutte</Trans></FilterChipsScelta>
+            {model.categoriesPresent.map((c) => (
+              <FilterChipsScelta key={c} active={category === c} onSelect={() => setCategory(c)}>{appCategoryLabel(c, lang)}</FilterChipsScelta>
+            ))}
+          </div>
           {catalogList.length > 0 ? (
             <FlatList>
               {catalogList.map((r) => (
@@ -762,12 +761,13 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
           {/* il catalogo CURATO di oggi (K2), con le sue categorie: la
               ricerca del campo in alto filtra anche questo (T1) */}
           <Section title={<Trans>Sfoglia</Trans>} testId="plugin-skills-catalog">
-            <UnderlineTabs<'all' | SkillCategoryId>
-              tabs={[['all', t`Tutte`], ...SKILL_CATEGORIES.map((c) => [c, t`${skillCategoryLabel(c)}`] as const)]}
-              value={skillCatFilter}
-              onChange={setSkillCatFilter}
-              label={t`Categorie delle skill`}
-            />
+            {/* C4: le categorie delle skill sono un FILTRO — pillole del catalogo */}
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t`Categorie delle skill`} data-testid="plugin-skill-filters">
+              <FilterChipsScelta active={skillCatFilter === 'all'} onSelect={() => setSkillCatFilter('all')}><Trans>Tutte</Trans></FilterChipsScelta>
+              {SKILL_CATEGORIES.map((c) => (
+                <FilterChipsScelta key={c} active={skillCatFilter === c} onSelect={() => setSkillCatFilter(c)}>{skillCategoryLabel(c)}</FilterChipsScelta>
+              ))}
+            </div>
             {(catalogRows.length === 0)
               ? <p className="text-small text-muted-foreground"><Trans>Nessuna skill trovata</Trans></p>
               : SKILL_CATEGORIES.filter((c) => catalogRows.some((e) => e.category === c)).map((c) => (

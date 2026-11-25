@@ -494,9 +494,9 @@ describe('DS4 · la memoria del bot', () => {
     const root = memory()
     const description = first(root, (n) => textOf(n).startsWith('Fatti e regole che il bot ricorda'))
     for (const cls of ['text-small', 'text-muted-foreground']) expect(has(description, cls), cls).toBe(true)
+    // C4: la ricerca è SearchField — la casa porta h-control-sm (la classe che il pannello le dà), raggio dei controlli e testo del corpo
     const input = first(root, (n) => n.tag === 'input')
-    for (const cls of ['h-control-sm', 'rounded-control', 'text-body']) expect(has(input, cls), cls).toBe(true)
-    expect(has(input, 'focus-visible:ring-2')).toBe(true)
+    expect(has(input.parent!, 'h-control-sm', 'rounded-control', 'bg-muted')).toBe(true)
     expect(clickFocus(input)).toBe(false)
   })
 })

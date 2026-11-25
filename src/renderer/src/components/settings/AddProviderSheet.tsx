@@ -23,7 +23,7 @@ import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { ChevronLeft, Search, Server } from 'lucide-react'
+import { ChevronLeft, Server } from 'lucide-react'
 import { api } from '../../store'
 import type { ProviderKind, ProviderPublic } from '../../../../shared/types'
 import { providerLogoUrl, providerLogoSvg } from '../../lib/provider-logos'
@@ -34,6 +34,7 @@ import { CONNECTABLE_KINDS } from '../../lib/model-select'
 import { KIND_LABELS, useProviderSetup } from '../../lib/use-provider-setup'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
+import { SearchField } from '../ui/search-field'
 import { FlatList, FlatRow } from '../ui/flat-list'
 import { Input } from '../ui/input'
 import { FIELD_PAGE_CLS, FOCUS_RING } from './SettingsRow'
@@ -178,17 +179,8 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
         {/* passo 1 — l'elenco dei tipi, con ricerca */}
         {!kind && (
           <div className="flex min-h-0 flex-1 flex-col gap-block px-5 pb-5">
-            {/* la ricerca: una pillola alta 36, col campo dentro (senza bordi suoi) */}
-            <div className="flex h-control items-center gap-2 rounded-full bg-muted px-3">
-              <Search className="size-4 shrink-0 text-muted-foreground" />
-              <input
-                className="w-full bg-transparent text-body outline-none"
-                placeholder={t`Cerca (Ollama, Anthropic…)`}
-                value={query}
-                autoFocus
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </div>
+            {/* C4: la ricerca è UNA — SearchField, il pezzo del catalogo */}
+            <SearchField value={query} onChange={setQuery} placeholder={t`Cerca (Ollama, Anthropic…)`} ariaLabel={t`Cerca (Ollama, Anthropic…)`} autoFocus className="w-full" />
             <div className="flex min-h-0 flex-1 flex-col gap-block overflow-y-auto scroll-thin pr-1.5">
               {groups.map((g) => {
                 const kinds = kindsOf(g)

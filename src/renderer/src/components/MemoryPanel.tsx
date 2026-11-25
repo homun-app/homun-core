@@ -32,6 +32,7 @@ import { api, useStore } from '../store'
 import type { MemoryNoteInfo, MemoryNoteDetail, MemorySearchHitInfo, MemoryOverview } from '../../../shared/types'
 import { cn } from '../lib/utils'
 import { Button } from './ui/button'
+import { SearchField } from './ui/search-field'
 
 /** Un contrassegno (proprietario, livello, stato): una pillola in text-caption, il colore la dà chi la usa. */
 const TAG = 'rounded-full px-2 py-0.5'
@@ -221,14 +222,15 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
         <p className="mt-1 text-small text-destructive"><Trans>Download non riuscito: {memoryProgress.error}</Trans></p>
       )}
 
-      {/* ricerca */}
+      {/* ricerca — C4: la ricerca è UNA, SearchField (invio cerca come prima) */}
       <div className="mt-2 flex gap-2">
-        <input
-          className={cn(FIELD, 'h-control-sm w-full min-w-0 px-3')}
-          placeholder={i18n.t('Cerca nella memoria…')}
+        <SearchField
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') search() }}
+          onChange={setQuery}
+          placeholder={i18n.t('Cerca nella memoria…')}
+          ariaLabel={i18n.t('Cerca nella memoria…')}
+          className="h-control-sm w-full flex-1"
+          testId="memory-search"
         />
         <Button variant="secondary" size="sm" onClick={search}>
           <Trans>Cerca</Trans>

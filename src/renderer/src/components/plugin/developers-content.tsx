@@ -15,6 +15,7 @@ import { accountLimitMessage } from '../../lib/apps-view'
 import { FlatList, FlatRow } from '../ui/flat-list'
 import { Section } from '../ui/section'
 import { Button, buttonVariants } from '../ui/button'
+import { SearchField } from '../ui/search-field'
 
 /**
  * Il campo di testo delle finestre dei plugin (DS1): 36 px di altezza —
@@ -369,13 +370,8 @@ export function DevelopersContent({ scrollTo, footer }: { scrollTo?: 'gateway' |
       </div>
       <ClientMetadataUrlRow />
       <Section size="body" title={<Trans>Cerca nel registro MCP</Trans>}>
-        {/* la ricerca: 36 px come tutti i campi (prima era una pillola più bassa) */}
-        <input
-          className={`${FIELD} w-full bg-muted`}
-          placeholder={t`cerca nel registro (2+ lettere)`}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        {/* C4: la ricerca è UNA — SearchField, il pezzo del catalogo */}
+        <SearchField value={query} onChange={setQuery} placeholder={t`cerca nel registro (2+ lettere)`} ariaLabel={t`cerca nel registro (2+ lettere)`} testId="registry-search" className="w-full" />
         {searching && <p className="text-small text-muted-foreground"><Trans>Cerco nel registro…</Trans></p>}
         {registryFailed && <p className="text-small text-muted-foreground"><Trans>Non riesco a cercare nel registro</Trans></p>}
         {registry !== null && registry.length === 0 && !searching && <p className="text-small text-muted-foreground"><Trans>Nessun server trovato.</Trans></p>}

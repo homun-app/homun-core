@@ -32,6 +32,7 @@ import { cn } from '../lib/utils'
 import type { GlobalActivityData } from '../../../shared/types'
 import { Button } from './ui/button'
 import { SearchField } from './ui/search-field'
+import { FilterChipsScelta } from './ui/filter-chips'
 import { FlatList } from './ui/flat-list'
 import { PageHeader } from './ui/page-header'
 import { PageShell } from './ui/page-shell'
@@ -177,18 +178,12 @@ export function ActivityPanel({ activityInitial }: { activityInitial?: GlobalAct
               min-w-0 e non shrink-0: in un'area stretta (finestra a 900 px col pannello del bot aperto)
               le pillole cedono spazio e vanno a capo, invece di spingersi sotto il pannello; la ricerca
               (flex-1) prende ciò che resta */}
+          {/* C4/C3: i filtri sono le pillole del catalogo (FilterChipsScelta) */}
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             {(Object.keys(FILTER_LABELS) as ActivityFilter[]).map((f) => (
-              <Button
-                key={f}
-                variant={filter === f ? 'primary' : 'secondary'}
-                shape="pill"
-                size="sm"
-                className="text-caption"
-                onClick={() => setFilter(f)}
-              >
+              <FilterChipsScelta key={f} active={filter === f} onSelect={() => setFilter(f)}>
                 {i18n.t(FILTER_LABELS[f])}
-              </Button>
+              </FilterChipsScelta>
             ))}
           </div>
         </>

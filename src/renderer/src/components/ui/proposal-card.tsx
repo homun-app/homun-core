@@ -7,8 +7,6 @@
 import type { ReactNode } from 'react'
 import { cn } from '../../lib/utils'
 
-export type ProposalVariant = 'app' | 'server' | 'enable' | 'install'
-
 /**
  * La card di proposta. Gli slot sono delimitati (non classi libere):
  *   testata          logo + titolo (cosa propone il bot)

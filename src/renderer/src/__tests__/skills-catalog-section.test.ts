@@ -51,11 +51,11 @@ describe('K2 → PL5: la sezione «Sfoglia» sta nella pagina Plugin (segmento S
   // PP4 (fase plugin-pulita): i filtri non sono più pillole ma testo (UnderlineTabs)
   // — «Tutte» più una per categoria; quella attiva non si ri-toglie più col
   // clic, perché «Tutte» è una scheda a fianco
-  it('i filtri come testo: «Tutte» più una per categoria (UnderlineTabs)', () => {
+  it('i filtri come PILLOLE: «Tutte» più una per categoria (C4: una UnderlineTabs sola per pagina)', () => {
     expect(src).toMatch(/skillCatFilter === 'all'/)
-    expect(src).toMatch(/<UnderlineTabs<'all' \| SkillCategoryId>/)
-    expect(src).toContain('onChange={setSkillCatFilter}')
-    expect(src).toContain("['all', t`Tutte`]")
+    expect(src).toMatch(/data-testid="plugin-skill-filters"/)
+    expect(src).toMatch(/onSelect=\{\(\) => setSkillCatFilter\('all'\)\}/)
+    expect(src).toContain('>Tutte<')
     expect(src).not.toMatch(/skillCatFilter === c \? 'bg-foreground/)
   })
 
