@@ -241,6 +241,10 @@ Galleria: testo.
 Il logo di un'app del catalogo: il file del repo (o un data: URL), e quando manca l'iniziale su una piastrella tenue — mai un'emoji. La misura la dà chi lo rende con `className` (size-8 nelle righe, size-10 nelle testate di scheda); il raggio e il fondo del tema scuro stanno in lib/app-logos, in un posto solo.
 Galleria: identita.
 
+### bot-dot
+Il puntino del colore di un bot: 8 px, tinta dalla palette `--bot-dot-c1…c7` (R5: contrasto ≥ 3:1 sul fondo della riga, in chiaro e in scuro) — NON dalla palette della mascotte. Il nome del bot resta nel colore del testo: il colore del bot sta qui.
+Galleria: identita.
+
 ### icon
 L'icona del catalogo: SOLO Lucide, con la misura scritta dal pezzo — `size` sm 16 (default: il testo e i bottoni) · lg 20 (le testate). Senza misura lucide disegna 24, e la regola del tema è che la misura si scrive sempre: fuori da ui/ non si scrive più, la scrive questa. aria-hidden di default: l'etichetta accessibile sta nel controllo che la porta.
 Galleria: testo.

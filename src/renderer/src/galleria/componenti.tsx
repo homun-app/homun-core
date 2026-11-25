@@ -38,6 +38,7 @@ import { Grid } from '../components/ui/grid'
 import { Text } from '../components/ui/text'
 import { Icon } from '../components/ui/icon'
 import { AppLogo } from '../components/ui/app-logo'
+import { BotDot } from '../components/ui/bot-dot'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -135,7 +136,7 @@ const MODELLI: ModelInfo[] = [
 export const SEZIONI = [
   { id: 'impaginazione', titolo: 'stack, row e grid — impaginare', componenti: ['stack', 'row', 'grid'] },
   { id: 'testo', titolo: 'text e icon — testo e icone', componenti: ['text', 'icon'] },
-  { id: 'identita', titolo: 'app-logo — i loghi delle app', componenti: ['app-logo'] },
+  { id: 'identita', titolo: 'app-logo e bot-dot — identità', componenti: ['app-logo', 'bot-dot'] },
   { id: 'bottoni', titolo: 'button', componenti: ['button'] },
   { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
@@ -146,7 +147,7 @@ export const SEZIONI = [
   { id: 'dialogo', titolo: 'dialog aperto', componenti: ['dialog'] },
   { id: 'menu', titolo: 'dropdown-menu aperto', componenti: ['dropdown-menu'] },
   { id: 'modelli', titolo: 'ModelPicker e ModelSelect', componenti: ['ModelPicker', 'ModelSelect'] },
-  { id: 'pillole', titolo: 'pillole, badge e puntini di stato', componenti: [] },
+  { id: 'pillole', titolo: 'pillole e badge', componenti: [] },
   { id: 'gusci', titolo: 'page-shell — i tre gusci di larghezza', componenti: ['page-shell'] },
   { id: 'markdown-1', titolo: 'DocumentBody — titoli, grassetti ed elenchi', componenti: [] },
   { id: 'markdown-2', titolo: 'DocumentBody — elenchi annidati, tabella, citazione e codice', componenti: [] }
@@ -351,16 +352,6 @@ const Sezione = ({ id }: { id: IdSezione }) => {
             <span className="inline-flex items-center rounded-full bg-muted px-2 h-control-sm text-caption">badge neutro</span>
             <span className="inline-flex items-center rounded-full bg-destructive text-destructive-foreground px-2 h-control-sm text-caption">badge rosso</span>
           </Riga>
-          <Riga label="puntini di stato dei bot — tutti i colori, 8 px">
-            <div className="flex items-center gap-4">
-              {PUNTINI.map((c) => (
-                <div key={c} className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
-                  <span data-testid={`bot-dot-${c}`} aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ background: `var(--bot-dot-${c})` }} />
-                  <span className="text-caption">{c}</span>
-                </div>
-              ))}
-            </div>
-          </Riga>
           <Riga label="famiglie dell'avatar">
             <div className="flex items-center gap-4">
               {BOT_FAMILIES.map((f) => (
@@ -410,6 +401,16 @@ const Sezione = ({ id }: { id: IdSezione }) => {
             <AppLogo logo="asana.svg" name="Asana" className="size-10 text-reading" />
             <AppLogo logo={null} name="Sconosciuta" className="size-8 text-body" />
             <AppLogo logo={null} name="App Nuova" className="size-10 text-reading" />
+          </Riga>
+          <Riga label="bot-dot — il colore del bot: tutti i sette, 8 px">
+            <div className="flex items-center gap-4">
+              {PUNTINI.map((c) => (
+                <div key={c} className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
+                  <BotDot color={c} testId={`bot-dot-${c}`} />
+                  <span className="text-caption">{c}</span>
+                </div>
+              ))}
+            </div>
           </Riga>
         </Section>
       )}
