@@ -44,6 +44,7 @@ import { ListRow } from '../components/ui/list-row'
 import { ListGroup } from '../components/ui/list-group'
 import { Card } from '../components/ui/card'
 import { EmptyState } from '../components/ui/empty-state'
+import { Field } from '../components/ui/field'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -143,7 +144,7 @@ export const SEZIONI = [
   { id: 'testo', titolo: 'text e icon — testo e icone', componenti: ['text', 'icon'] },
   { id: 'identita', titolo: 'app-logo, bot-dot e avatar — identità', componenti: ['app-logo', 'bot-dot', 'avatar'] },
   { id: 'bottoni', titolo: 'button', componenti: ['button'] },
-  { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
+  { id: 'campi', titolo: 'input, select e field', componenti: ['input', 'select', 'field'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
   { id: 'tabella', titolo: 'data-table', componenti: ['data-table'] },
   { id: 'elenchi', titolo: 'flat-list, list-row e list-group', componenti: ['flat-list', 'list-row', 'list-group'] },
@@ -222,6 +223,13 @@ const Sezione = ({ id }: { id: IdSezione }) => {
             <Select className="w-56" defaultValue=""><option value="">Scegli…</option><option value="a">Scelta A</option></Select>
             <Select className="w-56" defaultValue="a"><option value="a">Scelta A</option></Select>
             <Select className="w-56" defaultValue="a" aria-invalid="true"><option value="a">Con errore</option></Select>
+          </Riga>
+          <Riga label="field — etichetta · campo · aiuto · errore">
+            <div className="flex w-72 flex-col gap-4">
+              <Field label="Il nome" htmlFor="g-field-1"><Input id="g-field-1" placeholder="es. ricerche-estese" /></Field>
+              <Field label="L'indirizzo" aiuto="Serve per le ricerche del bot." htmlFor="g-field-2"><Input id="g-field-2" placeholder="https://…" /></Field>
+              <Field label="La chiave" errore="Troppo corta: ce ne vogliono 8." htmlFor="g-field-3"><Input id="g-field-3" aria-invalid="true" defaultValue="ak_" /></Field>
+            </div>
           </Riga>
           <Riga label="le classi del campo da sole (FIELD_CLASS)">
             <input className="h-control w-56 rounded-control border border-input px-3 text-body" placeholder="campo grezzo" />

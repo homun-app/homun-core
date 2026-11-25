@@ -289,6 +289,10 @@ Galleria: menu-account, chat (menu «Ragiona»).
 La superficie del catalogo: UNA forma sola — rounded-surface, bordo del tema, fondo card, NESSUNA ombra — per le card in chat e le schede della griglia. Il respiro interno è una variante chiusa (`padding` block 16 di default · none per chi lo decide da sé); il ritmo del contenuto lo decide chi la riempie (Stack). Non usarla per gli elenchi (righe a filo: ListGroup) né per i menu (popover).
 Galleria: superfici.
 
+### field
+L'etichetta col suo campo: `label` (text-small grigia, collegata con htmlFor) · il controllo nei `children` (Input, Select, Textarea…) · `aiuto` (la frase che spiega, sotto, grigia) · `errore` (in parole sotto, nel colore del distruttivo con role alert — e quando c'è lui, l'aiuto si fa da parte). Le pagine non scrivono più la coppia etichetta-campo a mano.
+Galleria: campi.
+
 ### empty-state
 Lo stato vuoto: l'icona grande grigia, il titolo, la FRASE che dice cosa fare (la descrizione che non sta più sotto il titolo di pagina va qui, o nell'aiuto del campo) e l'azione facoltativa che risolve. Centrato e arioso (py-10), la frase larga al più quanto un documento.
 Galleria: superfici.
