@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url'
 import { parse } from '@babel/parser'
 import { DESIGN_EXCEPTIONS, type DesignRule } from '../lib/design-exceptions'
 
-export const SRC = fileURLToPath(new URL('../../renderer/src', import.meta.url)) // src/renderer/src (il sorgente guardato, dal nuovo posto delle guardie)
+export const SRC = fileURLToPath(new URL('..', import.meta.url)) // src/renderer/src (il sorgente guardato, dal nuovo posto delle guardie)
 export const CSS_PATH = join(SRC, 'styles.css')
 const CSS = readFileSync(CSS_PATH, 'utf8')
 
