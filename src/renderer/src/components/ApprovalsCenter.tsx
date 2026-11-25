@@ -36,6 +36,8 @@ import { approvalChoicesOf, type ApprovalChoice } from '../lib/approval-app'
 // A2: i nomi dei consensi e il raggruppamento per bot (come Impostazioni › Approvazioni)
 import { grantDisplayName, groupGrantsByBot, type GrantLike } from '../lib/approval-app'
 import { Button, buttonVariants } from './ui/button'
+// C3 (fase linguaggio): i filtri passano dal corpo alla BARRA, col pezzo del catalogo
+import { FilterChipsScelta } from './ui/filter-chips'
 import { DataTable, Cell, CellStack, type DataTableColumn } from './ui/data-table'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { FlatList, FlatRow } from './ui/flat-list'
@@ -77,29 +79,6 @@ function timeAgo(when: number, now: number): string {
 
 /** Le due viste del centro: le richieste in attesa e il Registro. */
 type ApprovalsView = 'richieste' | 'registro'
-
-/**
- * Fase design (DS4): una pillola di filtro (i tipi delle richieste, gli esiti
- * del Registro). È un Button, e tutte le pillole del gruppo sono PILLOLE: in
- * una fila dove una sola è accesa la forma non può cambiare con lo stato —
- * il primary di tipo è una pillola, il secondary un rettangolo — perciò la
- * forma la decide il gruppo, con `shape`, non bottone per bottone. Il testo
- * è quello dei badge (text-caption): qui c'è un contatore.
- */
-function FilterPill({ active, onSelect, children }: { active: boolean; onSelect(): void; children: ReactNode }) {
-  return (
-    <Button
-      variant={active ? 'primary' : 'secondary'}
-      shape="pill"
-      size="sm"
-      className="text-caption"
-      aria-pressed={active}
-      onClick={onSelect}
-    >
-      {children}
-    </Button>
-  )
-}
 
 /** Una card del centro. */
 function CenterCard({ r, now }: { r: ApprovalsCenterRow; now: number }) {
@@ -372,6 +351,21 @@ export function ApprovalsCenter({ registroInitial }: { registroInitial?: Registr
   const approvalsView = useStore((s) => s.approvalsView)
   const setApprovalsView = useStore((s) => s.setApprovalsView)
   const [filter, setFilter] = useState<'all' | 'dati-tuoi' | 'invio' | 'sito-interattivo'>('all')
+  // C3 (fase linguaggio): lo stato del REGISTRO sta QUI (i filtri stanno nella
+  // barra, che è del centro): il log e i consensi si caricano pigri, quando
+  // la vista registro apre — come prima, che li caricava la vista sua
+  const [registroFilter, setRegistroFilter] = useState<'all' | 'approve' | 'deny' | 'expired' | 'auto'>('all')
+  const [log, setLog] = useState<ApprovalLogRow[] | null>(registroInitial?.log ?? null)
+  const [grants, setGrants] = useState<GrantLike[] | null>(registroInitial?.grants ?? null)
+  const registroCounts = (id: 'all' | 'approve' | 'deny' | 'expired' | 'auto'): number => registroModel(log ?? [], id).length
+  const reloadRegistro = (): void => {
+    void api.approvalsLog(200).then(setLog).catch(() => setLog([]))
+    void api.grantsList().then(setGrants).catch(() => setGrants([]))
+  }
+  useEffect(() => {
+    if (approvalsView === 'registro' && log === null) reloadRegistro()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [approvalsView])
   const now = Date.now()
   const rows = visibleApprovalsRows(approvalsAll, approvalsSnoozed, now)
   const counts = approvalsFilterCounts(rows)
@@ -418,33 +412,42 @@ export function ApprovalsCenter({ registroInitial }: { registroInitial?: Registr
           />
         }
         toolbar={
-          // A2: le due schede del centro. L'involucro riempie la riga: il filetto di base va da un bordo all'altro del contenuto
-          <UnderlineTabs<ApprovalsView>
-            tabs={[['richieste', i18n.t(msg`Richieste`)], ['registro', i18n.t(msg`Registro`)]]}
-            value={approvalsView}
-            onChange={setApprovalsView}
-            testId="approvals-center-tabs"
-            tabTestId={(id) => `approvals-tab-${id}`}
-            className="min-w-0 flex-1"
-          />
+          <>
+            {/* A2: le due schede del centro */}
+            <UnderlineTabs<ApprovalsView>
+              tabs={[['richieste', i18n.t(msg`Richieste`)], ['registro', i18n.t(msg`Registro`)]]}
+              value={approvalsView}
+              onChange={setApprovalsView}
+              testId="approvals-center-tabs"
+              tabTestId={(id) => `approvals-tab-${id}`}
+              className="min-w-0 flex-1"
+            />
+            {/* C3: i filtri dal corpo alla BARRA (richieste per tipo, registro per esito) */}
+            <div className="flex min-w-0 items-center gap-2 pl-3" role="group" aria-label={registro ? i18n.t(msg`Filtra il registro`) : i18n.t(msg`Filtra per tipo`)} data-testid="approvals-filters">
+              {registro ? (
+                <>
+                  <FilterChipsScelta active={registroFilter === 'all'} onSelect={() => setRegistroFilter('all')}><Trans>Tutte</Trans></FilterChipsScelta>
+                  {REGISTRO_FILTERS.map((f) => registroCounts(f.id) > 0 && (
+                    <FilterChipsScelta key={f.id} active={registroFilter === f.id} count={registroCounts(f.id)} onSelect={() => setRegistroFilter(f.id)}>{i18n.t(f.label)}</FilterChipsScelta>
+                  ))}
+                </>
+              ) : (
+                <>
+                  <FilterChipsScelta active={filter === 'all'} count={rows.length} onSelect={() => setFilter('all')}><Trans>Tutte</Trans></FilterChipsScelta>
+                  {APPROVALS_FILTERS.map((f) => counts[f.id] > 0 && (
+                    <FilterChipsScelta key={f.id} active={filter === f.id} count={counts[f.id]} onSelect={() => setFilter(f.id)}>{i18n.t(f.label)}</FilterChipsScelta>
+                  ))}
+                </>
+              )}
+            </div>
+          </>
         }
         contentClassName="flex flex-col gap-section pt-4 pb-6"
       >
         {registro ? (
-          <RegistroView initial={registroInitial} />
+          <RegistroView log={log} grants={grants} filter={registroFilter} reload={reloadRegistro} />
         ) : (
           <>
-            {/* i filtri per tipo, con i conteggi (solo i tipi con richieste) */}
-            <div className="flex flex-wrap gap-2" role="group" aria-label={i18n.t(msg`Filtra per tipo`)}>
-              <FilterPill active={filter === 'all'} onSelect={() => setFilter('all')}>
-                <Trans>Tutte · {rows.length}</Trans>
-              </FilterPill>
-              {APPROVALS_FILTERS.map((f) => counts[f.id] > 0 && (
-                <FilterPill key={f.id} active={filter === f.id} onSelect={() => setFilter(f.id)}>
-                  {i18n.t(f.label)} · {counts[f.id]}
-                </FilterPill>
-              ))}
-            </div>
             {grouped.map((g) => <GroupSection key={g.kind === 'squad' ? `s${g.squad!.id}` : `b${g.bot!.botId}`} g={g} now={now} />)}
             {/* la rassicurazione in fondo all'elenco: l'azione «Registro di oggi» sta in testata */}
             <div className="flex items-center gap-3 rounded-surface bg-muted/50 p-4">
@@ -460,23 +463,18 @@ export function ApprovalsCenter({ registroInitial }: { registroInitial?: Registr
 
 // ---- A2: il Registro — le decisioni, le passate da sole, i consentiti sempre ----
 
-/** il registro: le righe per giorno, i filtri e «Consentiti sempre» con Revoca. */
-function RegistroView({ initial }: { initial?: RegistroInitial }): ReactNode {
+/** il registro: le righe per giorno e «Consentiti sempre» con Revoca. Lo stato (log, filtri) sta nel centro: i filtri stanno nella SUA barra. */
+function RegistroView({ log, grants, filter, reload }: {
+  log: ApprovalLogRow[] | null
+  grants: GrantLike[] | null
+  filter: 'all' | 'approve' | 'deny' | 'expired' | 'auto'
+  reload(): void
+}): ReactNode {
   const { i18n, t } = useLingui()
   const agents = useStore((s) => s.agents)
-  const [log, setLog] = useState<ApprovalLogRow[] | null>(initial?.log ?? null)
-  const [grants, setGrants] = useState<GrantLike[] | null>(initial?.grants ?? null)
-  const [filter, setFilter] = useState<'all' | 'approve' | 'deny' | 'expired' | 'auto'>('all')
   const lang = i18n.locale === 'en' ? 'en' : 'it'
-
-  const reload = (): void => {
-    void api.approvalsLog(200).then(setLog).catch(() => setLog([]))
-    void api.grantsList().then(setGrants).catch(() => setGrants([]))
-  }
-  useEffect(reload, [])
   const rows = registroModel(log ?? [], filter)
   const days = groupRegistroByDay(rows, Date.now(), lang)
-  const counts = (id: typeof filter): number => registroModel(log ?? [], id).length
 
   // Fase design (DS4): la tabella unica (DataTable). QUANDO l'ora e da dove
   // è arrivata la decisione (due righe: l'ora, sotto il «da dove»), BOT e COSA
@@ -508,17 +506,6 @@ function RegistroView({ initial }: { initial?: RegistroInitial }): ReactNode {
 
   return (
     <div className="flex flex-col gap-section" data-testid="approvals-registro">
-      {/* i filtri del registro */}
-      <div className="flex flex-wrap gap-2" role="group" aria-label={i18n.t(msg`Filtra il registro`)}>
-        <FilterPill active={filter === 'all'} onSelect={() => setFilter('all')}>
-          <Trans>Tutte</Trans>
-        </FilterPill>
-        {REGISTRO_FILTERS.map((f) => counts(f.id) > 0 && (
-          <FilterPill key={f.id} active={filter === f.id} onSelect={() => setFilter(f.id)}>
-            {i18n.t(f.label)} · {counts(f.id)}
-          </FilterPill>
-        ))}
-      </div>
       {log === null && <p className="text-small text-muted-foreground"><Trans>caricamento…</Trans></p>}
       {log !== null && rows.length === 0 && (
         <p className="text-small text-muted-foreground"><Trans>Nessuna decisione registrata.</Trans></p>

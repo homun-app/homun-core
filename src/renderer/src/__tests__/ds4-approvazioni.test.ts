@@ -416,8 +416,9 @@ describe('DS4: il Registro — la tabella unica, per giorno', () => {
     const titolo = first(giorni[0]!, (n) => n.tag === 'h2')
     expect(textOf(titolo)).toBe('oggi')
     expect(has(titolo.children[0]!, 'capitalize')).toBe(true)
-    // i filtri: «Tutte» e solo gli esiti con righe, col conteggio
-    const gruppo = first(byTestid(root, 'approvals-registro'), (n) => n.attrs.role === 'group' && n.attrs['aria-label'] === 'Filtra il registro')
+    // C3: i filtri stanno nella BARRA del centro (approvals-filters), non più nel corpo
+        // findAll non guarda la radice: il gruppo si cerca dall'albero intero
+    const gruppo = first(root, (n) => n.attrs['data-testid'] === 'approvals-filters' && n.attrs.role === 'group' && n.attrs['aria-label'] === 'Filtra il registro')
     const pills = all(gruppo, (n) => n.tag === 'button')
     expect(pills.map((b) => textOf(b))).toEqual(['Tutte', 'Approvate · 1', 'Rifiutate · 1', 'Scadute · 1', 'Passate da sole · 1'])
     for (const p of pills) expectHasAll(p, ['rounded-full', 'h-control-sm', 'text-caption'])

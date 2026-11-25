@@ -31,7 +31,7 @@ export function FilterChipsScelta({ active, count, onSelect, children, testId }:
       onClick={onSelect}
     >
       {children}
-      {count !== undefined && <> · {count}</>}
+      {count !== undefined && <span> · {count}</span>}
     </Button>
   )
 }
