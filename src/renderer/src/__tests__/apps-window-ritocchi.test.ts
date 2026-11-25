@@ -10,13 +10,20 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const WINDOW = fileURLToPath(new URL('../components/AppsWindow.tsx', import.meta.url))
-const src = readFileSync(WINDOW, 'utf8')
+// C0 (fase linguaggio): AppsWindow.tsx è smontato in components/plugin/ — i
+// pezzi si leggono lì, uniti
+const src = [
+  '../components/plugin/app-logo.tsx',
+  '../components/plugin/app-row.tsx',
+  '../components/plugin/connect-flows.tsx',
+  '../components/plugin/developers-content.tsx',
+  '../components/plugin/gateway-accounts.tsx'
+].map((rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')).join('\n\n')
 
 /** Il blocco di un componente (dalla `function Nome` alla successiva). */
 function block(name: string): string {
   const start = src.indexOf(`function ${name}(`)
-  if (start < 0) throw new Error(`componente ${name} non trovato in AppsWindow.tsx`)
+  if (start < 0) throw new Error(`componente ${name} non trovato nei pezzi di plugin/`)
   const next = src.indexOf('\nfunction ', start + 10)
   const nextExport = src.indexOf('\nexport function ', start + 10)
   const ends = [next, nextExport].filter((i) => i > 0)
@@ -35,7 +42,7 @@ const count = (text: string): number => (text.match(/@container/g) ?? []).length
 const code = (text: string): string => text.replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
 
 describe('U2 → PL7: la finestra App non c\'è più; i fogli vivono nella pagina Plugin', () => {
-  it('nessuna finestra e nessun foglio-morto in AppsWindow.tsx: solo i pezzi riusati', () => {
+  it('nessuna finestra e nessun foglio-morto nei pezzi di plugin/: solo i pezzi riusati', () => {
     for (const gone of ['AppsWindow', 'AppsView', 'AppDetailSheet', 'ComposioAccountSheet', 'ConnectedDetailSheet', 'DevelopersSheet']) {
       expect(src, gone).not.toMatch(new RegExp(`^(export )?function ${gone}\\(`, 'm'))
     }

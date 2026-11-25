@@ -38,7 +38,10 @@ vi.mock('react/jsx-dev-runtime', async (orig) => {
 vi.mock('../components/ui/dialog', () => ({}) as never)
 
 const PANEL_SRC = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
-const APPS_SRC = readFileSync(fileURLToPath(new URL('../components/AppsWindow.tsx', import.meta.url)), 'utf8')
+// C0 (fase linguaggio): AppsWindow è smontato — i pezzi si leggono uniti
+const APPS_SRC = ['connect-flows', 'app-row', 'app-logo']
+  .map((n) => readFileSync(fileURLToPath(new URL(`../components/plugin/${n}.tsx`, import.meta.url)), 'utf8'))
+  .join('\n\n')
 
 const { PluginPanel, YourRow } = await import('../components/PluginPanel')
 const { useStore } = await import('../store')
@@ -221,7 +224,7 @@ describe('PP4: la lista — righe a filo, un solo pieno, segmenti come testo', (
   })
 
   it('anche la riga del catalogo (AppRow) è a filo, col logo da 32, e non dice «Connessa» quando è tutto a posto', async () => {
-    const { AppRow } = await import('../components/AppsWindow')
+    const { AppRow } = await import('../components/plugin/app-row')
     const base = { app: { id: 'notion', name: 'Notion', logo: null, via: 'direct' as const, directId: 'notion' }, tagline: 'Semplifica il lavoro', connected: 'connected' as const }
     const html = renderHtml(createElement(AppRow, { row: base, flow: null, onConnect: () => undefined, onCancel: () => undefined, onConflictResolve: () => undefined, onOpen: () => undefined } as never))
     const root = parseHtml(html)
@@ -356,7 +359,7 @@ describe('DS4 (fase design): la pagina è nel guscio di sistema', () => {
   })
 
   it('il logo di ripiego è l\'iniziale: niente emoji al posto di un logo (DS1: nell\'interfaccia solo icone)', async () => {
-    const { AppLogo } = await import('../components/AppsWindow')
+    const { AppLogo } = await import('../components/plugin/app-logo')
     const html = renderHtml(createElement(AppLogo, { logo: '🧩', name: 'Zed' }))
     expect(textOf(parseHtml(html))).toBe('Z')
     expect(html).not.toContain('🧩')
@@ -368,7 +371,7 @@ describe('DS4 (fase design): la pagina è nel guscio di sistema', () => {
 
 describe('DS4 (fase design): gli account di un\'app Composio sono righe a filo, come il resto della scheda', () => {
   it('un account per riga — l\'alias, l\'email in grigio, «Da ricollegare» per chi non è attivo — con «Rinomina» e «Togli» come testo; sotto, la riga che aggiunge un account', async () => {
-    const { GatewayAccountsSection } = await import('../components/AppsWindow')
+    const { GatewayAccountsSection } = await import('../components/plugin/gateway-accounts')
     const app = {
       slug: 'gmail', name: 'Gmail', status: 'ACTIVE', accountId: 'a1',
       accounts: [

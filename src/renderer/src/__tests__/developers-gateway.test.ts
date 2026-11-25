@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const APPSW = readFileSync(fileURLToPath(new URL('../components/AppsWindow.tsx', import.meta.url)), 'utf8')
+const APPSW = readFileSync(fileURLToPath(new URL('../components/plugin/developers-content.tsx', import.meta.url)), 'utf8')
 const MCPW = readFileSync(fileURLToPath(new URL('../components/plugin/manual-servers.tsx', import.meta.url)), 'utf8')
 const STORE = readFileSync(fileURLToPath(new URL('../store.ts', import.meta.url)), 'utf8')
 

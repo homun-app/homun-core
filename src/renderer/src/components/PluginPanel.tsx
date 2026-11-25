@@ -3,12 +3,12 @@
 // Libreria e Attività (regola B1: decide il render condizionale di App);
 // la voce «Plugin» sta nella barra tra «Da approvare» e «Attività», e dal
 // menu dell'account sono uscite «Collega app», «Skill» e «Server MCP».
-// I PEZZI delle finestre di oggi si riusano, non si riscrivono: le righe e
-// i flussi di connessione di AppsWindow (AppRow + useConnectFlows), il
-// foglio del dettaglio app, il ServerSheet dei server, ManualServers con
-// il form e l'import di McpWindow, l'editor SkillEditor di SkillsWindow,
-// il contenuto «Per sviluppatori» (gateway, marketplace, registro, chiave)
-// che qui sta in fondo alla pagina dentro «Avanzate».
+// I PEZZI si riusano, non si riscrivono: le righe e i flussi di connessione
+// (plugin/app-row + plugin/connect-flows), il foglio del dettaglio app,
+// ManualServers col form e l'import (plugin/manual-servers), l'editor delle
+// skill (plugin/skill-editor), il contenuto «Per sviluppatori» (gateway,
+// marketplace, registro, chiave) che sta in fondo alla pagina dentro
+// «Avanzate».
 // La riga grigia «tipo · strada · origine» e lo stato con l'azione vengono
 // dal modello puro lib/plugins-view: mai dati inventati.
 //
@@ -53,7 +53,10 @@ import { yourPlugins, grayLineOf, stateLabelOf, stradaLabel, stradaColumnWidth, 
 import type { PermissionsConfig } from '../../../shared/types'
 import { humanizeSkillName } from '../../../shared/skill-md'
 import { Toggle } from './Settings'
-import { AppRow, AppLogo, useConnectFlows, DevelopersContent } from './AppsWindow'
+import { AppRow } from './plugin/app-row'
+import { useConnectFlows } from './plugin/connect-flows'
+import { AppLogo } from './plugin/app-logo'
+import { DevelopersContent } from './plugin/developers-content'
 // Fase design (DS2): il guscio di OGNI pagina a tutta area e la sua testata — al posto di PluginShell
 import { PageShell } from './ui/page-shell'
 import { PageHeader } from './ui/page-header'

@@ -12,11 +12,14 @@ import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
 import { renderHtml, parseHtml, textOf, findAll, hasAncestor, type HtmlNode } from './render-helper'
 
-const APPS_SRC = readFileSync(fileURLToPath(new URL('../components/AppsWindow.tsx', import.meta.url)), 'utf8')
+// C0 (fase linguaggio): AppsWindow è smontato — i pezzi si leggono uniti
+const APPS_SRC = ['connect-flows', 'app-row', 'app-logo']
+  .map((n) => readFileSync(fileURLToPath(new URL(`../components/plugin/${n}.tsx`, import.meta.url)), 'utf8'))
+  .join('\n\n')
 const PANEL_SRC = readFileSync(fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url)), 'utf8')
 const CARD_SRC = readFileSync(fileURLToPath(new URL('../components/ConnectorCard.tsx', import.meta.url)), 'utf8')
 
-const { AppRow } = await import('../components/AppsWindow')
+const { AppRow } = await import('../components/plugin/app-row')
 
 type Row = Parameters<typeof AppRow>[0]['row']
 type Flow = Parameters<typeof AppRow>[0]['flow']

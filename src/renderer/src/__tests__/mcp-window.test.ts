@@ -12,7 +12,7 @@ import { createElement } from 'react'
 import { renderHtml, setStoreStateForRender, parseHtml, textOf, findAll } from './render-helper'
 
 const SIDEBAR = fileURLToPath(new URL('../components/Sidebar.tsx', import.meta.url))
-const APPSW = fileURLToPath(new URL('../components/AppsWindow.tsx', import.meta.url))
+const APPSW = fileURLToPath(new URL('../components/plugin/developers-content.tsx', import.meta.url))
 const MCPW = fileURLToPath(new URL('../components/plugin/manual-servers.tsx', import.meta.url))
 const APP = fileURLToPath(new URL('../App.tsx', import.meta.url))
 const PANEL = fileURLToPath(new URL('../components/PluginPanel.tsx', import.meta.url))
