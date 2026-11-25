@@ -34,6 +34,7 @@ import { Loader2, TriangleAlert, CircleHelp, CheckCircle2, Plus, Settings } from
 import { Button } from '../components/ui/button'
 import { Stack } from '../components/ui/stack'
 import { Row } from '../components/ui/row'
+import { Grid } from '../components/ui/grid'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -129,7 +130,7 @@ const MODELLI: ModelInfo[] = [
  * entra qui con tutti i suoi stati.
  */
 export const SEZIONI = [
-  { id: 'impaginazione', titolo: 'stack e row — colonna e riga', componenti: ['stack', 'row'] },
+  { id: 'impaginazione', titolo: 'stack, row e grid — impaginare', componenti: ['stack', 'row', 'grid'] },
   { id: 'bottoni', titolo: 'button', componenti: ['button'] },
   { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
@@ -419,6 +420,13 @@ const Sezione = ({ id }: { id: IdSezione }) => {
                 <span className="text-small text-muted-foreground">con la sua riga grigia, alla base</span>
               </Row>
             </div>
+          </Riga>
+          <Riga label="grid — le colonne uguali">
+            <Grid cols={3} className="w-80">
+              <div className="flex h-16 items-center justify-center rounded-surface border border-border text-small text-muted-foreground">una</div>
+              <div className="flex h-16 items-center justify-center rounded-surface border border-border text-small text-muted-foreground">due</div>
+              <div className="flex h-16 items-center justify-center rounded-surface border border-border text-small text-muted-foreground">tre</div>
+            </Grid>
           </Riga>
           <Riga label="gap tight (8) e section (32)">
             <div className="w-72 rounded-surface border border-border p-4">

@@ -233,6 +233,10 @@ Galleria: impaginazione.
 La riga dell'impaginazione (NON la riga di elenco: quella è ListRow): figli uno accanto all'altro, allineati una volta per tutti (`align` start · center · baseline · stretch) e alla distanza di una variante chiusa — `gap` tight 8 · item 12 (default) · block 16 · section 32 · none; `wrap` per mandare a capo. Chi scrive «flex items-center gap-3» fuori da ui/ sta riscrivendo questo pezzo.
 Galleria: impaginazione.
 
+### grid
+La griglia dell'impaginazione: figli in colonne uguali (2 di default, oppure 3 · 4 · 6) alla distanza dei token (`gap` tight 8 · item 12 · block 16 default · section 32). Le card della Libreria e i riquadri a colonne si compongono con questa, non con una griglia scritta in pagina.
+Galleria: impaginazione.
+
 ### ModelPicker
 Il combobox con ricerca per scegliere un modello a mano: ogni riga mostra id, finestra di contesto, le etichette visione/ragionamento/niente tool e il prezzo $/M; si può scrivere un id libero e confermare con Invio; `pillTrigger` lo riduce a una pillola che apre l'elenco. Non usarlo dove i modelli arrivano da provider da collegare (quello è ModelSelect, che offre «Collega»), né come campo di testo qualunque.
 Galleria: impostazioni-routine.
