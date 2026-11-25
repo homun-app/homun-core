@@ -289,6 +289,10 @@ Galleria: menu-account, chat (menu «Ragiona»).
 La superficie del catalogo: UNA forma sola — rounded-surface, bordo del tema, fondo card, NESSUNA ombra — per le card in chat e le schede della griglia. Il respiro interno è una variante chiusa (`padding` block 16 di default · none per chi lo decide da sé); il ritmo del contenuto lo decide chi la riempie (Stack). Non usarla per gli elenchi (righe a filo: ListGroup) né per i menu (popover).
 Galleria: superfici.
 
+### segmented
+La scelta ESCLUSIVA in una pillola, alta 36 (h-control): la scelta di un'impostazione («Sistema · Chiaro · Scuro»), NON un filtro (quelli sono FilterChips). Radiogroup col nome accessibile, la voce attiva piena, le altre grigie, ognuna raggiungibile col Tab; `fill` divide la larghezza. Porta al catalogo il pezzo che le Impostazioni chiamavano SettingsSegments.
+Galleria: campi.
+
 ### switch
 L'interruttore, SOLO per acceso/spento (le scelte esclusive sono Segmented): role switch col nome accessibile, bersaglio alto 32 (h-control-sm), pista 24 dentro e pallina 20 — le misure dell'interruttore che le Impostazioni già disegnavano (Toggle), passate al catalogo. In una riga è l'azione di destra insieme a Button secondary sm.
 Galleria: campi.

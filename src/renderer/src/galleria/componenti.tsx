@@ -47,6 +47,7 @@ import { EmptyState } from '../components/ui/empty-state'
 import { Field } from '../components/ui/field'
 import { Textarea } from '../components/ui/textarea'
 import { Switch } from '../components/ui/switch'
+import { Segmented } from '../components/ui/segmented'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -146,7 +147,7 @@ export const SEZIONI = [
   { id: 'testo', titolo: 'text e icon — testo e icone', componenti: ['text', 'icon'] },
   { id: 'identita', titolo: 'app-logo, bot-dot e avatar — identità', componenti: ['app-logo', 'bot-dot', 'avatar'] },
   { id: 'bottoni', titolo: 'button', componenti: ['button'] },
-  { id: 'campi', titolo: 'input, select, field, textarea e switch', componenti: ['input', 'select', 'field', 'textarea', 'switch'] },
+  { id: 'campi', titolo: 'input, select, field, textarea, switch e segmented', componenti: ['input', 'select', 'field', 'textarea', 'switch', 'segmented'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
   { id: 'tabella', titolo: 'data-table', componenti: ['data-table'] },
   { id: 'elenchi', titolo: 'flat-list, list-row e list-group', componenti: ['flat-list', 'list-row', 'list-group'] },
@@ -244,6 +245,10 @@ const Sezione = ({ id }: { id: IdSezione }) => {
             <Switch checked onChange={() => undefined} label="Attivo" />
             <Switch checked={false} onChange={() => undefined} label="Attivo" />
             <Switch checked disabled onChange={() => undefined} label="Attivo (disattivato)" />
+          </Riga>
+          <Riga label="segmented — la scelta di un'impostazione, alta 36 (non un filtro)">
+            <Segmented options={[{ value: 'sistema', label: 'Sistema' }, { value: 'chiaro', label: 'Chiaro' }, { value: 'scuro', label: 'Scuro' }]} value="chiaro" onChange={() => undefined} label="Tema" />
+            <Segmented options={[{ value: 'sistema', label: 'Sistema' }, { value: 'chiaro', label: 'Chiaro' }, { value: 'scuro', label: 'Scuro' }]} value={null} onChange={() => undefined} label="Tema" disabled />
           </Riga>
           <Riga label="le classi del campo da sole (FIELD_CLASS)">
             <input className="h-control w-56 rounded-control border border-input px-3 text-body" placeholder="campo grezzo" />
