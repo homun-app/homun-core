@@ -151,7 +151,8 @@ export const SEZIONI = [
   { id: 'testo', titolo: 'text e icon — testo e icone', componenti: ['text', 'icon'] },
   { id: 'identita', titolo: 'app-logo, bot-dot e avatar — identità', componenti: ['app-logo', 'bot-dot', 'avatar'] },
   { id: 'bottoni', titolo: 'button', componenti: ['button'] },
-  { id: 'campi', titolo: 'input, select, field, textarea, switch e segmented', componenti: ['input', 'select', 'field', 'textarea', 'switch', 'segmented'] },
+  { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
+  { id: 'modulo', titolo: 'field, textarea, switch e segmented', componenti: ['field', 'textarea', 'switch', 'segmented'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
   { id: 'tabella', titolo: 'data-table', componenti: ['data-table'] },
   { id: 'elenchi', titolo: 'flat-list, list-row e list-group', componenti: ['flat-list', 'list-row', 'list-group'] },
@@ -191,6 +192,37 @@ const Sezione = ({ id }: { id: IdSezione }) => {
   return (
     <div className="p-8" data-testid="galleria-componenti-contenuto" data-sezione={id}>
       <PageHeader title={info?.titolo ?? id} description="La pagina dei componenti è solo di sviluppo e di test: una sezione per volta, tutti gli stati, dal vivo." testId="galleria-page-header" />
+
+      {id === 'modulo' && (
+        <Section title="field, textarea, switch e segmented — il modulo" testId="galleria-section-modulo">
+          <Riga label="field — etichetta · campo · aiuto · errore">
+            <div className="flex items-start gap-4">
+              <div className="flex w-60 flex-col gap-3">
+                <Field label="Il nome" htmlFor="g-field-1"><Input id="g-field-1" placeholder="es. ricerche-estese" /></Field>
+                <Field label="L'indirizzo" aiuto="Serve per le ricerche del bot." htmlFor="g-field-2"><Input id="g-field-2" placeholder="https://…" /></Field>
+              </div>
+              <div className="flex w-60 flex-col gap-3">
+                <Field label="La chiave" errore="Troppo corta: ce ne vogliono 8." htmlFor="g-field-3"><Input id="g-field-3" aria-invalid="true" defaultValue="ak_" /></Field>
+              </div>
+            </div>
+          </Riga>
+          <Riga label="textarea — le tre altezze minime, poi cresce col testo">
+            <div className="flex items-start gap-4">
+              <Field label="La descrizione" htmlFor="g-ta-1"><Textarea id="g-ta-1" placeholder="cosa fa e quando usarla" /></Field>
+              <Field label="Il messaggio" htmlFor="g-ta-2"><Textarea id="g-ta-2" min="md" defaultValue="La bozza del bot, che puoi ritoccare prima di inviarla." /></Field>
+            </div>
+          </Riga>
+          <Riga label="switch — acceso/spento (le scelte sono Segmented)">
+            <Switch checked onChange={() => undefined} label="Attivo" />
+            <Switch checked={false} onChange={() => undefined} label="Attivo" />
+            <Switch checked disabled onChange={() => undefined} label="Attivo (disattivato)" />
+          </Riga>
+          <Riga label="segmented — la scelta di un'impostazione, alta 36 (non un filtro)">
+            <Segmented options={[{ value: 'sistema', label: 'Sistema' }, { value: 'chiaro', label: 'Chiaro' }, { value: 'scuro', label: 'Scuro' }]} value="chiaro" onChange={() => undefined} label="Tema" />
+            <Segmented options={[{ value: 'sistema', label: 'Sistema' }, { value: 'chiaro', label: 'Chiaro' }, { value: 'scuro', label: 'Scuro' }]} value={null} onChange={() => undefined} label="Tema" disabled />
+          </Riga>
+        </Section>
+      )}
 
       {id === 'bottoni' && (
         <Section title="button — tutte le varianti e taglie" testId="galleria-section-button">
@@ -234,29 +266,6 @@ const Sezione = ({ id }: { id: IdSezione }) => {
             <Select className="w-56" defaultValue="a"><option value="a">Scelta A</option></Select>
             <Select className="w-56" defaultValue="a" aria-invalid="true"><option value="a">Con errore</option></Select>
           </Riga>
-          <Riga label="field — etichetta · campo · aiuto · errore">
-            <div className="flex w-72 flex-col gap-4">
-              <Field label="Il nome" htmlFor="g-field-1"><Input id="g-field-1" placeholder="es. ricerche-estese" /></Field>
-              <Field label="L'indirizzo" aiuto="Serve per le ricerche del bot." htmlFor="g-field-2"><Input id="g-field-2" placeholder="https://…" /></Field>
-              <Field label="La chiave" errore="Troppo corta: ce ne vogliono 8." htmlFor="g-field-3"><Input id="g-field-3" aria-invalid="true" defaultValue="ak_" /></Field>
-            </div>
-          </Riga>
-          <Riga label="textarea — le tre altezze minime, poi cresce col testo">
-            <div className="flex w-72 flex-col gap-4">
-              <Field label="La descrizione" htmlFor="g-ta-1"><Textarea id="g-ta-1" placeholder="cosa fa e quando usarla" /></Field>
-              <Field label="Il messaggio da confermare" htmlFor="g-ta-2"><Textarea id="g-ta-2" min="md" defaultValue="La bozza del bot, che puoi ritoccare prima di inviarla." /></Field>
-              <Field label="Le istruzioni (markdown)" htmlFor="g-ta-3"><Textarea id="g-ta-3" min="lg" defaultValue={'# Istruzioni\n\nIl corpo lungo, in monospazio quando è codice.'} className="font-mono text-small" /></Field>
-            </div>
-          </Riga>
-          <Riga label="switch — acceso/spento (le scelte sono Segmented)">
-            <Switch checked onChange={() => undefined} label="Attivo" />
-            <Switch checked={false} onChange={() => undefined} label="Attivo" />
-            <Switch checked disabled onChange={() => undefined} label="Attivo (disattivato)" />
-          </Riga>
-          <Riga label="segmented — la scelta di un'impostazione, alta 36 (non un filtro)">
-            <Segmented options={[{ value: 'sistema', label: 'Sistema' }, { value: 'chiaro', label: 'Chiaro' }, { value: 'scuro', label: 'Scuro' }]} value="chiaro" onChange={() => undefined} label="Tema" />
-            <Segmented options={[{ value: 'sistema', label: 'Sistema' }, { value: 'chiaro', label: 'Chiaro' }, { value: 'scuro', label: 'Scuro' }]} value={null} onChange={() => undefined} label="Tema" disabled />
-          </Riga>
           <Riga label="le classi del campo da sole (FIELD_CLASS)">
             <input className="h-control w-56 rounded-control border border-input px-3 text-body" placeholder="campo grezzo" />
           </Riga>
@@ -295,11 +304,9 @@ const Sezione = ({ id }: { id: IdSezione }) => {
             <div className="divide-y divide-border/50">
               <ListRow segno={<Avatar family="h-creature" color="c1" />} titolo="Turismo" sottotitolo="Server MCP · sul Mac" metadato="2 min fa" azione={<Button variant="secondary" size="sm">Apri</Button>} clickable />
               <ListRow segno={<AppLogo logo="gmail.svg" name="Gmail" className="size-8 text-body" />} titolo="Gmail" sottotitolo="Connettore · tramite Composio" azione={<Button variant="secondary" size="sm">Ricollega</Button>} />
-              <ListRow titolo="Una riga di solo testo" metadato="40" />
-              <ListRow segno={<BotDot color="c3" />} titolo="Ricerche" sottotitolo="ha finito: 3 documenti nuovi" below="il motivo per esteso sta sotto, all'ascissa del titolo" />
             </div>
           </div>
-          <div className="mb-8">
+          <div>
             <Etichetta>list-group — il titolo di sezione e le righe a filo, NESSUN riquadro grigio</Etichetta>
             <ListGroup titolo="Server collegati" azione={<Button variant="ghost" size="sm">Mostra tutto</Button>}>
               <ListRow segno={<AppLogo logo="asana.svg" name="Asana" className="size-8 text-body" />} titolo="Asana" sottotitolo="24 strumenti · tutti i bot" metadato="oggi" clickable />
@@ -312,7 +319,6 @@ const Sezione = ({ id }: { id: IdSezione }) => {
           <FlatList testId="galleria-flat-list">
             <FlatRow title="La prima riga" subtitle="con un sottotitolo" trailing={<Button variant="ghost" size="sm" shape="control">Apri</Button>} />
             <FlatRow title="La seconda riga" subtitle="cliccabile" clickable onClick={() => undefined} />
-            <FlatRow title="La terza riga" />
           </FlatList>
         </Section>
       )}
@@ -465,21 +471,20 @@ const Sezione = ({ id }: { id: IdSezione }) => {
 
       {id === 'modelli-aperto' && (
         <Section title="i selettori di modello APERTI (scena loro, come il dialogo e il menu)" testId="galleria-section-model-open">
-          <Riga label="ModelPicker aperto (l'elenco con la ricerca scritta dentro)">
-            <div className="relative h-80 w-96">
-              <ModelPicker models={MODELLI} value="finto" onChange={() => undefined} placeholder="predefinito…" defaultOpen />
+          <div className="flex items-start gap-8">
+            <div>
+              <Etichetta>ModelPicker aperto</Etichetta>
+              <div className="relative h-64 w-80">
+                <ModelPicker models={MODELLI} value="finto" onChange={() => undefined} placeholder="predefinito…" defaultOpen />
+              </div>
             </div>
-          </Riga>
-          <Riga label="ModelPicker a pillola aperto (il «valore scelto non si mostra mai nel trigger»)">
-            <div className="relative h-80 w-96">
-              <ModelPicker models={MODELLI} value={null} onChange={() => undefined} pillTrigger={{ label: 'Altri modelli…' }} defaultOpen />
+            <div>
+              <Etichetta>ModelSelect aperto (popover, i provider sotto)</Etichetta>
+              <div className="relative h-64 w-80">
+                <ModelSelect value={null} onChange={() => undefined} allowNone allowFollowMain defaultOpen />
+              </div>
             </div>
-          </Riga>
-          <Riga label="ModelSelect aperto (riga chiusa col popover, i provider sotto)">
-            <div className="relative h-96 w-96">
-              <ModelSelect value={null} onChange={() => undefined} allowNone allowFollowMain defaultOpen />
-            </div>
-          </Riga>
+          </div>
         </Section>
       )}
 
@@ -640,13 +645,26 @@ const Sezione = ({ id }: { id: IdSezione }) => {
 
       {id === 'impaginazione' && (
         <Section title="stack — la colonna, con le distanze dei token" testId="galleria-section-stack">
-          <Riga label="gap block (16, il default) — tre blocchi">
-            <div className="w-72 rounded-surface border border-border p-4">
-              <Stack>
-                <div className="rounded-control bg-muted px-3 py-2 text-body">il primo blocco</div>
-                <div className="rounded-control bg-muted px-3 py-2 text-body">il secondo</div>
-                <div className="rounded-control bg-muted px-3 py-2 text-body">il terzo</div>
-              </Stack>
+          <Riga label="la colonna: gap block (16, il default) a confronto con tight (8) e section (32)">
+            <div className="flex items-start gap-6">
+              <div className="w-44 rounded-surface border border-border p-3">
+                <Stack>
+                  <div className="rounded-control bg-muted px-2 py-1 text-small">block · 16</div>
+                  <div className="rounded-control bg-muted px-2 py-1 text-small">il default</div>
+                </Stack>
+              </div>
+              <div className="w-44 rounded-surface border border-border p-3">
+                <Stack gap="tight">
+                  <div className="rounded-control bg-muted px-2 py-1 text-small">tight · 8</div>
+                  <div className="rounded-control bg-muted px-2 py-1 text-small">il gruppo</div>
+                </Stack>
+              </div>
+              <div className="w-44 rounded-surface border border-border p-3">
+                <Stack gap="section">
+                  <div className="rounded-control bg-muted px-2 py-1 text-small">section · 32</div>
+                  <div className="rounded-control bg-muted px-2 py-1 text-small">le sezioni</div>
+                </Stack>
+              </div>
             </div>
           </Riga>
           <Riga label="row — la riga: allineamento e distanza una volta sola">
@@ -663,24 +681,11 @@ const Sezione = ({ id }: { id: IdSezione }) => {
             </div>
           </Riga>
           <Riga label="grid — le colonne uguali">
-            <Grid cols={3} className="w-80">
-              <div className="flex h-16 items-center justify-center rounded-surface border border-border text-small text-muted-foreground">una</div>
-              <div className="flex h-16 items-center justify-center rounded-surface border border-border text-small text-muted-foreground">due</div>
-              <div className="flex h-16 items-center justify-center rounded-surface border border-border text-small text-muted-foreground">tre</div>
+            <Grid cols={3} className="w-72">
+              <div className="flex h-14 items-center justify-center rounded-surface border border-border text-small text-muted-foreground">una</div>
+              <div className="flex h-14 items-center justify-center rounded-surface border border-border text-small text-muted-foreground">due</div>
+              <div className="flex h-14 items-center justify-center rounded-surface border border-border text-small text-muted-foreground">tre</div>
             </Grid>
-          </Riga>
-          <Riga label="gap tight (8) e section (32)">
-            <div className="w-72 rounded-surface border border-border p-4">
-              <Stack gap="tight">
-                <div className="rounded-control bg-muted px-3 py-1.5 text-small">riga del gruppo</div>
-                <div className="rounded-control bg-muted px-3 py-1.5 text-small">la sua sorella</div>
-              </Stack>
-              <div className="mt-section" />
-              <Stack gap="section">
-                <div className="rounded-control bg-muted px-3 py-2 text-body">una sezione</div>
-                <div className="rounded-control bg-muted px-3 py-2 text-body">l'altra</div>
-              </Stack>
-            </div>
           </Riga>
         </Section>
       )}
