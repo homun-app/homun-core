@@ -23,3 +23,4 @@ fatto-uscite/
 
 # F1 (fase fondamenta): le differenze della galleria restano fuori dal repo
 galleria/.diff/
+galleria/.catture/
