@@ -241,6 +241,10 @@ Galleria: testo.
 Il logo di un'app del catalogo: il file del repo (o un data: URL), e quando manca l'iniziale su una piastrella tenue — mai un'emoji. La misura la dà chi lo rende con `className` (size-8 nelle righe, size-10 nelle testate di scheda); il raggio e il fondo del tema scuro stanno in lib/app-logos, in un posto solo.
 Galleria: identita.
 
+### avatar
+La mascotte del bot: il disegno VERO di bot/Bot (le cinque famiglie h-creature · h-robo · h-device · jelly · pixel, la palette della mascotte --bot-c*), alle misure chiuse `size` sm 20 · md 32 (default, le righe) · lg 40 (le testate) · xl 64; `state` cambia occhi e antenne, `label` la rende un'immagine col nome accessibile. Non ridisegnare la mascotte fuori da qui e non confondere la palette: il PUNTINO di stato è BotDot.
+Galleria: identita.
+
 ### bot-dot
 Il puntino del colore di un bot: 8 px, tinta dalla palette `--bot-dot-c1…c7` (R5: contrasto ≥ 3:1 sul fondo della riga, in chiaro e in scuro) — NON dalla palette della mascotte. Il nome del bot resta nel colore del testo: il colore del bot sta qui.
 Galleria: identita.

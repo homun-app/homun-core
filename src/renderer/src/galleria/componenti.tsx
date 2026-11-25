@@ -39,6 +39,7 @@ import { Text } from '../components/ui/text'
 import { Icon } from '../components/ui/icon'
 import { AppLogo } from '../components/ui/app-logo'
 import { BotDot } from '../components/ui/bot-dot'
+import { Avatar } from '../components/ui/avatar'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -136,7 +137,7 @@ const MODELLI: ModelInfo[] = [
 export const SEZIONI = [
   { id: 'impaginazione', titolo: 'stack, row e grid — impaginare', componenti: ['stack', 'row', 'grid'] },
   { id: 'testo', titolo: 'text e icon — testo e icone', componenti: ['text', 'icon'] },
-  { id: 'identita', titolo: 'app-logo e bot-dot — identità', componenti: ['app-logo', 'bot-dot'] },
+  { id: 'identita', titolo: 'app-logo, bot-dot e avatar — identità', componenti: ['app-logo', 'bot-dot', 'avatar'] },
   { id: 'bottoni', titolo: 'button', componenti: ['button'] },
   { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
@@ -352,14 +353,23 @@ const Sezione = ({ id }: { id: IdSezione }) => {
             <span className="inline-flex items-center rounded-full bg-muted px-2 h-control-sm text-caption">badge neutro</span>
             <span className="inline-flex items-center rounded-full bg-destructive text-destructive-foreground px-2 h-control-sm text-caption">badge rosso</span>
           </Riga>
-          <Riga label="famiglie dell'avatar">
+          {/* C1: la demo di fondamenta-galleria disegnava un CERCHIO qualsiasi — le famiglie si vedevano tutte uguali e il difetto sembrava dell'Avatar: la demo sbagliava. Ora rende il pezzo VERO del catalogo */}
+          <Riga label="avatar — le cinque famiglie del disegno vero, a 32">
             <div className="flex items-center gap-4">
               {BOT_FAMILIES.map((f) => (
                 <div key={f} className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
-                  <span aria-hidden="true" className="size-5 shrink-0 rounded-full" style={{ background: 'var(--bot-dot-c1)' }} />
+                  <Avatar family={f} color="c1" />
                   <span className="text-caption">{f}</span>
                 </div>
               ))}
+            </div>
+          </Riga>
+          <Riga label="le misure (20 · 32 · 40 · 64) e i colori c1–c4 sulla creatura">
+            <div className="flex items-end gap-4">
+              <Avatar family="h-creature" color="c1" size="sm" />
+              <Avatar family="h-robo" color="c2" />
+              <Avatar family="h-device" color="c3" size="lg" />
+              <Avatar family="jelly" color="c4" size="xl" />
             </div>
           </Riga>
         </Section>
