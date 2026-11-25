@@ -45,6 +45,7 @@ import { ListGroup } from '../components/ui/list-group'
 import { Card } from '../components/ui/card'
 import { EmptyState } from '../components/ui/empty-state'
 import { Field } from '../components/ui/field'
+import { Textarea } from '../components/ui/textarea'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -144,7 +145,7 @@ export const SEZIONI = [
   { id: 'testo', titolo: 'text e icon — testo e icone', componenti: ['text', 'icon'] },
   { id: 'identita', titolo: 'app-logo, bot-dot e avatar — identità', componenti: ['app-logo', 'bot-dot', 'avatar'] },
   { id: 'bottoni', titolo: 'button', componenti: ['button'] },
-  { id: 'campi', titolo: 'input, select e field', componenti: ['input', 'select', 'field'] },
+  { id: 'campi', titolo: 'input, select, field e textarea', componenti: ['input', 'select', 'field', 'textarea'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
   { id: 'tabella', titolo: 'data-table', componenti: ['data-table'] },
   { id: 'elenchi', titolo: 'flat-list, list-row e list-group', componenti: ['flat-list', 'list-row', 'list-group'] },
@@ -229,6 +230,13 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               <Field label="Il nome" htmlFor="g-field-1"><Input id="g-field-1" placeholder="es. ricerche-estese" /></Field>
               <Field label="L'indirizzo" aiuto="Serve per le ricerche del bot." htmlFor="g-field-2"><Input id="g-field-2" placeholder="https://…" /></Field>
               <Field label="La chiave" errore="Troppo corta: ce ne vogliono 8." htmlFor="g-field-3"><Input id="g-field-3" aria-invalid="true" defaultValue="ak_" /></Field>
+            </div>
+          </Riga>
+          <Riga label="textarea — le tre altezze minime, poi cresce col testo">
+            <div className="flex w-72 flex-col gap-4">
+              <Field label="La descrizione" htmlFor="g-ta-1"><Textarea id="g-ta-1" placeholder="cosa fa e quando usarla" /></Field>
+              <Field label="Il messaggio da confermare" htmlFor="g-ta-2"><Textarea id="g-ta-2" min="md" defaultValue="La bozza del bot, che puoi ritoccare prima di inviarla." /></Field>
+              <Field label="Le istruzioni (markdown)" htmlFor="g-ta-3"><Textarea id="g-ta-3" min="lg" defaultValue={'# Istruzioni\n\nIl corpo lungo, in monospazio quando è codice.'} className="font-mono text-small" /></Field>
             </div>
           </Riga>
           <Riga label="le classi del campo da sole (FIELD_CLASS)">

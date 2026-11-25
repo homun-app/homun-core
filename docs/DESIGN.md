@@ -289,6 +289,10 @@ Galleria: menu-account, chat (menu «Ragiona»).
 La superficie del catalogo: UNA forma sola — rounded-surface, bordo del tema, fondo card, NESSUNA ombra — per le card in chat e le schede della griglia. Il respiro interno è una variante chiusa (`padding` block 16 di default · none per chi lo decide da sé); il ritmo del contenuto lo decide chi la riempie (Stack). Non usarla per gli elenchi (righe a filo: ListGroup) né per i menu (popover).
 Galleria: superfici.
 
+### textarea
+L'area di testo, gemella dell'Input: le stesse classi del campo (FIELD_CLASS), e l'altezza NON è fissa — cresce col testo. L'altezza minima è una variante chiusa: `min` sm 64 (default, la descrizione) · md 96 (il messaggio da confermare) · lg 160 (le istruzioni lunghe). resize-y, mai in orizzontale.
+Galleria: campi.
+
 ### field
 L'etichetta col suo campo: `label` (text-small grigia, collegata con htmlFor) · il controllo nei `children` (Input, Select, Textarea…) · `aiuto` (la frase che spiega, sotto, grigia) · `errore` (in parole sotto, nel colore del distruttivo con role alert — e quando c'è lui, l'aiuto si fa da parte). Le pagine non scrivono più la coppia etichetta-campo a mano.
 Galleria: campi.
