@@ -35,6 +35,7 @@ import { Button } from '../components/ui/button'
 import { Stack } from '../components/ui/stack'
 import { Row } from '../components/ui/row'
 import { Grid } from '../components/ui/grid'
+import { Text } from '../components/ui/text'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -131,6 +132,7 @@ const MODELLI: ModelInfo[] = [
  */
 export const SEZIONI = [
   { id: 'impaginazione', titolo: 'stack, row e grid — impaginare', componenti: ['stack', 'row', 'grid'] },
+  { id: 'testo', titolo: 'text — le sei taglie e i toni', componenti: ['text'] },
   { id: 'bottoni', titolo: 'button', componenti: ['button'] },
   { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
@@ -394,6 +396,31 @@ const Sezione = ({ id }: { id: IdSezione }) => {
           <PageColumn width="reading">
             <DocumentBody markdown={MD_PRIMA_PARTE} />
           </PageColumn>
+        </Section>
+      )}
+
+      {id === 'testo' && (
+        <Section title="text — le sei taglie dei token, i toni e i pesi" testId="galleria-section-text">
+          <Riga label="le sei taglie (ognuna con la sua interlinea)">
+            <div className="flex flex-col gap-2">
+              <Text size="page" weight="semibold">Titolo di pagina · 28</Text>
+              <Text size="title" weight="semibold">Titolo di scheda · 20</Text>
+              <Text size="reading">Testo di lettura · 16, quello dei documenti e dei messaggi</Text>
+              <Text>Corpo · 14, il default dell'interfaccia</Text>
+              <Text size="small" tone="muted">Seconda riga · 13, grigia</Text>
+              <Text size="caption" tone="muted">Metadato · 12, orari e contatori</Text>
+            </div>
+          </Riga>
+          <Riga label="i toni">
+            <Text>normale</Text>
+            <Text tone="muted">grigio</Text>
+            <Text tone="destructive">errore</Text>
+          </Riga>
+          <Riga label="truncate: la riga che non ci sta si taglia col ellissi">
+            <div className="w-56">
+              <Text truncate size="small" tone="muted">una riga lunga che da sola non entrerebbe mai in questa larghezza</Text>
+            </div>
+          </Riga>
         </Section>
       )}
 
