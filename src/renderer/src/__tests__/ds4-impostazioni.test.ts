@@ -37,8 +37,8 @@ const { SettingsPage } = await import('../components/settings/SettingsPage')
 const { SettingsAdvanced } = await import('../components/settings/SettingsAdvanced')
 const { DiskSpaceSection, PruneFeedback } = await import('../components/settings/DiskSpaceSection')
 const { EngineSection } = await import('../components/settings/EngineSection')
-const { ApprovalsPage, ModeSelect } = await import('../components/settings/ApprovalsPage')
-const { ModelsPage, ProviderDetail } = await import('../components/settings/ModelsPage')
+const { ApprovalsPage } = await import('../components/settings/ApprovalsPage')
+const { ModelsPage } = await import('../components/settings/ModelsPage')
 const { AddProviderSheet, ProviderMark } = await import('../components/settings/AddProviderSheet')
 const { useStore } = await import('../store')
 
@@ -670,7 +670,7 @@ describe('DS4 Impostazioni: la Cassaforte', () => {
 })
 
 describe('DS4 Impostazioni: Approvazioni', () => {
-  const renderApprovals = (initial?: { mode?: unknown; cfg?: unknown; grants?: unknown }): HtmlNode => {
+  const renderApprovals = (initial?: { mode?: unknown; cfg?: unknown; grants?: unknown; regoleAperte?: boolean }): HtmlNode => {
     capture.els.length = 0
     setStoreStateForRender(useStore, {
       settingsOpen: true,
@@ -754,15 +754,20 @@ describe('DS4 Impostazioni: Approvazioni', () => {
     const bottone = byTag(root, 'button').filter((b) => textOf(b) === 'Regole per strumento')[0]!
     expect(bottone.attrs['aria-expanded']).toBe('false')
     expect(byText(root, 'Politica predefinita')).toBe(null)
-    // e il selettore dei modi è un Select a pillola (lo legge il render del pezzo)
-    const sel = htmlOf(createElement(ModeSelect, { value: 'blocked', onChange: () => undefined }))
-    const select = byTag(sel, 'select')[0]!
+    // e il selettore dei modi è un Select a pillola (C0: ModeSelect non è più
+    // esportata — si rende aprendo «Regole per strumento» da initial.regoleAperte)
+    const aperte = renderApprovals({ mode: 'ask', cfg: { enabled: false, providerId: null, model: null, allowRules: [], blockRules: [] }, grants: [], regoleAperte: true })
+    expect(byText(aperte, 'Politica predefinita')).not.toBe(null)
+    const select = byTag(findAll(aperte, (n) => n.attrs['aria-label'] === 'Politica predefinita')[0] ?? aperte, 'select')[0]
+      ?? byTag(aperte, 'select')[0]!
     expect(has(select, 'h-control-sm', 'rounded-full', 'text-body')).toBe(true)
     expect(byTag(select, 'option').map(textOf)).toEqual(['Consenti sempre', 'Chiedi approvazione', 'Blocca'])
   })
 })
 
 describe('DS4 Impostazioni: Modelli', () => {
+  /** Il render della pagina Modelli con un provider APERTO (C0: ProviderDetail non è più esportata). */
+  const renderModelliAperto = (id: string): HtmlNode => htmlOf(createElement(ModelsPage, { initial: { expanded: id } } as never))
   const PROVIDERS = [
     { id: 'ollama', name: 'Ollama (locale)', kind: 'ollama', baseUrl: 'http://127.0.0.1:41134', apiKey: '', enabled: true, hasKey: false },
     { id: 'custom_1', name: 'Finto locale', kind: 'custom', baseUrl: 'http://127.0.0.1:8000/v1', apiKey: '', enabled: false, hasKey: true }
@@ -815,7 +820,8 @@ describe('DS4 Impostazioni: Modelli', () => {
   })
 
   it('il provider aperto sul posto: i campi sono Input da 36, «Salva» la pillola piena, «Scollega» quieta rossa, la chiusura un bottone tondo da 32', () => {
-    const root = htmlOf(createElement(ProviderDetail, { provider: PROVIDERS[1] as never, onDone: () => undefined }))
+    // C0 (fase linguaggio): ProviderDetail non è più esportato — si apre da ModelsPage con initial.expanded
+    const root = renderModelliAperto(PROVIDERS[1]!.id)
     for (const campo of byTag(root, 'input')) expect(has(campo, 'h-control', 'rounded-control', 'text-body'), campo.attrs.placeholder ?? '').toBe(true)
     expect(findAll(root, (n) => n.attrs.placeholder === 'Nome')).toHaveLength(1)
     const salva = byTag(root, 'button').filter((b) => textOf(b) === 'Salva')[0]!

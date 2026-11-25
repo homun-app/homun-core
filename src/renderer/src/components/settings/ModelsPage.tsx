@@ -74,6 +74,9 @@ export interface ModelsPageInitial {
   chain?: FallbackRoute[] | null
   reviewer?: AutoReviewSettings | null
   mode?: ApprovalsMode
+  /** C0 (fase linguaggio): il provider aperto in partenza — la cucitura di
+   *  test per la scheda del provider (ProviderDetail non è esportato) */
+  expanded?: string
 }
 
 export function ModelsPage({ initial }: { initial?: ModelsPageInitial }) {
@@ -91,7 +94,7 @@ export function ModelsPage({ initial }: { initial?: ModelsPageInitial }) {
   // lo stato dei provider (providers:test), come oggi
   const [tests, setTests] = useState<Record<string, { ok: boolean; models?: ModelInfo[] }>>({})
   const [testing, setTesting] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<string | null>(initial?.expanded ?? null)
   const [addOpen, setAddOpen] = useState(false)
   const locale = i18n.locale
   const usd = (n: number): string => fmtUsdIn(n, locale)
@@ -552,7 +555,12 @@ function LocalModelCard() {
 }
 
 /** I2.3: il provider aperto SUL POSTO (niente più foglio EditProviderSheet). */
-export function ProviderDetail({ provider, onDone }: { provider: ProviderPublic; onDone(): void }) {
+/**
+ * La scheda del provider aperto sul posto. LOCALE dal C0 della fase
+ * linguaggio (l'export serviva solo ai test: la pagina lo apre con
+ * initial.expanded).
+ */
+function ProviderDetail({ provider, onDone }: { provider: ProviderPublic; onDone(): void }) {
   const { t } = useLingui()
   const [name, setName] = useState(provider.name)
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl)

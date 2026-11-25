@@ -61,6 +61,9 @@ export interface ApprovalsPageInitial {
   mode?: ApprovalsMode
   cfg?: AutoReviewSettings
   grants?: GrantRow[] | null
+  /** C0 (fase linguaggio): «Regole per strumento» aperto in partenza — la
+   *  cucitura di test per il selettore dei modi (ModeSelect non è esportato) */
+  regoleAperte?: boolean
 }
 
 /** Un link-bottone dentro una riga (il rimando «Cambia in Modelli ›»): testo in primo piano, sottolineato al passaggio. */
@@ -258,7 +261,7 @@ export function ApprovalsPage({ initial }: { initial?: ApprovalsPageInitial }) {
       </SettingsGroup>
 
       {/* ---- I4.5 · Regole per strumento (Avanzate) ---- */}
-      <SettingsAdvanced label={<Trans>Regole per strumento</Trans>}>
+      <SettingsAdvanced label={<Trans>Regole per strumento</Trans>} defaultOpen={initial?.regoleAperte}>
         <SettingsGroup>
           <SettingsRow
             title={<Trans>Politica predefinita</Trans>}
@@ -320,8 +323,13 @@ export function ApprovalsPage({ initial }: { initial?: ApprovalsPageInitial }) {
   )
 }
 
-/** Il selettore dei tre modi di una regola (Consenti sempre / Chiedi / Blocca): una pillola da 32, la misura dei controlli in riga. */
-export function ModeSelect({ value, onChange }: { value: PermissionMode; onChange(v: PermissionMode): Promise<void> | void }) {
+/**
+ * Il selettore dei tre modi di una regola (Consenti sempre / Chiedi / Blocca):
+ * una pillola da 32, la misura dei controlli in riga. LOCALE dal C0 della
+ * fase linguaggio (l'export serviva solo ai test: la pagina lo apre con
+ * initial.regoleAperte).
+ */
+function ModeSelect({ value, onChange }: { value: PermissionMode; onChange(v: PermissionMode): Promise<void> | void }) {
   const { t } = useLingui()
   return (
     <Select
