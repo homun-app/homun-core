@@ -285,6 +285,10 @@ Galleria: dialogo-nuovo, impostazioni-generali.
 Il menu a comparsa (Radix): voci `text-body` con icone a 16, variante destructive, checkbox e radio col segno disegnato, etichette `text-caption`, scorciatoie; resta dentro la finestra (collisionPadding 12). Non usarlo per scegliere un modello (ModelSelect), per azioni sempre visibili (button) o per schede (UnderlineTabs).
 Galleria: menu-account, chat (menu «Ragiona»).
 
+### list-group
+Il gruppo di righe a filo: il titolo di sezione (text-caption grigio, peso 500) con l'azione a destra, e sotto le righe divise da un filetto (divide-border/50) — NESSUN riquadro grigio attorno alle righe, né nelle pagine né nelle Impostazioni. La distanza dal titolo alle righe è gap-section-head (12); fra un gruppo e l'altro la decide chi li elenca (Stack gap-section). Prende il posto di SettingsGroup e FlatList.
+Galleria: elenchi.
+
 ### list-row
 LA riga di elenco dell'app, un solo oggetto per ogni elenco: `segno` (icona, logo, puntino o mascotte nella casa da 32) · `titolo` (text-body 500, si tronca) · `sottotitolo` (la riga grigia) · `metadato` (il dato grigio ai caption, a destra) · `azione` (a destra: in una riga è sempre Button secondary sm; Switch solo per acceso/spento; i link di testo spariscono) · `below` (ciò che sta sotto, all'ascissa del titolo). Misure fisse: min-h-row 52 col segno, 40 senza; respiro py-row-pad. `clickable` fa della riga un bottone con hover tenue solo dove si clicca. Prende il posto di SettingsRow, AppRow, YourRow e delle righe scritte a mano.
 Galleria: elenchi.

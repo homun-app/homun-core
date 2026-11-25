@@ -41,6 +41,7 @@ import { AppLogo } from '../components/ui/app-logo'
 import { BotDot } from '../components/ui/bot-dot'
 import { Avatar } from '../components/ui/avatar'
 import { ListRow } from '../components/ui/list-row'
+import { ListGroup } from '../components/ui/list-group'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -143,7 +144,7 @@ export const SEZIONI = [
   { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
   { id: 'tabella', titolo: 'data-table', componenti: ['data-table'] },
-  { id: 'elenchi', titolo: 'flat-list e list-row', componenti: ['flat-list', 'list-row'] },
+  { id: 'elenchi', titolo: 'flat-list, list-row e list-group', componenti: ['flat-list', 'list-row', 'list-group'] },
   { id: 'testate', titolo: 'section, page-header, column-head', componenti: ['section', 'page-header', 'column-head'] },
   { id: 'schede', titolo: 'underline-tabs', componenti: ['underline-tabs'] },
   { id: 'dialogo', titolo: 'dialog aperto', componenti: ['dialog'] },
@@ -260,6 +261,13 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               <ListRow titolo="Una riga di solo testo" metadato="40" />
               <ListRow segno={<BotDot color="c3" />} titolo="Ricerche" sottotitolo="ha finito: 3 documenti nuovi" below="il motivo per esteso sta sotto, all'ascissa del titolo" />
             </div>
+          </div>
+          <div className="mb-8">
+            <Etichetta>list-group — il titolo di sezione e le righe a filo, NESSUN riquadro grigio</Etichetta>
+            <ListGroup titolo="Server collegati" azione={<Button variant="ghost" size="sm">Mostra tutto</Button>}>
+              <ListRow segno={<AppLogo logo="asana.svg" name="Asana" className="size-8 text-body" />} titolo="Asana" sottotitolo="24 strumenti · tutti i bot" metadato="oggi" clickable />
+              <ListRow segno={<BotDot color="c2" />} titolo="ricerche-estese" sottotitolo="stdio · sul Mac" azione={<Button variant="secondary" size="sm">Test</Button>} />
+            </ListGroup>
           </div>
           <div className="mb-2">
             <Etichetta>flat-list (il pezzo di prima, finché le pagine non convertono)</Etichetta>
