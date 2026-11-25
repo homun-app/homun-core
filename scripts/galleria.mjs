@@ -48,6 +48,30 @@ const SOLO = argValue('--solo')?.split(',').map((x) => x.trim()).filter(Boolean)
 const APPROVA = argValue('--approva')
 const approvaSet = APPROVA === 'tutte' ? 'tutte' : APPROVA?.split(',').map((x) => x.trim()).filter(Boolean) ?? null
 
+// --foglio: il FOGLIO DI CONTROLLO delle approvate — tutte in miniatura a
+// gruppi (coi nomi), il click apre l'immagine intera. Serve a GUARDARSELE
+// davvero, una per una: niente «nessun difetto» per gruppi interi.
+if (argv.includes('--foglio')) {
+  const idDi = (nome) => nome.replace(/\.png$/, '').replace(/-(chiaro|scuro)(-900)?$/, '')
+  const gruppoDi = (id) => id === 'guida' ? 'Guida' : id.startsWith('componenti-') ? 'Componenti' : PAGES.find((p) => p.id === id)?.group ?? 'Altre'
+  const ordine = ['Guida', 'Chat', 'Menu', 'Dialoghi', 'Barra', 'Plugin', 'Libreria', 'Approvazioni', 'Attività', 'Impostazioni', 'Componenti', 'Altre']
+  const gruppi = new Map()
+  for (const f of readdirSync(APPROVATE).filter((f) => f.endsWith('.png')).sort()) {
+    const g = gruppoDi(idDi(f))
+    if (!gruppi.has(g)) gruppi.set(g, [])
+    gruppi.get(g).push(f)
+  }
+  writeFileSync(join(DIFF, 'foglio.html'), [
+    '<!doctype html><meta charset="utf-8"><title>galleria — il foglio di controllo delle approvate</title>',
+    '<style>body{background:#141419;color:#eee;font:14px -apple-system,Helvetica,sans-serif;margin:24px}h1{font-size:20px}h2{margin:28px 0 8px;font-size:16px}a{display:inline-block;margin:6px;vertical-align:top}img{display:block;width:240px;border:1px solid #444;border-radius:4px}span{display:block;font:11px ui-monospace,monospace;color:#aaa;padding:2px 0 6px}</style>',
+    '<h1>Le approvate, un gruppo per volta — il click apre l\'immagine intera</h1>',
+    ...[...gruppi.keys()].sort((a, b) => (ordine.indexOf(a) < 0 ? ordine.length : ordine.indexOf(a)) - (ordine.indexOf(b) < 0 ? ordine.length : ordine.indexOf(b)) || a.localeCompare(b)).map((g) => `<h2>${g} (${gruppi.get(g).length})</h2>` + gruppi.get(g).map((f) => `<a href="../approvate/${f}" target="_blank"><img loading="lazy" src="../approvate/${f}" alt="${f}"><span>${f.replace(/\.png$/, '')}</span></a>`).join('')),
+    ''
+  ].join('\n'))
+  console.log('[galleria] foglio di controllo:', join(DIFF, 'foglio.html'))
+  process.exit(0)
+}
+
 /** Le dimensioni della galleria: ogni scena a 1280×800 in chiaro e in scuro; anche 900×640 per queste. */
 const LARGHEZZE_EXTRA = ['chat', 'plugin-lista', 'libreria-griglia']
 const combinazioni = (page) => [
@@ -145,6 +169,21 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
       else sc.scrollTop = 0
     }
     return true`)
+  // le sezioni ASINCRONE delle Impostazioni › Generali (Spazio su disco, il
+  // motore del computer dei bot) si riempiono da RPC che NON passano dalla
+  // rete del renderer: la cattura poteva cadere a metà (righe e filetta
+  // assenti, e la colonna che da corta diventava lunga faceva apparire e
+  // sparire la barra di scorrimento — il rettangolo 6×17 che differiva tra
+  // due corse). Si aspetta la CONDIZIONE, non un tempo
+  if (page.id === 'impostazioni-generali') {
+    await s.attendi(`(() => {
+      const d = [...document.querySelectorAll('[role="dialog"]')].find((x) => x.querySelector('nav'))
+      if (!d) return false
+      const t = d.textContent ?? ''
+      if (t.includes('Sto guardando')) return false
+      return !!d.querySelector('[data-testid="disk-space-section"]') && t.includes('Spazio libero sul Mac')
+    })()`, { entro: 10_000, motivo: 'le sezioni asincrone delle Impostazioni Generali (spazio su disco, motore) siano caricate' })
+  }
   // le maschere della scena PRECEDENTE si tolgono: i rettangoli sono fissi
   // allo schermo e coprirebbero le scene successive. UNA funzione sola del
   // motore (sonda.mjs), con lo stesso attributo della creazione — la copia
@@ -315,22 +354,30 @@ try {
     ''
   ].join('\n'))
 
-  // --approva: copia le catture in approvate/ (MAI in automatico: l'elenco va nel commit col motivo)
+  // --approva: copia le catture in approvate/, SOPRASCRIVENDO quelle vecchie
+  // (G3: «rigenera tutte» deve poterle rifare) e togliendo le ORFANE — le
+  // approvate di scene che non esistono più. MAI in automatico: l'elenco va
+  // nel commit col motivo.
   if (approvaSet) {
     const copiate = []
+    const valide = new Set()
     for (const page of pages.filter(vuole).concat([guida])) {
       for (const [w, tema] of combinazioni(page).concat([[1280, 'chiaro'], [1280, 'scuro']])) {
         const nome = nomeCattura(page, tema, w)
+        valide.add(nome)
         const da = join(CATTURE, nome)
         const a = join(APPROVATE, nome)
-        if (existsSync(da) && (approvaSet === 'tutte' || approvaSet.includes(page.id)) && !existsSync(a)) {
+        if (existsSync(da) && (approvaSet === 'tutte' || approvaSet.includes(page.id))) {
           copyFileSync(da, a)
           copiate.push(nome)
         }
       }
     }
-    if (copiate.length) log('APPROVATE (da committare con elenco e motivo):', copiate.join(', '))
-    else log('--approva: nessuna cattura nuova da copiare (le approvate esistono già)')
+    const rimosse = readdirSync(APPROVATE).filter((f) => f.endsWith('.png') && !valide.has(f))
+    for (const f of rimosse) rmSync(join(APPROVATE, f))
+    if (copiate.length) log('APPROVATE (da committare con elenco e motivo):', [...new Set(copiate)].join(', '))
+    else log('--approva: nessuna cattura da copiare per le scene richieste')
+    if (rimosse.length) log('APPROVATE ORFANE RIMOSSE (scene che non esistono più):', rimosse.join(', '))
   }
 
   const nuove = esiti.filter((e) => e.esito === 'nuova')

@@ -24,3 +24,6 @@ fatto-uscite/
 # F1 (fase fondamenta): le differenze della galleria restano fuori dal repo
 galleria/.diff/
 galleria/.catture/
+# G3 (fase fondamenta-galleria): il modulo compilato della pagina componenti
+# (ci scrive scripts/galleria-modulo.config.mjs a ogni corsa)
+galleria/.modulo/

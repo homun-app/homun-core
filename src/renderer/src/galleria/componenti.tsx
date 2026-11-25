@@ -147,7 +147,7 @@ type IdSezione = (typeof SEZIONI)[number]['id']
 
 /** La VERA pagina di una sezione, con tutti gli stati dei suoi componenti. */
 const Sezione = ({ id }: { id: IdSezione }) => {
-  const [tab, setTab] = useState('una')
+  const [tab, setTab] = useState('due')
   const [modello, setModello] = useState<string | null>('finto')
   const righeVuote: typeof righe = []
   const righe = [
@@ -372,7 +372,7 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               l'ultimo guscio si stenderebbe su tutta la pagina (page-shell.tsx
               non si tocca) */}
           {(['reading', 'page', 'wide'] as PageWidth[]).map((w) => (
-            <div key={w} className="mb-4 h-40 overflow-hidden rounded-surface border border-border">
+            <div key={w} className="relative mb-4 h-40 overflow-hidden rounded-surface border border-border">
               <PageShell width={w} testId={`galleria-shell-${w}`} headName="componenti"
                 header={<PageHeader title={`Il guscio «${w}»`} testId={`galleria-shell-header-${w}`} />}
                 contentClassName="py-4">
@@ -426,6 +426,13 @@ const apri = (id?: IdSezione) => {
   // la pagina di test sta sopra tutto; il tema (la classe dark) lo decide la galleria sull'<html>
   host.style.cssText = 'position:fixed;inset:0;z-index:2147483600;background:var(--background);color:var(--foreground);overflow:auto'
   document.body.appendChild(host)
+  // i PORTALI di dialog e menu montano a livello body, SOTTO l'host di questa
+  // pagina: senza questa regola le sezioni con l'overlay aperto (dialogo,
+  // menu) resterebbero vuote — il portale c'è, ma coperto dall'host
+  const st = document.createElement('style')
+  st.id = 'galleria-componenti-portali'
+  st.textContent = '[data-slot="dialog-overlay"],[data-slot="dialog-content"],[data-radix-popper-content-wrapper"]{z-index:2147483647!important}'
+  document.head.appendChild(st)
   monta(SEZIONI.find((s) => s.id === id) ? id! : SEZIONI[0]!.id)
 }
 
@@ -434,6 +441,7 @@ const chiudi = () => {
   radice = null
   host?.remove()
   host = null
+  document.getElementById('galleria-componenti-portali')?.remove()
 }
 
 /** L'API che la galleria usa: apri(sezione)/chiudi() tra le scene, sezioni() per l'elenco. L'import del modulo NON apre nulla. */
