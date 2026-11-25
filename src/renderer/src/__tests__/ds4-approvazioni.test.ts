@@ -614,7 +614,10 @@ describe('DS4: «Attività»', () => {
     // il nome del bot nel suo colore
     const nome = ofText(righe[1]!, 'Lavoro')
     expectHasAll(nome, ['text-body', 'font-medium', 'truncate'])
-    expect(nome.attrs.style).toMatch(/^color:var\(--bot-c\d\)$/)
+    // C3 (fase linguaggio): il nome del bot nel COLORE DEL TESTO — il colore sta nel puntino (BotDot, palette --bot-dot-*)
+    expect(nome.attrs.style).toBeUndefined()
+    const dot = findAll(righe[1]!, (n) => (n.attrs.class ?? '').includes('size-2'))[0]!
+    expect(dot.attrs.style).toMatch(/^background:var\(--bot-dot-c\d\)$/)
     // lo stato: in corso grigio, aspetta te nel colore dell'attesa, il motivo in rosso, l'ora di un lavoro finito col segno di spunta
     expectHasAll(ofText(righe[1]!, 'in corso'), ['text-caption', 'text-muted-foreground'])
     expectHasAll(ofText(righe[0]!, 'aspetta te'), ['text-caption', 'text-waiting', 'font-semibold'])

@@ -21,14 +21,17 @@ import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { Activity, Search } from 'lucide-react'
+import { Activity } from 'lucide-react'
 import { api, useStore } from '../store'
 import { Bot } from '../bot/Bot'
+// C3 (fase linguaggio): il puntino del colore del bot (il nome resta nel colore del testo)
+import { BotDot } from './ui/bot-dot'
 import { useBotInfo } from '../bot/use-bot'
 import { activityRows, type ActivityFilter, type ActivityRow } from '../lib/activity-rows'
 import { cn } from '../lib/utils'
 import type { GlobalActivityData } from '../../../shared/types'
 import { Button } from './ui/button'
+import { SearchField } from './ui/search-field'
 import { FlatList } from './ui/flat-list'
 import { PageHeader } from './ui/page-header'
 import { PageShell } from './ui/page-shell'
@@ -101,7 +104,9 @@ function ActivityListRow({ row, onOpen }: { row: ActivityRow; onOpen(row: Activi
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
-          <span className="truncate text-body font-medium" style={{ color: `var(--bot-${info.avatar.color})` }}>{agent.name}</span>
+          {/* C3 (fase linguaggio): il nome del bot nel COLORE DEL TESTO — il colore del bot sta nel puntino (BotDot, la palette --bot-dot-*) */}
+          <BotDot color={info.avatar.color} />
+          <span className="truncate text-body font-medium">{agent.name}</span>
           {row.routine && <span className="shrink-0 text-small text-muted-foreground">· <Trans>routine</Trans></span>}
           <span className="flex-1" />
           {/* lo stato non va a capo: cede il nome */}
@@ -166,16 +171,8 @@ export function ActivityPanel({ activityInitial }: { activityInitial?: GlobalAct
       }
       toolbar={
         <>
-          {/* la ricerca: un campo (rounded-control) alto come i controlli di default (36) */}
-          <label className="flex h-control min-w-0 flex-1 items-center gap-3 rounded-control bg-muted px-3 text-muted-foreground">
-            <Search className="size-4 shrink-0" />
-            <input
-              className="min-w-0 flex-1 bg-transparent text-body text-foreground outline-none"
-              placeholder={t`Cerca nei lavori`}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
+          {/* C3 (fase linguaggio): la ricerca è SearchField, l'unica dell'app */}
+          <SearchField value={query} onChange={setQuery} placeholder={t`Cerca nei lavori`} ariaLabel={t`Cerca nei lavori`} testId="activity-search" className="min-w-0 flex-1" />
           {/* i filtri (tavolo 4): pillole, una sola accesa — tutte pillole, la forma non cambia con lo stato.
               min-w-0 e non shrink-0: in un'area stretta (finestra a 900 px col pannello del bot aperto)
               le pillole cedono spazio e vanno a capo, invece di spingersi sotto il pannello; la ricerca
