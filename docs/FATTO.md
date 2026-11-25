@@ -24,8 +24,12 @@ salva l'uscita completa di ogni passo in un file e scrive esito, durata e percor
    la regressione; si rifanno solo quelle dell'area toccata dalla fase.
 6. **processi a 0** — processi Electron e `--homun-daemon` DEL REPO, contati per eseguibile
    (`ps -axo pid=,comm=`): 0 e 0.
-7. **temporanei a 0** — nessuna cartella temporanea nuova rispetto alla fotografia presa prima del
-   passo 1: ogni cartella nuova, **di chiunque** (anche degli agenti paralleli), è un errore.
+7. **temporanei a 0** — la corsa ha una radice sua (una `fatto-*` con mkdtemp nella base dei vincoli,
+   passata come `TMPDIR` a tutti i passi): a fine corsa dev'essere **vuota**, e poi si cancella. Nella
+   `T/` comune conta solo ciò che porta un prefisso del repo (`sandbot-*`, `fatto-*`: tutto ciò che il
+   codice crea, letto dal codice): ogni cartella NUOVA di quei prefissi, rispetto alla fotografia
+   presa prima del passo 1, è un errore. Il resto — le cartelle delle altre app — non conta: un
+   controllo che fallisce per colpa altrui insegna a ignorarlo.
 
 Non coperti da `fatto.mjs` (la spec della fase li porta, e la chiusura li controlla):
 

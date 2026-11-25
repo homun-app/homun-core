@@ -7,13 +7,18 @@
 //   node scripts/fatto.mjs [--sonde fase-design,fase-b20-bug]
 //
 // Prima di tutto fotografa la cartella dei temporanei di sistema; alla fine
-// confronta: ogni cartella NUOVA — di chiunque, anche degli agenti paralleli
-// — è un errore. Conta anche i processi Electron e --homun-daemon DEL REPO
-// per eseguibile (ps -axo pid=,comm=). Non fa commit, non tagga e non tocca
-// il REPORT. Esce con 1 se un passo è rosso.
+// confronta SOLO i prefissi del repo (C0.7 della fase linguaggio: le
+// zcode-bash-* e le socket znr*.sock delle altre app non sono affare della
+// corsa — un controllo che fallisce per colpa altrui insegna a ignorarlo).
+// La corsa ha anche una RADICE SUA, una fatto-* con mkdtemp nella base dei
+// vincoli, passata come TMPDIR a tutti i passi: a fine corsa deve essere
+// VUOTA e poi si cancella. Conta anche i processi Electron e --homun-daemon
+// DEL REPO per eseguibile (ps -axo pid=,comm=). Non fa commit, non tagga e
+// non tocca il REPORT. Esce con 1 se un passo è rosso.
 import { spawn, spawnSync } from 'node:child_process'
-import { openSync, closeSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs'
+import { openSync, closeSync, readdirSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { PREFISSI_REPO, filtraRepo, nuoveDelRepo, residuiRadice } from './lib/temporanei-fatto.mjs'
 
 const ROOT = join(import.meta.dirname, '..')
 const TMP_BASE = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'
@@ -31,6 +36,12 @@ const stamp = (ms) => {
 mkdirSync(USCITE, { recursive: true })
 writeFileSync(join(USCITE, 'fotografia-iniziale.txt'), '') // riempita sotto, subito
 
+// la RADICE della corsa (C0.7): mkdtemp nella base dei vincoli, TMPDIR di
+// tutti i passi; a fine corsa dev'essere vuota e poi si cancella. Se la base
+// non c'è (altre macchine), cada sulla temporanea di sistema risolta.
+let radiceCorsa = null
+try { radiceCorsa = mkdtempSync(join(TMP_BASE, 'fatto-')) } catch { /* la base non c'è */ }
+
 /** Fotografia dell'elenco dei temporanei (il NOME basta: le nuove si vedono a fine corsa). */
 const fotoTemporanei = (where) => {
   let names = []
@@ -40,14 +51,14 @@ const fotoTemporanei = (where) => {
 }
 const fotoPrima = fotoTemporanei('iniziale')
 
-/** Un passo: comando (cmd, args…) e uscita in streaming sul file logFile (le sonde sono lunghe: si legge da terra). L'esito è dal CODICE di uscita: 0 = OK, tutto il resto = KO (nessun «undefined» che passa come verde). */
+/** Un passo: comando (cmd, args…) e uscita in streaming sul file logFile (le sonde sono lunghe: si legge da terra). L'esito è dal CODICE di uscita: 0 = OK, tutto il resto = KO (nessun «undefined» che passa come verde). Il passo riceve la RADICE della corsa come TMPDIR (C0.7): ciò che scrive lì, la fine corsa lo controlla. */
 const esegui = (nome, cmd, args, logFile, { env } = {}) => new Promise((resolve) => {
   const t = Date.now()
   const path = join(USCITE, logFile)
   const fd = openSync(path, 'w')
   let risolto = false
   const chiudi = (oggetto) => { if (!risolto) { risolto = true; try { closeSync(fd) } catch { /* già chiuso */ } resolve(oggetto) } }
-  const child = spawn(cmd, args, { cwd: ROOT, env: { ...process.env, ...(env ?? {}) }, stdio: ['ignore', fd, fd] })
+  const child = spawn(cmd, args, { cwd: ROOT, env: { ...process.env, TMPDIR: radiceCorsa ?? process.env.TMPDIR, ...(env ?? {}) }, stdio: ['ignore', fd, fd] })
   child.on('close', (code) => {
     try { writeFileSync(path + '.code', String(code)) } catch { /* il file d'uscita resta quello che conta */ }
     chiudi({ nome, path, esito: code === 0 ? 'OK' : 'KO', code, ms: Date.now() - t, nota: code === 0 ? '' : `codice d'uscita ${code}` })
@@ -107,13 +118,28 @@ const run = async () => {
   writeFileSync(path6, `pid,comm con Electron del repo (${ROOT}):\n${electronRighe.join('\n') || '(nessuna)'}\n\npid,args con --homun-daemon del repo:\n${daemonRighe.join('\n') || '(nessuna)'}\n`)
   aggiungi({ nome: 'processi del repo a 0', esito: electronRighe.length === 0 && daemonRighe.length === 0 ? 'OK' : 'KO', ms: Date.now() - t6, path: path6, nota: `${electronRighe.length} Electron, ${daemonRighe.length} daemon` })
 
-  // 7. temporanei: ogni cartella NUOVA (di chiunque) rispetto alla fotografia iniziale è un errore
+  // 7. temporanei (C0.7): nella T/ comune contano SOLO i prefissi del repo
+  // (sandbot-*, fatto-*: tutto ciò che il codice del repo crea, letto dal
+  // codice); il resto — di chiunque — non è affare della corsa. La RADICE
+  // della corsa (fatto-*, il TMPDIR dei passi) dev'essere VUOTA, e poi si
+  // cancella.
   const t7 = Date.now()
   const fotoDopo = fotoTemporanei('finale')
-  const nuove = [...fotoDopo].filter((n) => !fotoPrima.has(n)).sort()
+  const nuove = nuoveDelRepo([...fotoPrima], [...fotoDopo])
+  const residui = radiceCorsa === null ? [] : residuiRadice(readdirSync(radiceCorsa))
   const path7 = join(USCITE, 'temporanei.txt')
-  writeFileSync(path7, `nuove rispetto a inizio corsa:\n${nuove.join('\n') || '(nessuna)'}\n`)
-  aggiungi({ nome: 'nessuna temporanea nuova', esito: nuove.length === 0 ? 'OK' : 'KO', ms: Date.now() - t7, path: path7, nota: `${nuove.length} nuove` })
+  writeFileSync(path7, [
+    `prefissi contati nella T/ comune: ${PREFISSI_REPO.join(', ')}`,
+    `nuove del repo rispetto a inizio corsa:\n${nuove.join('\n') || '(nessuna)'}`,
+    `nuove ALTRUI (non contano):\n${[...fotoDopo].filter((n) => !fotoPrima.has(n) && !filtraRepo([n]).length).sort().join('\n') || '(nessuna)'}`,
+    `radice della corsa (${radiceCorsa ?? 'non creata'}) residui:\n${residui.join('\n') || '(nessuno)'}`
+  ].join('\n') + '\n')
+  const ok7 = nuove.length === 0 && residui.length === 0
+  aggiungi({ nome: 'nessuna temporanea nuova (del repo) e radice vuota', esito: ok7 ? 'OK' : 'KO', ms: Date.now() - t7, path: path7, nota: `${nuove.length} nuove del repo, ${residui.length} residui nella radice` })
+  if (radiceCorsa !== null && residui.length === 0) {
+    // la radice vuota si toglie; con dei residui resta a terra, per guardarsela
+    rmSync(radiceCorsa, { recursive: true, force: true })
+  }
 
   // ---- fatto-esito.md: una riga per passo ----
   const rosso = passi.filter((p) => p.esito === 'KO')
