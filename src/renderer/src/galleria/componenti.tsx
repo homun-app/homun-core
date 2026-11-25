@@ -32,6 +32,7 @@ import { i18n, activateUiLanguage } from '../lib/i18n'
 import '../styles.css'
 import { Loader2, TriangleAlert, CircleHelp, CheckCircle2, Plus, Settings } from 'lucide-react'
 import { Button } from '../components/ui/button'
+import { Stack } from '../components/ui/stack'
 import { Input, FIELD_CLASS } from '../components/ui/input'
 import { Select } from '../components/ui/select'
 import { Notice } from '../components/ui/notice'
@@ -127,6 +128,7 @@ const MODELLI: ModelInfo[] = [
  * entra qui con tutti i suoi stati.
  */
 export const SEZIONI = [
+  { id: 'impaginazione', titolo: 'stack — la colonna', componenti: ['stack'] },
   { id: 'bottoni', titolo: 'button', componenti: ['button'] },
   { id: 'campi', titolo: 'input e select', componenti: ['input', 'select'] },
   { id: 'avvisi', titolo: 'notice', componenti: ['notice'] },
@@ -390,6 +392,33 @@ const Sezione = ({ id }: { id: IdSezione }) => {
           <PageColumn width="reading">
             <DocumentBody markdown={MD_PRIMA_PARTE} />
           </PageColumn>
+        </Section>
+      )}
+
+      {id === 'impaginazione' && (
+        <Section title="stack — la colonna, con le distanze dei token" testId="galleria-section-stack">
+          <Riga label="gap block (16, il default) — tre blocchi">
+            <div className="w-72 rounded-surface border border-border p-4">
+              <Stack>
+                <div className="rounded-control bg-muted px-3 py-2 text-body">il primo blocco</div>
+                <div className="rounded-control bg-muted px-3 py-2 text-body">il secondo</div>
+                <div className="rounded-control bg-muted px-3 py-2 text-body">il terzo</div>
+              </Stack>
+            </div>
+          </Riga>
+          <Riga label="gap tight (8) e section (32)">
+            <div className="w-72 rounded-surface border border-border p-4">
+              <Stack gap="tight">
+                <div className="rounded-control bg-muted px-3 py-1.5 text-small">riga del gruppo</div>
+                <div className="rounded-control bg-muted px-3 py-1.5 text-small">la sua sorella</div>
+              </Stack>
+              <div className="mt-section" />
+              <Stack gap="section">
+                <div className="rounded-control bg-muted px-3 py-2 text-body">una sezione</div>
+                <div className="rounded-control bg-muted px-3 py-2 text-body">l'altra</div>
+              </Stack>
+            </div>
+          </Riga>
         </Section>
       )}
 

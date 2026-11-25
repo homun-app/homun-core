@@ -225,6 +225,10 @@ I valori sono i letterali di `styles.css`: quelli dei colori del tema chiaro sta
 
 ## Componenti
 
+### stack
+La colonna dell'impaginazione: i figli uno sotto l'altro alla distanza di una variante chiusa delle token — `gap` tight 8 · block 16 (default, fra i blocchi) · section 32 · none. È il pezzo che toglie i `className` di disposizione dalle pagine: fuori da `components/ui/` non si decide più la distanza fra i blocchi. Non usarlo per righe (quella è Row) né per contenere ciò che deve scorrere (lo decide il guscio della pagina).
+Galleria: impaginazione.
+
 ### ModelPicker
 Il combobox con ricerca per scegliere un modello a mano: ogni riga mostra id, finestra di contesto, le etichette visione/ragionamento/niente tool e il prezzo $/M; si può scrivere un id libero e confermare con Invio; `pillTrigger` lo riduce a una pillola che apre l'elenco. Non usarlo dove i modelli arrivano da provider da collegare (quello è ModelSelect, che offre «Collega»), né come campo di testo qualunque.
 Galleria: impostazioni-routine.
