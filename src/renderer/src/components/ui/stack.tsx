@@ -8,6 +8,7 @@ import type { ReactNode } from 'react'
 import { cn } from '../../lib/utils'
 
 export type StackGap = 'none' | 'tight' | 'block' | 'section'
+export type StackAlign = 'start' | 'center' | 'stretch'
 
 const GAP: Record<StackGap, string> = {
   none: '',
@@ -16,17 +17,25 @@ const GAP: Record<StackGap, string> = {
   section: 'gap-section'
 }
 
+const ALIGN: Record<StackAlign, string> = {
+  start: 'items-start',
+  center: 'items-center',
+  stretch: 'items-stretch'
+}
+
 /** La colonna: figli uno sotto l'altro, alla distanza scelta. */
-export function Stack({ gap = 'block', children, className, testId, ...rest }: {
+export function Stack({ gap = 'block', align = 'stretch', children, className, testId, ...rest }: {
   /** la distanza fra i figli: tight 8 · block 16 (default) · section 32 */
   gap?: StackGap
+  /** l'allineamento trasversale dei figli (nella colonna: in orizzontale) */
+  align?: StackAlign
   children: ReactNode
   className?: string
   testId?: string
 } & React.HTMLAttributes<HTMLDivElement>): ReactNode {
   return (
     <div
-      className={cn('flex min-w-0 flex-col', GAP[gap], className)}
+      className={cn('flex min-w-0 flex-col', ALIGN[align], GAP[gap], className)}
       {...(testId ? { 'data-testid': testId } : {})}
       {...rest}
     >
