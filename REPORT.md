@@ -1,3 +1,129 @@
+# REPORT FASE ISOLAMENTO-LOCALE: l'app in prova non tocca l'Ollama del Mac, e la pulizia conta solo i suoi llama-server
+
+Base: `main` al tag `fase-linguaggio-ritocchi` (a29cc628), verificata: HEAD era esattamente lì, git pulito a parte `out-review/` e `scripts/vetrina/` (non toccate). È una correzione delle prove, non una funzione nuova: l'app vera non cambia. Due commit, uno per punto: I1 `af73c0098`, I2 `eb2a658d4`. In prova l'app sotto esame faceva richieste vere ai servizi LLM locali del Mac; ora o sono finti o non c'è nessun indirizzo, e un registro nel processo principale (e nel daemon) lo prova a ogni corsa. Il controllo di pulizia K4 delle sonde contava ogni `llama-server` del Mac; ora conta solo quelli della corsa.
+
+## Come sono state prese le prove (e come no)
+
+- Il ROSSO di I1 non è stato preso «iniettando» un indirizzo finto per far fallire la base: ho fatto girare sulla base la galleria e le 43 sonde con il SOLO controllo (wrapper di `fetch` e `net.connect` nel main e nel daemon, attivi solo con `SANDBOT_TEST_*`, che registrano ogni tentativo verso localhost, 127.0.0.1 e ::1 sulle porte 11434 e 1234). L'inventario: 14:35:04 → 16:01:36 (ora del Mac), 44 elementi uno dietro l'altro, uscita su file, 0 processi del repo e 0 temporanee residue a ogni corsa.
+- Per distinguere i rossi preesistenti da quelli del controllo nuovo ho rifatto girare le 32 sonde rosse sull'esportazione PURA della base (senza controllo), 16:28:40 → 17:28:17: stesse righe rosse e stessi punteggi, tranne dove scritto sotto.
+- I llama-server finti li ho avviati io, su porta 0, e li ho chiusi a fine prova. Le porte 11434 e 1234 non le ho mai chiamate da un mio comando; sulla base le ha chiamate l'app sotto esame, ed è proprio quello che I1 toglie. Non ho letto i file dell'Ollama dell'utente.
+
+## I1 — in prova i servizi locali sono finti o assenti, mai quelli veri
+
+**Che cosa fa.** Un indirizzo locale arriva all'app solo da `SANDBOT_TEST_LOCAL_LLM_URLS`, e solo insieme a `SANDBOT_TEST_USER_DATA` (`src/main/agent/local-services-address.ts`); senza, in prova (`SANDBOT_TEST_USER_DATA`) la scoperta non prova nessun indirizzo: nemmeno con `SANDBOT_TEST_NO_LOCAL_MODELS` a 0 si trova più un servizio locale. L'app vera è com'era: un test lo pretende (`local-services-address.test.ts`). La galleria alza un Ollama finto su `127.0.0.1` porta 0 con un elenco fisso di 3 modelli (`scripts/lib/servizio-locale-finto.mjs`) e controlla che la riga «Ollama (locale)» ci sia sempre, con il conteggio fisso.
+
+### Visto ROSSO sulla base — galleria
+
+`node scripts/galleria.mjs` sulla base con il controllo:
+
+```
+scene: 118 · uguali 116 · diverse 0 · ROSSE 2
+  ✗ impostazioni-modelli-chiaro.png ROSSA — la riga «Ollama (locale)» non è quella del servizio finto: sottotitolo «Sul tuo Mac · 27 modelli · gratis e privato», stato «Collegato»
+  ✗ impostazioni-modelli-scuro.png  ROSSA — (lo stesso)
+```
+
+42 connessioni: 28 a `/api/show`, 11 a `/api/tags`, 3 a `/v1/models`, nelle scene `impostazioni-modelli` 1280 scuro (12) e chiaro (11), `impostazioni-approvazioni` 1280 chiaro (11), `avvio (guida)` (3), `impostazioni-modelli` 900 solo-controllo (3), `setup deterministico` (2). Le 28 a `/api/show` sono l'app che legge i modelli del Mac: l'elenco vero dell'utente è finito nella cattura («27 modelli»).
+
+### Visto ROSSO sulla base — le sonde
+
+Il registro dell'inventario conta 542 connessioni in 39 elementi (129 lette anche nei log, incrocio: 0 solo nei log). Le sonde che LEGGONO il registro sono 11, e sono rosse SOLO per I1 (più i rossi che c'erano già, dove indicati):
+
+| sonda | punteggio sulla base | tentativi | rossi preesistenti |
+|---|---|---|---|
+| fase-plugin-pulita | 113/114 | 5 | — |
+| fase-design | 7/8 | 19 (9 `/api/show`) | — |
+| fase-linguaggio | 7/8 | 4 | — |
+| fase-squadra | 32/33 | 4 | — |
+| fase-centro | 55/56 | 4 | — |
+| fase-b20-bug | 76/77 | 6 | — |
+| fase-deleghe | 28/29 | 5 | — |
+| fase-team-bot | 25/28 | 3 | 2 |
+| fase-barra | 20/22 | 5 | 1 (mascotte/robottini) |
+| fase-onboarding-a | 93/94 | 76 | — |
+| fase-beta12-correzioni | 8/21 | 4 | 12 (M1, M2) |
+
+Le righe: `KO  I1: 0 connessioni verso i servizi LLM locali veri (il registro è vuoto) — 25 tentativi verso i servizi locali veri: http://localhost:11434/api/tags (fetch, daemon pid …) | http://localhost:1234/v1/models (fetch, daemon pid …) | …` (tutte `daemon`/`fetch`).
+
+Le altre sonde hanno connessioni nel registro ma nessun controllo che lo legga (ora il registro resta vuoto; lì I1 è provato dallʼinventario, non dalla sonda). Tentativi per sonda: box-container 145 (78 `/v1/models`, 67 `/api/tags), onboarding-a 76, prima-release 21 (14 `/api/show`), schermo-vivo 21, mcp-setup 20, design 19 (9 `/api/show`), use-app 17, avvio 16, pagine 15, impostazioni 11, fase-0.3.1001-grafica 6, app-composio 6, b20-bug 6, mcp-env 6, risposta 6, skill 6, velocita 6, pulizia 6, composio-prova-vera 6, beta-4 5, barra 5, composio-account 5, composio-oauth 5, catalogo-app 5, deleghe 5, plugin 5, plugin-pulita 5, fase-0.3.1001 5, aiutanti 4, centro 4, chat-limiti 4, linguaggio 4, modalita-box 4, squadra 4, uso-permessi 4. Finite senza nessuna connessione: fase-memoria-engramma-correzioni, fase-memoria-engramma, fase-primo-avvio, fase14, fase15.
+
+### Le scene riapprovate
+
+Solo le due con la riga «Ollama (locale)» che cambia: `impostazioni-modelli-chiaro.png` e `impostazioni-modelli-scuro.png`. La riga ora dice «Sul tuo Mac · 3 modelli · gratis e privato», «Collegato» — i 3 del servizio finto, sempre gli stessi. Le altre 116: 0 differenze (e `chat-team-chiaro`, vedi sotto). Le catture prima/dopo sono in `docs/catture/fase-isolamento-locale/{prima,dopo}/`, fatte come la galleria.
+
+### VERDE dopo
+
+Galleria con I1: tre corse intere. `115 uguali · 3 diverse` (le due attese più `chat-team-chiaro`), poi `116 · 2` (con `--approva impostazioni-modelli`), poi `117 · 1` (`chat-team-chiaro` di nuovo). Il servizio finto: `18 richieste — 12 /api/tags, 6 /api/show, 0 inattese`. `chat-team-chiaro.png diversa` è l'ordine dei membri della squadra nella barra («Ricerche»/«Scrittura» scambiati: `orderRows` di `sidebar-utils.ts` mette alla pari due righe con stesso stato). L'ho misurata sulla base pura con `--solo chat-team`: 1/3 diversa anche lì. Non è di questa fase, NON l'ho approvata; nella corsa finale di fatto.mjs è uscita uguale (118/118).
+
+## I2 — la pulizia conta solo i llama-server della corsa
+
+**Che cosa fa.** Un `llama-server` è della corsa se discende dall'app o dal daemon della sonda (catena dei padri letta da `ps -axo pid,ppid,command`) o se ha negli argomenti la radice della corsa o la HOME finta. Niente più fotografia globale da `pgrep` all'inizio. Le funzioni sono in `scripts/lib/sonda.mjs`: `classificaLlamaServer`, `fotografiaDi`, `fotografaLlamaServerDellaCorsa`, `llamaServerDellaCorsa`, `messaggioLlamaServer`. Perché un orfano (il padre già spento) non si perda, la sonda scatta la fotografia dei discendenti PRIMA di spegnere app e daemon: a corsa spenta conta solo stesso pid E stessa riga di comando (un pid riusato da un altro processo non basta). Sette sonde passano dal vecchio controllo al nuovo: squadra, centro, barra, deleghe, team-bot, beta12-correzioni, onboarding-a.
+
+### Visto ROSSO prima
+
+Sulla base, con un finto `llama-server` (un collegamento a node, porta 0) avviato FUORI dalla corsa e vivo durante la sonda:
+
+```
+$ node scripts/fase-squadra-probe.mjs        # 16:26:00 → 16:28:14, uscita 1
+[sonda r1] KO  pulizia K4: 0 llama-server nati con la corsa — baseline 0, nuovi 1
+[sonda r1] CORSA r1: 32/33 controlli OK
+```
+
+Solo quel controllo rosso.
+
+### Visto VERDE dopo
+
+Stessa sonda, nuovo controllo, stesso finto fuori vivo: `OK  pulizia K4: 0 llama-server della corsa rimasti vivi — nessuno`, `CORSA r1: 33/33`, uscita 0.
+
+La prova che il nuovo controllo PRENDE chi deve prendere è la sonda nuova `scripts/fase-isolamento-locale-probe.mjs`: un finto `llama-server` avviato DAL daemon finto della corsa e lasciato vivo, e la regola K4 qui deve essere ROSSA. Nel log: `✗ I2: llama-server della corsa rimasti vivi — 2 della corsa vivi: pid N (discendente, da M) | pid K (argomenti)`. Tre corse di fila: `CORSA: 28/28 controlli OK`, uscita 0, +7,0 s, +5,3 s, +5,3 s. Il test puro `scripts/__tests__/llama-server-della-corsa.test.ts` copre: il nipote del daemon, la HOME finta negli argomenti, l'orfano senza e con fotografia, il pid riusato, un daemon rimasto vivo, il messaggio.
+
+Le sette sonde col nuovo controllo, prima del commit I2: centro 56/56, deleghe 29/29, onboarding-a 94/94, barra 21/22 (1 rosso preesistente), team-bot 26/28 (2 preesistenti), beta12-correzioni 9/21 (12 preesistenti), squadra 33/33. I controlli I1 e I2 verdi in tutte.
+
+## Che cosa i controlli NON vedono
+
+- I1 registra solo `fetch` e `net.connect` del main e del daemon: un `http.request` scritto a mano o una presa aperta da un figlio (llama-server, CLI) non passa di lì. E solo porte 11434 e 1234: un servizio locale su un'altra porta non viene registrato.
+- I1 in prova senza `SANDBOT_TEST_LOCAL_LLM_URLS` la scoperta «non trova nulla» perché non guarda: se un giorno il codice della scoperta smettese di passare da `local-services-address.ts`, il registro lo direbbe in corsa (e la galleria diventerebbe rossa), ma nessun test lo ferma prima.
+- I2 vede solo i processi che si chiamano `llama-server` (`pgrep -x`): un motore rinominato, o `ollama`, non viene contato. La catena dei padri si ferma a 64 passi.
+- Le 32 sonde che non leggono il registro hanno il registro vuoto ma nessun controllo che fallisca se si riempie: I1 lì è provato dall'inventario e dalle 5 sonde di fatto.mjs, non dalla sonda stessa.
+
+## Rossi della base che NON sono di questa fase
+
+Sulla base pura sono rossi come nell'inventario: 0.3.1001-grafica (0/2), 0.3.1001 (1/2), aiutanti, app-composio (0/1), beta-4 (17/29), catalogo-app, chat-limiti (3/13), composio-account (1/1), composio-oauth (0/1), composio-prova-vera (0/1), impostazioni (7/7), mcp-setup (2/2), modalita-box (8/8), pagine (0/1 ×3), plugin (48/49), pulizia, risposta, skill (5/5), skill-catalogo, use-app, velocita, fase14, fase15. Non confrontabili: box-container (54/59 nell'inventario con controllo, 58/59 sulla base pura: 4 KO solo nella corsa col controllo — CCK2 «finestra NUOVA … box GIÀ acceso … — null» e tre «ultima card vista: null» del browser — non li ho attribuiti né chiusi, né rifatti), memoria-engramma (1 KO solo nell'inventario; sull'esportazione pura esce subito perché le mancano i file), prima-release (rossa in entrambe, 50/54 e 36/42). Non li ho corretti: non sono nell'ambito della fase.
+
+## La corsa di fatto.mjs
+
+`node scripts/fatto.mjs --sonde fase-design,fase-plugin-pulita,fase-b20-bug,fase-centro,fase-squadra`, DA SOLO, dopo l'ultimo commit di codice (`eb2a658d4`). **Inizio 2026-11-26 17:51:39 CET, fine 18:17:07 CET.**
+
+```
+✓ typecheck · 1.6 s
+✓ suite: npm test · 59.2 s          Test Files 572 passed · Tests 6984 passed | 2 skipped
+✓ suite: ci-sim · 1 min 7 s         Test Files 570 passed | 2 skipped · Tests 6980 passed | 6 skipped
+✓ build · 3.6 s
+✓ galleria · 5 min 17 s             scene: 118 · uguali 118 · diverse 0 · ROSSE 0
+                                    servizio locale finto: 18 richieste — 12 /api/tags, 6 /api/show, 0 inattese
+✓ sonda fase-design · 14 min 56 s   CORSA fase-design: 8/8
+✓ sonda fase-plugin-pulita · 21 s   CORSA fase-plugin-pulita: 114/114
+✓ sonda fase-b20-bug · 17.7 s       CORSA fase-b20-bug: 77/77
+✓ sonda fase-centro · 12.3 s        CORSA r1: 56/56
+✓ sonda fase-squadra · 2 min 12 s   CORSA r1: 33/33
+✓ processi del repo a 0 · 0 Electron, 0 daemon
+✓ nessuna temporanea nuova (del repo) e radice vuota
+[fatto] VERDE in 25 min 28 s
+```
+
+La prova di I1 è il registro: `I1: 0 connessioni verso i servizi LLM locali veri (il registro è vuoto)` in tutte e cinque le sonde — **0 tentativi verso 11434 e 1234**. C5 da sola, subito dopo: `node scripts/fase-linguaggio-probe.mjs` → `DIFFERENZE: 0`, uscita 0.
+
+## Scelte che ho fatte io
+
+- Il finto Ollama della galleria ha 3 modelli fissi (lo stesso elenco di sempre): «3 modelli» è un numero della prova, non del Mac di nessuno.
+- Le sonde che non leggevano il registro non hanno avuto un controllo I1 nuovo: avrei dovuto toccare 32 file per aggiungere un controllo che, per come sono oggi, sarebbe sempre verde. L'inventario li copre, e il registro resta nei log per chi vuol leggere.
+- `fase-isolamento-locale-probe` non è nell'elenco delle sonde di fatto.mjs (tre corse verdi qui; resta da decidere se aggiungerlo).
+- Non ho approvato `chat-team-chiaro`.
+- Il commit I1 è stato rifatto una volta in locale (6484e0881 → af73c0098, mai pushato): la guardia `daemon-text-guard` segnava due letterali italiani in due messaggi della parte principale; resi in inglese come vuole la guardia. Non c'è stato nessun push, in nessun momento.
+
+## Vincoli rispettati
+
+Nessun comando negato. Niente Docker, npm vero, download, `open`, `osascript`, `sudo`; temporanee solo in `/var/folders/…/T/` (mktemp -d), tutte cancellate a fine corsa; l'app e il daemon mai avviati sul `~/Library/Application Support/sandbot` vero; catture solo via CDP; `vendor/`, `dist-installers/`, `out-review/`, `scripts/vetrina/` intatti; CHANGELOG invariato; le catture e le misure riscritte dalle sonde sono state riportate a HEAD prima del tag. Tre cartelle lasciate dalle sonde della base pura sulla radice comune (`sandbot-fase-memoria-engramma-BhbEgk`, `sandbot-fase-skill-catalogo-xCKQcY`, `sandbot-fase-skill-iZO0JU`): le ho tolte io a fine lavoro. Alla fine: processi Electron e `--homun-daemon` del repo 0 (`ps -axo pid=,comm=`), `pgrep -x llama-server` vuoto, niente di «sandbot» in `/tmp`, git pulito a parte `out-review/` e `scripts/vetrina/`.
+
 # REPORT FASE LINGUAGGIO-RITOCCHI: tre difetti corretti, e i tre controlli che ora li prende la macchina
 
 Base: `main` al tag `fase-linguaggio` (b710d8fe), verificata: HEAD era esattamente lì, git pulito a parte `out-review/` e `scripts/vetrina/` (non toccate). Il REPORT della fase prima diceva che le 92 scene riapprovate erano state «guardate affiancate col modello di visione»: i tre difetti c'erano comunque e nessun controllo automatico li prendeva. Qui li correggo e aggiungo i controlli — visti ROSSI sulla base prima di ogni correzione, con l'elenco di ciò che prendono. Un commit per punto (R1 fe935247, R2 1447cc65, R3 32d6e0f6), poi le 20 scene riapprovate (ddaf1be39), tre «seguito» che chiudono difetti trovati in corsa nei controlli stessi e nei test (d2338fb72, c1e9419a1, f268c9a27) e due correzioni nate dalle corse di fatto.mjs (3215b8dd9: l'anello del fuoco; df796380f: una cattura precoce nella galleria). Le catture dei documenti sono rifatte come la galleria (f778fad73). Chiusura con `node scripts/fatto.mjs --sonde fase-design,fase-plugin-pulita,fase-b20-bug,fase-centro,fase-squadra` lanciata DA SOLA dopo l'ultimo commit di codice: **VERDE in 26 min 44 s** — typecheck OK · suite 569 file / 6942 test OK · ci-sim OK · build OK · galleria 118/118 uguali (8,4 MB su 15) e le 53 passate di controllo a 900 senza errori · sonde design 7/7 (15 min 25 s), plugin-pulita 113/113, b20-bug 76/76, centro 55/55, squadra 32/32 · 0 Electron e 0 daemon del repo · 0 temporanee nuove del repo e radice della corsa vuota. È la quarta corsa: le prime tre sono raccontate sotto. CHANGELOG invariato; tag annotato `fase-linguaggio-ritocchi`; nessun push, nessun tag `v*`.
