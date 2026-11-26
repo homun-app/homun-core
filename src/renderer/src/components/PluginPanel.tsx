@@ -61,7 +61,7 @@ import { DevelopersContent } from './plugin/developers-content'
 import { PageShell } from './ui/page-shell'
 // C3 (fase linguaggio): la ricerca della pagina è il pezzo del catalogo
 import { SearchField } from './ui/search-field'
-import { FilterChipsScelta } from './ui/filter-chips'
+import { FilterChipsScelta, FilterChipsMenu, FilterChipsInterruttore } from './ui/filter-chips'
 import { PageHeader } from './ui/page-header'
 // PP4 (fase plugin-pulita): righe a filo e schede come testo — meno contenitori, un solo segnale di stato
 import { FlatList, FlatRow } from './ui/flat-list'
@@ -615,26 +615,52 @@ export function PluginPanel({ initial }: { initial?: PluginPanelInitial }): Reac
         />
       )}
       toolbar={(
-        <>
-          {/* i segmenti (tavola 8) — PP4: testo a larghezza naturale (se non
-              entrano scorrono da sole): la RICERCA sta sempre allo stesso
-              posto, cambia scheda o no (C5 la misura) */}
-          <div data-testid="plugin-segments" className="min-w-0">
+        /* fase linguaggio-ritocchi (R3): la barra VA A CAPO quando non c'è
+           spazio (come le pillole della Libreria), e le schede stanno a
+           larghezza naturale — prima la riga non wrappava, le schede si
+           stringevano finché la tablist non le tagliava a riposo, e il
+           controllo «niente tagliato» le prendeva a 1280 e a 900 */
+        <div className="flex w-full flex-wrap items-center gap-3">
+          {/* i segmenti (tavola 8) — PP4: testo a larghezza naturale. La
+              RICERCA sta sempre allo stesso posto, cambia scheda o no (C5 la
+              misura) */}
+          <div data-testid="plugin-segments" className="shrink-0">
             <UnderlineTabs<PluginSegment> tabs={segments} value={seg} onChange={setSeg} label={t`Visualizza`} />
           </div>
           {/* C3 (fase linguaggio): la ricerca è SearchField, l'unica dell'app (il testid plugin-search resta) */}
-          <SearchField value={query} onChange={setQuery} placeholder={t`Cerca tra plugin e skill`} ariaLabel={t`Cerca tra plugin e skill`} testId="plugin-search" />
-          {/* C3: le «strade» di Collegati in PILLOLE nella barra — niente seconda fila di schede nel corpo */}
+          <SearchField value={query} onChange={setQuery} placeholder={t`Cerca tra plugin e skill`} ariaLabel={t`Cerca tra plugin e skill`} testId="plugin-search" className="min-w-48 flex-1" />
+          {/* fase linguaggio-ritocchi (R3): le «strade» di Collegati in UNA
+              PILLOLA-MENU («Strada: tutte ▾», oltre tre scelte la pillola-menu —
+              regola ListPage in docs/DESIGN.md) e «Da sistemare» una
+              pillola-interruttore col conteggio. Prima erano sei pillole di
+              fila e a 1280 la barra non ci stava: schede tagliate a sinistra,
+              pillole fuori a destra. C3 aveva portato i filtri nella barra; la
+              barra resta UNA, con le schede a sinistra, la ricerca e due
+              pillole. */}
           {seg === 'connected' && (
-            <div className="flex min-w-0 items-center gap-2 pl-3" data-testid="plugin-connected-filters" role="group" aria-label={t`Filtra per strada`}>
-              <FilterChipsScelta active={onlyDaSistemare ? false : connFilter === 'all'} onSelect={() => { setConnFilter('all'); setOnlyDaSistemare(false) }}><Trans>Tutte le strade</Trans></FilterChipsScelta>
-              {([['direct', t`MCP diretto`], ['composio', t`Composio`], ['mac', t`Sul Mac`], ['box', t`Nel computer isolato`]] as Array<[ConnectedFilter, string]>).map(([f, label]) => (
-                <FilterChipsScelta key={f} active={!onlyDaSistemare && connFilter === f} onSelect={() => { setConnFilter(f); setOnlyDaSistemare(false) }}>{label}</FilterChipsScelta>
-              ))}
-              <FilterChipsScelta active={onlyDaSistemare} count={daSistemareCount(yourRows)} onSelect={() => setOnlyDaSistemare(true)}><Trans>Da sistemare</Trans></FilterChipsScelta>
+            <div className="flex shrink-0 items-center gap-2" data-testid="plugin-connected-filters" role="group" aria-label={t`Filtra per strada`}>
+              <FilterChipsMenu<ConnectedFilter>
+                label={t`Strada`}
+                value={connFilter}
+                options={[
+                  { value: 'all', label: t`tutte` },
+                  { value: 'direct', label: t`MCP diretto` },
+                  { value: 'composio', label: t`Composio` },
+                  { value: 'mac', label: t`Sul Mac` },
+                  { value: 'box', label: t`Nel computer isolato` }
+                ]}
+                onSelect={(v) => { setConnFilter(v); setOnlyDaSistemare(false) }}
+              />
+              <FilterChipsInterruttore
+                active={onlyDaSistemare}
+                count={daSistemareCount(yourRows)}
+                onToggle={() => setOnlyDaSistemare(!onlyDaSistemare)}
+              >
+                <Trans>Da sistemare</Trans>
+              </FilterChipsInterruttore>
             </div>
           )}
-        </>
+        </div>
       )}
       contentClassName="flex flex-col gap-section pb-6"
     >

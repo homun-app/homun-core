@@ -74,9 +74,13 @@ if (argv.includes('--foglio')) {
 
 /** Le dimensioni della galleria: ogni scena a 1280×800 in chiaro e in scuro; anche 900×640 per queste. */
 const LARGHEZZE_EXTRA = ['chat', 'plugin-lista', 'libreria-griglia']
+// fase linguaggio-ritocchi (R3): il controllo «niente tagliato» vale a 900
+// per OGNI scena — le altre ci arrivano con una passata SOLO CONTROLLO (niente
+// cattura, niente confronto: la 900 delle tre scene qui sopra si controlla
+// già durante la cattura)
 const combinazioni = (page) => [
   [1280, 'chiaro'], [1280, 'scuro'],
-  ...(LARGHEZZE_EXTRA.includes(page.id) ? [[900, 'chiaro'], [900, 'scuro']] : [])
+  ...(LARGHEZZE_EXTRA.includes(page.id) ? [[900, 'chiaro'], [900, 'scuro']] : [[900, 'solo-controllo']])
 ]
 
 /**
@@ -111,13 +115,21 @@ const MASCHERE = {
  * (l'allineamento del catalogo al codice lo copre la guardia della suite,
  * src/__tests__/guardie/lingui-catalogo.test.ts).
  *
- * R2 (fase linguaggio-ritocchi) — UN CONTROLLO UNA VOLTA SOLA: due controlli interattivi VISIBILI con
+ * R2 — UN CONTROLLO UNA VOLTA SOLA: due controlli interattivi VISIBILI con
  * lo stesso nome accessibile e lo stesso ruolo (gruppo, bottone, scheda)
  * nella stessa pagina sono ROSSI. Unica eccezione, dichiarata per ruolo e
  * contenitore: i controlli ripetuti UNA PER RIGA («Apri», «⋯», l'interruttore
  * di ogni riga) — ognuno sta in una riga o card DIVERSA di una lista o
  * tabella; due nomi uguali nella STESSA riga restano rossi.
  *
+ * R3 — NIENTE TAGLIATO: il rettangolo di ogni controllo visibile (scheda,
+ * pillola, bottone, campo) deve stare dentro quello del contenitore che
+ * ritaglia più vicino (overflow hidden/auto/scroll — chi scorre in orizzontale
+ * a riposo sta tagliando) e dentro la finestra in orizzontale. In verticale
+ * contano solo i ritagli DURI (hidden/clip): un controllo oltre il bordo di
+ * un corpo che scorre è lo scorrimento, non un difetto. In più la BARRA
+ * delle pagine di elenco non scorre in orizzontale (scrollWidth ≤ clientWidth).
+ */
 const VISIBILE_JS = `
   const visibile = (el) => {
     if (!el.getClientRects().length) return false
@@ -168,8 +180,73 @@ const CONTROLLO_DOPPIONI = `return (() => {
   return doppi
 })()`
 
+/** R3: i controlli tagliati dal contenitore o dalla finestra, e la barra che scorre in orizzontale. */
+const CONTROLLO_TAGLI = `return (() => {
+  ${VISIBILE_JS}
+  const TOL = 0.5
+  const problemi = []
+  const CONTROLLI = 'button, [role="button"], [role="tab"], a[href], input, select, textarea, [role="switch"], [role="menuitem"], [role="option"], [role="radio"], [role="checkbox"]'
+  const clippa = (el, assi) => {
+    for (let n = el.parentElement; n instanceof Element; n = n.parentElement) {
+      const st = getComputedStyle(n)
+      // in X il primo che ritaglia (hidden/clip/auto/scroll) è il contenitore
+      // del controllo; in Y il primo che ritaglia in QUALSIASI modo decide:
+      // se scorre (auto/scroll) è lo scorrimento di sempre — non un difetto —
+      // e si smette di cercare, altrimenti un ritaglio duro più lontano
+      // prenderebbe le righe a metà del bordo di una lista che scorre
+      if (st.overflowX !== 'visible' || st.overflowY !== 'visible') {
+        if (assi === 'x' && ['hidden', 'clip', 'auto', 'scroll'].includes(st.overflowX)) return { n, asse: st.overflowX }
+        if (assi === 'y') return ['hidden', 'clip'].includes(st.overflowY) ? { n, asse: st.overflowY } : null
+      }
+    }
+    return null
+  }
+  const descrizione = (el) => {
+    const nome = el.getAttribute('aria-label') ?? el.getAttribute('title') ?? (el.textContent ?? '').replace(/\\s+/g, ' ').trim()
+    const ruolo = el.getAttribute('role') ?? el.tagName.toLowerCase()
+    return '«' + String(nome).slice(0, 40) + '» (' + ruolo + ')'
+  }
+  for (const el of document.querySelectorAll(CONTROLLI)) {
+    if (!visibile(el)) continue
+    const r = el.getBoundingClientRect()
+    const fuori = (v, min, max) => v < min - TOL || v > max + TOL
+    const clipX = clippa(el, 'x')
+    if (clipX) {
+      const c = clipX.n.getBoundingClientRect()
+      if (fuori(r.left, c.left, c.right) || fuori(r.right, c.left, c.right)) {
+        problemi.push(descrizione(el) + ' tagliato in orizzontale dal contenitore (left ' + Math.round(r.left) + ', right ' + Math.round(r.right) + ' su ' + Math.round(c.left) + '–' + Math.round(c.right) + ')')
+        continue
+      }
+    } else if (r.left < -TOL || r.right > window.innerWidth + TOL) {
+      problemi.push(descrizione(el) + ' esce dalla finestra (left ' + Math.round(r.left) + ', right ' + Math.round(r.right) + ' su ' + window.innerWidth + ')')
+      continue
+    }
+    const clipY = clippa(el, 'y')
+    if (clipY) {
+      const c = clipY.n.getBoundingClientRect()
+      if (fuori(r.top, c.top, c.bottom) || fuori(r.bottom, c.top, c.bottom)) {
+        problemi.push(descrizione(el) + ' tagliato in verticale da un ritaglio duro (top ' + Math.round(r.top) + ', bottom ' + Math.round(r.bottom) + ' su ' + Math.round(c.top) + '–' + Math.round(c.bottom) + ')')
+      }
+    }
+  }
+  // niente di cui sopra su elementi invisibili: il popover «Chiedi al volo»
+  // chiuso sta nel DOM sopra lo schermo, e le voci scorse fuori da una lista
+  // non si vedono — un controllo che non si vede non è tagliato
+  // la barra delle pagine di elenco non scorre in orizzontale
+  for (const barra of document.querySelectorAll('[data-page-shell="toolbar"]')) {
+    const riga = barra.querySelector(':scope > div') ?? barra
+    for (const el of [barra, riga]) {
+      if (el.scrollWidth > el.clientWidth + TOL) {
+        problemi.push('la barra della pagina scorre in orizzontale (scrollWidth ' + el.scrollWidth + ' > clientWidth ' + el.clientWidth + ')')
+        break
+      }
+    }
+  }
+  return problemi
+})()`
+
 /**
- * I due controlli di una scena (R1/R2): riempiono `errori` — una scena
+ * I tre controlli di una scena (R1/R2/R3): riempiono `errori` — una scena
  * col vaso rotto è ROSSA, non catturata.
  */
 const controlliScena = async (s, errori) => {
@@ -183,6 +260,8 @@ const controlliScena = async (s, errori) => {
   }
   // R2: un controllo una volta sola
   for (const d of await s.eval(CONTROLLO_DOPPIONI)) errori.push(`controllo duplicato: ${d}`)
+  // R3: niente tagliato
+  for (const p of await s.eval(CONTROLLO_TAGLI)) errori.push(`controllo tagliato: ${p}`)
 }
 
 /**
@@ -202,9 +281,31 @@ const nomeCattura = (page, tema, w) => `${page.id}-${tema}${w !== 1280 ? `-${w}`
 const T0 = Date.now()
 const log = (...a) => console.log('[galleria]', `+${((Date.now() - T0) / 1000).toFixed(1)}s`, ...a)
 
-/** La cattura di UNA combinazione: viewport, tema, apertura della scena, preparazione, maschere, screenshot + strip. I controlli delle maschere e i due controlli di fase linguaggio-ritocchi (controlliScena) riempiono `errori`: una scena col vaso rotto è ROSSA, non catturata. */
+/**
+ * La cattura di UNA combinazione: viewport, tema, apertura della scena,
+ * preparazione, maschere, screenshot + strip. I controlli delle maschere e
+ * i tre controlli di fase linguaggio-ritocchi (controlliScena) riempiono
+ * `errori`: una scena col vaso rotto è ROSSA, non catturata.
+ * Con tema 'solo-controllo' (R3, la passata a 900 delle scene senza cattura):
+ * apre la scena, fa i controlli e basta — niente tema, maschere né foto.
+ */
 const cattura = async (s, page, ctx, w, tema, errori = []) => {
+  const solo = tema === 'solo-controllo'
   await s.viewport(w, 800 - 800 + (w === 900 ? 640 : 800))
+  if (solo) {
+    // R3: la passata di SOLO CONTROLLO a 900. Le PAGINE restano aperte al
+    // cambio di misura (le aveva aperte la cattura a 1280): riaprirle
+    // significherebbe cliccare di nuovo quel che la scena ha già cliccato, e
+    // certi clic non sono idempotenti — la riga di una squadra GIÀ attiva la
+    // CHIUDE, e la barra cambierebbe secondo il NUMERO di passate, non secondo
+    // l'app. Si riapre solo quel che il cambio di misura chiude da sé: i
+    // dialoghi, i menu, i fogli (openOverlay rifà lui le sue condizioni)
+    if (page.overlay) { await closeOverlays(s); await openOverlay(s, page) }
+    await s.attendiRete({ quieta: 300, entro: 8_000 }).catch(() => undefined)
+    await s.attendiStabile('body', { entro: 4_000 }).catch(() => undefined)
+    await controlliScena(s, errori)
+    return null
+  }
   await s.tema(tema)
   await closeOverlays(s)
   // la pagina dei componenti (F2/G2): UNA SEZIONE per scena, la apre il suo
@@ -225,7 +326,7 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
     // non ci sta, si divide in due scene: chi sta fuori non si vede).
     // Solo alle CATTURE (800 di altezza): la passata di controllo a 900 è
     // 640 di altezza e le sezioni lunghe non c'entrano per costruzione
-    const fuori = await s.eval(`return (() => {
+    const fuori = solo ? null : await s.eval(`return (() => {
       const el = document.querySelector('[data-testid="galleria-componenti-contenuto"]')
       if (!el) return 'il contenuto della pagina componenti non è nel DOM'
       const sezione = el.dataset.sezione ?? null
@@ -283,15 +384,16 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
   await s.togliMaschere()
   // il POPOVER ⌘K si chiude da solo entro ~1 s dall'apertura (già nell'originale):
   // la cattura parte SUBITO dopo l'apertura, prima delle attese di stabilità
-  const catturaPrima = page.id === 'popover-chiedi'
+  const catturaPrima = !solo && page.id === 'popover-chiedi'
   if (!catturaPrima) {
     await s.attendiRete({ quieta: 300, entro: 8_000 }).catch(() => undefined)
     await s.attendiStabile('body', { entro: 4_000 }).catch(() => undefined)
   }
-  // fase linguaggio-ritocchi: i due controlli (R1/R2) a OGNI cattura, prima
-  // delle maschere di questa scena — a quell'ora i render della scena sono
-  // tutti fatti, e il confronto dei pixel non li vede
+  // fase linguaggio-ritocchi: i tre controlli (R1/R2/R3) a OGNI passata,
+  // prima delle maschere di questa scena — PRIMA delle attese erano già tutti
+  // i render della scena, e il confronto dei pixel non li vede
   await controlliScena(s, errori)
+  if (solo) return null
   // G1: il CONTROLLO a ogni cattura — PRIMA delle maschere di questa scena,
   // nel DOM non può esserci NESSUN rettangolo (con qualunque ortografia
   // dell'attributo: un rettangolo che la pulizia non toglie è una maschera
@@ -442,7 +544,9 @@ try {
         esiti.push({ nome: nomeCattura(page, tema, w), scena: page.id, esito: 'rossa', dettaglio: errori.join(' · ') })
         continue
       }
-      esiti.push(confronta(page, tema, w))
+      // la passata a 900 di SOLO CONTROLLO non entra negli esiti (niente
+      // cattura, niente confronto): i suoi errori, semmai, sono già sopra
+      if (tema !== 'solo-controllo') esiti.push(confronta(page, tema, w))
     }
     log(page.id, '→', esiti.filter((e) => e.scena === page.id).map((e) => `${e.esito}${e.ae ? ` (${e.ae} px)` : ''}`).join(', '))
   }
@@ -473,7 +577,8 @@ try {
     const copiate = []
     const valide = new Set()
     for (const page of pages.filter(vuole).concat([guida])) {
-      for (const [w, tema] of combinazioni(page).concat([[1280, 'chiaro'], [1280, 'scuro']])) {
+      // le passate di solo controllo non hanno cattura: niente da approvare
+      for (const [w, tema] of combinazioni(page).concat([[1280, 'chiaro'], [1280, 'scuro']]).filter(([_, tema]) => tema !== 'solo-controllo')) {
         const nome = nomeCattura(page, tema, w)
         valide.add(nome)
         const da = join(CATTURE, nome)

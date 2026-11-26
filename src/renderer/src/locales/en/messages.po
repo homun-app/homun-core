@@ -8412,6 +8412,7 @@ msgid "notice.turnEndSuperseded"
 msgstr "Turn superseded by a new message"
 
 #: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/PluginPanel.tsx
 msgid "tutte"
 msgstr "all"
 
@@ -8420,10 +8421,6 @@ msgstr "all"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Tutte"
 msgstr "All"
-
-#: src/renderer/src/components/PluginPanel.tsx
-msgid "Tutte le strade"
-msgstr "All routes"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx

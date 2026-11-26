@@ -66,9 +66,16 @@ export function FilterChipsMenu<T extends string>({ label, value, options, onSel
   )
 }
 
-/** La pillola-interruttore: accende o spegne UN filtro («Archiviati»). */
-export function FilterChipsInterruttore({ active, onToggle, children, testId }: {
+/**
+ * La pillola-interruttore: accende o spegne UN filtro («Archiviati»). Il
+ * `count` è il conteggio accanto all'etichetta («Da sistemare · 2»), come
+ * quello della pillola di scelta — fase linguaggio-ritocchi (R3): l'unica
+ * cosa che resta fuori dal menu quando le scelte sono tante.
+ */
+export function FilterChipsInterruttore({ active, count, onToggle, children, testId }: {
   active: boolean
+  /** il conteggio accanto all'etichetta («Da sistemare · 2») */
+  count?: number
   onToggle(): void
   children: ReactNode
   testId?: string
@@ -84,6 +91,7 @@ export function FilterChipsInterruttore({ active, onToggle, children, testId }: 
       onClick={onToggle}
     >
       {children}
+      {count !== undefined && <span> · {count}</span>}
     </Button>
   )
 }
