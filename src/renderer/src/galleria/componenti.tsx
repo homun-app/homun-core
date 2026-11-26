@@ -127,9 +127,12 @@ const Etichetta = ({ children }: { children: React.ReactNode }) => (
   <div className="text-caption text-muted-foreground mb-2">{children}</div>
 )
 
-/** Una riga di campioni: i pezzi affiancati, il testo sotto. */
+/** Una riga di campioni: i pezzi affiancati, il testo sotto. data-testid
+ *  «galleria-row»: è UNA RIGA — il controllo dei duplicati della galleria
+ *  (fase linguaggio-ritocchi R2) scusa i campioni ripetuti una volta per
+ *  riga, come le righe di ogni lista. */
 const Riga = ({ label, children }: { label: string; children: React.ReactNode }) => (
-  <div className="mb-8">
+  <div className="mb-8" data-testid="galleria-row">
     <Etichetta>{label}</Etichetta>
     <div className="flex flex-wrap items-center gap-4">{children}</div>
   </div>
@@ -217,12 +220,15 @@ const Sezione = ({ id }: { id: IdSezione }) => {
           </Riga>
           <Riga label="switch — acceso/spento (le scelte sono Segmented)">
             <Switch checked onChange={() => undefined} label="Attivo" />
-            <Switch checked={false} onChange={() => undefined} label="Attivo" />
+            <Switch checked={false} onChange={() => undefined} label="Attivo (spento)" />
             <Switch checked disabled onChange={() => undefined} label="Attivo (disattivato)" />
           </Riga>
-          <Riga label="segmented — la scelta di un'impostazione, alta 36 (non un filtro)">
+          <Riga label="segmented — la scelta di un'impostazione, alta 36 (non un filtro); l'ultima è SPENTA">
             <Segmented options={[{ value: 'sistema', label: 'Sistema' }, { value: 'chiaro', label: 'Chiaro' }, { value: 'scuro', label: 'Scuro' }]} value="chiaro" onChange={() => undefined} label="Tema" />
-            <Segmented options={[{ value: 'sistema', label: 'Sistema' }, { value: 'chiaro', label: 'Chiaro' }, { value: 'scuro', label: 'Scuro' }]} value={null} onChange={() => undefined} label="Tema" disabled />
+            {/* fase linguaggio-ritocchi (R2): l'esempio spento usa UN ALTRO
+                setting — due campioni nella stessa riga non ripetono i nomi
+                delle voci (il controllo dei duplicati li prenderebbe) */}
+            <Segmented options={[{ value: 'auto', label: 'Automatico' }, { value: 'manuale', label: 'Manuale' }]} value={null} onChange={() => undefined} label="Modalità" disabled />
           </Riga>
         </Section>
       )}
@@ -467,7 +473,10 @@ const Sezione = ({ id }: { id: IdSezione }) => {
           </Riga>
           <Riga label="ModelSelect">
             <ModelSelect value={null} onChange={() => undefined} allowNone allowFollowMain />
-            <ModelSelect value={{ providerId: 'finto', model: 'finto' }} onChange={() => undefined} />
+            {/* fase linguaggio-ritocchi (R2): il nome della seconda è suo — due
+                combobox visibili con lo stesso nome li prende il controllo dei
+                duplicati */}
+            <ModelSelect value={{ providerId: 'finto', model: 'finto' }} onChange={() => undefined} ariaLabel="Provider e modello (scelto)" />
           </Riga>
         </Section>
       )}
@@ -525,13 +534,16 @@ const Sezione = ({ id }: { id: IdSezione }) => {
           <div className="mb-2">
             <Etichetta>i tre modelli in fila — list-page, detail-page e document-page (nei loro riquadri, come i gusci)</Etichetta>
             <div className="flex items-start gap-4">
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-[1.5]">
                 <Etichetta>list-page — l'elenco</Etichetta>
                 <div className="relative h-56 overflow-hidden rounded-surface border border-border">
+                  {/* fase linguaggio-ritocchi (R3): le schede della demo stanno
+                      nel riquadro ANCHE a 900 (il riquadro è il più largo dei
+                      tre: le sue schede sono le più lunghe) — niente tagliato */}
                   <ListPage
                     titolo="Plugin"
                     testId="galleria-list-page"
-                    schede={{ tabs: [['tutto', 'Tutto'], ['connettori', 'Connettori'], ['skill', 'Skill'], ['collegati', 'Collegati · 12']] as never, value: 'tutto', onChange: () => undefined }}
+                    schede={{ tabs: [['tutto', 'Tutto'], ['collegati', 'Collegati']] as never, value: 'tutto', onChange: () => undefined }}
                     headName="componenti"
                     contentClassName="py-4"
                   >
@@ -590,12 +602,14 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               <Etichetta>server MCP (in attesa e collegata)</Etichetta>
               <div className="flex flex-col gap-4 lg:flex-row">
                 <ProposalCard
+                  testId="galleria-proposal-card-1"
                   testata={<div className="flex items-center gap-2"><AppLogo logo="asana.svg" name="Asana" className="size-8 text-body" /><Text weight="semibold">Aggiungi server MCP: Asana</Text></div>}
                   righe={<><Text size="small" tone="muted">Pubblicato da asana (dominio verificato) · remoto</Text><Text size="small" tone="muted">Accesso: con il tuo account (si apre il browser)</Text></>}
                   perché={<Text>Per cercare i task del tuo piano senza lasciare la chat.</Text>}
                   azioni={<><Button>Aggiungi</Button><Button variant="ghost">No</Button></>}
                 />
                 <ProposalCard
+                  testId="galleria-proposal-card-2"
                   testata={<div className="flex items-center gap-2"><AppLogo logo="asana.svg" name="Asana" className="size-8 text-body" /><Text weight="semibold">Aggiungi server MCP: Asana</Text></div>}
                   stato={<Text size="small" tone="muted">✓ Asana collegato · 12 strumenti</Text>}
                 />
@@ -605,19 +619,22 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               <Etichetta>plugin da installare · plugin da accendere · app Composio</Etichetta>
               <div className="flex flex-col gap-4 lg:flex-row">
                 <ProposalCard
-                  testata={<div className="flex items-center gap-2"><AppLogo logo={null} name="Ricette" className="size-8 text-body" /><Text weight="semibold">Installa plugin: ricette-claude</Text></div>}
+                  testId="galleria-proposal-card-3"
+                                    testata={<div className="flex items-center gap-2"><AppLogo logo={null} name="Ricette" className="size-8 text-body" /><Text weight="semibold">Installa plugin: ricette-claude</Text></div>}
                   righe={<Text size="small" tone="muted">fiducia: marketplace ufficiale · commit 9c31f0aa2b4c · skill: ricette, spesa</Text>}
                   perché={<Text>Mi serve per salvare le ricette che trovi nei documenti.</Text>}
                   azioni={<><Button>Installa</Button><Button variant="ghost">No</Button></>}
                 />
                 <ProposalCard
-                  testata={<div className="flex items-center gap-2"><AppLogo logo={null} name="Posta" className="size-8 text-body" /><Text weight="semibold">Accendi il plugin Posta</Text></div>}
+                  testId="galleria-proposal-card-4"
+                                    testata={<div className="flex items-center gap-2"><AppLogo logo={null} name="Posta" className="size-8 text-body" /><Text weight="semibold">Accendi il plugin Posta</Text></div>}
                   righe={<Text size="small" tone="muted">Server MCP · sul Mac · spento</Text>}
                   perché={<Text>Per cercare la mail della prenotazione che ti ho chiesto.</Text>}
                   azioni={<><Button>Attiva</Button><Button variant="ghost">Non ora</Button></>}
                 />
                 <ProposalCard
-                  avviso={<p className="rounded-control bg-destructive/15 px-3 py-2 text-small text-destructive">Proposta fatta dopo aver letto contenuti esterni: controlla che sia quello che volevi</p>}
+                  testId="galleria-proposal-card-5"
+                                    avviso={<p className="rounded-control bg-destructive/15 px-3 py-2 text-small text-destructive">Proposta fatta dopo aver letto contenuti esterni: controlla che sia quello che volevi</p>}
                   testata={<div className="flex items-center gap-2"><AppLogo logo="gmail.svg" name="Gmail" className="size-8 text-body" /><Text weight="semibold">Collega Gmail</Text></div>}
                   righe={<Text size="small" tone="muted">App del catalogo · tramite Composio</Text>}
                   perché={<Text>Così posso cercare i messaggi quando me lo chiedi.</Text>}

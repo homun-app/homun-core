@@ -345,8 +345,10 @@ export function TeamChat() {
               type="button"
               className="no-drag flex h-control-sm min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-full bg-card/95 px-4 text-left shadow-soft transition hover:bg-card"
               aria-expanded={rightPanel}
-              aria-label={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
-              title={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
+              /* R2 (fase linguaggio-ritocchi): il nome accessibile della pillola
+                 è il NOME DELLA SQUADRA che mostra; «Mostra il pannello dei
+                 membri» è dell'ICONA accanto, e due controlli visibili con lo
+                 stesso nome li prende il controllo dei duplicati della galleria */
               onClick={() => setRightPanel(!rightPanel)}
             >
               <span className="truncate text-body font-medium">{group.name}</span>

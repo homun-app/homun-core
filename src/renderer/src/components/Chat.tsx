@@ -595,8 +595,10 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
               type="button"
               className="no-drag flex h-control-sm min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-full bg-card/95 pl-1.5 pr-4 text-left shadow-soft transition hover:bg-card"
               aria-expanded={rightPanel}
-              aria-label={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
-              title={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
+              /* R2 (fase linguaggio-ritocchi): il nome accessibile della pillola
+                 è il NOME DEL BOT che mostra; «Mostra il pannello del bot» è
+                 dell'ICONA accanto, e due controlli visibili con lo stesso
+                 nome li prende il controllo dei duplicati della galleria */
               onClick={() => setRightPanel(!rightPanel)}
             >
               <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={24} track={false} dimmed={info.dimmed} />

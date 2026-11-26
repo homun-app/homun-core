@@ -100,13 +100,23 @@ const MASCHERE = {
   ]
 }
 /**
- * fase linguaggio-ritocchi (R1): il controllo che la macchina fa a OGNI scena,
- * oltre al confronto coi pixel: le TRADUZIONI MANCANTI raccolte dal vivo: il renderer (con
+ * fase linguaggio-ritocchi: I TRE CONTROLLI che la macchina fa a OGNI scena,
+ * oltre al confronto coi pixel. Nessuno dei tre difetti della fase era stato
+ * preso da un controllo automatico: ora li prende la galleria.
+ *
+ * R1 — le TRADUZIONI MANCANTI raccolte dal vivo: il renderer (con
  * SANDBOT_TEST_*, solo nelle corse di prova) accumula gli id che Lingui
  * dichiara mancanti; la galleria svuota l'elenco a ogni scena. Prende anche
  * un messaggio costruito a runtime, che l'estrazione statica non vede
  * (l'allineamento del catalogo al codice lo copre la guardia della suite,
  * src/__tests__/guardie/lingui-catalogo.test.ts).
+ *
+ * R2 (fase linguaggio-ritocchi) — UN CONTROLLO UNA VOLTA SOLA: due controlli interattivi VISIBILI con
+ * lo stesso nome accessibile e lo stesso ruolo (gruppo, bottone, scheda)
+ * nella stessa pagina sono ROSSI. Unica eccezione, dichiarata per ruolo e
+ * contenitore: i controlli ripetuti UNA PER RIGA («Apri», «⋯», l'interruttore
+ * di ogni riga) — ognuno sta in una riga o card DIVERSA di una lista o
+ * tabella; due nomi uguali nella STESSA riga restano rossi.
  *
 const VISIBILE_JS = `
   const visibile = (el) => {
@@ -126,8 +136,40 @@ const VISIBILE_JS = `
     return true
   }`
 
+/** R2: i controlli duplicati (nome accessibile + ruolo), con l'eccezione per riga. */
+const CONTROLLO_DOPPIONI = `return (() => {
+  ${VISIBILE_JS}
+  const nomeDi = (el) => {
+    const aria = el.getAttribute('aria-label') ?? el.getAttribute('title')
+    return String(aria ?? el.textContent ?? '').replace(/\\s+/g, ' ').trim()
+  }
+  const ruoloDi = (el) => el.getAttribute('role') ?? el.tagName.toLowerCase()
+  // la riga (o card) del controllo ripetuto: dentro una lista o una tabella
+  // (una voce di un listbox è una riga anche lei: ogni opzione la sua azione)
+  const rigaDi = (el) =>
+    el.closest('tr, li, [role="row"], [role="listitem"], [role="option"], [data-testid*="-row"], [data-testid*="-card"], [data-testid*="-item"]')
+    ?? (el.closest('.divide-y') ? el.closest('.divide-y > *') : null)
+  const perChiave = new Map()
+  for (const el of document.querySelectorAll('button, [role="button"], [role="tab"], [role="group"]')) {
+    if (!visibile(el)) continue
+    const nome = nomeDi(el)
+    if (!nome) continue
+    const chiave = ruoloDi(el) + '::' + nome
+    if (!perChiave.has(chiave)) perChiave.set(chiave, [])
+    perChiave.get(chiave).push(el)
+  }
+  const doppi = []
+  for (const [chiave, els] of perChiave) {
+    if (els.length < 2) continue
+    const righe = els.map(rigaDi)
+    if (righe.every(Boolean) && new Set(righe).size === els.length) continue
+    doppi.push('«' + chiave.split('::')[1] + '» (' + chiave.split('::')[0] + ') ×' + els.length)
+  }
+  return doppi
+})()`
+
 /**
- * Il controllo R1 di una scena: riempie `errori` — una scena
+ * I due controlli di una scena (R1/R2): riempiono `errori` — una scena
  * col vaso rotto è ROSSA, non catturata.
  */
 const controlliScena = async (s, errori) => {
@@ -139,6 +181,8 @@ const controlliScena = async (s, errori) => {
     const unici = [...new Map(mancanti.map((m) => [`${m.locale}:${m.id}`, m])).values()]
     for (const m of unici) errori.push(`traduzione mancante (${m.locale}): ${m.id}`)
   }
+  // R2: un controllo una volta sola
+  for (const d of await s.eval(CONTROLLO_DOPPIONI)) errori.push(`controllo duplicato: ${d}`)
 }
 
 /**
@@ -244,9 +288,9 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
     await s.attendiRete({ quieta: 300, entro: 8_000 }).catch(() => undefined)
     await s.attendiStabile('body', { entro: 4_000 }).catch(() => undefined)
   }
-  // fase linguaggio-ritocchi (R1): le traduzioni mancanti a OGNI cattura,
-  // prima delle maschere di questa scena — a quell'ora i render della scena
-  // sono tutti fatti, e il confronto dei pixel non li vede
+  // fase linguaggio-ritocchi: i due controlli (R1/R2) a OGNI cattura, prima
+  // delle maschere di questa scena — a quell'ora i render della scena sono
+  // tutti fatti, e il confronto dei pixel non li vede
   await controlliScena(s, errori)
   // G1: il CONTROLLO a ogni cattura — PRIMA delle maschere di questa scena,
   // nel DOM non può esserci NESSUN rettangolo (con qualunque ortografia
@@ -365,7 +409,7 @@ try {
   for (const tema of ['chiaro', 'scuro']) {
     await s.tema(tema)
     await s.attendiRete({ quieta: 300, entro: 8_000 }).catch(() => undefined)
-    // fase linguaggio-ritocchi (R1): il controllo vale per la guida pure
+    // fase linguaggio-ritocchi: i tre controlli valgono per la guida pure
     const erroriGuida = []
     await controlliScena(s, erroriGuida)
     if (erroriGuida.length) esiti.push({ nome: nomeCattura(guida, tema, 1280), scena: guida.id, esito: 'rossa', dettaglio: erroriGuida.join(' · ') })

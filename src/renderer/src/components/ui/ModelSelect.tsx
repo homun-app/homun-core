@@ -352,7 +352,7 @@ export function ModelSelect({
             {toConnect.length > 0 && (
               <div className="mt-1 border-t border-border/40 pt-1">
                 {toConnect.map(({ kind }) => (
-                  <div key={kind} className="flex items-center gap-2 rounded-control px-2 py-1.5">
+                  <div key={kind} data-testid={`connect-row-${kind}`} className="flex items-center gap-2 rounded-control px-2 py-1.5">
                     <ProviderMark kind={kind} name={KIND_LABELS[kind] ?? kind} size="sm" />
                     <span className="min-w-0 flex-1 truncate text-body">{KIND_LABELS[kind] ?? kind}</span>
                     <button

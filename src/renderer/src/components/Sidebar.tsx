@@ -1509,11 +1509,15 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
             {model.teams.length > 0 && (
               <Title action={
                 /* B2 (fase beta.4): la squadra NASCE IN CHAT, non da un menu —
-                   il «+» della tavola 6 apre il dialogo «Nuovo» del BOT */
+                   il «+» della tavola 6 apre il dialogo «Nuovo» del BOT.
+                   R2 (fase linguaggio-ritocchi): il suo nome è «Nuovo bot»,
+                   non «Crea» come il + della riga di ricerca — due controlli
+                   visibili con lo stesso nome li prende il controllo dei
+                   duplicati della galleria */
                 <button
                   className={ROW_BUTTON}
-                  aria-label={t`Crea`}
-                  title={t`Crea`}
+                  aria-label={t`Nuovo bot`}
+                  title={t`Nuovo bot`}
                   onClick={() => setNewBotOpen(true)}
                 >
                   <Plus className="size-4" />

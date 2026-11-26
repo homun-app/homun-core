@@ -32,11 +32,14 @@
 //
 // Fase design (DS4) — la Libreria passa al sistema, con una scheda sola:
 //  · il guscio è PageShell (larghezza «page»): la testata di PageHeader —
-//    indietro · icona · titolo · griglia/elenco — sulla riga dei 52 di OGNI
-//    colonna; la ricerca e i filtri nella barra degli strumenti, ferma sotto
-//    (prima stavano in testa e andavano a capo, la ricerca su una riga sua);
-//    il corpo che scorre largo quanto l'area, col contenuto centrato. Addio
-//    alla colonna max-w-4xl scritta a mano.
+//    indietro · icona · titolo — sulla riga dei 52 di OGNI colonna; la
+//    ricerca, i filtri e la scelta griglia/elenco nella barra degli
+//    strumenti, ferma sotto (prima stavano in testa e andavano a capo, la
+//    ricerca su una riga sua); il corpo che scorre largo quanto l'area, col
+//    contenuto centrato. Addio alla colonna max-w-4xl scritta a mano.
+//    R2 (fase linguaggio-ritocchi): il selettore della vista sta SOLO nella
+//    barra — in testata c'era due volte, e il controllo dei duplicati lo
+//    prendeva.
 //  · la scheda (rounded-surface, bordo, bg-card): titolo, la zona
 //    dell'anteprima ALTA QUATTRO RIGHE (LibraryPreview: il perché sta lì),
 //    i metadati in fondo. Le righe sono quelle di DOC_CARD, le STESSE della
@@ -377,10 +380,12 @@ function LibraryList({ initial }: { initial?: LibraryPanelInitial }) {
     clearSelection()
   }
 
-  // fase design (DS4): l'interruttore griglia/elenco sta nella testata, a
-  // destra — due bottoni tondi da 32 dentro una rotaia tonda, come le altre
-  // icone delle testate. Stanno nella fascia che trascina la finestra: ognuno
-  // porta no-drag, o il clic servirebbe a trascinarla.
+  // fase design (DS4): l'interruttore griglia/elenco — due bottoni tondi da
+  // 32 dentro una rotaia tonda, come le altre icone. fase linguaggio-ritocchi
+  // (R2): UN selettore della vista solo, nello slot `vista` della barra
+  // (PageToolbar), come vuole il modello ListPage — prima stava ANCHE nella
+  // testata e il controllo dei duplicati lo prendeva («Vista» ×2). I bottoni
+  // portano no-drag perché la barra sta nella fascia che trascina la finestra.
   const viewToggle = (
     <div role="group" aria-label={t`Vista`} className="flex items-center rounded-full bg-muted p-0.5">
       <Button
@@ -415,7 +420,6 @@ function LibraryList({ initial }: { initial?: LibraryPanelInitial }) {
           back={{ onClick: () => openLibrary(null), label: t`Torna alla chat` }}
           icon={<Library className="size-5" />}
           title={<Trans>Libreria</Trans>}
-          actions={viewToggle}
         />
       }
       // C3 (fase linguaggio): la barra è PageToolbar — la ricerca (SearchField,

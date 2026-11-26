@@ -5432,14 +5432,6 @@ msgstr "name non valido: {name}"
 msgid "Nascondi i file nascosti"
 msgstr "Nascondi i file nascosti"
 
-#: src/renderer/src/components/TeamChat.tsx
-msgid "Nascondi il pannello dei membri"
-msgstr "Nascondi il pannello dei membri"
-
-#: src/renderer/src/components/Chat.tsx
-msgid "Nascondi il pannello del bot"
-msgstr "Nascondi il pannello del bot"
-
 #: src/renderer/src/lib/activity.ts
 msgid "naviga…"
 msgstr "naviga…"
@@ -6019,6 +6011,10 @@ msgstr "Nuova routine"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Nuovo"
 msgstr "Nuovo"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Nuovo bot"
+msgstr "Nuovo bot"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Nuovo titolo"
