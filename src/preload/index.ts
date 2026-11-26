@@ -370,5 +370,12 @@ contextBridge.exposeInMainWorld('sandbot', api)
 // di test (SANDBOT_TEST_GALLERIA=1, che imposta la galleria). Il NOME del
 // modulo non sta qui: lo scrive la galleria a runtime sul renderer, così il
 // bundle del preload non contiene il marcatore della pagina.
-contextBridge.exposeInMainWorld('sandbotTest', { galleria: process.env.SANDBOT_TEST_GALLERIA === '1' })
+//
+// fase linguaggio-ritocchi (R1): in OGNI corsa di prova (lo USER_DATA lo
+// mette il motore di sonde e galleria) il renderer raccoglie gli id di
+// traduzione mancanti, che la galleria legge a ogni scena.
+contextBridge.exposeInMainWorld('sandbotTest', {
+  galleria: process.env.SANDBOT_TEST_GALLERIA === '1',
+  traduzioni: process.env.SANDBOT_TEST_USER_DATA !== undefined
+})
 

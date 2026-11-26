@@ -77,7 +77,7 @@ msgstr "\"Always allow\" choices made on cards. A server's reads only cover tool
 msgid "skill.metadataInvalid"
 msgstr "\"metadata\" must be a map of strings (each value a string)."
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/plugin-detail.tsx
 msgid "(le istruzioni complete le vede il bot col tool skill)"
 msgstr "(the bot sees the full instructions with the skill tool)"
 
@@ -151,7 +151,7 @@ msgid "{0, plural, one {# passo} other {# passaggi}}"
 msgstr "{0, plural, one {# step} other {# steps}}"
 
 #. placeholder {0}: r.secretCount
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "{0, plural, one {# segreto} other {# segreti}}"
 msgstr "{0, plural, one {# secret} other {# secrets}}"
 
@@ -254,11 +254,6 @@ msgstr "{0} min ago"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "{0} non è tra le app del catalogo, ma si può collegare con un server MCP"
 msgstr "{0} is not among the catalog apps, but it can be connected with an MCP server"
-
-#. placeholder {0}: rows.length
-#: src/renderer/src/components/ApprovalsCenter.tsx
-msgid "{0} richieste da {bots} bot · solo tu puoi deciderle · ogni richiesta si decide anche dove è nata"
-msgstr "{0} requests from {bots} bots · only you can decide them · each request is also decided where it was born"
 
 #. placeholder {0}: picked.length
 #: src/renderer/src/components/PluginPanel.tsx
@@ -406,16 +401,16 @@ msgstr "{minutes} minutes before every calendar event"
 msgid "notice.modelRouteCooled"
 msgstr "{model} on {provider} is paused until {until} (recent limit or error): the turn starts from {fallback} on {fallbackProvider}."
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "{n, plural, one {# selezionato} other {# selezionati}}"
 msgstr "{n, plural, one {# selected} other {# selected}}"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "{n, plural, one {# strumento} other {# strumenti}}"
 msgstr "{n, plural, one {# tool} other {# tools}}"
 
 #. placeholder {0}: (test.tools ?? []).join(', ')
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "{n} strumenti: {0}"
 msgstr "{n} tools: {0}"
 
@@ -567,7 +562,7 @@ msgstr "+ Add contact"
 msgid "+ Aggiungi login"
 msgstr "+ Add login"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "+ Aggiungi server MCP"
 msgstr "+ Add MCP server"
 
@@ -575,7 +570,7 @@ msgstr "+ Add MCP server"
 msgid "+ Nuova routine"
 msgstr "+ New routine"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "+ Variabile"
 msgstr "+ Variable"
 
@@ -632,7 +627,7 @@ msgstr "7 days"
 msgid "A: {0}"
 msgstr "To: {0}"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 msgid "Accedi a Composio nel browser…"
 msgstr "Sign in to Composio in the browser…"
 
@@ -688,7 +683,8 @@ msgstr "Account"
 msgid "Account e bot"
 msgstr "Accounts and bots"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Adattamenti di Homun"
 msgstr "Homun’s adaptations"
 
@@ -720,20 +716,21 @@ msgid "notice.agentBusyDiscard"
 msgstr "Agent busy: message discarded (the queue lives in the daemon jobs table)."
 
 #: src/renderer/src/components/ComputerFiles.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Aggiorna"
 msgstr "Refresh"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Aggiorna da GitHub"
 msgstr "Update from GitHub"
 
+#: src/renderer/src/components/plugin/catalog-preview.tsx
 #: src/renderer/src/components/PluginPanel.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Aggiornamento disponibile"
 msgstr "Update available"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
 msgid "aggiornata"
 msgstr "updated"
 
@@ -742,7 +739,7 @@ msgstr "updated"
 msgid "aggiornata {0}"
 msgstr "updated {0}"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "aggiornata da GitHub"
 msgstr "updated from GitHub"
 
@@ -754,19 +751,19 @@ msgstr "Up to date"
 msgid "Aggiorno il motore alla versione nuova…"
 msgstr "Updating Homun's engine to the new version…"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "aggiungi"
 msgstr "add"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Aggiungi"
 msgstr "Add"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "aggiungi gateway"
 msgstr "add gateway"
 
@@ -793,7 +790,7 @@ msgstr "Add MCP server: {0}"
 msgid "card.mcpServer"
 msgstr "Add MCP server: {name}"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/gateway-accounts.tsx
 msgid "Aggiungi un altro account"
 msgstr "Add another account"
 
@@ -812,10 +809,6 @@ msgstr "Adding…"
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Aggiunta"
 msgstr "Added"
-
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "aggiunto da te"
-msgstr "added by you"
 
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "aiutante"
@@ -948,7 +941,7 @@ msgid "analizzo…"
 msgstr "analyzing…"
 
 #. placeholder {0}: r.alsoIn.map(label).join(', ')
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "anche in {0}"
 msgstr "also in {0}"
 
@@ -958,7 +951,6 @@ msgstr "no steps yet"
 
 #: src/renderer/src/components/AgentSendRow.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/BoxSetupProgress.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
@@ -966,16 +958,20 @@ msgstr "no steps yet"
 #: src/renderer/src/components/GuideModelStep.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
-#: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
+#: src/renderer/src/components/plugin/gateway-accounts.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 #: src/renderer/src/components/plugin/ServerSecretRows.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/Sidebar.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Annulla"
@@ -999,7 +995,7 @@ msgstr "Cancelled"
 msgid "Annullato (interrupt)"
 msgstr "Cancelled (interrupt)"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "anteprima"
 msgstr "preview"
 
@@ -1054,14 +1050,14 @@ msgstr "opens {host}…"
 msgid "apre una pagina…"
 msgstr "opens a page…"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "apri"
 msgstr "open"
 
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 #: src/renderer/src/components/TaskCard.tsx
 msgid "Apri"
@@ -1079,7 +1075,7 @@ msgstr "open at the side"
 msgid "Apri Accessibilità"
 msgstr "Open Accessibility"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Apri Composio"
 msgstr "Open Composio"
 
@@ -1197,7 +1193,7 @@ msgstr "Archived"
 msgid "Argomenti (args) non sono JSON valido"
 msgstr "Arguments (args) are not valid JSON"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Argomenti separati per spazio"
 msgstr "Arguments separated by space"
 
@@ -1205,7 +1201,7 @@ msgstr "Arguments separated by space"
 msgid "args JSON, es. {\"query\":\"x\"}"
 msgstr "args JSON, e.g. {\"query\":\"x\"}"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Arrivano al comando come variabili d'ambiente. Quelle segrete si salvano cifrate: nell'elenco si vedono solo i nomi."
 msgstr "They reach the command as environment variables. Secret ones are saved encrypted: the list shows names only."
 
@@ -1258,7 +1254,7 @@ msgstr "Activate"
 msgid "card.enablePlugin"
 msgstr "Turn on {name}"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Attiva con la chiave ak_ del tuo progetto."
 msgstr "Activate with your project's ak_ key."
 
@@ -1319,7 +1315,7 @@ msgstr "Autonomy:"
 msgid "Autonomia: {0}"
 msgstr "Autonomy: {0}"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 msgid "autorizza nel browser…"
 msgstr "authorizing in the browser…"
 
@@ -1347,7 +1343,7 @@ msgstr "authorization succeeded but the server does not respond: {error}"
 msgid "Autorizzazioni"
 msgstr "Permissions"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Avanti"
 msgstr "Next"
 
@@ -1385,7 +1381,7 @@ msgstr "Start at login"
 msgid "Avvio automatico"
 msgstr "Automatic start"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 msgid "Avvio del collegamento…"
 msgstr "Starting the connection…"
 
@@ -1417,7 +1413,7 @@ msgstr "Base URL"
 msgid "Basso"
 msgstr "Low"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Bearer token (opzionale — salvato cifrato)"
 msgstr "Bearer token (optional — stored encrypted)"
 
@@ -1439,13 +1435,14 @@ msgstr "Blocked by permissions: {tool}"
 msgid "Blu"
 msgstr "Blue"
 
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/Settings.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "bot"
 msgstr "bot"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/GuideView.tsx
+#: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Bot"
@@ -1456,12 +1453,12 @@ msgstr "Bots"
 msgid "bot · {0}"
 msgstr "bot · {0}"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Bot che la usano"
 msgstr "Bots that use it"
 
 #: src/renderer/src/components/PluginCard.tsx
-#: src/renderer/src/components/ServerSheet.tsx
 msgid "Bot che lo usano"
 msgstr "Bots that use it"
 
@@ -1559,11 +1556,12 @@ msgstr "Upload here"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/ApprovalsCenter.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "caricamento…"
 msgstr "loading…"
 
@@ -1598,6 +1596,7 @@ msgstr "Skill categories"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
+#: src/renderer/src/components/ui/search-field.tsx
 msgid "Cerca"
 msgstr "Search"
 
@@ -1621,11 +1620,11 @@ msgstr "searches for the right tool…"
 msgid "Cerca nei lavori"
 msgstr "Search jobs"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "cerca nel registro (2+ lettere)"
 msgstr "search the registry (2+ letters)"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Cerca nel registro MCP"
 msgstr "Search the MCP registry"
 
@@ -1649,7 +1648,7 @@ msgstr "Search a model or a provider"
 msgid "Cerco LM Studio sul tuo Mac (porta 1234)."
 msgstr "Looking for LM Studio on your Mac (port 1234)."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Cerco nel registro…"
 msgstr "Searching the registry…"
 
@@ -1691,7 +1690,7 @@ msgstr "key"
 msgid "Chiave (facoltativa)"
 msgstr "Key (optional)"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "chiave / token Bearer (salvata cifrata)"
 msgstr "key / Bearer token (stored encrypted)"
 
@@ -1703,11 +1702,11 @@ msgstr "API key · pay per use"
 msgid "Chiave API (opzionale)"
 msgstr "API key (optional)"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "chiave API di Composio"
 msgstr "Composio API key"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Chiave di progetto Composio (sviluppatori)"
 msgstr "Composio project key (developers)"
 
@@ -1716,7 +1715,7 @@ msgstr "Composio project key (developers)"
 msgid "composio.keyInvalid"
 msgstr "Invalid key: check it and try again."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Chiave non valida: controllala e riprova."
 msgstr "Invalid key: check it and try again."
 
@@ -1830,16 +1829,16 @@ msgid "Chiude il controllo e torna alla vista"
 msgstr "Ends control and returns to the view"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "chiudi"
 msgstr "close"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/PipView.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/ui/dialog.tsx
@@ -1898,11 +1897,11 @@ msgstr "What bots can do without asking. Revoke it and the next call asks again.
 msgid "circa (±15 min)"
 msgstr "around (±15 min)"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "Claude Code"
 msgstr "Claude Code"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "Claude Desktop"
 msgstr "Claude Desktop"
 
@@ -1919,7 +1918,7 @@ msgstr "Clicking a row opens its card. «To fix» collects the ones that do not 
 msgid "notice.queueFull"
 msgstr "Queue full: message discarded."
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "Codex"
 msgstr "Codex"
 
@@ -1927,8 +1926,8 @@ msgstr "Codex"
 msgid "codice TOTP"
 msgstr "TOTP code"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
+#: src/renderer/src/components/plugin/gateway-accounts.tsx
 #: src/renderer/src/components/ServerSetup.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx
@@ -1996,16 +1995,12 @@ msgstr "Color {col}"
 msgid "comandi nel computer, senza rete"
 msgstr "commands in the computer, no network"
 
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "Comando"
-msgstr "Command"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "mcp.commandNotFound"
 msgstr "command \"{command}\" not found: use the full path"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Comando (es. node)"
 msgstr "Command (e.g. node)"
 
@@ -2014,7 +2009,7 @@ msgstr "Command (e.g. node)"
 msgid "autoreview.neverAuto"
 msgstr "command that runs other commands (never-auto)"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "comando con una variabile non risolta"
 msgstr "command with an unresolved variable"
 
@@ -2042,7 +2037,7 @@ msgstr "Same as the others ({0})"
 msgid "Come si chiama?"
 msgstr "What’s their name?"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 msgid "Come si risolve"
 msgstr "How to fix it"
 
@@ -2083,7 +2078,7 @@ msgid "Completa"
 msgstr "Set up"
 
 #. placeholder {0}: row.app.name
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 msgid "Completa il login di {0} nel browser…"
 msgstr "Finish signing in to {0} in the browser…"
 
@@ -2096,19 +2091,19 @@ msgstr "completed"
 msgid "Composio"
 msgstr "Composio"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Composio attivo"
 msgstr "Composio active"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 msgid "Composio è già attivo con la chiave di progetto (sviluppatori). Le due strade non possono stare insieme: disattivo la chiave e collego con il login?"
 msgstr "Composio is already active with the project key (developers). The two paths cannot be active together: deactivate the key and connect with the sign-in?"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Composio è già collegato con il login. Le due strade non possono stare insieme: disattivo il login e uso la chiave di progetto?"
 msgstr "Composio is already connected with the sign-in. The two paths cannot be active together: deactivate the sign-in and use the project key?"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Composio è un servizio di terzi: i login e le azioni delle app collegate tramite Composio passano dai suoi server, non restano solo sul tuo Mac."
 msgstr "Composio is a third-party service: logins and actions of apps connected through Composio pass through its servers, they do not stay only on your Mac."
 
@@ -2147,7 +2142,7 @@ msgstr "Composio didn't answer in time: {name} wasn't connected."
 msgid "composio.unreachable"
 msgstr "Composio unreachable: check your connection and try again."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Composio non raggiungibile: controlla la connessione e riprova."
 msgstr "Composio unreachable: check your connection and try again."
 
@@ -2210,7 +2205,7 @@ msgid "condivise"
 msgstr "shared"
 
 #: src/renderer/src/components/MemoryPanel.tsx
-#: src/renderer/src/components/RoutineCreatedRow.tsx
+#: src/renderer/src/components/routine-tz-ask.tsx
 msgid "Conferma"
 msgstr "Confirm"
 
@@ -2272,10 +2267,6 @@ msgstr "connector_poll: intervalMin must be ≥ 2 minutes"
 msgid "trigger.toolMissing"
 msgstr "connector_poll: missing tool"
 
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "Connessa"
-msgstr "Connected"
-
 #: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Connessione al terminale…"
 msgstr "Connecting to the terminal…"
@@ -2284,8 +2275,8 @@ msgstr "Connecting to the terminal…"
 msgid "Connessione allo schermo…"
 msgstr "Connecting to the screen…"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 #: src/renderer/src/components/PluginCard.tsx
 msgid "Connetti"
 msgstr "Connect"
@@ -2308,10 +2299,6 @@ msgstr "Connectors"
 #: src/shared/ui-messages.ts
 msgid "rpc.connectorsUnavailable"
 msgstr "connectors not available"
-
-#: src/renderer/src/components/PluginPanel.tsx
-msgid "Connettori, server MCP e skill: tutto quello che dà capacità ai tuoi bot, in un posto."
-msgstr "Connectors, MCP servers and skills: everything that gives your bots capabilities, in one place."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Consegna"
@@ -2463,8 +2450,9 @@ msgstr "Continue"
 msgid "Continua da solo quando…"
 msgstr "Continue on your own when…"
 
+#: src/renderer/src/components/plugin/catalog-preview.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/Settings.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Controlla aggiornamenti"
 msgstr "Check for updates"
 
@@ -2506,7 +2494,7 @@ msgstr "Copy"
 msgid "copia curl"
 msgstr "copy curl"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Copia la cartella in ~/Downloads/Homun/skills/"
 msgstr "Copies the folder to ~/Downloads/Homun/skills/"
 
@@ -2600,7 +2588,7 @@ msgid "creata {0} · aggiornata {1}"
 msgstr "created {0} · updated {1}"
 
 #. placeholder {0}: agentName(meta.createdBy)
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "creata da {0}"
 msgstr "created by {0}"
 
@@ -2628,7 +2616,7 @@ msgstr "cron \"{expr}\""
 msgid "rpc.cronInvalid"
 msgstr "invalid cron: \"{cron}\" (5 fields, e.g. \"0 9 * * *\")"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "Cursor"
 msgstr "Cursor"
 
@@ -2679,13 +2667,9 @@ msgstr "To approve, {count} requests"
 msgid "conn.needsAuthSettings"
 msgstr "to authorize (Settings → Installed → Connect)"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "da compilare"
 msgstr "to fill in"
-
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "Da completare"
-msgstr "To complete"
 
 #. placeholder {0}: message.settings.map((st) => st.key).join(', ')
 #: src/renderer/src/components/ConnectorCards13.tsx
@@ -2714,7 +2698,7 @@ msgstr "to set up"
 msgid "dialog.moveToApplications.body"
 msgstr "From here, automatic updates don\\u2019t work."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/gateway-accounts.tsx
 msgid "Da ricollegare"
 msgstr "Needs reconnecting"
 
@@ -2723,10 +2707,9 @@ msgstr "Needs reconnecting"
 msgid "da scegliere"
 msgstr "to be chosen"
 
-#. placeholder {0}: daSistemareCount(yourRows)
 #: src/renderer/src/components/PluginPanel.tsx
-msgid "Da sistemare · {0}"
-msgstr "To fix · {0}"
+msgid "Da sistemare"
+msgstr "Needs fixing"
 
 #. placeholder {0}: r.allowedBy
 #: src/renderer/src/lib/approvals-center.ts
@@ -2819,7 +2802,7 @@ msgstr "description"
 msgid "Descrizione"
 msgstr "Description"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Descrizione (cosa fa e quando usarla)"
 msgstr "Description (what it does and when to use it)"
 
@@ -2866,15 +2849,15 @@ msgstr "Forget this memory forever? The text is completely erased and there is n
 msgid "Direttamente sul Mac"
 msgstr "Directly on the Mac"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Disattiva il login e riprova"
 msgstr "Deactivate the sign-in and retry"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Disattiva la chiave"
 msgstr "Deactivate the key"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 msgid "Disattiva la chiave e collega"
 msgstr "Turn off the key and connect"
 
@@ -2955,7 +2938,7 @@ msgstr "Where commands run"
 msgid "Dove la trovo?"
 msgstr "Where do I find it?"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Dove la trovo? Copia la chiave API dalle impostazioni del tuo progetto su Composio (composio.dev → Settings → API Keys)."
 msgstr "Where do I find it? Copy the API key from your Composio project settings (composio.dev → Settings → API Keys)."
 
@@ -3039,7 +3022,7 @@ msgstr "Delete bot"
 msgid "Elimina i file dei bot"
 msgstr "Delete the bot files"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Elimina il server"
 msgstr "Delete the server"
 
@@ -3176,7 +3159,7 @@ msgstr "Result"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/PageView.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Esporta"
 msgstr "Export"
 
@@ -3243,7 +3226,7 @@ msgstr "Failed"
 msgid "Fatti e regole che il bot ricorda tra i turni, sul motore Engramma. «Condivise» valgono per tutti i bot."
 msgstr "Facts and rules the bot remembers across turns, on the Engramma engine. “Shared” ones apply to every bot."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Fatto"
 msgstr "Done"
@@ -3291,14 +3274,15 @@ msgstr "file"
 
 #: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "File"
 msgstr "Files"
 
 #. placeholder {0}: updateDiff.diff.added.join(', ')
 #. placeholder {0}: updatePreview.diff.added.join(', ')
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "File aggiunti: {0}"
 msgstr "Added files: {0}"
 
@@ -3309,11 +3293,12 @@ msgstr "Binary file ({0})"
 
 #. placeholder {0}: updateDiff.diff.changed.join(', ')
 #. placeholder {0}: updatePreview.diff.changed.join(', ')
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "File cambiati: {0}"
 msgstr "Changed files: {0}"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
 msgid "File che entrano"
 msgstr "Files to be added"
 
@@ -3328,7 +3313,8 @@ msgstr "files written in the computer"
 
 #. placeholder {0}: updateDiff.diff.removed.join(', ')
 #. placeholder {0}: updatePreview.diff.removed.join(', ')
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "File tolti: {0}"
 msgstr "Removed files: {0}"
 
@@ -3387,16 +3373,12 @@ msgstr "Pin"
 msgid "onboarding.focusDescription"
 msgstr "Initial focus: {focus}"
 
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "Fonte"
-msgstr "Source"
-
 #. placeholder {0}: detail.note.source
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "fonte: {0}"
 msgstr "source: {0}"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "formato non capito"
 msgstr "unrecognized format"
 
@@ -3412,7 +3394,7 @@ msgstr "It works. The key stays in your Mac’s Keychain."
 msgid "Fuso orario"
 msgstr "Time zone"
 
-#: src/renderer/src/components/RoutineCreatedRow.tsx
+#: src/renderer/src/components/routine-tz-ask.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Fuso orario (es. Europe/Rome)"
 msgstr "Time zone (e.g. Europe/Rome)"
@@ -3421,10 +3403,6 @@ msgstr "Time zone (e.g. Europe/Rome)"
 #: src/shared/ui-messages.ts
 msgid "rpc.tzInvalid"
 msgstr "Invalid time zone: \"{tz}\""
-
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "gateway"
-msgstr "gateway"
 
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "gateway, marketplace, registro, chiave"
@@ -3435,7 +3413,7 @@ msgstr "gateway, marketplace, log, key"
 msgid "Gelatina"
 msgstr "Jelly"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "Gemini CLI"
 msgstr "Gemini CLI"
 
@@ -3443,7 +3421,7 @@ msgstr "Gemini CLI"
 msgid "Generali"
 msgstr "General"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "già collegato"
 msgstr "already connected"
 
@@ -3495,14 +3473,14 @@ msgstr "runs on your Mac"
 msgid "Gira tutto qui, senza costi."
 msgstr "Everything runs here, no costs."
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "GitHub"
 msgstr "GitHub"
 
 #. placeholder {0}: meta.origin.repo
 #. placeholder {1}: meta.origin.commit.slice(0, 8)
 #. placeholder {2}: meta.origin.path
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "GitHub · {0} @ {1} · {2}"
 msgstr "GitHub · {0} @ {1} · {2}"
 
@@ -3675,7 +3653,7 @@ msgstr "Wrote a document"
 msgid "Ha scritto un file"
 msgstr "Wrote a file"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Ha un piano gratuito."
 msgstr "It has a free plan."
 
@@ -3726,7 +3704,7 @@ msgstr "You chose: {0}"
 msgid "Hai scritto: {0}"
 msgstr "You wrote: {0}"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "header con una variabile non risolta"
 msgstr "header with an unresolved variable"
 
@@ -3752,7 +3730,7 @@ msgstr "I published the summary in the team “{name}”"
 msgid "Ho trovato questi modelli sul tuo Mac"
 msgstr "I found these models on your Mac"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Homun crea il client e chiede a Composio l'elenco delle app: se riesce, la chiave viene salvata cifrata sul tuo Mac."
 msgstr "Homun creates the client and asks Composio for the list of apps: if it works, the key is saved encrypted on your Mac."
 
@@ -3770,7 +3748,7 @@ msgstr "Homun lacks the Accessibility permission: clicks and typing on your Mac 
 msgid "rpc.masterKeyUnavailable"
 msgstr "Homun can’t read the keys that protect your secrets. If macOS asked for Keychain access, allow it and press Retry."
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "http (URL)"
 msgstr "http (URL)"
 
@@ -3782,7 +3760,7 @@ msgstr "http://127.0.0.1:11434"
 msgid "http://127.0.0.1:1234"
 msgstr "http://127.0.0.1:1234"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "https://utente.github.io/sandbot/client.json"
 msgstr "https://user.github.io/sandbot/client.json"
 
@@ -3825,10 +3803,6 @@ msgstr "Secrets are used by the bots' COMMANDS (<0>{SECRET_TEMPLATE}</0>): the v
 #: src/renderer/src/components/PluginCard.tsx
 msgid "i segreti stanno cifrati sul tuo Mac"
 msgstr "secrets are stored encrypted on your Mac"
-
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "I token stanno cifrati sul tuo Mac."
-msgstr "Tokens are encrypted on your Mac."
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "I token, le intestazioni e le variabili segrete dei plugin si cambiano nella scheda di ciascuno. Qui si vedono solo quali sono, mai i valori."
@@ -4162,7 +4136,7 @@ msgstr "The provider {provider} chosen for this routine is no longer available: 
 msgid "rpc.routineModelProvider"
 msgstr "the provider chosen for the routine does not exist: {provider}"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "il registro ›"
 msgstr "the registry ›"
 
@@ -4302,11 +4276,11 @@ msgstr "The vault is encrypted at rest (AES-256-GCM, key in the Keychain). Value
 msgid "Importa {0}"
 msgstr "Import {0}"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "Importa {n}"
 msgstr "Import {n}"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Importa da altre app"
 msgstr "Import from other apps"
@@ -4435,7 +4409,7 @@ msgstr "cooling down"
 msgid "in raffreddamento fino a {0}"
 msgstr "cooling down until {0}"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Incolla la chiave"
 msgstr "Paste the key"
@@ -4455,12 +4429,13 @@ msgid "indicizzazione delle conversazioni: {0}/{1}"
 msgstr "indexing conversations: {0}/{1}"
 
 #: src/renderer/src/components/GuideView.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
+#: src/renderer/src/components/plugin/plugin-detail.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Indietro"
 msgstr "Back"
 
-#: src/renderer/src/components/ServerSheet.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Indirizzo"
@@ -4471,7 +4446,7 @@ msgstr "Address"
 msgid "Indirizzo (es. http://127.0.0.1:8000/v1)"
 msgstr "Address (e.g. http://127.0.0.1:8000/v1)"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "indirizzo con una variabile non risolta"
 msgstr "address with an unresolved variable"
 
@@ -4633,12 +4608,12 @@ msgstr "sending outside"
 msgid "event.selfProfileField.role"
 msgstr "instructions"
 
+#: src/renderer/src/components/plugin/plugin-detail.tsx
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Istruzioni"
 msgstr "Instructions"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Istruzioni (markdown)"
 msgstr "Instructions (markdown)"
 
@@ -4740,7 +4715,7 @@ msgstr "The key (leave it empty if the server does not ask for one)"
 msgid "La chiave di {providerLabel}"
 msgstr "The {providerLabel} key"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "La chiave non è stata salvata."
 msgstr "The key was not saved."
 
@@ -4863,7 +4838,7 @@ msgstr "working…"
 msgid "onboarding.focusWork"
 msgstr "Everyday work"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/gateway-accounts.tsx
 msgid "lavoro, personale…"
 msgstr "work, personal…"
 
@@ -4910,7 +4885,7 @@ msgstr "Bot searches are sent to these services under their terms of use: <0>You
 msgid "Le scelte: Consenti sempre · Chiedi · Blocca. Dopo che un bot ha letto contenuti non fidati, le azioni di scrittura tornano a chiedere anche se le hai consentite."
 msgstr "The choices: Always allow · Ask · Block. After a bot reads untrusted content, write actions go back to asking even if you allowed them."
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Le versioni precedenti si conservano in .versions/ (le ultime 10)."
 msgstr "Previous versions are kept in .versions/ (the last 10)."
 
@@ -4991,7 +4966,8 @@ msgstr "Library"
 msgid "Libreria: {0} GB — oltre i 2 GB consigliati. Valuta cosa cancellare dalla vista Libreria (nessun blocco automatico)."
 msgstr "Library: {0} GB — above the recommended 2 GB. Consider deleting something from the Library view (no automatic blocking)."
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Licenza"
 msgstr "License"
 
@@ -5130,8 +5106,8 @@ msgstr "marketplaces not available"
 msgid "rpc.invalidMarketplace"
 msgstr "invalid marketplace ({source}): {reason}"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCards13.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "marketplace ufficiale"
 msgstr "official marketplace"
 
@@ -5233,7 +5209,7 @@ msgstr "I need about {needed} GB of free space, I can see {free}."
 msgid "Migliora la ricerca: scarica il modello (circa 400 MB)"
 msgstr "Improve search: download the model (about 400 MB)"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "migrata dalla libreria per bot"
 msgstr "migrated from the per-bot library"
 
@@ -5312,8 +5288,8 @@ msgstr "model out of credit"
 msgid "Modello:"
 msgstr "Model:"
 
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/Settings.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "modifica"
 msgstr "edit"
@@ -5324,7 +5300,7 @@ msgstr "edit"
 msgid "Modifica"
 msgstr "Edit"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Modifica il server"
 msgstr "Edit the server"
 
@@ -5404,7 +5380,7 @@ msgid "mostra meno"
 msgstr "show less"
 
 #: src/renderer/src/App.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Mostra nel Finder"
 msgstr "Reveal in Finder"
 
@@ -5559,7 +5535,7 @@ msgstr "No archived documents."
 msgid "Nessun file caricato."
 msgstr "No file uploaded."
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Nessun file di supporto."
 msgstr "No support files."
 
@@ -5607,11 +5583,11 @@ msgstr "No plugin with a saved secret."
 msgid "Nessun risultato."
 msgstr "No results."
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Nessun server trovato nelle altre app."
 msgstr "No servers found in the other apps."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Nessun server trovato."
 msgstr "No server found."
 
@@ -5655,12 +5631,11 @@ msgstr "No memories: ask the bot to remember a preference."
 msgid "Nessuna richiesta di dati tuoi, pagamenti o invii passa senza di te."
 msgstr "No request involving your data, payments or sends goes through without you."
 
-#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "Nessuna richiesta in attesa."
 msgstr "No pending requests."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 msgid "Nessuna risposta"
 msgstr "No answer"
 
@@ -5698,7 +5673,7 @@ msgstr "No skills found in the other apps."
 msgid "Nessuna skill. Creane una, importala, o chiedi a un bot di salvarne una."
 msgstr "No skills yet. Write one, import one, or ask a bot to save one."
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Nessuna versione precedente."
 msgstr "No previous versions."
 
@@ -5749,8 +5724,8 @@ msgid "event.selfProfileField.name"
 msgstr "name"
 
 #: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Nome"
 msgstr "Name"
@@ -5760,7 +5735,7 @@ msgstr "Name"
 msgid "Nome (es. API_KEY)"
 msgstr "Name (e.g. API_KEY)"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Nome (es. Composio)"
 msgstr "Name (e.g. Composio)"
 
@@ -5768,15 +5743,15 @@ msgstr "Name (e.g. Composio)"
 msgid "Nome (es. Il mio gateway)"
 msgstr "Name (e.g. My gateway)"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Nome (es. MATTERMOST_URL)"
 msgstr "Name (e.g. MATTERMOST_URL)"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Nome (es. weather)"
 msgstr "Name (e.g. weather)"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Nome cartella"
 msgstr "Folder name"
 
@@ -5795,8 +5770,7 @@ msgstr "Invalid name \"{name}\": 1-64 characters, only lowercase letters, digits
 msgid "skill.err.invalidName"
 msgstr "Invalid name: 1-64 characters, only lowercase letters, digits and single hyphens."
 
-#: src/renderer/src/components/ServerSheet.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Nome tecnico"
 msgstr "Technical name"
 
@@ -5849,7 +5823,7 @@ msgstr "This is not a GitHub address: paste an https://github.com/… URL."
 msgid "Non importati (non girano in Homun): {0}"
 msgstr "Not imported (they don't run in Homun): {0}"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "non importato"
 msgstr "not imported"
 
@@ -5892,7 +5866,7 @@ msgstr "Not working"
 msgid "Non posso ora: controlla lo spazio e riprova."
 msgstr "Not now: check the free space and retry."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Non riesco a cercare nel registro"
 msgstr "Can’t search the registry"
 
@@ -5951,8 +5925,8 @@ msgstr "Failed"
 msgid "non riuscito"
 msgstr "failed"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 msgid "Non riuscito"
 msgstr "Didn't work"
 
@@ -5980,7 +5954,7 @@ msgstr "you won't need your Mac password"
 msgid "Non si può annullare."
 msgstr "This cannot be undone."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 msgid "Non si può collegare"
 msgstr "Can't be connected"
 
@@ -6062,7 +6036,7 @@ msgstr "New token — replaces the saved one"
 msgid "Nuovo valore — sostituisce quello salvato"
 msgstr "New value — replaces the saved one"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "OAuth"
 msgstr "OAuth"
 
@@ -6174,7 +6148,7 @@ msgstr "hours"
 msgid "origine"
 msgstr "source"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Origine"
 msgstr "Origin"
 
@@ -6186,7 +6160,7 @@ msgstr "Origin https://…"
 msgid "Origini https://… (separate da virgola)"
 msgstr "Origins https://… (comma separated)"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "owner/repo di GitHub oppure URL git https"
 msgstr "GitHub owner/repo or https git URL"
 
@@ -6310,7 +6284,7 @@ msgstr "To get updates, move Homun to Applications"
 msgid "Per il computer dei bot serve Docker Desktop: installalo e aprilo, poi Riprova."
 msgstr "The bots' computer needs Docker Desktop: install it and open it, then press Retry."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Per la maggior parte delle persone è meglio «Accedi con Composio» nella vista principale: un clic nel browser, niente chiavi. La chiave ak_ di un progetto la usano gli sviluppatori."
 msgstr "For most people “Sign in with Composio” in the main view is better: one click in the browser, no keys. A project's ak_ key is for developers."
 
@@ -6337,7 +6311,7 @@ msgstr "For this turn"
 msgid "notice.needModel"
 msgstr "I need a model to answer you."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Per sviluppatori"
 msgstr "For developers"
@@ -6368,7 +6342,7 @@ msgstr "Permissions"
 msgid "perso"
 msgstr "lost"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Più di mille app con Composio"
 msgstr "More than a thousand apps with Composio"
 
@@ -6380,10 +6354,6 @@ msgstr "Multiple send tools for this channel: ask the bot to pick one"
 #: src/renderer/src/components/GuideView.tsx
 msgid "Pixel"
 msgstr "Pixel"
-
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "plugin"
-msgstr "plugin"
 
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
@@ -6409,7 +6379,7 @@ msgstr "plugin {id} not found"
 msgid "Plugin attivato — riprendo"
 msgstr "Plugin turned on — resuming"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Plugin nel formato di Claude Code. Predefinito: <0>anthropics/claude-plugins-official</0> (puoi rimuoverlo). Di un plugin Homun importa SOLO skill e server MCP; hook, bin/ e comandi non girano mai."
 msgstr "Plugins in the Claude Code format. Default: <0>anthropics/claude-plugins-official</0> (you can remove it). Homun imports ONLY skills and MCP servers from a plugin; hooks, bin/ and commands never run."
 
@@ -6604,12 +6574,12 @@ msgstr "next: {0}"
 msgid "Prossimamente"
 msgstr "Coming soon"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/GuideModelStep.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Prova"
 msgstr "Test"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Prova la chiave"
 msgstr "Test the key"
 
@@ -6661,7 +6631,7 @@ msgstr "Testing the address…"
 msgid "Provo la chiave…"
 msgstr "Testing the key…"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "provo…"
 msgstr "testing…"
 
@@ -6788,7 +6758,7 @@ msgstr "This key doesn’t work: {providerLabel} replies “unauthorized”. Che
 msgid "Questa colonna non si può svuotare."
 msgstr "This column cannot be emptied."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Questa è una chiave di Composio «For You» (inizia con ck_). Homun usa la chiave di un progetto Composio: su composio.dev apri il pannello per sviluppatori, crea un progetto e copia la sua chiave API da Settings → API Keys (inizia con ak_)."
 msgstr "This is a Composio “For You” key (it starts with ck_). Homun uses a Composio project key: on composio.dev open the developer dashboard, create a project and copy its API key from Settings → API Keys (it starts with ak_)."
 
@@ -6805,7 +6775,7 @@ msgstr "this week"
 msgid "skill.err.linkedReadonly"
 msgstr "This skill is linked read-only: it changes with its original folder. Import a copy to edit it."
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Questa skill è stata modificata: l'aggiornamento sovrascrive le modifiche (la versione attuale va nelle precedenti)."
 msgstr "This skill has been edited: updating overwrites your edits (the current version goes to the previous ones)."
 
@@ -6878,10 +6848,6 @@ msgstr "Log"
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Registro di oggi"
 msgstr "Today's log"
-
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "registro MCP"
-msgstr "MCP registry"
 
 #: src/renderer/src/components/RuleProposalCard.tsx
 msgid "Regola aggiunta"
@@ -7023,25 +6989,16 @@ msgstr "Next request"
 msgid "Richieste"
 msgstr "Requests"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 #: src/renderer/src/components/plugin/ServerSecretRows.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/PluginPanel.tsx
-#: src/renderer/src/components/ServerSheet.tsx
 msgid "Ricollega"
 msgstr "Reconnect"
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Ricomincia"
 msgstr "Restart"
-
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "riconnessione non riuscita"
-msgstr "reconnection failed"
-
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "riconnesso"
-msgstr "reconnected"
 
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "Riconnetti"
@@ -7098,27 +7055,25 @@ msgstr "Remove the model and free {0} GB?"
 msgid "Rimuovere il modello locale ({size})? Potrai riscaricarlo quando vuoi."
 msgstr "Remove the local model ({size})? You can download it again whenever you want."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "rimuovi"
 msgstr "remove"
 
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/PluginCard.tsx
-#: src/renderer/src/components/ServerSheet.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Rimuovi"
 msgstr "Remove"
 
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/PluginCard.tsx
-#: src/renderer/src/components/ServerSheet.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Rimuovi davvero"
 msgstr "Really remove"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/plugin/gateway-accounts.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Rinomina"
 msgstr "Rename"
@@ -7143,8 +7098,8 @@ msgstr "Resume"
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/PageView.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/Sidebar.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Ripristina"
 msgstr "Restore"
 
@@ -7154,7 +7109,6 @@ msgstr "Restore v{version} as a new version"
 
 #: src/renderer/src/App.tsx
 #: src/renderer/src/components/ActivityPanel.tsx
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/ComputerActivity.tsx
@@ -7164,6 +7118,7 @@ msgstr "Restore v{version} as a new version"
 #: src/renderer/src/components/ConnectorCard.tsx
 #: src/renderer/src/components/GuideComputerStep.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/plugin/app-row.tsx
 #: src/renderer/src/components/settings/EngineSection.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx
@@ -7292,17 +7247,17 @@ msgid "Salta per ora"
 msgstr "Skip for now"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/DraftCard.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
-#: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/plugin/gateway-accounts.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 #: src/renderer/src/components/plugin/ServerSecretRows.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Salva"
@@ -7325,7 +7280,7 @@ msgstr "Save to vault"
 msgid "salva nella Libreria…"
 msgstr "saves to the Library…"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "salvata"
 msgstr "saved"
 
@@ -7333,7 +7288,7 @@ msgstr "saved"
 msgid "salvato"
 msgstr "saved"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "salvato cifrato — scrivi per sostituire"
 msgstr "saved encrypted — type to replace"
 
@@ -7599,7 +7554,7 @@ msgstr "If the template has skills, create them with update_skill (name, descrip
 msgid "Se lo usi già in Cursor o Claude è lo stesso server: si aggiunge con lo stesso comando o lo stesso indirizzo."
 msgstr "If you already use it in Cursor or Claude it is the same server: add it with the same command or the same address."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR)."
 msgstr "If you host a client metadata document (CIMD, e.g. on GitHub Pages, https with a path), paste it here; empty = dynamic registration (DCR)."
 
@@ -7607,11 +7562,11 @@ msgstr "If you host a client metadata document (CIMD, e.g. on GitHub Pages, http
 msgid "Segreti"
 msgstr "Secrets"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "segreto"
 msgstr "secret"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Segreto (salvato cifrato)"
 msgstr "Secret (saved encrypted)"
 
@@ -7722,14 +7677,8 @@ msgid "Server esterno"
 msgstr "External server"
 
 #: src/renderer/src/components/PluginPanel.tsx
-#: src/renderer/src/components/ServerSheet.tsx
 msgid "Server MCP"
 msgstr "MCP server"
-
-#. placeholder {0}: publisherLine(sv)
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "Server MCP · Pubblicato da {0}"
-msgstr "MCP server · Published by {0}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -7741,7 +7690,7 @@ msgstr "MCP server «{name}» does not start: {error}"
 msgid "sistema.mcpServerOk"
 msgstr "MCP server connected: {name} — {count, plural, one {# tool} other {# tools}}"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati)."
 msgstr "Manual MCP servers (stdio or HTTP, with headers/bearer stored encrypted)."
 
@@ -7750,7 +7699,7 @@ msgstr "Manual MCP servers (stdio or HTTP, with headers/bearer stored encrypted)
 msgid "card.openMcpWindow"
 msgstr "MCP server for {service}"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Server MCP personalizzato"
 msgstr "Custom MCP server"
@@ -7760,7 +7709,7 @@ msgstr "Custom MCP server"
 msgid "rpc.serverNotFoundPlain"
 msgstr "server not found: {id}"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Server personalizzati, plugin, gateway e registro: chi sa cos'è un server MCP lo trova qui."
 msgstr "Custom servers, plugins, gateways and the registry: those who know what an MCP server is will find it here."
 
@@ -7891,9 +7840,9 @@ msgstr "new site, interactive"
 msgid "sk-…"
 msgstr "sk-…"
 
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/PluginPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Skill"
 msgstr "Skills"
 
@@ -7945,7 +7894,7 @@ msgstr "Only {0}"
 msgid "Solo {0} +{1}"
 msgstr "Only {0} +{1}"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
 msgid "solo con /"
 msgstr "only with /"
 
@@ -8088,7 +8037,7 @@ msgstr "You are controlling the screen of {0}"
 msgid "Stato"
 msgstr "Status"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "stdio (comando locale)"
 msgstr "stdio (local command)"
 
@@ -8216,11 +8165,11 @@ msgstr "unknown template: {id}"
 msgid "Terminale"
 msgstr "Terminal"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Test della connessione"
 msgstr "Test the connection"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "test in corso…"
 msgstr "testing…"
 
@@ -8239,6 +8188,10 @@ msgstr "Hourly cap reached (40 bot messages in one hour): group turns resume sho
 msgid "Ti chiedo"
 msgstr "I ask you"
 
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Tipo"
+msgstr "Type"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.invalidValueType"
@@ -8253,16 +8206,16 @@ msgstr "invalid type: {kind}"
 msgid "Titolo (es. Riepilogo email del mattino)"
 msgstr "Title (e.g. Morning email digest)"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/gateway-accounts.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Togli"
 msgstr "Remove"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/gateway-accounts.tsx
 msgid "Togli davvero"
 msgstr "Really remove"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Togli la variabile"
 msgstr "Remove the variable"
 
@@ -8397,7 +8350,7 @@ msgstr "Too large to preview ({0})"
 msgid "trovato"
 msgstr "found"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "tu"
 msgstr "you"
 
@@ -8410,7 +8363,7 @@ msgstr "You"
 msgid "Tu: {0}"
 msgstr "You: {0}"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "tua"
 msgstr "yours"
 
@@ -8472,11 +8425,6 @@ msgstr "all"
 msgid "Tutte"
 msgstr "All"
 
-#. placeholder {0}: rows.length
-#: src/renderer/src/components/ApprovalsCenter.tsx
-msgid "Tutte · {0}"
-msgstr "All · {0}"
-
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "Tutte le strade"
 msgstr "All routes"
@@ -8488,11 +8436,11 @@ msgstr "All"
 
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/plugin/catalog-preview.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 #: src/renderer/src/components/PluginCard.tsx
 #: src/renderer/src/components/PluginPanel.tsx
-#: src/renderer/src/components/ServerSheet.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Tutti i bot"
 msgstr "All bots"
 
@@ -8577,7 +8525,7 @@ msgstr "A computer of its own, inside your Mac: it works there without touching 
 msgid "Un consenso di 8 ore per tutto il team, solo per questo"
 msgstr "An 8-hour consent for the whole team, only for this"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi"
 msgstr "A gateway holds the keys to all the apps you connect there: it's a third-party service"
 
@@ -8628,11 +8576,11 @@ msgstr "otpauth URI of type \"{type}\" not supported: totp is required"
 msgid "totp.badUri"
 msgstr "invalid otpauth URI: copy the base32 secret shown under the QR code"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "URL (es. http://localhost:3001/mcp)"
 msgstr "URL (e.g. http://localhost:3001/mcp)"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "URL https del server MCP"
 msgstr "MCP server https URL"
 
@@ -8665,7 +8613,7 @@ msgstr "uses the computer…"
 msgid "Usa la cartella originale"
 msgstr "Use the original folder"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/plugin/developers-content.tsx
 msgid "Usa la chiave di progetto"
 msgstr "Use the project key"
 
@@ -8678,12 +8626,12 @@ msgstr "use the \"Connect apps\" view for catalog connectors"
 msgid "usa un’app…"
 msgstr "uses an app…"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "usato da tutti i bot"
 msgstr "used by all bots"
 
 #. placeholder {0}: s.enabledFor.map((id) => agents.find((a) => a.id === id)?.name ?? id).join(', ')
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "usato da: {0}"
 msgstr "used by: {0}"
 
@@ -8726,7 +8674,7 @@ msgid "validità: {0} → {1}"
 msgstr "validity: {0} → {1}"
 
 #: src/renderer/src/components/LibraryCards.tsx
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Valore"
 msgstr "Value"
 
@@ -8734,7 +8682,7 @@ msgstr "Value"
 msgid "Valore (sostituisce)"
 msgstr "Value (replaces)"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/manual-servers.tsx
 msgid "Variabili"
 msgstr "Variables"
 
@@ -8806,11 +8754,11 @@ msgstr "pinned version {0}"
 msgid "Versione nuova disponibile"
 msgstr "New version available"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "versione ripristinata"
 msgstr "version restored"
 
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/skill-editor.tsx
 msgid "Versioni precedenti"
 msgstr "Previous versions"
 
@@ -8824,7 +8772,7 @@ msgid "cron.aroundTime"
 msgstr "around {time} (±15 min)"
 
 #. placeholder {0}: group?.plugin
-#: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/plugin/plugin-detail.tsx
 msgid "Viene dal plugin {0}: si aggiorna aggiornando il plugin."
 msgstr "It comes from plugin {0}: it updates when the plugin updates."
 
@@ -8854,7 +8802,7 @@ msgstr "inconsistent item"
 msgid "rpc.itemNotFound"
 msgstr "item not found"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "VS Code"
 msgstr "VS Code"
 
@@ -8930,7 +8878,7 @@ msgstr "webhook"
 msgid "trigger.tokenMissing"
 msgstr "webhook: missing token"
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "Windsurf"
 msgstr "Windsurf"
 
@@ -8938,6 +8886,6 @@ msgstr "Windsurf"
 msgid "xAI, Mistral, DeepSeek, Groq, Z.ai e i compatibili OpenAI."
 msgstr "xAI, Mistral, DeepSeek, Groq, Z.ai and OpenAI-compatible ones."
 
-#: src/renderer/src/components/McpWindow.tsx
+#: src/renderer/src/components/plugin/import-list.tsx
 msgid "ZCode"
 msgstr "ZCode"

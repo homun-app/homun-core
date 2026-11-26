@@ -11,6 +11,29 @@ import type { UiLanguage } from '../../../shared/ui-language'
 /** Le generazioni crescono a ogni attivazione: vince l'ultima chiamata. */
 let generation = 0
 
+// fase linguaggio-ritocchi (R1): SOLO nelle corse di prova (SANDBOT_TEST_*,
+// il flag lo espone il preload: il motore di sonde e galleria mette lo
+// USER_DATA in ogni corsa) il renderer raccoglie gli id che Lingui dichiara
+// MANCANTI — l'evento «missing» scatta quando l'id non sta nel catalogo
+// della lingua attiva, e nel vivo il testo rende l'id grezzo («g0mreA:
+// Tutti i tipi»). La galleria svuota l'elenco a ogni scena e segna la scena
+// ROSSA con l'id: così prende anche un messaggio costruito a runtime, che
+// l'estrazione statica non può trovare.
+// Il raccoglitore sta su window e NASCE una volta sola: anche il modulo dei
+// componenti della galleria (un bundle suo, che porta una COPPIA di questo
+// modulo e della sua i18n) aggiunge i SUOI eventi allo stesso elenco,
+// invece di ricopiarlo con uno che non vede niente.
+if (typeof window !== 'undefined' && (window as unknown as { sandbotTest?: { traduzioni?: boolean } }).sandbotTest?.traduzioni) {
+  type Mancante = { id: string; locale: string }
+  interface Raccoglitore { visti: Mancante[]; drain(): Mancante[] }
+  const w = window as unknown as { __sandbotTraduzioniMancanti?: Raccoglitore }
+  const raccoglitore = w.__sandbotTraduzioniMancanti ??= {
+    visti: [],
+    drain(): Mancante[] { const out = [...this.visti]; this.visti.length = 0; return out }
+  }
+  i18n.on('missing', (e: { id: string; locale: string }) => { raccoglitore.visti.push({ id: e.id, locale: e.locale }) })
+}
+
 async function loadCatalog(lang: UiLanguage): Promise<Messages> {
   const { messages } = await import(`../locales/${lang}/messages.po`)
   return messages

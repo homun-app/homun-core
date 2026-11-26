@@ -100,6 +100,48 @@ const MASCHERE = {
   ]
 }
 /**
+ * fase linguaggio-ritocchi (R1): il controllo che la macchina fa a OGNI scena,
+ * oltre al confronto coi pixel: le TRADUZIONI MANCANTI raccolte dal vivo: il renderer (con
+ * SANDBOT_TEST_*, solo nelle corse di prova) accumula gli id che Lingui
+ * dichiara mancanti; la galleria svuota l'elenco a ogni scena. Prende anche
+ * un messaggio costruito a runtime, che l'estrazione statica non vede
+ * (l'allineamento del catalogo al codice lo copre la guardia della suite,
+ * src/__tests__/guardie/lingui-catalogo.test.ts).
+ *
+const VISIBILE_JS = `
+  const visibile = (el) => {
+    if (!el.getClientRects().length) return false
+    const r = el.getBoundingClientRect()
+    if (r.width === 0 || r.height === 0) return false
+    // VISIBILE = interseca la finestra: il popover «Chiedi al volo» sta nel
+    // DOM già posizionato SOPRA lo schermo quando è chiuso (e chi sta oltre
+    // la piega di un corpo che scorre non è nella cattura) — né l'uno né
+    // l'altro si vedono
+    if (r.bottom <= 0 || r.top >= window.innerHeight || r.right <= 0 || r.left >= window.innerWidth) return false
+    // le azioni al passaggio (opacity-0 fino all'hover) non sono visibili
+    for (let n = el; n instanceof Element; n = n.parentElement) {
+      const st = getComputedStyle(n)
+      if (st.visibility === 'hidden' || Number(st.opacity) === 0) return false
+    }
+    return true
+  }`
+
+/**
+ * Il controllo R1 di una scena: riempie `errori` — una scena
+ * col vaso rotto è ROSSA, non catturata.
+ */
+const controlliScena = async (s, errori) => {
+  // R1: le traduzioni mancanti raccolte dal renderer da quando si è svuotato l'ultima volta
+  const mancanti = await s.eval('return (window.__sandbotTraduzioniMancanti ? window.__sandbotTraduzioniMancanti.drain() : null)')
+  if (mancanti === null) {
+    errori.push('il raccoglitore delle traduzioni mancanti non è nel renderer (SANDBOT_TEST_USER_DATA attivo?)')
+  } else {
+    const unici = [...new Map(mancanti.map((m) => [`${m.locale}:${m.id}`, m])).values()]
+    for (const m of unici) errori.push(`traduzione mancante (${m.locale}): ${m.id}`)
+  }
+}
+
+/**
  * Le scene dei COMPONENTI (F2/G2): UNA PER SEZIONE della pagina, in chiaro e
  * in scuro — come Storybook/Chromatic, una cattura per storia, non una
  * pagina lunga in una foto sola. L'elenco delle sezioni lo dà la pagina
@@ -116,7 +158,7 @@ const nomeCattura = (page, tema, w) => `${page.id}-${tema}${w !== 1280 ? `-${w}`
 const T0 = Date.now()
 const log = (...a) => console.log('[galleria]', `+${((Date.now() - T0) / 1000).toFixed(1)}s`, ...a)
 
-/** La cattura di UNA combinazione: viewport, tema, apertura della scena, preparazione, maschere, screenshot + strip. I controlli delle maschere riempiono `errori`: una scena col vaso rotto è ROSSA, non catturata. */
+/** La cattura di UNA combinazione: viewport, tema, apertura della scena, preparazione, maschere, screenshot + strip. I controlli delle maschere e i due controlli di fase linguaggio-ritocchi (controlliScena) riempiono `errori`: una scena col vaso rotto è ROSSA, non catturata. */
 const cattura = async (s, page, ctx, w, tema, errori = []) => {
   await s.viewport(w, 800 - 800 + (w === 900 ? 640 : 800))
   await s.tema(tema)
@@ -136,7 +178,9 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
     await s.attendi(`(() => { const el = document.querySelector('[data-testid="galleria-componenti-contenuto"]'); return !!el })()`, { entro: 10_000, motivo: `la sezione ${page.sezione} della pagina componenti si apra col suo contenuto` })
     // G2: la radice della sezione deve stare INTERA nel viewport — una
     // cattura che taglia il fondo in silenzio non è una prova (se la sezione
-    // non ci sta, si divide in due scene: chi sta fuori non si vede)
+    // non ci sta, si divide in due scene: chi sta fuori non si vede).
+    // Solo alle CATTURE (800 di altezza): la passata di controllo a 900 è
+    // 640 di altezza e le sezioni lunghe non c'entrano per costruzione
     const fuori = await s.eval(`return (() => {
       const el = document.querySelector('[data-testid="galleria-componenti-contenuto"]')
       if (!el) return 'il contenuto della pagina componenti non è nel DOM'
@@ -200,6 +244,10 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
     await s.attendiRete({ quieta: 300, entro: 8_000 }).catch(() => undefined)
     await s.attendiStabile('body', { entro: 4_000 }).catch(() => undefined)
   }
+  // fase linguaggio-ritocchi (R1): le traduzioni mancanti a OGNI cattura,
+  // prima delle maschere di questa scena — a quell'ora i render della scena
+  // sono tutti fatti, e il confronto dei pixel non li vede
+  await controlliScena(s, errori)
   // G1: il CONTROLLO a ogni cattura — PRIMA delle maschere di questa scena,
   // nel DOM non può esserci NESSUN rettangolo (con qualunque ortografia
   // dell'attributo: un rettangolo che la pulizia non toglie è una maschera
@@ -317,15 +365,22 @@ try {
   for (const tema of ['chiaro', 'scuro']) {
     await s.tema(tema)
     await s.attendiRete({ quieta: 300, entro: 8_000 }).catch(() => undefined)
+    // fase linguaggio-ritocchi (R1): il controllo vale per la guida pure
+    const erroriGuida = []
+    await controlliScena(s, erroriGuida)
+    if (erroriGuida.length) esiti.push({ nome: nomeCattura(guida, tema, 1280), scena: guida.id, esito: 'rossa', dettaglio: erroriGuida.join(' · ') })
     for (const m of MASCHERE.guida ?? []) await s.mascheraEspr(m.espr)
     const percorso = join(CATTURE, nomeCattura(guida, tema, 1280))
     await s.cattura(percorso)
     spawnSync(MAGICK, [percorso, '-strip', percorso])
-    log('cattura', nomeCattura(guida, tema, 1280))
+    log('cattura', nomeCattura(guida, tema, 1280), erroriGuida.length ? `ROSSA (${erroriGuida.join(' · ')})` : '')
   }
 
   const { ctx } = await preparaDeterministica(s, { providerPort: porta })
   log('setup deterministico fatto (timeline e Libreria seminati all\'istante fermo)')
+  // R1: si svuota il raccoglitore DOPO il setup — un id mancante reso prima
+  // delle scene (la chat nuda) non deve tingere la prima scena
+  await s.eval('return window.__sandbotTraduzioniMancanti ? window.__sandbotTraduzioniMancanti.drain().length : 0').then((n) => { if (n) log('svuotati', n, 'id mancanti resi prima delle scene') }).catch(() => undefined)
 
   // le sezioni della pagina dei componenti le dichiara la PAGINA (componenti.tsx):
   // la galleria non tiene una lista sua da far driftare
