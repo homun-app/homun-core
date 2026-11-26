@@ -784,7 +784,9 @@ describe('DS4 Impostazioni: Modelli', () => {
       expect(has(riga, 'min-h-row', 'py-row-pad', 'gap-row-gap', 'cursor-pointer'), String(i)).toBe(true)
       expect(riga.attrs.tabindex, String(i)).toBe('0')
       // l'anello del fuoco verso l'interno (la scheda ritaglia ai suoi angoli), e mai `focus:`
-      expect(has(riga, 'outline-none', 'focus-visible:outline-2', 'focus-visible:-outline-offset-2', 'focus-visible:outline-ring'), String(i)).toBe(true)
+      // (fase linguaggio-ritocchi: mai nemmeno `outline-none` accanto — in Tailwind 4 azzera l'anello, misurato dalla sonda b20-bug)
+      expect(has(riga, 'focus-visible:outline-2', 'focus-visible:-outline-offset-2', 'focus-visible:outline-ring'), String(i)).toBe(true)
+      expect(has(riga, 'outline-none'), String(i)).toBe(false)
       expect(classes(riga).filter((c) => /(?:^|\s)focus:/.test(c)), String(i)).toEqual([])
       expect(has(byTag(riga, 'span')[0]!, 'size-8', 'shrink-0', 'place-items-center'), String(i)).toBe(true)
     }
@@ -797,7 +799,9 @@ describe('DS4 Impostazioni: Modelli', () => {
     const conCatena = htmlOf(createElement(ModelsPage, { initial: { chain: [] } }))
     const riserva = byTag(conCatena, 'button').filter((b) => textOf(b) === 'Aggiungi riserva')[0]
     expect(riserva, '«Aggiungi riserva» con la catena letta').toBeTruthy()
-    expect(has(riserva!, 'min-h-row', 'py-row-pad', 'text-body', 'text-muted-foreground', 'outline-none')).toBe(true)
+    // l'anello verso l'interno senza `outline-none` (in Tailwind 4 la azzera: fase linguaggio-ritocchi)
+    expect(has(riserva!, 'min-h-row', 'py-row-pad', 'text-body', 'text-muted-foreground', 'focus-visible:outline-2', 'focus-visible:-outline-offset-2', 'focus-visible:outline-ring')).toBe(true)
+    expect(has(riserva!, 'outline-none')).toBe(false)
     expect(has(byTag(riserva!, 'svg')[0]!, 'size-4')).toBe(true)
     // con una riserva: il suo posto è un dettaglio grigio, e il menu «Altre azioni» è un'icona lucide (non più il segno «⋯»)
     const conRiserva = htmlOf(createElement(ModelsPage, { initial: { chain: [{ providerId: 'ollama', model: 'x' }] } }))

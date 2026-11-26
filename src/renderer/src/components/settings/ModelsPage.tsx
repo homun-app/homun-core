@@ -64,7 +64,7 @@ const FILETTO = '[&:not(:first-child)]:border-t [&:not(:first-child)]:border-bor
  * ritagliata ai suoi angoli (SettingsGroup), e un anello fuori dal bordo
  * sparirebbe ai lati. Da tastiera si vede; dopo un clic no (focus-visible).
  */
-const ANELLO_DENTRO = 'outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring'
+const ANELLO_DENTRO = 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring'
 
 /** Il menu tondo «Altre azioni» di una riga di riserva (un'icona da 16 in un bottone da 32). */
 const MENU_TONDO = 'grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground'

@@ -125,7 +125,7 @@ export const DOC_CARD = {
   /** i metadati, in fondo alla scheda */
   meta: 'text-caption text-muted-foreground',
   /** l'anello del fuoco VERSO L'INTERNO: la scheda sta in una griglia che ritaglia, uno fuori dal bordo ai lati sparirebbe */
-  focus: 'outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring'
+  focus: 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring'
 } as const
 
 /**

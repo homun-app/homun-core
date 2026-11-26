@@ -242,3 +242,43 @@ describe('B5 — il CSS compilato da Tailwind (la prova che la variante è davve
     expect(enclosingPrelude(out, out.indexOf('.focus-visible\\:ring-\\[3px\\]')), 'le ring- dei componenti restano utility').toBe('@layer utilities')
   })
 })
+
+// fase linguaggio-ritocchi — trovato DALLA SONDA b20-bug nella corsa di fatto,
+// dopo R2: il selettore della vista è solo nella barra, il Tab dopo «Elenco»
+// cade sulla scheda di un documento, e lì l'anello non si vede.
+// MISURATO DAL VIVO (sonda CDP, Tab vero): la scheda con il fuoco da tastiera
+// (`:focus-visible` vero) aveva `outline: none 2px` e nessuna ombra; tolta la
+// classe outline-none dallo stesso elemento, stesso fuoco, `outline: solid 2px`
+// nel colore dell'anello. La causa sta nel CSS di Tailwind 4: `outline-none`
+// imposta `--tw-outline-style: none`, e `outline-<n>` — anche nella variante
+// focus-visible — rimette lo stile da QUELLA variabile: sullo stesso elemento
+// l'una azzera l'altra, e l'anello non esce mai. L'outline nativo dopo un clic
+// lo toglie già la regola unica qui sopra: outline-none non serve, e toglie.
+describe('l’anello VERSO L’INTERNO: outline-none accanto a focus-visible:outline- non mostra nulla', () => {
+  it('il CSS compilato: outline-none azzera --tw-outline-style, e focus-visible:outline-2 legge quella variabile', async () => {
+    const out = await compileRenderer(['outline-none', 'focus-visible:outline-2', 'focus-visible:-outline-offset-2'])
+    const blocco = (selettore: string): string => {
+      const at = out.indexOf(selettore)
+      expect(at, `la regola ${selettore} nel CSS compilato`).toBeGreaterThan(-1)
+      return squashed(out.slice(out.indexOf('{', at), out.indexOf('}', at)))
+    }
+    expect(blocco('.outline-none {')).toContain('--tw-outline-style: none')
+    expect(blocco('.outline-none {')).toContain('outline-style: none')
+    expect(blocco('.focus-visible\\:outline-2')).toContain('outline-style: var(--tw-outline-style)')
+    expect(blocco('.focus-visible\\:outline-2')).toContain('outline-width: 2px')
+  })
+
+  it('nessun sorgente del renderer (fuori dai test e dai commenti) ha outline-none sulla stessa riga di focus-visible:outline-', () => {
+    const TOGLE = /(?<![\w-])outline-none(?![\w-])/
+    const ANELLO = /focus-visible:-?outline-[\w[]/
+    const hits: string[] = []
+    for (const f of sourceFiles(RENDERER).filter((x) => /\.tsx?$/.test(x))) {
+      readFileSync(f, 'utf8').split('\n').forEach((linea, i) => {
+        const testo = linea.trim()
+        if (testo.startsWith('//') || testo.startsWith('*') || testo.startsWith('/*')) return
+        if (TOGLE.test(linea) && ANELLO.test(linea)) hits.push(`${relative(process.cwd(), f)}:${i + 1}`)
+      })
+    }
+    expect(hits, 'outline-none azzera l’anello che focus-visible:outline- dovrebbe mostrare: toglierla (l’outline nativo dopo un clic lo toglie la regola unica)').toEqual([])
+  })
+})

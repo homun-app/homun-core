@@ -151,7 +151,7 @@ export function SettingsRow({ title, description, control, children, clickable, 
       // sparirebbe ai lati. Da tastiera si vede; dopo un clic no (focus-visible)
       <button
         type="button"
-        className={`${cls}transition hover:bg-muted/70 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring ${clickable ? '' : 'text-left'}`}
+        className={`${cls}transition hover:bg-muted/70 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring ${clickable ? '' : 'text-left'}`}
         {...(testId ? { 'data-testid': testId } : {})}
         onClick={onClick}
       >

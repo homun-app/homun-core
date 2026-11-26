@@ -52,7 +52,7 @@ export function SystemRow({ icon: Icon, children, tone = 'neutral', testId }: {
 }) {
   return (
     <summary
-      className="flex cursor-pointer items-center outline-none select-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden"
+      className="flex cursor-pointer items-center select-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden"
       data-testid={testId}
     >
       <Notice icon={<Icon className="size-4" />} tone={tone} action={<ChevronDown className="size-4" aria-hidden="true" />}>
