@@ -339,9 +339,13 @@ export async function downloadPkg(opts: {
   const totalHeader = Number(res.headers.get('content-length') ?? 0)
   const total = resume ? have + totalHeader : totalHeader
   let bytes = resume ? have : 0
-  const body = res.body ? Readable.fromWeb(res.body as never) : Readable.from([])
   const out = await openFile(opts.partPath, resume ? 'a' : 'w')
   try {
+    // il corpo nasce QUI e il ciclo sotto lo legge subito: fra la sua nascita e
+    // chi ascolta i suoi errori non c'è nessun await. Se nasceva PRIMA di
+    // aprire il .part, un annullamento (o un errore di rete) in quegli istanti
+    // lo faceva fallire SENZA ascoltatori — in Node un'eccezione non catturata
+    const body = res.body ? Readable.fromWeb(res.body as never) : Readable.from([])
     for await (const chunk of body) {
       if (opts.signal.aborted) throw new Error('download cancelled')
       const piece = chunk as Buffer

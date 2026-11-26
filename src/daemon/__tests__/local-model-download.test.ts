@@ -360,3 +360,37 @@ describe('fase locale correzioni 2 (LD5): il «cut» del server aspetta il .part
     expect(st.progress).toEqual({ bytes: 20_000, total: ENTRY.sizeBytes })
   })
 })
+
+describe('fase isolamento-suite (S2): l\'annullamento mentre il .part si apre non lascia errori in giro', () => {
+  it('l\'abort arriva un giro di loop dopo la risposta (il download è fermo su open del .part): nessuna eccezione non catturata, rifiuta «cancelled», resta paused', async () => {
+    mode = 'stall'
+    // Il completamento di open() arriva dal threadpool, sempre in un giro di
+    // loop successivo alla risposta: un annullamento partito un giro dopo la
+    // risposta cade lì, mentre nessuno sta ancora leggendo il corpo. Sulla
+    // base il corpo nasceva PRIMA di quell'attesa: l'abort lo faceva fallire
+    // con «error» SENZA ascoltatore — in Node un'eccezione non catturata
+    // (nella suite faceva uscire `npm test` con 1, a test tutti verdi).
+    const fetchPoiAnnulla = vi.fn(async (u: string | URL, init?: RequestInit): Promise<Response> => {
+      const res = await fakeFetch(u, init)
+      setImmediate(() => { lm.cancelLocalModelDownload() })
+      return res
+    })
+    const nonCatturate: unknown[] = []
+    // se l'errore dell'abort parte senza ascoltatore, finisce qui invece che nel processo
+    process.setUncaughtExceptionCaptureCallback((e) => { nonCatturate.push(e) })
+    try {
+      const p = lm.startLocalModelDownload({ fetch: fetchPoiAnnulla as unknown as typeof fetch, url: `${base}/${ENTRY.file}`, entry: ENTRY })
+      // si lasciano passare il giro dell'annullamento e l'apertura del file
+      for (let i = 0; i < 10; i++) await new Promise<void>((r) => setImmediate(r))
+      expect(nonCatturate).toEqual([]) // ROSSO sulla base: DOMException [AbortError]: This operation was aborted
+      await expect(p).rejects.toThrow(/download cancelled/)
+      expect(lm.localModelDownloading()).toBe(false)
+      const st = await statusOf()
+      expect(st.state).toBe('paused')
+      expect(st.error).toBeUndefined()
+      expect(st.progress).toEqual({ bytes: 0, total: ENTRY.sizeBytes })
+    } finally {
+      process.setUncaughtExceptionCaptureCallback(null)
+    }
+  })
+})

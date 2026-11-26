@@ -22,7 +22,7 @@ import { appleKernelSetRecommendedArgv } from '../../main/sandbox/apple-containe
 import {
   boxSetupNext, boxSetupStartFrom, boxSetupResumeFrom, boxSetupNeededBytes,
   boxSetupRunConfig, createBoxSetup, parsePkgutilCheckSignature, INITIAL_BOX_SETUP,
-  boxSetupPlan, boxSetupPlanBytes, KERNEL_ESTIMATED_BYTES,
+  boxSetupPlan, boxSetupPlanBytes, KERNEL_ESTIMATED_BYTES, downloadPkg,
   type BoxSetupState, type BoxSetupEvent, type BoxSetupDeps
 } from '../box-setup'
 // OBD2: il piano vive in shared (lo usano daemon e UI)
@@ -1044,5 +1044,51 @@ describe('MB1: start() registra la scelta del computer del bot', () => {
     expect(s.phase).toBe('error')
     expect(s.error?.code).toBe('no-space')
     expect(h.settings.get('sandbox.mode')).toBe('box') // la scelta NON si ribalta
+  })
+})
+
+// S2 (fase isolamento-suite): lo stesso difetto del download del modello
+// integrato stava qui, identico — il corpo della risposta nasceva PRIMA di
+// aprire il .part, e un annullamento in quegli istanti lo faceva fallire con
+// «error» senza ascoltatore (in Node un'eccezione non catturata).
+describe('S2: l\'annullamento mentre il .part si apre non lascia errori in giro (downloadPkg)', () => {
+  it('l\'abort arriva un giro di loop dopo la risposta: nessuna eccezione non catturata, rifiuta «cancelled», il .part resta', async () => {
+    const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-s2-pkg-'))
+    createdDirs.push(dir)
+    const controller = new AbortController()
+    // il corpo che, all'annullamento, fallisce col motivo del segnale: è quel
+    // che fa fetch alla sua risposta (qui niente rete: il corpo è del test)
+    const fetchPoiAnnulla: typeof fetch = async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new Uint8Array(16))
+          controller.signal.addEventListener('abort', () => { c.error(controller.signal.reason) }, { once: true })
+        }
+      })
+      // il completamento di open() arriva dal threadpool, sempre in un giro
+      // successivo: l'annullamento parte un giro dopo la risposta e cade lì
+      setImmediate(() => { controller.abort() })
+      return new Response(body, { status: 200, headers: { 'content-length': '4096' } })
+    }
+    const partPath = join(dir, 'pacchetto.pkg.part')
+    const nonCatturate: unknown[] = []
+    // se l'errore dell'abort parte senza ascoltatore, finisce qui invece che nel processo
+    process.setUncaughtExceptionCaptureCallback((e) => { nonCatturate.push(e) })
+    try {
+      // il rifiuto si aspetta DA SUBITO (chi chiama downloadPkg nell'app fa
+      // così): nelle tornate qui sotto la promessa è già rifiutata, e senza
+      // chi l'aspetta sarebbe un «Unhandled Rejection» del TEST, non del codice
+      const rifiutato = downloadPkg({ fetch: fetchPoiAnnulla, url: 'https://esempio.test/pacchetto.pkg', partPath, onProgress: () => undefined, signal: controller.signal }).then(
+        () => null,
+        (e: unknown) => e
+      )
+      // si lasciano passare il giro dell'annullamento e l'apertura del file
+      for (let i = 0; i < 10; i++) await new Promise<void>((r) => setImmediate(r))
+      expect(nonCatturate).toEqual([]) // ROSSO sulla base: DOMException [AbortError]: This operation was aborted
+      await expect(rifiutato).resolves.toMatchObject({ message: 'download cancelled' })
+      expect(existsSync(partPath)).toBe(true)
+    } finally {
+      process.setUncaughtExceptionCaptureCallback(null)
+    }
   })
 })

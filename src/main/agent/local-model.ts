@@ -72,9 +72,13 @@ export async function downloadLocalModel(opts: {
   const totalHeader = Number(res.headers.get('content-length') ?? 0)
   const total = resume ? have + totalHeader : totalHeader
   let bytes = resume ? have : 0
-  const body = res.body ? Readable.fromWeb(res.body as never) : Readable.from([])
   const out = await open(partPath, resume ? 'a' : 'w')
   try {
+    // il corpo nasce QUI e il ciclo sotto lo legge subito: fra la sua nascita e
+    // chi ascolta i suoi errori non c'è nessun await. Se nasceva PRIMA di
+    // open(), un annullamento (o un errore di rete) mentre il .part si apriva
+    // lo faceva fallire SENZA ascoltatori — in Node un'eccezione non catturata
+    const body = res.body ? Readable.fromWeb(res.body as never) : Readable.from([])
     for await (const chunk of body) {
       // il pezzo si scrive TUTTO (i write parziali si ripetono sul byte che
       // manca): il progresso si annuncia SOLO dopo, coi byte davvero sul .part
