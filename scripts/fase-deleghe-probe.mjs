@@ -34,7 +34,7 @@ import { createServer } from 'node:http'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync, readFileSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { findProbeDaemons, stopProbeDaemons } from './lib/probe-daemons.mjs'
-import { leggiTentativiLocali, messaggioTentativiLocali } from './lib/sonda.mjs'
+import { leggiTentativiLocali, messaggioTentativiLocali, fotografaLlamaServerDellaCorsa, llamaServerDellaCorsa, messaggioLlamaServer } from './lib/sonda.mjs'
 import { cleanupProbeRun, countProbeDirs } from './lib/probe-rm.mjs'
 
 const runArg = process.argv.find((a) => /^--?run/.test(a))
@@ -167,12 +167,6 @@ const app = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`, '--la
 app.stdout.on('data', (d) => { appLog += d.toString() })
 app.stderr.on('data', (d) => { appLog += d.toString() })
 const stopApp = () => { try { app?.kill('SIGTERM') } catch { /* già via */ } }
-const llamaBaseline = (() => {
-  try {
-    const { execSync } = require('node:child_process')
-    return new Set(execSync('pgrep -x llama-server || true', { encoding: 'utf8' }).trim().split('\n').filter(Boolean))
-  } catch { return new Set() }
-})()
 process.on('SIGINT', () => { stopApp(); process.exit(130) })
 process.on('SIGTERM', () => { stopApp(); process.exit(143) })
 
@@ -615,6 +609,8 @@ try {
 } finally {
   // ---- pulizia K4: app giù, daemon via, cartelle via, 0 processi ----
   await waitQuiet(60_000).catch(() => undefined)
+  // I2 (fase isolamento-locale): la FOTOGRAFIA dei llama-server discendenti dell'app e del daemon si scatta PRIMA di spegnerli
+  const fotografiaLlama = fotografaLlamaServerDellaCorsa({ prefix: PREFIX, radice: DATA, home: null, pidApp: app.pid })
   stopApp()
   try { await withTimeout(new Promise((r) => app.on('exit', r)), 8000, 'exit app') } catch {
     try { app.kill('SIGKILL') } catch { /* già via */ }
@@ -649,8 +645,9 @@ try {
   check('pulizia K4: 0 cartelle sandbot-fase-deleghe-* rimaste', leftDirs.length === 0, `${leftDirs.length} cartelle: ${leftDirs.join(', ')}`)
   const daemons = findProbeDaemons(PREFIX)
   check('pulizia K4: 0 daemon della sonda', daemons.length === 0, JSON.stringify(daemons))
-  const llamas = (await import('node:child_process').then((c) => c.execSync('pgrep -x llama-server || true', { encoding: 'utf8' }).trim().split('\n').filter(Boolean))).filter((pid) => !llamaBaseline.has(pid))
-  check('pulizia K4: 0 llama-server nati con la corsa', llamas.length === 0, `baseline ${llamaBaseline.size}, nuovi ${llamas.length}`)
+  // I2: si contano solo i llama-server della corsa (catena dei padri, oppure radice o HOME finta negli argomenti)
+  const llamas = llamaServerDellaCorsa({ prefix: PREFIX, radice: DATA, home: null, fotografia: fotografiaLlama })
+  check('pulizia K4: 0 llama-server della corsa rimasti vivi', llamas.length === 0, messaggioLlamaServer(llamas) || 'nessuno')
   if (failed > 0) log('risposte servite (diagnostica):', JSON.stringify(served.slice(-20)))
   await new Promise((r) => providerServer.close(r))
 }

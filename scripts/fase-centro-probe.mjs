@@ -26,18 +26,18 @@
 // basso) in docs/catture/fase-approvazioni-chiare/. VERDE in TRE corse di
 // fila: node scripts/fase-centro-probe.mjs. Attese dei click UI ≤ 5 s
 // (lezione di fase-squadra). Pulizia K4: 0 cartelle sandbot-fase-centro-*, 0
-// daemon della sonda, 0 llama-server nati con la corsa.
+// daemon della sonda, 0 llama-server della corsa rimasti vivi.
 //
 // F7 (fase fondamenta): la sonda usa il MOTORE comune (scripts/lib/sonda.mjs):
 // un avvio per corsa, porta CDP libera scelta a caso (niente --run), e le
 // attese sono su CONDIZIONE (s.attendi e varianti), non a tempo. Cosa
 // controlla NON cambia: stesse verifiche e stesso numero di controlli verdi
 // (55).
-import { spawnSync, execSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { writeFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { avviaSonda, messaggioTentativiLocali } from './lib/sonda.mjs'
+import { avviaSonda, messaggioTentativiLocali, messaggioLlamaServer } from './lib/sonda.mjs'
 import { findProbeDaemons } from './lib/probe-daemons.mjs'
 
 const run = 1
@@ -134,15 +134,6 @@ writeFileSync(FAKE_CONTAINER, [
 chmodSync(FAKE_CONTAINER, 0o755)
 sonda.env.HOMUN_CONTAINER_PATH = FAKE_CONTAINER
 sonda.env.SANDBOT_TEST_FAKE_BROWSER_MCP = join(ROOT, 'scripts', 'fake-browser-mcp.mjs')
-
-// i llama-server GIÀ in corsa (per esempio l'Ollama dell'utente) non sono
-// della sonda — il controllo di pulizia conta solo quelli NASCITI dopo
-const llamaBaseline = (() => {
-  try {
-    const out = spawnSync('/usr/bin/pgrep', ['-x', 'llama-server'], { encoding: 'utf8' })
-    return new Set(String(out.stdout ?? '').trim().split('\n').filter(Boolean))
-  } catch { return new Set() }
-})()
 
 const connessione = await sonda.avvia()
 const portaDebug = connessione.porta
@@ -689,8 +680,7 @@ try {
   check('I1: 0 connessioni verso i servizi LLM locali veri (il registro è vuoto)', fine.tentativiLocali.length === 0, messaggioTentativiLocali(fine.tentativiLocali))
   const daemons = findProbeDaemons(PREFIX)
   check('pulizia K4: 0 daemon della sonda', daemons.length === 0, JSON.stringify(daemons))
-  const llamas = execSync('pgrep -x llama-server || true', { encoding: 'utf8' }).trim().split('\n').filter(Boolean).filter((pid) => !llamaBaseline.has(pid))
-  check('pulizia K4: 0 llama-server nati con la corsa', llamas.length === 0, `baseline ${llamaBaseline.size}, nuovi ${llamas.length}`)
+  check('pulizia K4: 0 llama-server della corsa rimasti vivi', fine.llamaDellaCorsa.length === 0, messaggioLlamaServer(fine.llamaDellaCorsa) || 'nessuno')
   if (failed > 0) log('risposte servite (diagnostica):', JSON.stringify(served))
   await new Promise((r) => providerServer.close(r))
 }

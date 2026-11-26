@@ -34,7 +34,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { findProbeDaemons, stopProbeDaemons } from './lib/probe-daemons.mjs'
-import { leggiTentativiLocali, messaggioTentativiLocali } from './lib/sonda.mjs'
+import { leggiTentativiLocali, messaggioTentativiLocali, llamaServerDellaCorsa } from './lib/sonda.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 // Vincoli della fase: temporanei SOLO con mkdtemp nella cartella indicata
@@ -1127,8 +1127,8 @@ check('PULIZIA I1: 0 connessioni verso i servizi LLM locali veri (i registri son
 // ---- pulizia finale: 0 daemon e 0 llama-server ----
 const leftDaemons = findProbeDaemons('sandbot-fase-onboarding-a')
 check('PULIZIA nessun daemon della sonda vivo', leftDaemons.length === 0, leftDaemons.map((d) => d.pid).join(','))
-const llama = await import('node:child_process').then((c) => c.spawnSync('/usr/bin/pgrep', ['-fl', 'llama-server'], { encoding: 'utf8' }))
-const llamaMine = (llama.stdout ?? '').split('\n').filter((l) => l.includes(TMP))
+// I2: si contano solo i llama-server della corsa (catena dei padri fino a un daemon della sonda, oppure la radice negli argomenti)
+const llamaMine = llamaServerDellaCorsa({ prefix: 'sandbot-fase-onboarding-a', radice: TMP, home: null })
 check('PULIZIA nessun llama-server della sonda vivo', llamaMine.length === 0, llamaMine.join(' | ') || 'nessuno')
 providerServer.close()
 } catch (err) {

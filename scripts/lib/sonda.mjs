@@ -22,7 +22,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
-import { stopProbeDaemons } from './probe-daemons.mjs'
+import { findProbeDaemons, stopProbeDaemons } from './probe-daemons.mjs'
 import { cleanupProbeRun, countProbeDirs } from './probe-rm.mjs'
 
 export const ROOT = join(import.meta.dirname, '..', '..')
@@ -60,6 +60,81 @@ export function messaggioTentativiLocali(tentativi) {
   if (!Array.isArray(tentativi) || tentativi.length === 0) return ''
   const righe = tentativi.map((r) => r.riga ?? `${r.url ?? `${r.host}:${r.porta}`} (${r.via}, ${r.modo} pid ${r.pid}, scena: ${r.scena ?? '—'})`)
   return `${tentativi.length} tentativi verso i servizi locali veri: ${righe.join(' | ')}`
+}
+
+// ---- I2 (fase isolamento-locale): i llama-server DELLA CORSA ----
+// Il controllo di pulizia contava TUTTI i processi che si chiamano
+// «llama-server» (pgrep globale, prima e dopo): così un llama-server
+// dell'Ollama dell'utente, nato durante la corsa, faceva vedere ROSSA la
+// sonda. Ora un llama-server è della corsa solo in due modi: la catena dei
+// padri sale all'app o a un daemon della sonda, oppure negli argomenti ci sono
+// la radice della corsa o la HOME finta. Fuori da questi due casi non si tocca
+// e non si conta. Le funzioni sono qui così tutte le sonde contano allo stesso
+// modo; il controllo guarda e RACCONTA, non uccide nulla.
+/** La tavola dei processi — pid → { ppid, comando } — e i pid dei processi che si chiamano «llama-server». */
+const leggiTavolaProcessi = () => {
+  const ps = spawnSync('/bin/ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+  const processi = new Map()
+  for (const riga of (ps.stdout ?? '').split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s(.*)$/.exec(riga)
+    if (m) processi.set(Number(m[1]), { ppid: Number(m[2]), comando: m[3] })
+  }
+  const pg = spawnSync('/usr/bin/pgrep', ['-x', 'llama-server'], { encoding: 'utf8' })
+  const pidLlama = (pg.stdout ?? '').split('\n').filter(Boolean).map(Number).filter((p) => Number.isInteger(p) && p > 1)
+  return { processi, pidLlama }
+}
+
+/** I pid da cui può discendere un llama-server della corsa: l'app e i daemon della sonda con questo prefisso. */
+const antenatiDellaCorsa = (prefix, pidApp) => new Set(
+  [pidApp, ...(prefix ? findProbeDaemons(prefix).map((d) => d.pid) : [])].filter((p) => Number.isInteger(p) && p > 1)
+)
+
+/**
+ * I2: quali, fra i `pidLlama`, sono llama-server della corsa — e perché.
+ * Torna [{ pid, perche, da, comando }] in ordine di pid, dove `perche` è:
+ *   'argomenti'  — la riga di comando contiene la radice della corsa o la HOME finta (`da` è null);
+ *   'discendente' — la catena dei padri sale all'app o a un daemon della sonda (`da`: quel pid);
+ *                   a corsa spenta lo dice la FOTOGRAFIA fatta prima dello spegnimento (stesso pid,
+ *                   stessa riga di comando: un pid riusato da un altro processo non basta).
+ * `processi` è la tavola pid → { ppid, comando }; `antenati` i pid dell'app e dei daemon; `radice` e
+ * `home` la cartella temporanea della corsa e la sua HOME finta (null: non c'è).
+ */
+export function classificaLlamaServer({ processi, pidLlama, antenati, radice, home, fotografia = null }) {
+  const lista = []
+  for (const pid of pidLlama) {
+    const riga = processi.get(pid)
+    if (!riga) continue
+    if ((radice && riga.comando.includes(radice)) || (home && riga.comando.includes(home))) {
+      lista.push({ pid, perche: 'argomenti', da: null, comando: riga.comando })
+      continue
+    }
+    let da = null
+    for (let p = riga.ppid, passi = 0; da === null && p > 1 && passi < 64; passi++) {
+      if (antenati.has(p)) da = p
+      else p = processi.get(p)?.ppid ?? 0
+    }
+    const foto = da === null ? fotografia?.get(pid) : null
+    if (da === null && foto && foto.comando === riga.comando) da = foto.da
+    if (da !== null) lista.push({ pid, perche: 'discendente', da, comando: riga.comando })
+  }
+  return lista.sort((a, b) => a.pid - b.pid)
+}
+
+/** I2: la FOTOGRAFIA dei discendenti vivi ADESSO — pid → { comando, da } — da scattare PRIMA di spegnere app e daemon. */
+export const fotografiaDi = (lista) => new Map(lista.filter((l) => l.perche === 'discendente').map((l) => [l.pid, { comando: l.comando, da: l.da }]))
+
+/** I2: la fotografia della corsa, letta da `ps` (si scatta prima dello spegnimento). */
+export const fotografaLlamaServerDellaCorsa = ({ prefix, radice, home, pidApp = null }) =>
+  fotografiaDi(classificaLlamaServer({ ...leggiTavolaProcessi(), antenati: antenatiDellaCorsa(prefix, pidApp), radice, home }))
+
+/** I2: i llama-server della corsa vivi ADESSO, letti da `ps` — dopo la pulizia, con la fotografia fatta prima. */
+export const llamaServerDellaCorsa = ({ prefix, radice, home, pidApp = null, fotografia = null }) =>
+  classificaLlamaServer({ ...leggiTavolaProcessi(), antenati: antenatiDellaCorsa(prefix, pidApp), radice, home, fotografia })
+
+/** I2: il dettaglio del controllo — quanti, quali pid e perché sono della corsa. Vuoto quando non ce ne sono. */
+export function messaggioLlamaServer(lista) {
+  if (!Array.isArray(lista) || lista.length === 0) return ''
+  return `${lista.length} della corsa viv${lista.length === 1 ? 'o' : 'i'}: ${lista.map((l) => `pid ${l.pid} (${l.perche}${l.da !== null ? `, da ${l.da}` : ''})`).join(' | ')}`
 }
 
 /** Una porta libera su 127.0.0.1, scelta dal sistema (listen(0)): mai una porta fissa, mai calcolata da --run. */
@@ -193,6 +268,8 @@ export async function avviaSonda({
     return true
   }
   const pulizia = async ({ parziale = false } = {}) => {
+    // I2: la fotografia dei llama-server della corsa, da scattare PRIMA di spegnere app e daemon
+    const fotografiaLlama = fotografaLlama()
     stopApp()
     try {
       if (Number.isInteger(app?.pid)) await waitPidGone(app.pid, 8_000)
@@ -200,11 +277,18 @@ export async function avviaSonda({
       if (!parziale) {
         const r = await cleanupProbeRun({ pids: [], prefix, dirs: [tmp], log: () => undefined, capMs: 20_000 }).catch(() => ({ left: ['?'] }))
         fermaVedetta()
+        // I2: i llama-server della corsa rimasti vivi DOPO la pulizia (con la fotografia fatta prima)
+        const llamaDellaCorsa = llamaRimasti(fotografiaLlama)
+        if (llamaDellaCorsa.length > 0) log('✗ I2: llama-server della corsa rimasti vivi —', messaggioLlamaServer(llamaDellaCorsa))
         return r
       }
     } catch { /* meglio possibile */ }
     return null
   }
+  // I2: la fotografia dei llama-server della corsa (discendenti di app e daemon), PRIMA dello spegnimento
+  const fotografaLlama = () => { try { return fotografaLlamaServerDellaCorsa({ prefix, radice: tmp, home, pidApp: app?.pid ?? null }) } catch { return new Map() } }
+  // I2: i llama-server della corsa rimasti vivi DOPO la pulizia, con la fotografia fatta prima
+  const llamaRimasti = (fotografia) => { try { return llamaServerDellaCorsa({ prefix, radice: tmp, home, fotografia }) } catch { return [] } }
   if (chiudiPerSegnale) {
     process.on('SIGINT', () => { void pulizia().then(() => process.exit(130)) })
     process.on('SIGTERM', () => { void pulizia().then(() => process.exit(143)) })
@@ -610,6 +694,7 @@ export async function avviaSonda({
       return document.querySelectorAll('[data-galleria-maschera],[data-galleriamaschera],[data-galleriaMaschera]').length`),
     /** La fine della sonda: app spenta, figli della porta di debug via, daemon chiusi, cartelle cancellate e CONTEGGIATE. */
     fine: async ({ porta } = {}) => {
+      const fotografiaLlama = fotografaLlama()
       try { cdp?.sock.close() } catch { /* già chiusa */ }
       stopApp()
       if (Number.isInteger(app?.pid)) await waitPidGone(app.pid).catch(() => undefined)
@@ -635,7 +720,10 @@ export async function avviaSonda({
       const left = countProbeDirs(prefix, [tmp])
       fermaVedetta()
       if (tentativiLocali.length > 0) log('✗ I1: l\'app in prova ha toccato i servizi locali veri —', messaggioTentativiLocali(tentativiLocali))
-      return { cartelleRimaste: r?.left ?? [], conteggio: left, tentativiLocali }
+      // I2: i llama-server della corsa rimasti vivi DOPO la pulizia (con la fotografia fatta prima dello spegnimento)
+      const llamaDellaCorsa = llamaRimasti(fotografiaLlama)
+      if (llamaDellaCorsa.length > 0) log('✗ I2: llama-server della corsa rimasti vivi —', messaggioLlamaServer(llamaDellaCorsa))
+      return { cartelleRimaste: r?.left ?? [], conteggio: left, tentativiLocali, llamaDellaCorsa }
     }
   }
   return s

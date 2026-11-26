@@ -16,13 +16,13 @@
 // Catture CDP in docs/catture/fase-team-bot/. VERDE in TRE corse di fila:
 //   node scripts/fase-team-bot-probe.mjs --run 1|2|3
 // Pulizia: a fine corsa 0 cartelle sandbot-fase-team-bot-*, 0 daemon della
-// sonda, 0 llama-server nati con la corsa.
+// sonda, 0 llama-server della corsa rimasti vivi.
 import { spawn, execSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { findProbeDaemons, stopProbeDaemons } from './lib/probe-daemons.mjs'
-import { leggiTentativiLocali, messaggioTentativiLocali } from './lib/sonda.mjs'
+import { leggiTentativiLocali, messaggioTentativiLocali, fotografaLlamaServerDellaCorsa, llamaServerDellaCorsa, messaggioLlamaServer } from './lib/sonda.mjs'
 import { cleanupProbeRun, countProbeDirs } from './lib/probe-rm.mjs'
 
 const runArg = process.argv.find((a) => /^--?run/.test(a))
@@ -93,11 +93,6 @@ const app = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`, '--la
 app.stdout.on('data', (d) => { appLog += d.toString() })
 app.stderr.on('data', (d) => { appLog += d.toString() })
 const stopApp = () => { try { app?.kill('SIGTERM') } catch { /* già via */ } }
-const llamaBaseline = (() => {
-  try {
-    return new Set(execSync('pgrep -x llama-server || true', { encoding: 'utf8' }).trim().split('\n').filter(Boolean))
-  } catch { return new Set() }
-})()
 process.on('SIGINT', () => { stopApp(); process.exit(130) })
 process.on('SIGTERM', () => { stopApp(); process.exit(143) })
 
@@ -467,6 +462,8 @@ try {
   // ---- pulizia (come le altre sonde) ----
   // SIGTERM di grazia, poi SIGKILL: un'app che si trascina (menu aperti,
   // dialoghi) non deve tenere in vita la corsa
+  // I2 (fase isolamento-locale): la FOTOGRAFIA dei llama-server discendenti dell'app e del daemon si scatta PRIMA di spegnerli
+  const fotografiaLlama = fotografaLlamaServerDellaCorsa({ prefix: PREFIX, radice: DATA, home: null, pidApp: app.pid })
   stopApp()
   await sleep(1500)
   try { if (Number.isInteger(app.pid) && app.pid > 1) process.kill(app.pid, 'SIGKILL') } catch { /* già via */ }
@@ -499,8 +496,9 @@ try {
   check('pulizia: 0 cartelle sandbot-fase-team-bot-* rimaste', leftDirs.length === 0, `${leftDirs.length} cartelle: ${leftDirs.join(', ')}`)
   const daemons = findProbeDaemons(PREFIX)
   check('pulizia: 0 daemon della sonda', daemons.length === 0, JSON.stringify(daemons))
-  const llamas = execSync('pgrep -x llama-server || true', { encoding: 'utf8' }).trim().split('\n').filter(Boolean).filter((pid) => !llamaBaseline.has(pid))
-  check('pulizia: 0 llama-server nati con la corsa', llamas.length === 0, `baseline ${llamaBaseline.size}, nuovi ${llamas.length}`)
+  // I2: si contano solo i llama-server della corsa (catena dei padri, oppure radice o HOME finta negli argomenti)
+  const llamas = llamaServerDellaCorsa({ prefix: PREFIX, radice: DATA, home: null, fotografia: fotografiaLlama })
+  check('pulizia: 0 llama-server della corsa rimasti vivi', llamas.length === 0, messaggioLlamaServer(llamas) || 'nessuno')
   await new Promise((r) => providerServer.close(r))
 }
 
