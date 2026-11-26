@@ -405,6 +405,16 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
       return !!d.querySelector('[data-testid="disk-space-section"]') && t.includes('Spazio libero sul Mac')
     })()`, { entro: 10_000, motivo: 'le sezioni asincrone delle Impostazioni Generali (spazio su disco, motore) siano caricate' })
   }
+  // la scheda del plugin › Autorizzazioni: gli strumenti del server arrivano
+  // da una RPC (mcpTools) che NON passa dalla rete del renderer. Sotto carico
+  // la cattura li precedeva — «caricamento…» al posto delle 24 righe, con la
+  // squadra ancora aperta nella barra (trovato COSÌ nella corsa di fatto, in
+  // una combinazione su 118; da sola la scena non lo fa mai). Si aspetta la
+  // CONDIZIONE: i gruppi di strumenti. Se non arrivano, la cattura resta
+  // com'è e la scena è DIVERSA: non si nasconde niente
+  if (page.id === 'plugin-autorizzazioni') {
+    await s.attendi(`!!document.querySelector('[data-testid="plugin-permissions"] [data-testid^="plugin-group-"]')`, { entro: 15_000, motivo: 'gli strumenti del plugin siano arrivati nella scheda Autorizzazioni' }).catch(() => undefined)
+  }
   // le maschere della scena PRECEDENTE si tolgono: i rettangoli sono fissi
   // allo schermo e coprirebbero le scene successive. UNA funzione sola del
   // motore (sonda.mjs), con lo stesso attributo della creazione — la copia
