@@ -382,7 +382,8 @@ describe('DS4 barra: i titoli di gruppo', () => {
     const tree = renderSidebar(layoutFull)
     const p = findAll(tree, (n) => n.tag === 'p' && textOf(n) === 'Team')[0]!
     const plus = findAll(p.parent!, (n) => n.tag === 'button')[0]!
-    expect(plus.attrs['aria-label']).toBe('Crea')
+    // R2 (fase linguaggio-ritocchi): «Nuovo bot», non «Crea» come il + della riga di ricerca
+    expect(plus.attrs['aria-label']).toBe('Nuovo bot')
     for (const c of ['size-control-sm', 'rounded-full', 'shrink-0']) expect(has(plus, c), c).toBe(true)
     expect(has(svgIn(plus), 'size-4')).toBe(true)
   })

@@ -200,10 +200,10 @@ describe('DS4 Libreria: la testata', () => {
     hasAll(content.children[0]!, ['flex', 'min-w-0', 'flex-1', 'items-center'])
   })
 
-  it('indietro · icona · «Libreria» · griglia/elenco — e nient\'altro: i filtri non stanno più in testata', () => {
+  it('indietro · icona · «Libreria» — e nient\'altro: né i filtri né il selettore della vista stanno in testata (R2, fase linguaggio-ritocchi: il selettore è UNO, nella barra)', () => {
     const { root, html } = renderLibrary({ items: [DOC] })
     const h = head(root)
-    expect(buttonsIn(h).map((b) => b.attrs['aria-label'])).toEqual(['Torna alla chat', 'Griglia', 'Elenco'])
+    expect(buttonsIn(h).map((b) => b.attrs['aria-label'])).toEqual(['Torna alla chat'])
     // indietro è il PRIMO bottone della pagina (è lui che la sonda preme per l'anello di fuoco)
     expect(buttonsIn(root)[0]).toBe(buttonsIn(h)[0])
     // l'icona della pagina (quella fuori dai bottoni) è da 20, la misura delle testate;
@@ -221,11 +221,11 @@ describe('DS4 Libreria: la testata', () => {
     for (const gone of ['max-w-4xl', 'max-w-3xl', 'max-w-sm']) expect(html).not.toContain(gone)
   })
 
-  it('OGNI bottone della testata è da 32 e porta no-drag (sta nella fascia che trascina la finestra: senza, il clic trascina)', () => {
+  it('OGNI bottone della testata è da 32 e porta no-drag (sta nella fascia che trascina la finestra: senza, il clic trascina) — e il selettore della vista sta nella BARRA, coi suoi no-drag', () => {
     for (const initial of [{ items: [DOC] }, { items: [DOC], view: 'list' }]) {
       const { root } = renderLibrary(initial)
-      const buttons = buttonsIn(head(root))
-      expect(buttons).toHaveLength(3)
+      const buttons = [...buttonsIn(head(root)), ...buttonsIn(bySlot(root, 'toolbar')[0]!).filter((b) => ['Griglia', 'Elenco'].includes(String(b.attrs['aria-label'])))]
+      expect(buttons.map((b) => b.attrs['aria-label'])).toEqual(['Torna alla chat', 'Griglia', 'Elenco'])
       for (const b of buttons) {
         expect(has(b, 'no-drag'), `no-drag su «${b.attrs['aria-label']}»`).toBe(true)
         expect(has(b, 'size-control-sm') || has(b, 'h-control-sm'), `32 px su «${b.attrs['aria-label']}»`).toBe(true)
