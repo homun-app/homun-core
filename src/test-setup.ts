@@ -10,6 +10,16 @@ import { afterAll } from 'vitest'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { guardiaServiziLocaliDellaSuite } from './test-local-services-guard'
+
+// S1 (fase isolamento-suite): nessun test apre connessioni verso i servizi
+// LLM locali VERI del Mac (Ollama e LM Studio, alle porte di KNOWN_BASE_URLS).
+// Chi ci prova — con fetch, net.connect, http/https o un socket nudo — fallisce
+// col nome del test e l'URL, PRIMA che la connessione parta: il rosso non
+// dipende dal fatto che il servizio vero sia acceso. Chi vuole davvero un
+// servizio locale usa un server finto su porta 0. Tutto in
+// test-local-services-guard.ts, con le sue prove.
+guardiaServiziLocaliDellaSuite()
 
 const PREFIX = 'sandbot-vitest-data-'
 const current = process.env.SANDBOT_DATA_DIR

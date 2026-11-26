@@ -100,8 +100,8 @@ export function destinazioneSocket(args: readonly unknown[]): { host: string; po
   return null
 }
 
-/** L'URL di ciò che è stato passato a fetch (una stringa, un URL, una Request). */
-function urlDi(input: unknown): string | null {
+/** L'URL di ciò che è stato passato a fetch (una stringa, un URL, una Request). Lo legge anche la guardia della suite (test-local-services-guard.ts). */
+export function urlDi(input: unknown): string | null {
   if (typeof input === 'string') return input
   if (input instanceof URL) return input.href
   if (typeof input === 'object' && input !== null && 'url' in input && typeof (input as { url: unknown }).url === 'string') {
