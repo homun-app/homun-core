@@ -245,6 +245,9 @@ const CONTROLLO_TAGLI = `return (() => {
   return problemi
 })()`
 
+/** R1: svuota il raccoglitore e torna quanti id ha scartato (vedasi dove si chiama, in cattura). */
+const scartaTraduzioni = (s) => s.eval('return window.__sandbotTraduzioniMancanti ? window.__sandbotTraduzioniMancanti.drain().length : 0')
+
 /**
  * I tre controlli di una scena (R1/R2/R3): riempiono `errori` — una scena
  * col vaso rotto è ROSSA, non catturata.
@@ -326,6 +329,13 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
   }
   await s.tema(tema)
   await closeOverlays(s)
+  // R1: le traduzioni mancanti si contano da QUI in poi. La scena di prima,
+  // ri-renderizzata dal cambio di misura, ha potuto rendere di nuovo i suoi id
+  // (l'evento «missing» scatta a ogni chiamata): senza questo scarto finivano
+  // nella scena NUOVA — «V_pNa0», che è di Collegati, attribuito alla scena
+  // dopo. Nella passata di solo controllo non si scarta: lì la pagina è
+  // quella della scena stessa, e il suo ri-render al cambio di misura conta
+  await scartaTraduzioni(s)
   // la pagina dei componenti (F2/G2): UNA SEZIONE per scena, la apre il suo
   // API (apri(sezione)), la chiude closeOverlays
   if (page.open === 'componenti') {
