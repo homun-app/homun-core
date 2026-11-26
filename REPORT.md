@@ -1,3 +1,319 @@
+# REPORT FASE ISOLAMENTO-SUITE: la suite non tocca i servizi locali veri, il download annullato non lascia errori in giro, la barra ha un ordine stabile
+
+Base: `main` al tag `fase-isolamento-locale` (d65e876ec), verificata: HEAD era esattamente lì, git pulito a parte `out-review/` e `scripts/vetrina/` (non toccate). È una correzione delle prove e di un ordine instabile (freeze 0.3.1002): niente di nuovo. Tre commit, uno per punto: S1 `b1d823da9`, S2 `a34f91f09`, S3 `2a5d7315e`.
+
+- **S1.** Sulla base, con la suite instrumentata, nessun test ha provato a chiamare l'Ollama vero: l'elenco dei test da correggere è VUOTO. Cinque corse, ma il conteggio completo è quello di una sola, l'ultima: le prime quattro, rileggendo i file, su socket e fetch non aggiungono una prova (vedi sotto; il messaggio del commit S1 dice più di così). Il controllo c'è lo stesso, fisso in tutta la suite: chi ci prova è rosso col nome del test e l'URL, prima che la connessione parta. Visto rosso con tre sonde temporanee sul codice vero dell'app. Chi le abbia fatte, non lo so: un altro cliente dell'Ollama c'è, ed è vivo — `opencode`, con dentro la stessa firma (vedi sotto).
+- **S2.** La causa era nel codice: un download annullato mentre il .part si apriva faceva fallire il corpo della risposta SENZA ascoltatori, che in Node è un'eccezione non catturata. Corretta in due file (6 righe per file). Il file ripetuto 30 volte, per file: rosso 30 su 30 sulla base, 0 su 30 dopo.
+- **S3.** A parità `orderRows` non aveva un ordine suo: ora è il nome, poi l'id (5 test rossi sulla base, 34 verdi dopo). E il salto della galleria «chat-team» aveva una SECONDA causa, nella scena — i due membri nascevano a volta nello stesso millisecondo — che il solo `orderRows` non fermava (8 uguali e 1 diversa su 9): corretta anche quella. Sei corse di fila uguali, galleria intera 118 su 118, nessuna riapprovazione.
+
+## Come sono state prese le prove (e come no)
+
+- Il ROSSO di S1 non l'ho preso «iniettando» un indirizzo finto per far fallire la base, né aspettando che il difetto capitasse nella suite. Sulla base ho fatto girare la suite intera CINQUE volte con gli involucri temporanei di `fetch`, `net.connect`, `http`/`https` `request`/`get` e di `socket.connect` (attivi solo in quelle corse, l'inventario su file). Il conteggio completo è quello dell'ultima corsa (22:38:32): 0 tentativi verso le porte dei servizi veri, 0 socket fuori da loopback. Nelle prime quattro l'inventario era ancora in costruzione e su socket e fetch non dice abbastanza (vedi sotto). Il rosso è quello della guardia nuova, visto con tre sonde temporanee (cancellate subito dopo) sul codice vero dell'app: le tre strade, chi inghiotte l'errore, i tentativi negli hook.
+- Il ROSSO di S2 è riproducibile a comando: i due test nuovi, sulla base, rossi 30 volte su 30 per file. Il difetto «naturale» non si è riprodotto in 60 corse del file di prima (30 a Mac fermo, 30 coi 10 core occupati): la prova è il test deterministico, non la ripetizione.
+- Il ROSSO di S3 è doppio. `orderRows`: i cinque test nuovi, scritti prima, sulla base (5 rossi su 34, due volte). La galleria: `--solo chat-team` sulla base (3 corse: 1 uguale, 2 diverse), poi col solo `orderRows` (9 corse: 8 uguali, 1 diversa). La causa l'ho misurata con una sonda temporanea che non fa catture, solo numeri.
+- I servizi finti li ho avviato io, su porta 0, e li ho chiusi a fine prova. Le porte 11434 e 1234 non le ho mai chiamate da un mio comando: la sonda che fa girare le tre strade vere dell'app si ferma nell'involucro della guardia, prima che il socket esista («La connessione NON è partita», nell'uscita). Non ho letto i file dell'Ollama dell'utente. Per vedere chi parla con l'Ollama, alla chiusura ho solo letto la tabella dei socket (`lsof`) per tre minuti: nessuna connessione mia.
+- Le ore sono quelle del Mac (CET): il 26/11/2026 fino a mezzanotte, poi il 27/11 (la corsa di fatto.mjs passa mezzanotte).
+
+## S1 — nessun test apre connessioni verso i servizi locali veri
+
+**Che cosa fa.** Una guardia FISSA per tutta la suite: `src/test-local-services-guard.ts`, installata da `src/test-setup.ts` (4 file, 538 righe aggiunte, 261 di prove). Gli involucri fermano il tentativo PRIMA che parta, col nome del test e l'URL — il rosso non dipende dal fatto che il servizio vero sia acceso:
+
+- `fetch` (il globale di Node), `net.connect` e `net.createConnection`, `http`/`https` `request` e `get`;
+- `net.Socket.prototype.connect`: il punto per cui passano TUTTE le connessioni TCP di Node, anche quelle che gli altri involucri non vedono (l'Agent di `http`, che lega `net.createConnection` al CARICAMENTO del modulo; un `import { connect }`, che è una fotografia della funzione; `tls.connect`).
+
+Chi decide se una destinazione è un servizio locale vero è il registro di I1 (`src/main/local-services-registry.ts`: `eServizioLocaleVero`, `eUrlServizioLocaleVero`; `urlDi` ora esportata): la porta nota di Ollama o di LM Studio, su questa macchina. Nessun numero di porta scritto due volte.
+
+Fermare la richiesta non basta: chi la inghiotte (l'elenco vivo di Ollama ha un catch per ogni `/api/show`) farebbe passare il test lo stesso. Ogni tentativo si ricorda, e un `afterEach` di tutta la suite fa fallire il test in cui è partito. Fuori da un test (modulo, `beforeAll`, `afterAll`) non c'è un test da far fallire: l'errore parte come rifiuto non gestito e lo riferisce Vitest («Unhandled Errors», uscita 1).
+
+**Visto ROSSO — le tre strade vere dell'app, senza stub** (sonda temporanea di tre test, 22:43:40, uscita 1: `discoverProviders()` come al boot del demone, `listProviderModels()`, `readOllamaCapabilities()`):
+
+```
+ ❯ src/__tests__/zz-probe-s1-reale-temporanea.test.ts (3 tests | 3 failed)
+     × scoperta: discoverProviders(), come al boot del demone
+     × elenco vivo: listProviderModels()
+     × capability: readOllamaCapabilities()
+ErroreServizioLocale: guardia servizi locali: il test «…» ha provato a collegarsi a un servizio locale VERO di questo Mac (Ollama o LM Studio).
+La connessione NON è partita. Nella suite i servizi locali sono finti: fetch finto, o un server finto su porta 0 (scripts/lib/servizio-locale-finto.mjs).
+Tentativi fermati: 2
+  • fetch GET http://localhost:11434/api/tags
+  • fetch GET http://localhost:1234/v1/models
+…
+Tentativi fermati: 1
+  • fetch GET http://localhost:11434/api/tags
+…
+Tentativi fermati: 1
+  • fetch POST http://localhost:11434/api/show
+```
+
+**Visto ROSSO — chi inghiotte l'errore** (sonda temporanea, 22:24:24, 2 failed | 1 passed; verso una porta libera, sorvegliata solo in quella prova — le vere non si toccano nemmeno nelle prove della guardia):
+
+```
+     × A: fetch inghiottita — deve essere ROSSA
+     × B: http.get inghiottito — deve essere ROSSA
+     ✓ C: pulito — resta verde
+Tentativi fermati: 1
+  • fetch GET http://127.0.0.1:52013/api/tags
+Tentativi fermati: 1
+  • http.get GET http://localhost:52013/api/tags
+```
+
+**Visto ROSSO — negli hook** (sonda temporanea, 22:48:28, 3 failed | 2 passed): chi lascia arrivare l'errore della guardia è rosso per quello; chi lo inghiotte è rosso per l'`afterEach`; un tentativo nell'`afterEach` del file fa rosso QUEL test; il primo test dopo un tentativo nel `beforeAll` resta verde (l'errore è andato a chi lo deve riferire).
+
+**L'inventario sulla base.** Cinque corse della suite intera (22:17:13, 22:21:31, 22:24:35, 22:28:17 e 22:38:32–22:39:40): 573 file ogni volta, 6996 test passati, 2 saltati. L'unico rosso era `src/__tests__/guardie/porte-modelli.test.ts` — una guardia della base che vieta di scrivere le porte vere nei test e nelle sonde — per colpa del MIO file nuovo di prove (poi corretto: legge il registro). Dall'analisi della quinta (finestra 22:38:33 → 22:39:32):
+
+```
+CONTEGGIO PER VIA {"figlio":1357,"listen":150,"socket-loopback":188,"segnale":31,"listen-dominio":2,"socket-dominio":1}
+
+== socket-PORTA-VERA: 0
+== fetch-PORTA-VERA: 0
+== http.request-PORTA-VERA: 0
+== http.get-PORTA-VERA: 0
+== https.request-PORTA-VERA: 0
+== https.get-PORTA-VERA: 0
+== socket-FUORI: 0
+== unhandledRejection: 0
+
+connessioni di loopback verso porte che NESSUN processo di prova ha messo in ascolto: 0
+```
+
+**Le prime quattro corse non aggiungono una prova su socket e fetch.** L'ho visto rileggendo i cinque file dell'inventario prima di scrivere qui (poco dopo le 00:24): il conteggio completo è in uno solo, il quinto (1729 righe). Nella prima e nella seconda corsa (22:17:13 e 22:21:31) l'inventario registrava solo i processi figli (1357 righe per corsa): su socket e fetch non dicono nulla. Nella terza e nella quarta (22:24:35 e 22:28:17) registrava i figli e, per controllare che l'involucro vedesse, i primi due socket di loopback per processo (75 righe in più): un conteggio parziale. In nessuno dei cinque file c'è una riga verso le porte vere, ma questo — per le prime quattro — vale quel che vale un inventario che non le guardava tutte. Il messaggio del commit S1 dice «cinque corse, ogni connessione TCP contata»: non è esatto, e non posso cambiarlo (è un commit fatto, con sopra altri due commit).
+
+**I figli, letti dal comando — e questo vale per tutte e cinque le corse.** L'inventario dei processi figli era completo fin dalla prima: 1357 per corsa, gli stessi conteggi tutte e cinque le volte (le righe lette una per una sono quelle della quinta, poco dopo le 00:35 del 27/11). 872 sono `node scripts/fake-container.mjs`, 191 `git`, 118 `magick`, 50 `node scripts/fake-browser-mcp.mjs`, 30 `node -e`, 20 finti `container`/`cli`, 19 `sh`/`zsh -c`, 17 altri script (sei del repo: i finti `open`, `spctl`, `pkgutil`, `verify-release`, `esporta-inutilizzati`, `design-migrazione`; e `finto-mcp.mjs`, in cartelle temporanee di prova), 13 `node scripts/aggiorna-catalogo-composio.mjs` (con `--base-url http://127.0.0.1:<porta>`), e 27 fra `tar`, `ps`, `lsof`, finti `npx`, `sleep`, altri. Nessuno fa girare l'app: nessun Electron, niente da `out/`; l'unico con `--homun-daemon` nel comando è `node -e 'setInterval(()=>{},1e9)' -- --homun-daemon`, che non fa nulla. Dei 30 `node -e`, 13 aprono una connessione: sempre a un socket di dominio della prova (`vnc-view.sock`, `vnc-control.sock`). Nessun comando di un figlio nomina 11434, 1234, `/api/tags`, `/api/show` o `localhost`. È il COMANDO col quale sono nati, non la rete che hanno fatto: un figlio non passa dagli involucri. Ma nessuno di loro, dal comando, è un pezzo dell'app.
+
+**Un altro cliente dell'Ollama c'è, e l'ho visto: `opencode`.** Alla chiusura, facendo la conta dei processi (00:38 del 27/11), ho guardato chi parla con l'Ollama vero — senza chiamarlo e senza leggere i suoi file: sola lettura della tabella dei socket (`lsof`), come `ps` legge l'elenco dei processi.
+
+- Tre minuti a macchina ferma (00:40:42–00:43:42, 308 campioni): `opencode` (pid 9657) con CINQUE connessioni stabilite `127.0.0.1:<porta>->127.0.0.1:11434`, le stesse in tutti i 308 campioni. In ascolto su 11434 c'è `ollama` (pid 1241); su 1234 non ascolta nessuno.
+- `opencode` (Homebrew, `opencode-v2 2.4.2`) è sul Mac da prima della corsa delle 18:37: `opencode serve --service` (pid 54608) è avviato alle 14:53:37 del 26/11. Un secondo, `opencode run … -m deepseek/deepseek-v4-pro --title review-v0.6.19-t3-deepseek …` (pid 9650) col suo `opencode serve --stdio --port 0` (pid 9657), è avviato alle 00:04:32 del 27/11 — mentre girava la mia corsa di fatto.mjs — da un'altra sessione di lavoro (la riga di comando legge un prompt del progetto engramma): non da me.
+- Dentro il binario (stringhe, sola lettura, niente di eseguito) il provider di Ollama è `origin:"http://127.0.0.1:11434"` e la sua scoperta è, nel codice minificato, `(yield* e.getJson("/api/tags",Kee)).models…` e poi, per ogni modello, `A?.digest===b.digest ? A.info : yield* e.postJson("/api/show",$ee,{model:b.model},Mee)`, con `{concurrency:4}`. Una GET /api/tags e una POST /api/show per ogni modello: la firma che la spec legge nel log alle 18:37:23–24 (dodici `/api/show`: dodici modelli).
+
+Che cosa questo NON prova: che le chiamate delle 18:37 le abbia fatte `opencode`. Il log dell'Ollama non dice chi ha chiamato; i file di opencode (configurazione, log) non li ho letti, sono di un'altra app. Ed è la stessa firma dell'`listProviderModels` dell'app. Ma è un cliente vero, vivo, con quel codice dentro — e la suite, misurata, non ci prova.
+
+**VERDE dopo.** Le prove della guardia: `src/__tests__/test-local-services-guard.test.ts`, 18 test (le funzioni pure, gli hook, gli involucri veri con un server su porta libera). Le guardie prese insieme — i 17 file di `__tests__/guardie/` e il file nuovo — fanno 18 file, 107 test verdi (22:48:35). La suite: `Test Files 573 passed (573)`, `Tests 7002 passed | 2 skipped (7004)`, uscita 0, nessun «Errors» (22:48:54–22:50:01).
+
+## S2 — il download annullato non lascia errori in giro
+
+**Il sintomo sulla base** (sonda temporanea di un test solo, senza cattura, 23:02:15): il test passava e la corsa usciva con 1:
+
+```
+ ✓ src/daemon/__tests__/zz-probe-s2-temporanea.test.ts (1 test) 35ms
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯
+⎯⎯⎯⎯⎯⎯ Uncaught Exception ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ AbortController.abort node:internal/abort_controller:579:18
+ ❯ Module.cancelLocalModelDownload src/daemon/local-model.ts:320:29
+ ❯ Immediate._onImmediate src/daemon/__tests__/zz-probe-s2-temporanea.test.ts:48:31
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+     Errors  1 error
+```
+
+**La causa è nel codice, non nel test.** In `downloadLocalModel` (`src/main/agent/local-model.ts`) e in `downloadPkg` (`src/daemon/box-setup.ts`) il corpo della risposta nasceva con `Readable.fromWeb` PRIMA di `await open(.part)`:
+
+- un annullamento (o un errore di rete) in quell'attesa faceva fallire lo stream web della risposta;
+- `Readable.fromWeb`, alla chiusura con errore del suo reader, chiama `destroy(readable, error)`: un «error» che nessuno ascoltava — l'unico che lo ascolta è il ciclo `for await`, e partiva solo dopo `open()`;
+- in Node un «error» senza ascoltatori è un'eccezione non catturata.
+
+La promessa del download rifiutava comunque («download cancelled»): non si appendeva nulla e lo stato restava `paused`, ma quell'errore usciva dal processo.
+
+**La correzione** (6 righe per file): si apre il .part per primo e il corpo nasce dentro il `try`, subito prima del ciclo che lo legge — fra la sua nascita e chi ascolta i suoi errori non c'è nessun `await`.
+
+**Le prove.** Due test nuovi, uno per funzione (`src/daemon/__tests__/local-model-download.test.ts`, `src/daemon/__tests__/box-setup.test.ts`): l'annullamento parte un giro di loop dopo la risposta (`setImmediate`), quando il download è fermo su `open` del .part — il completamento di `open()` arriva dal threadpool, sempre in un giro successivo. Raccogliono ciò che sarebbe un'eccezione non catturata (`process.setUncaughtExceptionCaptureCallback`) e pretendono l'elenco vuoto, poi il rifiuto «download cancelled» e il .part al suo posto.
+
+Ogni file, da solo (`TMPDIR=<temporanea della corsa> npx vitest run <file>`), 30 volte di fila, prima e dopo:
+
+```
+                                                     rosse   corse con «Errors»   ora
+base, il file com'era, da solo, Mac fermo             0/30    0                      22:55:13–22:56:11
+base, il file com'era, da solo, 10 core occupati      0/30    0                      22:57:04–23:00:12
+base + il test nuovo (prima versione)                 30/30   30 (solo box-setup)    23:05:22–23:07:55
+base + il test nuovo (versione finale)                30/30   0                      23:13:48–23:16:16
+dopo la correzione + il test nuovo (versione finale)  0/30    0                      23:10:26–23:13:03
+```
+
+«Rosse» conta le corse con uscita 1 per quel file: `Tests 1 failed | 13 passed (14)` in `local-model-download.test.ts`, 1 fallito su 67 in `box-setup.test.ts`, con `AbortError: This operation was aborted` nell'elenco. Dopo: 14 e 67 passati, ogni volta.
+
+I 21 file di prova che toccano il download: 705 test verdi (23:13:14).
+
+## S3 — la barra ha un ordine stabile
+
+**Che cosa cambia nel codice.** `orderRows` (`src/renderer/src/sidebar-utils.ts`) ordina: chi aspetta te, chi lavora adesso, l'ultima attività — e ora, a PARITÀ, il nome e poi l'id. Sulla base chi era a parità restava nell'ordine d'arrivo: un ordine che `orderRows` non sceglie e nessuno gli garantisce, perché dipende da chi passa la lista. Per i bot liberi è quello di `listAgents` (`created_at`); per i membri di una squadra creati insieme è l'ordine di ingresso; per quelli aggiunti uno alla volta, a parità di `joined_at`, è l'id — casuale. I nomi si confrontano per codice Unicode, non per lingua: lo stesso su ogni Mac. `OrderRow` chiede `name` e `id`; `SidebarBot` li ripete in testa alla riga; `TeamRows` li passa.
+
+**Visto ROSSO sulla base — `orderRows`** (`npx vitest run src/renderer/src/__tests__/sidebar-barra.test.ts`, cinque test nuovi scritti prima; `Tests 5 failed | 29 passed (34)` alle 23:22:09 e di nuovo, coi test finali, alle 23:22:58):
+
+```
+AssertionError: ordine d'arrivo: z m a b A: expected 'z m a b A' to be 'a m z b A'
+AssertionError: ordine d'arrivo: w-z w-a l-b l-a f-z f-a n-b n-a: expected 'w-z w-a l-b l-a f-z f-a n-b n-a' to be 'w-a w-z l-a l-b f-a f-z n-a n-b'
+AssertionError: expected [ 'z', 'a', 'c', 'b' ] to deeply equal [ 'z', 'a', 'b', 'c' ]
+AssertionError: expected [ undefined, undefined, undefined ] to deeply equal [ 'z', 'a', 'b' ]
+AssertionError: expected [ 'Zeta', 'Alfa' ] to deeply equal [ 'Alfa', 'Zeta' ]
+```
+
+I cinque: TUTTE le permutazioni di righe a parità; in ogni gruppo (tra chi aspetta, tra chi lavora, tra i fermi) e SOLO dopo lo stato e l'attività; l'attività più recente vince ancora; `buildSidebarModel` porta nome e id; la barra disegnata.
+
+VERDE dopo: 34 passati (23:23:01; ancora alle 23:47:03, dopo le ultime modifiche ai soli commenti); i 18 file che toccano la barra, 185 test verdi (23:23:14); `tsc --noEmit` pulito (23:47:22).
+
+**La galleria «chat-team»: il salto aveva UN'ALTRA causa.** `node scripts/galleria.mjs --solo chat-team`:
+
+```
+                                        corse   uguali  diverse   ora
+sulla base                              3       1       2         23:19:29–23:20:09
+col solo orderRows corretto             9       8       1         23:25:23–23:34:26
+con anche la scena corretta             6       6       0         23:40:19–23:41:26
+```
+
+«Diversa» è sempre `chat-team → diversa (22705100 px), uguale`, uscita 1: la chiara con «Ricerche · adesso» sopra «Scrittura · adesso» (sha1 `c2cee2fe…`) invece del contrario (`d736688e…`, com'è nell'approvata). La corsa diversa col solo `orderRows` è la settima, 23:33:53–23:34:04.
+
+La mia prima spiegazione era sbagliata: avevo letto che, a parità di `joined_at`, il demone ordina i membri per id (casuale) e l'ho presa per la causa. Misurato: non è così. `groupCreate` assegna `joined_at` a passi di un millisecondo («ordine di ingresso deterministico anche nello stesso millisecondo») e in tutte le 16 corse di misura l'ordine d'arrivo è stato «Bot > Ricerche > Scrittura».
+
+La causa vera: «Ricerche» e «Scrittura» nascono a orologio REALE (`createAgent` mette `createdAt = Date.now()`), a un soffio l'uno dall'altra. Nella barra chi non ha ancora parlato si ordina per istante di nascita (a `lastSendAt` mancante vale `createdAt`): nello stesso millisecondo è parità, e vince il nome («Ricerche» prima); in millisecondi diversi vince il più giovane («Scrittura» prima). Misurato con una sonda temporanea (stesso avvio della galleria: orologio fermo, servizi finti su porta 0; nessuna cattura, solo numeri), 8 corse con `orderRows` corretto e la scena ancora com'era, 23:31:36–23:32:27:
+
+```
+millisecondi fra le due nascite   disegnato              corse
+0                                 Ricerche > Scrittura   7
+1                                 Scrittura > Ricerche   1   (la terza, 23:31:49)
+ordine d'arrivo dal demone: «Bot > Ricerche > Scrittura» in tutte e 8
+```
+
+**La correzione della scena** (`scripts/lib/scene.mjs`, `fissaNascitaMembri`, chiamato in `prepara` e in `preparaDeterministica` prima del reload che rilegge gli agenti): i due membri nascono a un millisecondo di distanza, sull'orologio reale di oggi. Così «Scrittura» sta dopo «Ricerche», come nell'approvata, e la riga dice ancora «adesso» (l'orologio fermo del renderer è indietro rispetto a oggi).
+
+Non a un istante fisso del passato: `listAgents` ordina per `created_at` e il primo è il bot principale. La mia prima versione metteva i due membri a `ISTANTE_FERMO` e la scena rinominava «Bot» proprio Ricerche (misurato, 23:37:13–23:37:48: nessun agente «Ricerche», squadra «Bot > Scrittura»); corretto.
+
+VERDE dopo: la sonda di misura, 8 corse su 8 con un millisecondo fra le nascite e «Scrittura > Ricerche», agenti «Bot > Novità AI > Ricerche > Scrittura», 0 cartelle rimaste, 0 tentativi (23:39:19–23:40:09). La galleria vera, `--solo chat-team`: 6 corse di fila «uguale, uguale», uscita 0, sha1 uguali a quelli delle approvate (23:40:19–23:41:26). Poi la galleria intera, da sola: `scene: 118 · uguali 118 · diverse 0 · ROSSE 0 · nuove senza approvata 0 · errori 0`, uscita 0 (23:41:39–23:46:51).
+
+Le approvate non sono cambiate (`chat-team-chiaro.png` d736688e…, `chat-team-scuro.png` 4fcb84ca…): nessuna riapprovazione.
+
+## Che cosa i controlli NON vedono
+
+- S1 vede solo ciò che passa dalle funzioni avvolte, nei processi della suite che caricano `test-setup.ts`. Un FIGLIO che si collega da solo (una CLI, un llama-server, `git`, `curl`) non passa di lì — i 1357 della corsa sono tutti identificati dal comando e nessuno è un pezzo dell'app (sopra), ma è il comando, non la rete che hanno fatto — e un Worker (`worker_threads`) ha un suo `net` e un suo `fetch`. E guarda solo le due porte note, su questa macchina: un servizio vero su un'altra porta non lo ferma.
+- S1 ferma il tentativo e fa rosso il test: non dice CHI, fuori dalla suite, ha chiamato l'Ollama del Mac durante `npm test` sulla base (la domanda in fondo).
+- La conta dei processi di chiusura — Electron e `--homun-daemon` per eseguibile, la stessa del passo di fatto.mjs — non vede un demone del repo partito come `node out/main/daemon.js`. Due sono vivi, e non sono miei: pid 75804 (avviato il 26/11 alle 16:01:35, directory di lavoro il repo, in ascolto su 127.0.0.1:60102) e pid 8443 (alle 17:28:15, directory di lavoro `…/T/sandbot-isolamento-base-kjNo2O`, l'esportazione pura della base della fase prima, in ascolto su 127.0.0.1:60331): `node out/main/daemon.js --data …/sandbot-fase15-probe-MSdhHn/data-b` e `…/sandbot-fase15-probe-zmLizT/data-b`, con HOME finta nella stessa cartella di prova. È il demone B di `scripts/fase15-probe.mjs`; il primo è nato un secondo prima della fine dell'inventario della fase prima (16:01:36). Nello script il `SIGTERM` al demone B sta solo in fondo al cammino riuscito (`scripts/fase15-probe.mjs:309`): nel `catch`/`finally` che seguono si chiude il provider finto e si cancella la temporanea, ma il demone resta. Due corse finite prima di lì — la seconda dalla base pura — l'hanno lasciato vivo. Le tre cartelle non esistono più; il padre è launchd; nell'ambiente non c'è `SANDBOT_TEST_USER_DATA`, cioè il registro di I1 è spento. Quella fase ha chiuso scrivendo «0 processi del repo» a ogni corsa e «0 e 0» alla fine: con questa conta sono veri, e i due non si vedevano. A mezzanotte, per tre minuti, nessuno dei due ha avuto un socket oltre al proprio LISTEN. Dal codice dell'app, all'avvio il demone fa la scoperta dei provider locali (`src/daemon/runtime.ts:1200`, un `GET /api/tags`): col registro spento, se l'Ollama era acceso, la chiamata è andata a lui — poco dopo le 16:01:35 e le 17:28:15 del 26/11. Sulle 18:37 non dicono niente: non li ho guardati allora. Non li ho chiusi: non li ho avviati io (domanda in fondo).
+- S2 riproduce una sola finestra: l'annullamento mentre il .part si apre. Se è `open()` a fallire da solo (disco pieno, permessi) il corpo della risposta non viene né creato né consumato: com'era sulla base, senza errori in giro, e non l'ho toccato.
+- S3 fissa l'ordine dei bot e dei MEMBRI di una squadra. L'ordine delle SQUADRE a parità di ultima attività (`teams.sort`, in `sidebar-utils.ts`) è ancora quello d'arrivo: non era nella spec, non l'ho toccato.
+- La stabilità di «chat-team» nasce dalla scena (i due membri a un millisecondo di distanza): nessun test della suite lo pretende. Se qualcuno la cambia, è la galleria a diventare rossa — a volta.
+- `addTeamMember`, a parità di `joined_at`, ordina ancora per id casuale: per l'ordine della barra non conta più (vince il nome), ma l'ordine d'arrivo dei membri lì resta casuale.
+- La galleria: `--approva` insieme a `--solo` CANCELLA le approvate che non sono selezionate. Non l'ho corretto (freeze) e non l'ho mai usato in questa fase: le riapprovazioni, se servono, a mano, una alla volta.
+- L'inventario sulla base conta davvero per una corsa su cinque: le prime quattro non sono una prova su socket e fetch (vedi S1).
+- Le catture delle sonde nel repo non le confronta nessuno: le sonde guardano il testo e il DOM, scrivono i PNG e basta. Solo la galleria confronta le sue con le approvate. Quindi un'interfaccia cambiata si vede nelle catture delle sonde soltanto a occhio (due coppie le ho guardate: sotto, nella corsa di fatto.mjs).
+- Le sonde non congelano le animazioni: una cattura può prendere un menu o un velo a metà di una transizione.
+
+## Rossi della base che NON sono di questa fase
+
+- Le 32 sonde rosse sulla base pura (l'inventario della fase precedente, sezione sotto) non le ho rifatte girare qui: restano come là, non sono di questa fase. fatto.mjs ne ha girate 6, tutte verdi (sotto).
+- `src/__tests__/guardie/porte-modelli.test.ts` è stata rossa per cinque corse per colpa del MIO file di prove (vedi S1): un rosso mio, chiuso nel commit S1.
+- Nella galleria `dialogo-nuovo` porta una maschera dichiarata (il colore della mascotte è hash di un id casuale): non è un rosso, è dichiarato.
+- Le righe `[skills] ref 0123456789… non trovato` e `fatal: git upload-pack: not our ref` nell'uscita della suite sono il rumore di sempre della base: ci sono nelle corse rosse come in quelle verdi.
+
+## La corsa di fatto.mjs
+
+Il comando, DA SOLO — nessun'altra sonda, suite o galleria in giro — dopo l'ultimo commit di codice (`2a5d7315e`, S3) e prima di questo REPORT, con l'uscita su file:
+
+```
+node scripts/fatto.mjs --sonde fase-design,fase-plugin-pulita,fase-b20-bug,fase-centro,fase-squadra,fase-isolamento-locale
+```
+
+**Inizio 2026-11-26 23:47:56 CET, fine 2026-11-27 00:13:35 CET** (25 min 39 s), uscita 0 — tolte dalle righe le vie dei file di log:
+
+```
+INIZIO fatto.mjs 2026-11-26 23:47:56 · HEAD 2a5d7315e · ?? out-review/ ?? scripts/vetrina/
+[fatto] ✓ typecheck · 1.1 s
+[fatto] ✓ suite: npm test · 58.3 s
+[fatto] ✓ suite: ci-sim · 1 min 2 s
+[fatto] ✓ build · 3.6 s
+[fatto] ✓ galleria · 5 min 13 s
+[fatto] ✓ sonda fase-design · 15 min 9 s
+[fatto] ✓ sonda fase-plugin-pulita · 20.8 s
+[fatto] ✓ sonda fase-b20-bug · 17.9 s
+[fatto] ✓ sonda fase-centro · 13.6 s
+[fatto] ✓ sonda fase-squadra · 2 min 13 s
+[fatto] ✓ sonda fase-isolamento-locale · 6.7 s
+[fatto] ✓ processi del repo a 0 · 0.1 s · 0 Electron, 0 daemon
+[fatto] ✓ nessuna temporanea nuova (del repo) e radice vuota · 0 s · 0 nuove del repo, 0 residui nella radice
+[fatto] VERDE in 25 min 39 s
+EXIT 0 · FINE 2026-11-27 00:13:35
+```
+
+Dai log dei singoli passi (`fatto-uscite/`, tutti con codice 0):
+
+- typecheck: nessun errore (uscita vuota).
+- `npm test`: `Test Files 573 passed (573)`, `Tests 7009 passed | 2 skipped (7011)`, iniziata alle 23:47:58, 57.57 s; nessuna riga «Errors», nessun «Unhandled». Sulla base erano 572 file e 6984 test: +1 file e +25 test (18 della guardia, 2 del download, 5 della barra).
+- `npm run test:ci-sim`: `Test Files 571 passed | 2 skipped (573)`, `Tests 7005 passed | 6 skipped (7011)`, iniziata alle 23:48:56, 60.87 s; nessuna riga «Errors».
+- build: `✓ built`.
+- galleria: `scene: 118 · uguali 118 · diverse 0 · ROSSE 0 · nuove senza approvata 0 · errori 0`; `peso di galleria/approvate/: 8.4 MB (limite 15 MB)`; `servizio locale finto: 18 richieste — 12 /api/tags, 6 /api/show, 0 inattese`.
+- le sei sonde, una alla volta, in quest'ordine: `CORSA fase-design: 8/8 controlli OK`, `CORSA fase-plugin-pulita: 114/114 controlli OK`, `CORSA fase-b20-bug: 77/77 controlli OK`, `CORSA r1: 56/56 controlli OK` (centro), `CORSA r1: 33/33 controlli OK` (squadra), `CORSA: 28/28 controlli OK` (isolamento-locale). In tutte e sei: `I1: 0 connessioni verso i servizi LLM locali veri (il registro è vuoto)`.
+- processi: Electron del repo `(nessuna)`, `--homun-daemon` del repo `(nessuna)`. Temporanee: nuove del repo rispetto all'inizio della corsa `(nessuna)`, residui nella radice della corsa `(nessuno)`.
+
+**C5, da sola, subito dopo** — `node scripts/fase-linguaggio-probe.mjs`, 13 pagine misurate («misurata …»):
+
+```
+INIZIO C5 2026-11-27 00:14:04
+…
+I1 registro-servizi-locali: 0 connessioni verso i servizi LLM locali veri
+DIFFERENZE: 0 — le pagine dello stesso modello coincidono
+EXIT 0 · FINE 2026-11-27 00:17:26
+```
+
+**Catture e misure, riportate a HEAD prima del tag.** Le sonde di fatto.mjs hanno riscritto 187 catture (154 in `docs/catture/fase-design/`, 12 in `fase-b20-bug/`, 11 in `fase-plugin-pulita/`, 4 in `fase-squadra/`, 2 in `fase-approvazioni-chiare/`, 2 in `fase-centro/`, 2 in `fase-ritocchi-beta18/`) e una misura (`docs/misure/fase-design/dopo.json`: cambia il `build` e le misure, 815 righe aggiunte e 1013 tolte). C5 non ne ha riscritta nessuna in più. `galleria/approvate/` non è cambiata.
+
+Che cosa differiva da HEAD, prima di ripristinare (tutte e 187 sono del 24/11: 36a2f15af, e otto di `fase-b20-bug` di d5d173f30):
+
+- le 154 di `fase-design` hanno dimensioni diverse da quelle a HEAD: lì sono i composti «prima/dopo affiancati» (2568x830, 3368x1080, 1808x670: il doppio della larghezza), la sonda di oggi scrive la cattura sola (1280x800, 1680x1050, 900x640);
+- le altre 33 hanno la stessa dimensione. Una è uguale al pixel (`fase-b20-bug/2-b2-risposta-vuota-4-volte-1280x800-scuro.png`: diversi solo i byte); 32 hanno pixel diversi oltre l'1%, da 5538 su 3.840.000 (`fase-plugin-pulita/2-scheda-account-1200x800-scuro.png`) a 4.083.420 su 4.096.000 (`fase-b20-bug/6-b4-conferma-elimina-1280x800-chiaro.png`);
+- due coppie le ho guardate a occhio. `fase-squadra/1-chat-di-squadra.png`: cambiano le mascotte (quadratini rosa a HEAD, il robot oggi) e il colore dei pallini di Capo e Turismo, che è il colore del bot — hash di un id casuale. `fase-b20-bug/6-b4-conferma-elimina-1280x800-chiaro.png`: la cattura di oggi ha la freccia indietro nell'intestazione della Libreria, i filtri «Bot: Tutti i bot» e «Tipo: Tutti i tipi», la data di oggi (27/11/2026) al posto del 24/11/2026, la conferma su una superficie colorata e con un velo più leggero, e il menu della voce ancora visibile, sbiadito, dietro la conferma — in quella a HEAD il menu non si vede. Nessuno dei 12 file toccati in questa fase è `LibraryPanel.tsx` o un CSS: viene da prima della base, e non ho cercato in quale fase. Se il menu resti davvero dietro la conferma, o sia solo la cattura presa mentre si chiudeva, non l'ho misurato.
+
+Ripristino: `git checkout -- docs/catture docs/misure`. Dopo: `git status --porcelain` mostra solo `?? out-review/` e `?? scripts/vetrina/`, e nessun file in quelle due cartelle è stato toccato dopo le 22:00 del 26/11.
+
+Che cosa girava intorno alla corsa, senza toccarla: i due daemon orfani (sopra) e `opencode` — il suo `opencode run` è partito alle 00:04:32, mentre girava la sonda fase-design (vedi S1). Nessuno dei tre è del repo di questa corsa: fatto.mjs è stato lanciato da solo.
+
+## Scelte che ho fatte io
+
+- **S1, una guardia fissa in tutta la suite** invece di correggere dei test: l'elenco dei test da correggere, sulla base, era vuoto. Il controllo resta, perché il difetto (leggere i modelli del Mac dell'utente in una prova) può nascere in qualunque test nuovo.
+- **S1, fa rosso anche chi inghiotte.** Fermare la richiesta e basta non sarebbe bastato: l'elenco vivo di Ollama ha un catch per ogni modello.
+- **S1, le prove della guardia usano porte libere**, passate come opzione: le vere non si toccano nemmeno nei test che le nominano. E il file di prove legge le porte dal registro, perché la guardia `porte-modelli` della base vieta di scriverle.
+- **S2, corretto il codice** in entrambe le funzioni: la causa era là, non nei test.
+- **S3, nome e id per codice Unicode**, non `localeCompare`: lo stesso risultato su ogni Mac, qualunque sia la lingua di sistema.
+- **S3, `OrderRow` chiede `name` e `id`**: chi chiama `orderRows` deve passarli, lo controlla `tsc`.
+- **S3, la scena corretta in tutti e due gli setup** (`prepara` e `preparaDeterministica`): il salto nasceva dalla nascita reale dei membri, che c'è in tutti e due.
+- **S3, l'orologio reale e non un istante fisso del passato** per la nascita dei due membri: `listAgents` ordina per `created_at` e il primo è il bot principale (vedi sotto, il mio sbaglio).
+- **S3, nessun test statico in più sulla scena**: la misura l'ha fatta la sonda temporanea, la stabilità la vede la galleria.
+- **S3, non ho riapprovato `chat-team`**: le approvate erano già giuste; è la corsa che ora è stabile.
+- **S3, l'ordine delle squadre a parità non l'ho toccato**: non era nella spec.
+- **Non ho aggiunto `fase-isolamento-locale` a un elenco fisso**: fatto.mjs prende qualunque `scripts/<nome>-probe.mjs`, e la spec lo nomina.
+
+**Sbagli miei, detti com'erano:**
+
+- S3: la mia prima aspettativa in un test era sbagliata (`['a','b','z']`; giusto `['a','z','b']`) — sul codice corretto, 1 rosso su 34 (23:22:41). Ho corretto il test, non il codice.
+- S3: la mia prima causa del salto della galleria era sbagliata (l'ordine d'arrivo per id casuale): l'avevo già scritta nei commenti; la misura l'ha smentita e i commenti sono stati corretti prima del commit.
+- S3: la mia prima versione della scena metteva i due membri a `ISTANTE_FERMO`, e toglieva il posto di bot principale al bot vero (misurato, 23:37:13–23:37:48). L'uscita di quelle sei corse è stata sovrascritta nel file: resta solo nella conversazione.
+- S3: le prime 12 corse della sonda di misura sono state errori della sonda (sei col risultato non atteso: `Cannot read properties of undefined`, 23:30:00–23:30:32; sei con la stampa saltata da `process.exit`, 23:30:51–23:31:29). Nessuna ha lasciato temporanee.
+- S2: la prima versione del test nuovo faceva da sola un rifiuto non gestito («Unhandled Rejection: Error: download cancelled», da `downloadPkg`). Sul codice corretto la corsa era verde ma con «Errors 1 error» (81 passati, 23:09:04); sulla base, accanto ai due test rossi giusti, c'era quello (2 falliti | 79 passati, 23:03:20); nei 30 giri compariva in tutti i 30 di `box-setup` e in nessuno dei 30 di `local-model-download`. Corretto prima del commit: i test finali non hanno «Errors» (81 passati alle 23:10:16 e alle 23:16:23; 0 su 120 giri, 60 sulla base e 60 dopo).
+- S1: nel messaggio del commit ho scritto «cinque corse, ogni connessione TCP contata»: il conteggio completo è di una sola, la quinta (vedi sopra). Nello stesso messaggio ho scritto che la causa più plausibile delle chiamate all'Ollama è «un altro programma del Mac»: quando l'ho scritto era un'ipotesi senza nome. L'ho guardato solo alla chiusura, e per caso (`opencode`: sopra): per le 18:37 resta non provata.
+- L'esperimento coi 10 core occupati: alla fine delle 30 corse i processi che li tenevano occupati (`node -e 'for(;;){}'`) non sono stati chiusi dal mio comando; me ne sono accorto e li ho chiusi a mano poco dopo le 23:00. Non erano processi del repo; alle 00:28, prima di scrivere qui, nessuno era vivo.
+- Il primo confronto delle catture riscritte con quelle a HEAD (00:18:40–00:19:20) dava numeri senza senso: uscita su `null:` e coppie di dimensioni diverse contate come se fossero confrontabili. Rifatto (dalle 00:20:05) con la chiamata della galleria, e contati i pixel solo nelle coppie con la stessa dimensione: quelli di sotto.
+- Le ultime modifiche prima del commit S3 erano ai soli commenti, dopo l'ultima corsa verde: ho rifatto girare il file (34 passati, 23:47:03).
+
+## Vincoli rispettati
+
+- Niente Docker, niente `container` vero (solo CLI e installer finti), niente eval col modello, niente dist firmata: la suite e ci-sim sono verdi senza (573 e 571 file, sopra).
+- Nessun download vero, niente Composio vero, nessun pacchetto nuovo: `npm install` mai lanciato, `package.json` e il lock sono quelli della base. Rete solo su 127.0.0.1, su porte scelte dal sistema (porta 0) per i servizi finti, che ho chiuso a fine prova.
+- L'Ollama dell'utente: non avviato, non fermato, mai chiamato sulle porte 11434 e 1234, i suoi file non letti. L'unica prova che nomina quegli indirizzi è la sonda temporanea delle tre strade vere dell'app (S1), che si è fermata nell'involucro della guardia prima che il socket esistesse: «La connessione NON è partita», nell'uscita.
+- Mai `open` vero dell'Installer, mai `osascript`, mai `sudo`. Nessun comando negato.
+- Temporanee solo con `mktemp -d` nella cartella `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/`, sempre per via letterale; ogni cartella cancellata a fine prova o a fine corsa; nei test sempre `TEST_TMP_BASE`. La mia cartella di lavoro (quella degli inventari, dei log e di questo testo) l'ho cancellata prima del commit di questo REPORT. Niente in `/tmp`. In fatto.mjs: 0 temporanee nuove del repo, 0 residui nella radice della corsa.
+- Mai avviato l'app o il daemon su `~/Library/Application Support/sandbot`, mai letto né copiato i suoi file. Mai toccato `~/Library/Application Support/com.apple.container/`, `/Applications/Homun.app`, il daemon che gira da lì, `~/Library/Logs/Homun`.
+- Niente `screencapture`: catture solo via CDP. Mai `--update-lock` di prepare-engramma; il build è `electron-vite build` diretto e non ha scritto in `vendor/` (git status pulito a parte `out-review/` e `scripts/vetrina/`).
+- Non toccati `vendor/llama`, `vendor/engramma`, `dist-installers/`, `~/Projects/Bot/engramma`, `~/Projects/Homun/homun2` e il llama-server di Homebrew; `out-review/` e `scripts/vetrina/` intatti.
+- Mai letti i file veri di configurazione delle altre app: solo HOME finta.
+- Migrazioni DB: nessuna, nemmeno additive. I 12 file toccati in tutto: 4 di test, la guardia e il setup dei test, il registro, 2 del download, 2 della barra, la scena.
+- Sonde una alla volta, uscita su file, mai `| grep | tail` su un processo vivo. Catture e misure delle altre fasi riportate a HEAD (sopra).
+- REPORT.md: questa sezione in cima, coda byte-identica (2.456.617 byte, il file di prima per intero, verificati con `cmp`). CHANGELOG invariato.
+- Chiusura: processi Electron e `--homun-daemon` DEL REPO, contati per eseguibile (`ps -axo pid=,comm=`): **0 e 0**. Due processi del repo NON miei però sono vivi — i due daemon B orfani di `scripts/fase15-probe.mjs`, della fase prima — e quella conta non li vede: non li ho chiusi (domanda in fondo). Nella radice T/ nessuna cartella `sandbot-*`, `fatto-*` o `homun-*` fuori la mia, cancellata prima di questo commit; le altre voci della radice sono di altre app e dello strumento che mi fa girare i comandi (`zcode-bash-*`, `zcode-official-*`): non mie, non toccate. Tag annotato `fase-isolamento-suite`; nessun push, nessun tag `v*`.
+
+## Domande aperte
+
+- **Chi ha chiamato l'Ollama durante `npm test` sulla base — e S1 si chiude così?** La spec di questa fase legge nel log dell'Ollama dell'utente, durante `npm test` della corsa delle 18:37: `GET /api/tags` alle 18:37:23, dodici `POST /api/show` alle 18:37:24, e di nuovo alle 18:37:54, tutte da 127.0.0.1. S1 chiedeva di far fallire con la guardia «almeno il test (o i test)» che le hanno prodotte, con l'elenco. L'elenco è vuoto: sulla base, suite instrumentata, nessun test ci ha provato (conteggio completo in una corsa su cinque), nessun figlio è un pezzo dell'app, e con la guardia fissa la suite intera è verde — nessun test da correggere. Dall'altra parte c'è `opencode`, vivo da prima, con lo stesso codice di scoperta (nella sezione S1). Che le chiamate delle 18:37 siano sue non l'ho provato, e non posso provarlo io: il log dell'Ollama non dice chi chiama, e i file di opencode non li leggo. **Accetti S1 chiuso così — la guardia fissa e verde, l'elenco dei test vuoto, la causa cercata fuori dalla suite — o vuoi che la fase resti da riprendere finché non hai guardato tu il log dell'Ollama (e, se vuoi, quello di opencode) intorno alle 18:37:23–54?** Il tag `fase-isolamento-suite` l'ho messo come dice la spec: è locale, non spinto, e si sposta.
+- **I due daemon orfani** (pid 75804 e 8443, il demone B di `scripts/fase15-probe.mjs`: nella sezione «Che cosa i controlli NON vedono»): non li ho avviati io e non li ho chiusi. Non mi blocca: **vuoi che li chiuda, e che chiuda anche il buco nello script — il demone B fermato anche quando lo scenario fallisce — in un commit a parte?**
+- **Le catture delle sonde nel repo** sono del 24/11 e mostrano un'interfaccia di tre giorni prima della base (sopra); le 154 di `fase-design` sono di un'altra forma da quelle che la sonda scrive oggi. Le ho lasciate a HEAD, come dice la spec. Non mi blocca: **vuoi che vengano rinfrescate una volta, in un commit a parte, o restano ferme all'ultima fase in cui sono state guardate?**
+
 # REPORT FASE ISOLAMENTO-LOCALE: l'app in prova non tocca l'Ollama del Mac, e la pulizia conta solo i suoi llama-server
 
 Base: `main` al tag `fase-linguaggio-ritocchi` (a29cc628), verificata: HEAD era esattamente lì, git pulito a parte `out-review/` e `scripts/vetrina/` (non toccate). È una correzione delle prove, non una funzione nuova: l'app vera non cambia. Due commit, uno per punto: I1 `af73c0098`, I2 `eb2a658d4`. In prova l'app sotto esame faceva richieste vere ai servizi LLM locali del Mac; ora o sono finti o non c'è nessun indirizzo, e un registro nel processo principale (e nel daemon) lo prova a ogni corsa. Il controllo di pulizia K4 delle sonde contava ogni `llama-server` del Mac; ora conta solo quelli della corsa.
