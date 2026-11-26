@@ -77,6 +77,33 @@ export function liveModelsUrl(p: Pick<ProviderConfig, 'baseUrl' | 'kind'>): stri
   return openAiCompatBase({ baseUrl: base }) + '/models'
 }
 
+// ---- I1 (fase isolamento-locale): l'indirizzo dei servizi locali si inietta ----
+
+/**
+ * Decide il base URL con cui il MAIN parla a un provider: lo imposta
+ * all'avvio solo il main (local-services-address.ts; nell'app vera restituisce
+ * sempre l'indirizzo letto). Il renderer non lo imposta mai: questo modulo
+ * resta senza `process`.
+ */
+export type RisolutoreServizioLocale = (kind: ProviderKind, baseLetto: string) => string | null
+let risolutoreServizioLocale: RisolutoreServizioLocale | null = null
+
+export function setRisolutoreServizioLocale(risolutore: RisolutoreServizioLocale | null): void {
+  risolutoreServizioLocale = risolutore
+}
+
+/**
+ * Il base URL GREZZO di un provider (senza la regola /v1), già con l'eventuale
+ * indirizzo iniettato in prova al posto di quello noto di Ollama o LM Studio;
+ * null = in prova quel servizio è assente e verso di lui non deve partire
+ * nessuna richiesta. È l'unica porta per cui passano scoperta, elenco vivo,
+ * capability (/api/show) e adattatore.
+ */
+export function baseServizioLocale(p: Pick<ProviderConfig, 'kind' | 'baseUrl'>): string | null {
+  const base = (typeof p.baseUrl === 'string' ? p.baseUrl : '').trim().replace(/\/+$/, '')
+  return risolutoreServizioLocale === null ? base : risolutoreServizioLocale(p.kind, base)
+}
+
 /** Gli header dell'elenco vivo: anthropic usa x-api-key + anthropic-version, gli altri Bearer. */
 export function liveModelsHeaders(p: Pick<ProviderConfig, 'kind' | 'apiKey'>): Record<string, string> {
   if (p.kind === 'anthropic') {
@@ -192,7 +219,7 @@ export interface OllamaShowResult {
  * cache vecchia senza thinking resta valida per le caps e si rilegge qui.
  */
 export async function readOllamaCapabilities(
-  p: Pick<ProviderConfig, 'id' | 'baseUrl'>,
+  p: Pick<ProviderConfig, 'id' | 'baseUrl'> & { kind?: ProviderKind },
   model: string,
   timeoutMs = 1500
 ): Promise<OllamaShowResult> {
@@ -200,7 +227,9 @@ export async function readOllamaCapabilities(
   const d = digestOf.get(key)
   const cached = d ? capByDigest.get(`${key}|${d}`) : undefined
   if (cached && cached.thinking !== undefined) return { caps: cached.caps, thinking: cached.thinking }
-  const base = (typeof p.baseUrl === 'string' ? p.baseUrl : '').replace(/\/+$/, '')
+  // I1 (fase isolamento-locale): l'indirizzo iniettato in prova; null = il servizio è assente
+  const base = baseServizioLocale({ kind: p.kind ?? 'ollama', baseUrl: p.baseUrl })
+  if (base === null) return { caps: cached?.caps ?? null, thinking: null, error: 'local service absent in test' }
   try {
     const r = await fetch(base + '/api/show', {
       method: 'POST',

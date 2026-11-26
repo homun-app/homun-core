@@ -13,7 +13,7 @@
 //   · la posizione (dal fondo riga) e la misura dell'AZIONE IN RIGA.
 // Fallisce se due pagine dello stesso modello differiscono anche di 1 px, o
 // se una pagina cambia larghezza cambiando scheda. Uscita 1 col conteggio.
-import { avviaSonda, ROOT } from './lib/sonda.mjs'
+import { avviaSonda, ROOT, messaggioTentativiLocali } from './lib/sonda.mjs'
 import { PAGES, preparaDeterministica, closeOverlays, openPage, openOverlay, ISTANTE_FERMO } from './lib/scene.mjs'
 import { modelloFinto } from './lib/modello-finto.mjs'
 
@@ -97,6 +97,7 @@ const run = async () => {
   await s.avvia()
   await s.viewport(1280, 800)
   await s.attendi(`!!document.querySelector('[data-testid="guide-view"]')`, { entro: 25_000, motivo: 'la guida iniziale compaia' })
+  await s.scena('setup deterministico')
   const { ctx } = await preparaDeterministica(s, { providerPort: porta })
   log('setup deterministico fatto')
 
@@ -114,6 +115,8 @@ const run = async () => {
     if (!page) throw new Error(`pagina sconosciuta: ${id}`)
     for (const [w, h] of [[1280, 800], [900, 640]]) {
       for (const tema of ['chiaro', 'scuro']) {
+        // I1: la scena corrente, per il registro delle connessioni verso i servizi locali veri
+        await s.scena(`${id} ${w}/${tema}`)
         await s.viewport(w, h)
         await s.tema(tema)
         await closeOverlays(s)
@@ -157,9 +160,19 @@ const run = async () => {
       differenze.push(`${modelloChiave} · ${metrica} · ${chiave.split('|').slice(3).join(' ')}: ${valori.map(([p, v]) => `${p}=${v}`).join(', ')}`)
     }
   }
-  await s.fine({ porta }).catch(() => undefined)
+  const fine = await s.fine({ porta }).catch(() => undefined)
   await modello.chiudi?.()
   console.log('')
+  // I1 (fase isolamento-locale): anche questa sonda legge il REGISTRO delle connessioni verso i
+  // servizi LLM locali veri del Mac (lo scrive l'app in prova): una corsa che ne ha fatta partire
+  // una è ROSSA, con l'URL e la scena
+  const tentativiLocali = fine?.tentativiLocali ?? []
+  if (tentativiLocali.length) {
+    console.log(`I1 registro-servizi-locali: ✗ ${messaggioTentativiLocali(tentativiLocali)}`)
+    process.exitCode = 1
+    return
+  }
+  console.log('I1 registro-servizi-locali: 0 connessioni verso i servizi LLM locali veri')
   if (differenze.length > 0) {
     console.log(`DIFFERENZE: ${differenze.length}`)
     for (const d of differenze) console.log('  ✗ ' + d)

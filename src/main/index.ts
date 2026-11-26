@@ -64,10 +64,24 @@ import { secondInstanceWhileQuitting } from './quit-behavior'
 // U6: il tray si distrugge all'uscita
 import { createTray, refreshTray, destroyTray } from './tray'
 import { guardStdioEpipe } from './stdio-guard'
+import { installaRegistroServiziLocali } from './local-services-registry'
+import { installaIndirizziLocaliInProva } from './agent/local-services-address'
 
 // un log su uno stdout/stderr ormai chiuso non deve aprire il dialogo
 // «A JavaScript error occurred in the main process» (vale anche per il daemon)
 guardStdioEpipe([process.stdout, process.stderr])
+
+// I1 (fase isolamento-locale): in prova (SANDBOT_TEST_USER_DATA) i servizi
+// LLM locali sono FINTI o ASSENTI, mai quelli veri del Mac. Il registro delle
+// connessioni verso le porte vere si installa QUI, in entrambe le modalità
+// (UI e daemon sono lo stesso eseguibile) e prima che parta qualunque
+// richiesta — è il daemon che scopre i servizi locali e legge l'elenco dei
+// modelli. Nell'app vera non installa nulla.
+void installaRegistroServiziLocali({ env: process.env, modo: isDaemonMode(process.argv) ? 'daemon' : 'ui' })
+// E qui si decide, dall'env, con quale indirizzo il main parla a Ollama e LM
+// Studio: in prova quello FINTO iniettato dal motore (SANDBOT_TEST_LOCAL_LLM_URLS)
+// o nessuno; nell'app vera niente cambia.
+installaIndirizziLocaliInProva(process.env)
 
 // fase 16 (U0b): la cartella dati reale dell'utente è …/Application
 // Support/sandbot (minuscolo), di prima del cambio di nome visibile in

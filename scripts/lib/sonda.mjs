@@ -19,7 +19,7 @@
 // i modi di morire che NESSUN gestore può prendere (SIGKILL alla sonda,
 // kill del padre che si porta via la catena).
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
 import { stopProbeDaemons } from './probe-daemons.mjs'
@@ -32,6 +32,35 @@ const ELECTRON = join(ROOT, 'node_modules', 'electron', 'dist', 'Electron.app', 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const pidAlive = (pid) => { try { process.kill(pid, 0); return true } catch { return false } }
 const withTimeout = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + what)), ms))])
+
+// ---- I1 (fase isolamento-locale): il REGISTRO delle connessioni verso i servizi locali VERI ----
+// In prova (SANDBOT_TEST_USER_DATA) l'app non deve toccare l'Ollama e il LM
+// Studio veri del Mac: i servizi locali sono finti o assenti. Il controllo lo
+// tiene l'app stessa (src/main/local-services-registry.ts): il main — UI e
+// daemon — scrive una riga JSON nel registro per OGNI connessione che parte
+// verso le porte di quei servizi su questa macchina, appena parte (così il
+// rosso si vede anche se il servizio vero è spento), con l'URL della richiesta
+// e la scena corrente (il file che `scena()` scrive). Il registro sta nella
+// cartella DATI della prova, così le sonde che non usano il motore lo trovano
+// allo stesso posto: `join(DATA, NOME_REGISTRO_LOCALI)`.
+export const NOME_REGISTRO_LOCALI = 'registro-servizi-locali.jsonl'
+
+/** I1: il percorso del registro per una cartella dati di prova. */
+export const percorsoRegistroLocali = (dataDir) => join(dataDir, NOME_REGISTRO_LOCALI)
+
+/** I1: i tentativi registrati finora in una cartella dati (file assente = nessuno). Una riga illeggibile resta com'è, in `riga`. */
+export function leggiTentativiLocali(dataDir) {
+  let testo = ''
+  try { testo = readFileSync(percorsoRegistroLocali(dataDir), 'utf8') } catch { return [] }
+  return testo.split('\n').filter(Boolean).map((riga) => { try { return JSON.parse(riga) } catch { return { riga } } })
+}
+
+/** I1: il dettaglio del controllo — quanti tentativi, verso quale URL (o host:porta), da quale processo, in quale scena. Vuoto quando non ce ne sono. */
+export function messaggioTentativiLocali(tentativi) {
+  if (!Array.isArray(tentativi) || tentativi.length === 0) return ''
+  const righe = tentativi.map((r) => r.riga ?? `${r.url ?? `${r.host}:${r.porta}`} (${r.via}, ${r.modo} pid ${r.pid}, scena: ${r.scena ?? '—'})`)
+  return `${tentativi.length} tentativi verso i servizi locali veri: ${righe.join(' | ')}`
+}
 
 /** Una porta libera su 127.0.0.1, scelta dal sistema (listen(0)): mai una porta fissa, mai calcolata da --run. */
 export const portaLibera = async () => {
@@ -136,6 +165,8 @@ export async function avviaSonda({
   let vedetta = null
   let cdp = null
   let rete = null
+  // I1: la scena corrente la legge il registro dell'app a ogni connessione
+  const fileScena = join(tmp, 'scena-corrente.txt')
   const env = {
     HOME: home,
     PATH: process.env.PATH,
@@ -145,6 +176,7 @@ export async function avviaSonda({
     SANDBOT_TEST_USER_DATA: data,
     SANDBOT_TEST_FAKE_KEYCHAIN: join(data, 'keychain-finta.json'),
     SANDBOT_TEST_FAKE_SAFESTORAGE: join(data, 'safestorage-finta.json'),
+    SANDBOT_TEST_LOCAL_LLM_SCENE: fileScena,
     ...(envExtra ?? {})
   }
   const stopApp = () => { try { app?.kill('SIGTERM') } catch { /* già via */ } }
@@ -193,6 +225,15 @@ export async function avviaSonda({
     get pid() { return app?.pid ?? null },
     appLog: () => appLog,
     t: () => `+${((Date.now() - T0) / 1000).toFixed(1)}s`,
+    /**
+     * I1: la scena che la corsa sta facendo (la galleria la scrive prima di
+     * ogni cattura; una sonda quando cambia pagina). Il registro dell'app la
+     * allega a ogni connessione verso i servizi locali veri, così il rosso
+     * dice QUALE scena li ha toccati.
+     */
+    scena: (nome) => { writeFileSync(fileScena, String(nome)); return String(nome) },
+    /** I1: le connessioni registrate finora verso i servizi locali veri (si legge anche dopo `fine()`: il risultato è nel valore di ritorno). */
+    tentativiLocali: () => leggiTentativiLocali(data),
     /** Avvia l'app e collega CDP (una volta sola): risolve con la pagina principale (non i PiP). */
     avvia: async () => {
       if (app) throw new Error('l\'app è già avviata: UN avvio per sonda')
@@ -588,10 +629,13 @@ export async function avviaSonda({
         await sleep(400)
       }
       await stopProbeDaemons(prefix, { log: () => undefined }).catch(() => undefined)
+      // I1: il registro si legge PRIMA che la cartella sparisca — poi resta solo il valore di ritorno
+      const tentativiLocali = leggiTentativiLocali(data)
       const r = await cleanupProbeRun({ pids: [], prefix, dirs: [tmp], log: () => undefined, capMs: 20_000 }).catch(() => ({ left: ['?'] }))
       const left = countProbeDirs(prefix, [tmp])
       fermaVedetta()
-      return { cartelleRimaste: r?.left ?? [], conteggio: left }
+      if (tentativiLocali.length > 0) log('✗ I1: l\'app in prova ha toccato i servizi locali veri —', messaggioTentativiLocali(tentativiLocali))
+      return { cartelleRimaste: r?.left ?? [], conteggio: left, tentativiLocali }
     }
   }
   return s

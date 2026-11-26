@@ -18,7 +18,7 @@ import { uiText, uiError } from '../ui-language'
 import { UI } from '../../shared/ui-messages'
 import type { ProviderConfig, ProviderKind, ProviderPublic, ProviderSaveInput, ModelInfo, SealedKey, MainModel } from '../../shared/types'
 export type { ProviderSaveInput } from '../../shared/types'
-import { liveModelsUrl, liveModelsHeaders, ollamaCapabilities, setOllamaCapabilities, readOllamaCapabilities, parseOllamaShow, KNOWN_BASE_URLS } from './live-models'
+import { baseServizioLocale, liveModelsUrl, liveModelsHeaders, ollamaCapabilities, setOllamaCapabilities, readOllamaCapabilities, parseOllamaShow, KNOWN_BASE_URLS } from './live-models'
 import { isLocalProvider } from '../../shared/network-host'
 import { sealProviderKey, openProviderKey, keyHintOf, isSealedKey, type ProviderKeyDeps } from './provider-keys'
 import { getProvidersKey, type SecurityRunner } from '../../daemon/keychain'
@@ -221,8 +221,14 @@ export async function discoverProviders(): Promise<ProviderPublic[]> {
   ]
   await Promise.all(
     probes.map(async (p) => {
+      // I1 (fase isolamento-locale): in prova verso l'indirizzo VERO non si
+      // prova nulla — si prova il servizio FINTO iniettato dal motore di sonde
+      // e galleria, o nessuno. Il provider trovato resta salvato con l'indirizzo
+      // noto, come nell'app vera: la sostituzione è solo al momento della richiesta.
+      const base = baseServizioLocale({ kind: p.kind, baseUrl: p.url })
+      if (base === null) return
       try {
-        const ctl = await fetch(p.url.replace(/\/$/, '') + (p.kind === 'ollama' ? '/api/tags' : '/v1/models'), {
+        const ctl = await fetch(base + (p.kind === 'ollama' ? '/api/tags' : '/v1/models'), {
           signal: AbortSignal.timeout(1500)
         })
         if (ctl.ok) found.push(p)
@@ -303,9 +309,14 @@ export async function listProviderModels(p: ProviderConfig): Promise<ModelInfo[]
       local: true
     }]
   }
+  // I1 (fase isolamento-locale): l'indirizzo con cui si parla al provider —
+  // in prova quello iniettato al posto del noto; null = il servizio locale è
+  // assente in quella prova, e la richiesta non parte (come verso un servizio spento)
+  const base = baseServizioLocale(p)
+  if (base === null) throw new Error('fetch failed: local service absent in test')
+  const baseEffettivo = { ...p, baseUrl: base }
   if (p.kind === 'ollama') {
-    const base = p.baseUrl.replace(/\/+$/, '')
-    const r = await fetch(liveModelsUrl(p), { signal: AbortSignal.timeout(5000) })
+    const r = await fetch(liveModelsUrl(baseEffettivo), { signal: AbortSignal.timeout(5000) })
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     const j = (await r.json()) as { models?: Array<{ name: string; digest?: string; details?: { parameter_size?: string } }> }
     const list = j.models ?? []
@@ -329,7 +340,7 @@ export async function listProviderModels(p: ProviderConfig): Promise<ModelInfo[]
     })
     return list.map((m) => liveInfo(p, m.name, m.details?.parameter_size ? `${m.name} (${m.details.parameter_size})` : m.name))
   }
-  const r = await fetch(liveModelsUrl(p), {
+  const r = await fetch(liveModelsUrl(baseEffettivo), {
     headers: liveModelsHeaders(p),
     signal: AbortSignal.timeout(8000)
   })

@@ -14,9 +14,17 @@ import { runDaemonRuntime } from './runtime'
 import { APP_BUILD_ID } from '../main/build-id'
 // P1 (fase primo-avvio): ogni riga [sandbotd] con l'orario ISO, come main.log
 import { installDaemonLogTimestamps } from './log-timestamp'
+import { installaRegistroServiziLocali } from '../main/local-services-registry'
+import { installaIndirizziLocaliInProva } from '../main/agent/local-services-address'
 
 // PRIMA di ogni riga del daemon: nessuna arriva senza orario
 installDaemonLogTimestamps()
+// I1 (fase isolamento-locale): anche dalla via legacy il daemon in prova
+// (SANDBOT_TEST_USER_DATA) registra le connessioni verso i servizi LLM locali
+// veri — è lui che li scopre e che legge l'elenco dei modelli. Nell'app vera non installa nulla.
+void installaRegistroServiziLocali({ env: process.env, modo: 'daemon' })
+// E parla con Ollama e LM Studio all'indirizzo FINTO iniettato dal motore, o a nessuno
+installaIndirizziLocaliInProva(process.env)
 
 const dir = resolveDataDirArgv(process.argv) ?? process.env.SANDBOT_DATA_DIR
 if (dir === undefined || dir === null || dir === '') {

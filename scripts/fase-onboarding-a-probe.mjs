@@ -30,10 +30,11 @@
 // chiude ANCHE il daemon di sviluppo, la cartella viene rimossa, nessun push.
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { findProbeDaemons, stopProbeDaemons } from './lib/probe-daemons.mjs'
+import { leggiTentativiLocali, messaggioTentativiLocali } from './lib/sonda.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 // Vincoli della fase: temporanei SOLO con mkdtemp nella cartella indicata
@@ -1118,6 +1119,11 @@ log('FASE OBV-b: Integrato pronto…')
   await stopEverything(DATA12)
 }
 
+// I1 (fase isolamento-locale): il REGISTRO delle connessioni verso i servizi LLM locali veri del Mac
+// (lo scrive l'app in prova) di OGNI cartella dati della sonda, letto prima che la temporanea sparisca:
+// una connessione = corsa ROSSA
+const tentativiLocali = readdirSync(TMP).flatMap((d) => leggiTentativiLocali(join(TMP, d)))
+check('PULIZIA I1: 0 connessioni verso i servizi LLM locali veri (i registri sono vuoti)', tentativiLocali.length === 0, messaggioTentativiLocali(tentativiLocali))
 // ---- pulizia finale: 0 daemon e 0 llama-server ----
 const leftDaemons = findProbeDaemons('sandbot-fase-onboarding-a')
 check('PULIZIA nessun daemon della sonda vivo', leftDaemons.length === 0, leftDaemons.map((d) => d.pid).join(','))

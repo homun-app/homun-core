@@ -37,7 +37,7 @@ import { spawnSync, execSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { writeFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { avviaSonda } from './lib/sonda.mjs'
+import { avviaSonda, messaggioTentativiLocali } from './lib/sonda.mjs'
 import { findProbeDaemons } from './lib/probe-daemons.mjs'
 
 const run = 1
@@ -686,6 +686,7 @@ try {
   // ---- pulizia K4: app giù, daemon via, cartelle via, 0 processi (il motore) ----
   const fine = await sonda.fine({ porta: portaDebug })
   check('pulizia K4: 0 cartelle sandbot-fase-centro-* rimaste', fine.cartelleRimaste.length === 0 && fine.conteggio === 0, `${fine.cartelleRimaste.length} cartelle: ${fine.cartelleRimaste.join(', ')}`)
+  check('I1: 0 connessioni verso i servizi LLM locali veri (il registro è vuoto)', fine.tentativiLocali.length === 0, messaggioTentativiLocali(fine.tentativiLocali))
   const daemons = findProbeDaemons(PREFIX)
   check('pulizia K4: 0 daemon della sonda', daemons.length === 0, JSON.stringify(daemons))
   const llamas = execSync('pgrep -x llama-server || true', { encoding: 'utf8' }).trim().split('\n').filter(Boolean).filter((pid) => !llamaBaseline.has(pid))

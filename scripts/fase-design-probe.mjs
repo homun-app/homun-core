@@ -41,7 +41,7 @@ import { readFileSync, writeFileSync, existsSync, rmSync, mkdirSync } from 'node
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { avviaSonda, ROOT } from './lib/sonda.mjs'
+import { avviaSonda, ROOT, messaggioTentativiLocali } from './lib/sonda.mjs'
 import { modelloFinto } from './lib/modello-finto.mjs'
 import { PAGES, NOMI, prepara, closeOverlays, openPage, openOverlay, WIDTHS, HEAD_HEIGHT, NARROW_AREA_BELOW, PAGE_MARGIN, PAGE_MARGIN_NARROW } from './lib/scene.mjs'
 
@@ -713,6 +713,7 @@ try {
   const fine = await s.fine({ porta })
   const left = fine.conteggio
   check('pulizia: 0 cartelle sandbot-fase-design-* rimaste', left === 0 && fine.cartelleRimaste.length === 0, `rimaste ${left}${fine.cartelleRimaste.length ? ': ' + fine.cartelleRimaste.join(', ') : ''}`)
+  check('I1: 0 connessioni verso i servizi LLM locali veri (il registro è vuoto)', fine.tentativiLocali.length === 0, messaggioTentativiLocali(fine.tentativiLocali))
   const daemons = await import('./lib/probe-daemons.mjs').then((m) => m.findProbeDaemons(PREFIX))
   check('pulizia: 0 daemon della sonda', daemons.length === 0, JSON.stringify(daemons))
   const fakes = spawnSync('/usr/bin/pgrep', ['-f', 'fake-plugin-pulita-mcp.mjs'], { encoding: 'utf8' })

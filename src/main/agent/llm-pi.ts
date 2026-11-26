@@ -58,7 +58,8 @@ import { traceLlmCall } from './llm'
 // arrivano anche i base URL noti, così questo file non dipende da providers.ts
 // fase velocità (S2): ollamaThinkingLevels/ollamaThinkingInfo leggono la
 // parte `thinking` di /api/show dalla STESSA cache delle capability.
-import { ZAI_CONSUMPTION_BASE_URL, KNOWN_BASE_URLS, LOCAL_KINDS, openAiCompatBase, ollamaCapabilities, ollamaThinkingInfo, ollamaThinkingLevels } from './live-models'
+import { baseServizioLocale, ZAI_CONSUMPTION_BASE_URL, KNOWN_BASE_URLS, LOCAL_KINDS, openAiCompatBase, ollamaCapabilities, ollamaThinkingInfo, ollamaThinkingLevels } from './live-models'
+import { INDIRIZZO_ASSENTE_IN_PROVA } from './local-services-address'
 import { fallbackEligible } from './model-fallback'
 
 // re-esportati per i test e i chiamanti (la regola è una sola, in live-models)
@@ -102,7 +103,11 @@ function normalizedBaseUrl(p: ProviderConfig): string {
   // i server OpenAI-compatible locali prendono la regola /v1 di openAiCompatBase
   // (fase locale L3: anche homun-local — llama-server serve /v1/chat/completions)
   if (p.kind === 'ollama' || p.kind === 'lmstudio' || p.kind === 'homun-local' || p.kind === 'openai-compatible' || p.kind === 'custom') {
-    return openAiCompatBase({ baseUrl: base })
+    // I1 (fase isolamento-locale): Ollama e LM Studio in prova parlano
+    // all'indirizzo FINTO iniettato dal motore (al posto del noto); se lì il
+    // servizio è assente, a un indirizzo dove non ascolta nessuno — mai al vero
+    const locale = p.kind === 'ollama' || p.kind === 'lmstudio' ? (baseServizioLocale(p) ?? INDIRIZZO_ASSENTE_IN_PROVA) : base
+    return openAiCompatBase({ baseUrl: locale })
   }
   return base
 }

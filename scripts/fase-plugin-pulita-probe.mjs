@@ -39,7 +39,7 @@ import { randomBytes, createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServer } from 'node:http'
-import { avviaSonda } from './lib/sonda.mjs'
+import { avviaSonda, messaggioTentativiLocali } from './lib/sonda.mjs'
 import { findProbeDaemons } from './lib/probe-daemons.mjs'
 
 const ROOT = join(import.meta.dirname, '..')
@@ -702,6 +702,7 @@ try {
   check('PP2: i valori dei token di prova non compaiono in nessun file della temporanea (log, database, cache)', hits.length === 0, `${hits.length} file: ${hits.slice(0, 5).join(', ')}`)
   const fine = await sonda.fine({ porta: portaDebug })
   check('pulizia: 0 cartelle sandbot-fase-plugin-pulita-* rimaste', fine.cartelleRimaste.length === 0 && fine.conteggio === 0, `${fine.cartelleRimaste.length} cartelle: ${fine.cartelleRimaste.join(', ')}`)
+  check('I1: 0 connessioni verso i servizi LLM locali veri (il registro è vuoto)', fine.tentativiLocali.length === 0, messaggioTentativiLocali(fine.tentativiLocali))
   const daemons = findProbeDaemons(PREFIX)
   check('pulizia: 0 daemon della sonda', daemons.length === 0, JSON.stringify(daemons))
   // i server MCP finti avviati dal daemon escono da soli quando il padre muore: lo si CONTA

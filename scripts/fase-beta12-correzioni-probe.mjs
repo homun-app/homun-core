@@ -26,6 +26,7 @@ import { createServer } from 'node:http'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { findProbeDaemons, stopProbeDaemons } from './lib/probe-daemons.mjs'
+import { leggiTentativiLocali, messaggioTentativiLocali } from './lib/sonda.mjs'
 import { cleanupProbeRun, countProbeDirs } from './lib/probe-rm.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
@@ -426,6 +427,10 @@ try {
     }
   } catch { /* pgrep vuoto */ }
   await stopProbeDaemons(PREFIX, { log }).catch((e) => log('stopProbeDaemons:', e.message))
+  // I1 (fase isolamento-locale): il REGISTRO delle connessioni verso i servizi LLM locali veri del Mac
+  // (lo scrive l'app in prova) si legge PRIMA che la cartella dati sparisca: una connessione = corsa ROSSA
+  const tentativiLocali = leggiTentativiLocali(DATA)
+  check('I1: 0 connessioni verso i servizi LLM locali veri (il registro è vuoto)', tentativiLocali.length === 0, messaggioTentativiLocali(tentativiLocali))
   await cleanupProbeRun({ pids: [app.pid], prefix: PREFIX, dirs: [DATA], log, capMs: 20_000 }).catch((e) => log('cleanupProbeRun:', e.message))
   await stopProbeDaemons(PREFIX, { log }).catch(() => undefined)
   await cleanupProbeRun({ pids: [], prefix: PREFIX, dirs: [], log, capMs: 10_000 }).catch(() => undefined)

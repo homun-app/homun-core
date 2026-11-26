@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // F1 (fase fondamenta): LA GALLERIA VISIVA — regressione visiva pixel per
 // pixel. Avvia l'app VERA da out/ con lo stesso ambiente delle sonde (dati
-// temporanei, HOME finta, modello finto su 127.0.0.1, Composio finto — il
+// temporanei, HOME finta, modello finto su 127.0.0.1, Composio finto, e da
+// fase isolamento-locale l'Ollama FINTO — mai quello del Mac — il
 // motore sonda.mjs), apre una lista fissa di SCENE (le pagine della sonda di
 // design, in scripts/lib/scene.mjs, più la pagina dei componenti di F2), le
 // cattura via CDP e le confronta con le immagini approvate.
@@ -29,9 +30,10 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, existsSync, copyFileSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { avviaSonda, ROOT } from './lib/sonda.mjs'
+import { avviaSonda, ROOT, messaggioTentativiLocali } from './lib/sonda.mjs'
 import { PAGES, NOMI, preparaDeterministica, closeOverlays, openPage, openOverlay, ISTANTE_FERMO } from './lib/scene.mjs'
 import { modelloFinto } from './lib/modello-finto.mjs'
+import { MODELLI_OLLAMA_FINTO, ollamaFinto } from './lib/servizio-locale-finto.mjs'
 
 const MAGICK = '/opt/homebrew/bin/magick'
 const GALLERIA = join(ROOT, 'galleria')
@@ -249,6 +251,29 @@ const CONTROLLO_TAGLI = `return (() => {
 const scartaTraduzioni = (s) => s.eval('return window.__sandbotTraduzioniMancanti ? window.__sandbotTraduzioniMancanti.drain().length : 0')
 
 /**
+ * I1 (fase isolamento-locale): la riga «Ollama (locale)» di Impostazioni ›
+ * Modelli è quella del servizio FINTO della galleria — un testo FISSO. Fino
+ * alla fase linguaggio-ritocchi la riga era dell'Ollama VERO del Mac (o non
+ * c'era, se era spento): l'approvata diceva «… modelli» con i puntini in
+ * coda, cioè la cattura era caduta a metà di una richiesta che poteva durare
+ * quanto voleva. Qui si legge la riga dal DOM: null se dice il numero FISSO
+ * dei modelli del servizio finto (MODELLI_OLLAMA_FINTO, lo stesso elenco che
+ * serve /api/tags) ed è «Collegato», altrimenti cosa dice.
+ */
+const RIGA_OLLAMA = `(() => {
+  const nome = [...document.querySelectorAll('span[title="Ollama (locale)"]')].find((s) => s.getClientRects().length)
+  if (!nome) return 'la riga «Ollama (locale)» non c\\'è'
+  const riga = nome.closest('[role="button"]')
+  if (!riga) return 'la riga «Ollama (locale)» non è una riga di provider'
+  // il sottotitolo è la riga che inizia con «Sul tuo Mac»: si cerca nella riga, non per posizione
+  const sotto = [...riga.querySelectorAll('span')].map((s) => (s.textContent ?? '').replace(/\\s+/g, ' ').trim()).find((t) => t.startsWith('Sul tuo Mac')) ?? '(senza sottotitolo)'
+  const stato = riga.lastElementChild ? (riga.lastElementChild.textContent ?? '').replace(/\\s+/g, ' ').trim() : '(senza stato)'
+  return sotto === 'Sul tuo Mac · ${MODELLI_OLLAMA_FINTO.length} modelli · gratis e privato' && stato === 'Collegato'
+    ? null
+    : 'sottotitolo «' + sotto + '», stato «' + stato + '» (atteso: «Sul tuo Mac · ${MODELLI_OLLAMA_FINTO.length} modelli · gratis e privato» e «Collegato», dal servizio finto)'
+})()`
+
+/**
  * I tre controlli di una scena (R1/R2/R3): riempiono `errori` — una scena
  * col vaso rotto è ROSSA, non catturata.
  */
@@ -311,6 +336,8 @@ const attendiLayout = (s) => s.attendi(`(() => new Promise((ok) => {
 
 const cattura = async (s, page, ctx, w, tema, errori = []) => {
   const solo = tema === 'solo-controllo'
+  // I1: la scena corrente, per il registro delle connessioni verso i servizi locali veri — un rosso dice QUALE scena li ha toccati
+  await s.scena(`${page.id} ${w}/${tema}`)
   await s.viewport(w, 800 - 800 + (w === 900 ? 640 : 800))
   if (solo) {
     // R3: la passata di SOLO CONTROLLO a 900. Le PAGINE restano aperte al
@@ -415,6 +442,16 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
   if (page.id === 'plugin-autorizzazioni') {
     await s.attendi(`!!document.querySelector('[data-testid="plugin-permissions"] [data-testid^="plugin-group-"]')`, { entro: 15_000, motivo: 'gli strumenti del plugin siano arrivati nella scheda Autorizzazioni' }).catch(() => undefined)
   }
+  // I1 (fase isolamento-locale): la riga «Ollama (locale)» si aspetta — il
+  // numero dei modelli arriva da una RPC che NON passa dalla rete del
+  // renderer, e la cattura la precedeva. Si aspetta la CONDIZIONE (il testo
+  // FISSO del servizio finto e «Collegato»); se non arriva, la cattura resta
+  // com'è e la scena è ROSSA col testo che la riga dice davvero
+  if (page.id === 'impostazioni-modelli') {
+    await s.attendi(`(() => { return ${RIGA_OLLAMA} === null })()`, { entro: 15_000, motivo: 'la riga di Ollama (locale) dica il numero fisso dei modelli del servizio finto e sia «Collegato»' }).catch(() => undefined)
+    const riga = await s.eval(`return ${RIGA_OLLAMA}`)
+    if (riga !== null) errori.push(`la riga «Ollama (locale)» non è quella del servizio finto: ${riga}`)
+  }
   // le maschere della scena PRECEDENTE si tolgono: i rettangoli sono fissi
   // allo schermo e coprirebbero le scene successive. UNA funzione sola del
   // motore (sonda.mjs), con lo stesso attributo della creazione — la copia
@@ -485,9 +522,20 @@ const confronta = (page, tema, w) => {
 
 // ---- la corsa ----
 const esiti = []
+// I1: il servizio locale FINTO — fuori dal try, così la via FATAL lo spegne lo stesso
+let servizio = null
 try {
   const modello = modelloFinto()
   const porta = await modello.avvia()
+  // I1 (fase isolamento-locale): l'Ollama FINTO, su 127.0.0.1 con porta 0
+  // scelta dal sistema. L'indirizzo si INIETTA all'app in prova
+  // (SANDBOT_TEST_LOCAL_LLM_URLS) al posto di quello vero: la galleria non
+  // tocca più l'Ollama del Mac, e la riga «Ollama (locale)» di Impostazioni ›
+  // Modelli c'è SEMPRE, con un numero fisso di modelli. LM Studio resta
+  // ASSENTE (non si inietta): la scena non ha mai avuto la sua riga
+  servizio = ollamaFinto()
+  const urlServizio = await servizio.avvia()
+  log('servizio locale finto: Ollama su', urlServizio, '· LM Studio assente')
   // la pagina dei COMPONENTI (F2): compilata FUORI dal build dell'app (il
   // marcatore non entra in out/), copiata accanto a index.html e caricata dal
   // renderer con un import() dinamico dietro SANDBOT_TEST_GALLERIA=1
@@ -503,7 +551,7 @@ try {
   const s = await avviaSonda({
     prefix: 'sandbot-galleria',
     appDir: APP_DIR,
-    envExtra: { SANDBOT_TEST_GALLERIA: '1' },
+    envExtra: { SANDBOT_TEST_GALLERIA: '1', SANDBOT_TEST_LOCAL_LLM_URLS: `ollama=${urlServizio}` },
     // l'orologio fermo è a SETTE GIORNI dall'avvio della corsa e i dati finti nascono
     // a ora reale (≈ l'avvio): OGNI tempo relativo mostrato è «7 giorni fa» — la stringa
     // non cambia né col jitter di secondi del setup né tra una corsa e l'altra. Un
@@ -528,6 +576,9 @@ try {
   }
   log('pagina su; orologio fermo, animazioni spente')
 
+  // I1: da qui in poi OGNI momento della corsa ha un nome — il registro dell'app
+  // lo allega a una connessione verso i servizi locali veri
+  await s.scena('avvio (guida)')
   // la GUIDA prima del setup (poi non si vede più)
   await s.viewport(1280, 800)
   const guida = PAGES.find((p) => p.id === 'guida')
@@ -547,6 +598,7 @@ try {
     }
   }
   for (const tema of ['chiaro', 'scuro']) {
+    await s.scena(`guida 1280/${tema}`)
     await s.tema(tema)
     await s.attendiRete({ quieta: 300, entro: 8_000 }).catch(() => undefined)
     // fase linguaggio-ritocchi: i tre controlli valgono per la guida pure
@@ -560,6 +612,7 @@ try {
     log('cattura', nomeCattura(guida, tema, 1280), erroriGuida.length ? `ROSSA (${erroriGuida.join(' · ')})` : '')
   }
 
+  await s.scena('setup deterministico')
   const { ctx } = await preparaDeterministica(s, { providerPort: porta })
   log('setup deterministico fatto (timeline e Libreria seminati all\'istante fermo)')
   // R1: si svuota il raccoglitore DOPO il setup — un id mancante reso prima
@@ -647,15 +700,50 @@ try {
   modello.chiudi()
   const fine = await s.fine()
   if (fine.cartelleRimaste.length) log('ERRORE DI PULIZIA:', fine.cartelleRimaste.join(', '))
+  // I1 (fase isolamento-locale): IL REGISTRO delle connessioni verso i
+  // servizi LLM locali VERI del Mac. In prova l'app non deve toccarli: i
+  // servizi locali sono finti o assenti. Una connessione registrata = corsa
+  // ROSSA, con l'URL e la scena che l'ha fatta partire (una riga per scena
+  // toccata). Il registro sta nella cartella dati della prova: si legge in
+  // s.fine(), prima che la cartella sparisca
+  const toccate = new Map()
+  for (const r of fine.tentativiLocali) {
+    const scena = r.scena ?? '(prima delle scene)'
+    if (!toccate.has(scena)) toccate.set(scena, [])
+    toccate.get(scena).push(r)
+  }
+  for (const [scena, rs] of toccate) esiti.push({ nome: `registro-servizi-locali · ${scena}`, scena, esito: 'rossa', dettaglio: messaggioTentativiLocali(rs) })
+  const tentativiLocali = fine.tentativiLocali.length
+  if (tentativiLocali) log(`✗ I1 registro-servizi-locali: ${tentativiLocali} connession${tentativiLocali === 1 ? 'e' : 'i'} verso i servizi locali veri in ${toccate.size} scen${toccate.size === 1 ? 'a' : 'e'}`)
+  // I1 (fase isolamento-locale): l'app in prova ha parlato col servizio
+  // FINTO, e solo come l'app parla a Ollama per scoprirlo ed elencare i
+  // modelli. Zero letture di /api/tags = l'indirizzo iniettato non è arrivato
+  // all'app (e la riga «Ollama (locale)» non può essere quella del servizio
+  // finto); una richiesta fuori da /api/tags e /api/show è un turno dal vivo
+  // o una chiamata che la galleria non conosce: ROSSA, non si nasconde
+  const rFinte = servizio.richieste
+  const letture = rFinte.filter((r) => r.metodo === 'GET' && r.url === '/api/tags')
+  const inattese = rFinte.filter((r) => !((r.metodo === 'GET' && r.url === '/api/tags') || (r.metodo === 'POST' && r.url === '/api/show')))
+  if (letture.length === 0) {
+    esiti.push({ nome: 'servizio-locale-finto · /api/tags', scena: 'servizio-locale-finto', esito: 'rossa', dettaglio: 'l\'app in prova non ha mai chiesto l\'elenco dei modelli al servizio finto (0 richieste)' })
+    log('✗ I1 servizio-locale-finto: l\'app in prova non ha mai chiesto /api/tags al servizio finto')
+  }
+  for (const r of inattese) {
+    esiti.push({ nome: `servizio-locale-finto · ${r.metodo} ${r.url}`, scena: 'servizio-locale-finto', esito: 'rossa', dettaglio: `richiesta inattesa n. ${r.n}${r.modello ? ` (modello ${r.modello})` : ''}` })
+    log(`✗ I1 servizio-locale-finto: richiesta inattesa al servizio finto — ${r.metodo} ${r.url}${r.modello ? ` (${r.modello})` : ''}`)
+  }
+  log(`servizio locale finto: ${rFinte.length} richieste — ${letture.length} /api/tags, ${rFinte.length - letture.length - inattese.length} /api/show, ${inattese.length} inattese`)
+  await servizio.chiudi()
   // il modulo della pagina componenti si TIRA GIÙ da out/: il build deve restare
   // senza il marcatore (la guardia componenti.test.ts lo verifica a ogni corsa)
   try {
     rmSync(join(ROOT, 'out', 'renderer', 'galleria-componenti.js'))
     rmSync(join(ROOT, 'out', 'renderer', 'galleria-componenti.mjs')) // il nome della prima era: nessuna copia vecchia resta in out/
   } catch { /* già via */ }
-  process.exit(diverse.length || rosse.length || nuove.length || errs.length || turniDalVivo || fine.cartelleRimaste.length ? 1 : 0)
+  process.exit(diverse.length || rosse.length || nuove.length || errs.length || turniDalVivo || tentativiLocali || letture.length === 0 || inattese.length || fine.cartelleRimaste.length ? 1 : 0)
 } catch (e) {
   log('FATAL:', e?.stack ?? e)
+  try { await servizio?.chiudi() } catch { /* già chiuso */ }
   try { rmSync(join(ROOT, 'out', 'renderer', 'galleria-componenti.js')) } catch { /* già via */ }
   process.exit(1)
 }

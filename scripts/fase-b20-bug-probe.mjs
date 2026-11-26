@@ -37,7 +37,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServer } from 'node:http'
-import { avviaSonda } from './lib/sonda.mjs'
+import { avviaSonda, messaggioTentativiLocali } from './lib/sonda.mjs'
 import { findProbeDaemons } from './lib/probe-daemons.mjs'
 
 const ROOT = join(import.meta.dirname, '..')
@@ -873,6 +873,7 @@ try {
   const fine = await sonda.fine({ porta: connessione?.porta })
   const left = fine.conteggio
   check('pulizia: 0 cartelle sandbot-fase-b20-bug-* rimaste', left === 0, `rimaste ${left}`)
+  check('I1: 0 connessioni verso i servizi LLM locali veri (il registro è vuoto)', fine.tentativiLocali.length === 0, messaggioTentativiLocali(fine.tentativiLocali))
   const daemons = findProbeDaemons(PREFIX)
   check('pulizia: 0 daemon della sonda', daemons.length === 0, JSON.stringify(daemons))
   for (const res of composio.hung) { try { res.destroy() } catch { /* già chiusa */ } }
