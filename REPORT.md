@@ -1,3 +1,196 @@
+# REPORT FASE LINGUAGGIO-RITOCCHI: tre difetti corretti, e i tre controlli che ora li prende la macchina
+
+Base: `main` al tag `fase-linguaggio` (b710d8fe), verificata: HEAD era esattamente lì, git pulito a parte `out-review/` e `scripts/vetrina/` (non toccate). Il REPORT della fase prima diceva che le 92 scene riapprovate erano state «guardate affiancate col modello di visione»: i tre difetti c'erano comunque e nessun controllo automatico li prendeva. Qui li correggo e aggiungo i controlli — visti ROSSI sulla base prima di ogni correzione, con l'elenco di ciò che prendono. Un commit per punto (R1 fe935247, R2 1447cc65, R3 32d6e0f6), poi le 20 scene riapprovate (ddaf1be39), tre «seguito» che chiudono difetti trovati in corsa nei controlli stessi e nei test (d2338fb72, c1e9419a1, f268c9a27) e due correzioni nate dalle corse di fatto.mjs (3215b8dd9: l'anello del fuoco; df796380f: una cattura precoce nella galleria). Le catture dei documenti sono rifatte come la galleria (f778fad73). Chiusura con `node scripts/fatto.mjs --sonde fase-design,fase-plugin-pulita,fase-b20-bug,fase-centro,fase-squadra` lanciata DA SOLA dopo l'ultimo commit di codice: **VERDE in 26 min 44 s** — typecheck OK · suite 569 file / 6942 test OK · ci-sim OK · build OK · galleria 118/118 uguali (8,4 MB su 15) e le 53 passate di controllo a 900 senza errori · sonde design 7/7 (15 min 25 s), plugin-pulita 113/113, b20-bug 76/76, centro 55/55, squadra 32/32 · 0 Electron e 0 daemon del repo · 0 temporanee nuove del repo e radice della corsa vuota. È la quarta corsa: le prime tre sono raccontate sotto. CHANGELOG invariato; tag annotato `fase-linguaggio-ritocchi`; nessun push, nessun tag `v*`.
+
+## Come sono state prese le prove (e come no)
+
+Tutto quello che sta sotto viene da un'uscita di comando: la suite, la galleria, la sonda C5, una lettura del DOM via CDP (il testo vero di ogni scheda e di ogni pillola, e i rettangoli), `magick compare`. Niente è stato «guardato con un modello di visione» e dichiarato buono: le immagini in `docs/catture/fase-linguaggio-ritocchi/` sono il documento di ciò che i numeri dicono, non la prova. In corso d'opera ho letto alcuni ritagli di cattura anche con uno strumento di analisi immagini, prima di passare alla lettura dal DOM: non è una prova, e in questo REPORT non c'è nessuna affermazione che poggi su di esso. Dove un controllo non arriva, lo dico (più sotto, «Che cosa i controlli NON vedono»).
+
+La «base» delle prove ROSSE è l'albero a fe935247 coi cataloghi riportati a quelli di b710d8fe, costruito in una worktree temporanea: cioè l'interfaccia della base com'era, più il solo raccoglitore degli id mancanti (che è parte del controllo R1 e sulla base pura non esistrebbe). La galleria è quella a f268c9a27; l'unico commit che dopo la tocca (df796380f) aggiunge un'attesa per la scena plugin-autorizzazioni e non cambia nessun controllo. L'albero dell'app è quello a fe935247.
+
+## I tre difetti sulla base, letti dal DOM
+
+Letto con la stessa procedura prima (l'albero della base descritto sopra, con la sola aggiunta del raccoglitore) e dopo (app a f268c9a27; i due commit che seguono non spostano testo né misure a riposo: uno toglie classi di fuoco, l'altro sta nella galleria), a 1280×800 e a 900×640, chiaro e scuro — i valori sono identici fra chiaro e scuro.
+
+| | PRIMA (base) | DOPO |
+|---|---|---|
+| **Libreria · pillole** | «Bot: Tutti i bot ▾» · **«g0mreA: Tutti i tipi ▾»** · «Archiviati» | «Bot: Tutti i bot ▾» · **«Tipo: Tutti i tipi ▾»** · «Archiviati» |
+| **Libreria · selettore della vista** | «Griglia» ed «Elenco» dentro il gruppo «Vista», **due volte** (testata e barra): i nomi accessibili ripetuti sono «Vista» ×2, «Griglia» ×2, «Elenco» ×2 | una volta sola, nella barra; in testata resta solo «Torna alla chat» |
+| **Libreria · ricerca** (1280 / 900) | «Cerca per titolo…», x=302 larga 480 / x=106 larga 304 | x=302 larga 500 / x=106 larga 324 (la pillola più corta le lascia 20 px) |
+| **Plugin · schede** (1280) | Tutto · Connettori · Skill · Collegati · 15 — su Tutto, Connettori e Skill da 302 a 569; su Collegati la riga si stringe a 302–490 e le schede stanno a 223–490 | le stesse quattro, alle stesse ascisse (302–336, 356–424, 444–468, 488–569) su tutte e quattro le schede |
+| **Plugin · ricerca** (1280) | x=581 larga 288 su Tutto, Connettori e Skill; **x=502** su Collegati (si spostava cambiando scheda) | **x=581 su tutte e quattro**, larga 661 (410 su Collegati, dove stanno anche le due pillole) |
+| **Plugin · ricerca** (900) | x=385 su tre schede; **x=252** su Collegati | **x=385 su tutte**, larga 485 (234 su Collegati) |
+| **Plugin › Collegati · schede a 1280** | «Tutto» 223–257 e «Connettori» 277–345 **tagliate** dalla riga delle schede (larga 188: 302–490) | intere |
+| **Plugin › Collegati · schede a 900** | «Tutto» −27–7 e «Connettori» 27–95 **tagliate** (riga larga 134: 106–240) | intere |
+| **Plugin › Collegati · pillole** | «Tutte le strade» (accesa) · «MCP diretto» · «Composio» · «Sul Mac» · «Nel computer isolato» · **«V_pNa0 · 13»** — sei pillole; «Nel computer isolato» fuori dalla finestra a 1280 (1183–1321) | «Strada: tutte ▾» · «Da sistemare · 13» — due pillole |
+| **Plugin › Collegati · barra** | **scorre**: scrollWidth 1158 > clientWidth a 1280, 1097 > 824 a 900 | non scorre (alta 40, come ogni barra) |
+| **Da approvare** | «Richieste» · «Registro», pillola «Tutte · 0» | invariata |
+| **Attività** | ricerca «Cerca nei lavori», pillole «Tutti» (accesa) · «Da te» · «Routine» · «Non riusciti» | invariata |
+
+## I controlli nuovi, visti ROSSI sulla base
+
+Comando: `node scripts/galleria.mjs` (completa) dalla worktree «base + raccoglitore». Uscita: **168 combinazioni rosse su 168, 56 scene su 56** — perché due doppioni di nome stanno sotto ogni pagina (vedi R2). Nessun falso positivo.
+
+**R1 — traduzioni mancanti dal vivo** (13 combinazioni): `g0mreA` (Tipo) su libreria-griglia (1280 chiaro e scuro, 900 chiaro e scuro), libreria-lista (1280 ×2, 900) e documento (1280 ×2 — il documento si apre passando dalla Libreria); `V_pNa0` (Da sistemare) su plugin-collegati (1280 ×2, 900). È ciò che la fase chiedeva: libreria-* e plugin-collegati-* rosse.
+
+**R2 — un controllo una volta sola** (per nome; combinazioni su 168):
+- «Vista» (gruppo) ×2, «Griglia» ×2, «Elenco» ×2: 7 combinazioni, le scene libreria-griglia (1280 ×2, 900 ×2) e libreria-lista (1280 ×2, 900) — il difetto della fase.
+- «Crea» (bottone) ×2: 112 combinazioni, tutte le 56 scene a 1280 — il «+» della riga di ricerca e il «+» del titolo Team della barra laterale.
+- «Mostra il pannello del bot» (bottone) ×2: 159 combinazioni, 52 scene — la pillola del nome del bot e l'icona accanto, nella testata della chat.
+- «Mostra il pannello dei membri» ×2: chat-team (1280 ×2, 900) — lo stesso, nella squadra.
+- Le demo della pagina dei componenti: «Piccolo» ×3 e «Disattivato» ×2 (componenti-bottoni), «Attivo» (switch) ×2 e «Sistema»/«Chiaro»/«Scuro» (radio) ×2 (componenti-modulo), «Tutte · 12» ×2 e «Bot: tutti» ×2 (componenti-ricerca), «No» ×3 a 1280 e ×2 a 900 (componenti-proposta), «Provider e modello» (combobox) ×2 (componenti-modelli), «Collega» ×11 a 1280 e ×7 a 900 (componenti-modelli-aperto).
+- 47 scene sono prese SOLO per «Crea» e «Mostra il pannello del bot».
+
+**R3 — niente tagliato** (4 combinazioni):
+- plugin-collegati a 1280 (chiaro e scuro): la barra scorre (1158 > 1016); «Tutto» (223–257) e «Connettori» (277–345) tagliate dal contenitore; «Nel computer isolato» (1183–1321) fuori dalla finestra.
+- plugin-collegati a 900 (passata di solo controllo, layout assestato): la barra scorre (1097 > 824); «Tutto» (27–61), «Connettori» (81–149) e «Collegati · 15» (213–294) tagliate dalla riga delle schede (106–240); «Sul Mac» (859–926) fuori dalla finestra.
+- componenti-gusci a 900: la scheda «Collegati · 12» della demo di ListPage tagliata (249–329).
+- **Non prende** Connettori, Skill, Da approvare e Attività, né a 1280 né a 900: misurato, le loro barre non scorrono e nessun controllo è tagliato (le categorie di Connettori e Skill sono nel corpo e vanno a capo; le pillole di Da approvare e Attività stanno nella barra senza sforare). Per questo non sono state toccate, oltre alla barra comune di Plugin.
+
+## R1 — le traduzioni: il catalogo sempre allineato al codice
+
+**La guardia della suite** (`src/__tests__/guardie/lingui-catalogo.test.ts`, tre test): estrae i messaggi **in memoria** con l'API di `@lingui/cli` (`getConfig` + `getCatalogs` + `catalog.collect()`: le stesse sorgenti e lo stesso estrattore Babel di `lingui.config.ts`, quindi `t`, `msg`, `Trans`, `plural`, `select`, anche con le variabili) e fallisce se (1) un messaggio del codice non sta in `locales/it/messages.po` o in `locales/en/messages.po`; (2) una voce dei .po non è più nel codice, cioè ciò che `--clean` toglierebbe; (3) il compilato `messages.mjs` non è quello del .po (ricompilato in memoria con `createCompiledCatalog`, le stesse opzioni di `i18n:compile`). Nel repo non scrive nulla. Durata ~2,5 s.
+
+Vista ROSSA sulla base (HEAD a b710d8fe, il solo file del test in più) — 2 test rossi su 3:
+```
+messaggi nel codice assenti dal catalogo — manca `npm run i18n:extract`:
+  it: g0mreA (Tipo) · it: V_pNa0 (Da sistemare) · en: g0mreA (Tipo) · en: V_pNa0 (Da sistemare)
+voci del catalogo che il codice non contiene più — rilanciare extract le toglie:
+  16 id per lingua
+il catalogo compilato (messages.mjs) è quello del .po:   passato
+```
+
+**Il controllo dal vivo**: con `SANDBOT_TEST_USER_DATA` — lo mette il motore in ogni corsa di sonde e galleria; il preload lo espone come `sandbotTest.traduzioni` — il renderer ascolta l'evento `missing` di Lingui e accumula gli id su `window.__sandbotTraduzioniMancanti`; nell'app vera il flag non c'è e il raccoglitore non nasce. La galleria svuota l'elenco a ogni scena e la segna ROSSA con l'id.
+
+**La correzione**: `npm run i18n:extract` (con `--clean`) e `npm run i18n:compile`. Entrano **Tipo** → Type, **Da sistemare** → Needs fixing e, con R2, **Nuovo bot** → New bot. Escono 16 voci per lingua, ciascuna verificata leggendo il riferimento che aveva nel catalogo della base:
+- **12 stavano in `ServerSheet.tsx`**, il file cancellato nella fase prima (C0): «Comando», «Connessa», «Da completare», «Fonte», «gateway», «plugin», «registro MCP», «riconnesso», «riconnessione non riuscita», «aggiunto da te», «I token stanno cifrati sul tuo Mac.», «Server MCP · Pubblicato da {0}». Nessuna è ancora una macro del codice (le parole che ritrovano — «marketplace aggiunto da te», «Comando (es. node)», «registro MCP» dentro `stradaLabel` — sono altre frasi o stringhe non macro; l'estrattore è la misura).
+- **2 sono le descrizioni tolte dalle pagine**: «Connettori, server MCP e skill: tutto quello che dà capacità ai tuoi bot, in un posto.» (Plugin) e «{0} richieste da {bots} bot · solo tu puoi deciderle · …» (Da approvare).
+- **2 sono i conteggi che oggi passano dal prop `count`** delle pillole: «Tutte · {0}» (Da approvare) e «Da sistemare · {0}» (Collegati).
+
+Guardia verde dopo; verde anche dopo R2 e R3 (che tolgono «Nascondi il pannello del bot», «Nascondi il pannello dei membri» e «Tutte le strade», e aggiungono «Nuovo bot»).
+
+## R2 — un controllo una volta sola
+
+**Il controllo** (`scripts/galleria.mjs`, `CONTROLLO_DOPPIONI`, a ogni cattura e a ogni passata a 900): due controlli interattivi visibili con lo stesso nome accessibile (aria-label, title, altrimenti il testo) e lo stesso ruolo (gruppo, bottone, scheda) sono ROSSI col nome e quante volte compare. «Visibile» = ha rettangoli, non è a opacità zero, e interseca la finestra. L'eccezione è dichiarata **per ruolo e contenitore**, non per elenco di scene: valgono i controlli ripetuti una per riga, cioè quando ogni controllo sta in una riga o card diversa — `tr`, `li`, `[role=row]`, `[role=listitem]`, un'opzione di un listbox, un antenato col testid di riga/card/voce, un figlio di un `divide-y`, o le righe di campioni della pagina dei componenti. Due nomi uguali nella stessa riga restano rossi.
+
+**Visto ROSSO**: sopra. Il gruppo «Vista» (con «Griglia» ed «Elenco») due volte in libreria-griglia e libreria-lista, a 1280 e a 900.
+
+**La correzione**: il selettore griglia/elenco della Libreria sta solo nella barra, nello slot `vista` di PageToolbar, come vuole ListPage; la testata resta senza azioni (`LibraryPanel.tsx`).
+
+**Gli altri doppioni**, tutti dello stesso tipo — lo stesso nome per due controlli che non fanno la stessa cosa:
+- il «+» del titolo Team si chiama **«Nuovo bot»** (apriva e apre il dialogo «Nuovo» del bot; «Crea» resta il «+» della riga di ricerca);
+- la pillola del nome nella testata della chat (e della squadra) non porta più l'aria-label «Mostra/Nascondi il pannello…»: il suo nome accessibile è il nome che mostra; l'etichetta resta dell'icona accanto, che è il bottone che le sonde premono. Il tooltip della pillola se ne va con lei.
+- le demo della pagina dei componenti non ripetono nomi nella stessa riga: lo spento di Segmented mostra un altro setting (Automatico · Manuale), il secondo ModelSelect ha il suo `aria-label`, lo switch spento dice «Attivo (spento)», le ProposalCard della demo hanno ciascuna il suo testid, le righe «da collegare» di ModelSelect sono `connect-row-*`, le righe di campioni sono `galleria-row`.
+
+I test DS4 della testata seguono il disegno nuovo (d2338fb72): stesso controllo, nella forma nuova.
+
+## R3 — niente tagliato
+
+**Il controllo** (`CONTROLLO_TAGLI`, a ogni scena a 1280×800 e a 900×640): il rettangolo di ogni controllo visibile (bottone, scheda, link, campo, interruttore, voce di menu, radio, casella) deve stare dentro il contenitore che ritaglia più vicino — `overflow` hidden, auto o scroll in orizzontale: chi sporge a riposo sta tagliando — e dentro la finestra in orizzontale. In verticale contano solo i ritagli duri (hidden, clip): un controllo oltre il bordo di un corpo che scorre è lo scorrimento, non un difetto; e se prima si attraversa un contenitore che scorre, è lui a decidere. In più la **barra** delle pagine non scorre in orizzontale (`scrollWidth ≤ clientWidth`).
+
+**La passata a 900**: le 53 scene che la galleria non cattura a 900 ci arrivano con una passata di solo controllo — apre ciò che il resize chiude (dialoghi, menu), fa i controlli e basta. Le pagine restano aperte dal 1280, perché riaprirle vorrebbe dire rifare i clic della scena, e certi clic non sono idempotenti.
+
+**Visto ROSSO**: sopra.
+
+**La correzione di Collegati** (`PluginPanel.tsx`), come fanno Primer e Polaris quando i filtri sono tanti: le strade diventano **una pillola-menu** «Strada: tutte ▾» (`FilterChipsMenu`, cinque voci: tutte, MCP diretto, Composio, Sul Mac, Nel computer isolato) e «Da sistemare» la **pillola-interruttore col conteggio** «Da sistemare · 13» (`FilterChipsInterruttore` ha il prop `count`). La barra è una sola: schede a sinistra a larghezza naturale, la ricerca che si prende ciò che resta (`min-w-48 flex-1`, prima `w-72` fisso), le due pillole; se manca lo spazio va a capo, come le pillole della Libreria — a 1280 e a 900 non serve, sta su una riga. `plugin-connected-filters` resta sul gruppo. Connettori e Skill non cambiano (il controllo non li prende). La regola è in `docs/DESIGN.md`, modello ListPage: **oltre tre scelte, la pillola-menu**; il filtro che è un modo di vedere resta l'interruttore col conteggio.
+
+**I test**: nel repo il render è statico («niente jsdom», `plugin-page.test.ts`), quindi **non esisteva nessun test che clicca una pillola-strada** — e non se ne possono scrivere senza un pacchetto nuovo. Nessuno da aggiornare; la scelta si prova sulle funzioni pure (`connectedTable`, `plugins-view.test.ts`). Ho aggiunto ciò che il render dice (`plugin-collegati-bar.test.ts`, `ui-filter-chips.test.ts`): il gruppo nella barra con la pillola-menu «Strada: tutte» e le cinque voci nel menu, l'interruttore «Da sistemare · 1», un solo bottone nel gruppo — rosso sull'app della base.
+
+## Dopo: le scene
+
+Nella quarta corsa di fatto.mjs: **118 catture, 118 uguali, 0 diverse, 0 rosse, 0 nuove** (8,4 MB su 15), e le **53 passate di solo controllo a 900** senza un errore (una passata con un errore sarebbe ROSSA col suo nome). Le tre regole sono verdi su tutte le scene. Suite: 569 file / 6942 test in `npm test` e 569 file / 6944 (6938 + 6 saltati) in ci-sim — prima della fase 566 file / 6930 test: tre file e dodici test in più (la guardia del catalogo, il raccoglitore, la barra di Collegati, l'interruttore col conteggio, la guardia dell'anello).
+
+Riapprovate le 20, col perché:
+- **plugin-lista, plugin-connettori, plugin-skill** (1280, chiaro e scuro; plugin-lista anche a 900): la barra di Plugin — le schede a larghezza naturale e la ricerca elastica (661 invece di 288 fissi). Il corpo è quello di prima.
+- **plugin-collegati** (1280, chiaro e scuro): la barra con «Strada: tutte ▾» e «Da sistemare · 13».
+- **libreria-griglia** (1280 e 900, chiaro e scuro), **libreria-lista** (1280, chiaro e scuro): la testata senza il selettore della vista, la pillola «Tipo: Tutti i tipi» al posto di «g0mreA: Tutti i tipi».
+- **componenti-modulo** (1280, chiaro e scuro): lo spento di Segmented con un altro setting e lo switch «Attivo (spento)».
+- **componenti-gusci** (1280, chiaro e scuro): il riquadro di ListPage più largo (ha le schede più lunghe) con due schede, «Tutto» e «Collegati», così sta anche a 900.
+
+Le altre 98: 0 differenze.
+
+**Le catture** in `docs/catture/fase-linguaggio-ritocchi/`: 24 PNG (1,8 MB), `prima/` e `dopo/`, ognuna con Libreria › griglia, Libreria › lista e Plugin › Collegati a 1280 e a 900, chiaro e scuro. Fatte **come la galleria** (orologio fermo, rendering deterministico, modello finto, `s.cattura`, `magick -strip`). Le otto per cui la galleria ha un'approvata sono le approvate stesse — di b710d8fe in `prima/`, di questa fase in `dopo/`. Le otto a 900 di Libreria › lista e Plugin › Collegati (che la galleria non cattura) vengono da una corsa con lo stesso ambiente, verificata uguale alle approvate dove le approvate ci sono: `magick compare -metric AE -fuzz 1%` dà 0 sulle quattro a 1280, su libreria-griglia a 900 e su plugin-lista a 900, prima e dopo.
+
+**La sonda C5** (`node scripts/fase-linguaggio-probe.mjs`, da sola): `DIFFERENZE: 0 — le pagine dello stesso modello coincidono`. Un limite da dire: Collegati è **da solo** nel suo gruppo (elenco · schede+ricerca+pillole), quindi C5 non lo confronta con nessuno. Che la sua ricerca stia alla stessa x delle altre tre schede di Plugin (581 a 1280, 385 a 900) lo dicono le misure della tabella, non C5.
+
+## Che cosa i controlli NON vedono
+
+- **R2** guarda ciò che è visibile nella scena: i controlli dentro un menu chiuso o un dialogo non aperto non li vede; li vedrà nelle scene che li aprono.
+- **R2** dichiara l'eccezione per contenitore (testid con `-row`, `-card`, `-item`, figli di `divide-y`): due controlli omonimi dentro due contenitori così chiamati, ma che non sono righe, passerebbero.
+- **R3** guarda i controlli, non il testo: una parola tagliata in una cella o in un titolo non la prende. E la passata a 900 delle 53 scene senza cattura controlla i rettangoli ma non confronta i pixel.
+- **R1 dal vivo** prende ciò che la scena rende: un messaggio senza traduzione in una pagina che nessuna scena apre resta alla guardia statica — che però vede solo le macro, non un id costruito a runtime.
+- **Il clic sul menu** («Strada: tutte ▾» → scelta della voce → filtro applicato) non è coperto da un test, per il limite del render statico; la galleria non apre quel menu.
+- **L'anello del fuoco da tastiera** non lo vede nessuna delle tre regole (la galleria fotografa a riposo): l'ha preso la sonda fase-b20-bug, sotto.
+
+## Difetti dei controlli stessi, trovati e chiusi in corsa
+
+- **Il raccoglitore si faceva sovrascrivere.** La prima versione metteva su `window` un raccoglitore nuovo a ogni copia del modulo: la pagina dei componenti è un bundle suo, con una copia di `lib/i18n`, e la sua copia ricopriva la prima — in galleria non si raccoglieva più niente, e le scene della Libreria restavano verdi con «g0mreA» sullo schermo. Ora l'oggetto nasce una volta sola e le copie aggiungono allo stesso elenco; lo prova `i18n-traduzioni-mancanti.test.ts` (rosso con la versione che sovrascriveva).
+- **Falsi positivi.** La prima versione del controllo dei tagli, sulla stessa base, segnava 2.826 «controlli tagliati» su 171 combinazioni rosse, 2.809 dei quali in verticale: il popover ⌘K chiuso sta nel DOM sopra la finestra e le voci scorse fuori da una lista restano nel DOM — controlli che non si vedono. Con i controlli definitivi i tagli verticali sono 0. Ora «visibile» significa anche intersecare la finestra, e una lista che scorre decide lei.
+- **La passata a 900 misurava uno stato che nessuno vede.** L'app ricalcola il layout con un resize debounced (100 ms) e i controlli giravano prima: barra laterale ancora larga a 900, area 636 invece di 824, «Crea» ×2. Ora `attendiLayout` aspetta che barra e colonna tengano lo stesso rettangolo per più del debounce (c1e9419a1).
+- **Un id mancante attribuito alla scena sbagliata.** La pagina della scena prima, ri-renderizzata dal cambio di misura, rende di nuovo i suoi id: «V_pNa0» finiva sulla scena dopo Collegati. Ora il raccoglitore si svuota appena prima di aprire la scena (f268c9a27).
+- **Le prime catture dei documenti erano scadute**: le avevo scattate con una procedura mia, senza l'ambiente della galleria (orologio reale, animazioni accese, modello finto sulla porta 0): non coincidevano con le approvate e non erano una prova. Rifatte come cattura la galleria (f778fad73, vedi «Le catture»).
+
+## Scelte che ho fatto io
+
+- Le etichette accessibili cambiate per rendere vero R2 su tutte le scene («Nuovo bot»; la pillola del nome in testata senza tooltip). Sono conseguenze dirette della regola, ma sono cambi visibili: se «Nuovo bot» non è la parola giusta, è una riga.
+- La barra di Plugin va a capo quando manca lo spazio, e la ricerca è elastica. A 1280 e a 900 non va mai a capo; la regola è lì per le larghezze sotto.
+- Le demo della pagina dei componenti cambiate per non ripetere nomi e per stare a 900: sono campioni, non l'app.
+- **L'anello del fuoco l'ho corretto in tutti e quattro i punti**, non solo nella scheda che la sonda misurava: è la stessa riga con la stessa causa. La fase diceva «solo questi difetti»: se voleva solo il punto misurato, gli altri tre sono da riportare indietro (3215b8dd9 li tocca insieme; i test che li guardano sono i due DS4).
+
+## La corsa di fatto.mjs
+
+Comando: `node scripts/fatto.mjs --sonde fase-design,fase-plugin-pulita,fase-b20-bug,fase-centro,fase-squadra`, lanciato da solo dopo l'ultimo commit di codice (df796380f). **Quarta corsa: VERDE in 26 min 44 s** (`fatto-esito.md` e le uscite in `fatto-uscite/`, non committate).
+
+| passo | esito | durata | misura |
+|---|---|---|---|
+| typecheck | OK | 1,7 s | |
+| suite: npm test | OK | 1 min 15 s | 569 file, 6942 test |
+| suite: ci-sim | OK | 1 min 21 s | 569 file, 6938 test + 6 saltati |
+| build | OK | 4,9 s | |
+| galleria | OK | 5 min 37 s | 118 su 118 uguali, 0 rosse; 53 passate a 900 senza errori |
+| sonda fase-design | OK | 15 min 25 s | 7/7 |
+| sonda fase-plugin-pulita | OK | 20,5 s | 113/113 |
+| sonda fase-b20-bug | OK | 16,6 s | 76/76 |
+| sonda fase-centro | OK | 10,2 s | 55/55 |
+| sonda fase-squadra | OK | 2 min 13 s | 32/32 |
+| processi del repo a 0 | OK | 0,1 s | 0 Electron, 0 daemon (`ps -axo pid=,comm=`) |
+| nessuna temporanea nuova | OK | 0,1 s | 0 nuove del repo, radice della corsa vuota |
+
+La sonda C5 (`fase-linguaggio-probe.mjs`) non è fra le `--sonde` che la fase chiede: l'ho lanciata da sola due volte, prima e dopo la correzione dell'anello — `DIFFERENZE: 0` entrambe le volte.
+
+## I rossi delle corse di fatto.mjs
+
+`fatto.mjs` è stato lanciato da solo cinque volte. La prima (dopo f268c9a27) è stata interrotta a metà dallo strumento di lavoro, al passo dopo il build, e non è arrivata alle sonde. Poi quattro: l'ultima è quella verde, dopo l'ultimo commit di codice.
+
+**Prima corsa** (dopo f268c9a27): ROSSA in 26 min 56 s — tutto verde tranne la **sonda fase-b20-bug, 75/76**. È il rosso che conta: sotto.
+
+**Seconda corsa** (dopo 3215b8dd9): fermata da me. typecheck e `npm test` verdi, poi **ci-sim uscita con codice 1**: un test caduto per timeout, `skill-github.test.ts` › «commit vecchio → nuovo, file aggiunti/tolti/cambiati» — «Test timed out in 5000ms» (5011 ms). È un test che non ho toccato, che fa `git clone` e `git commit` veri su cartelle temporanee; nello stesso momento `npm test` (che lo contiene) era passato in 1 min 15 s, e nelle altre corse dura da 0,46 a 1,27 s. Rilanciato da solo, in ambiente ci-sim, tre volte: verde (619, 465, 568 ms). Il carico della macchina in quei minuti era di altre applicazioni (due processi di Chrome al 100% e un `llama-server` di Ollama al 66%: load average 5–6; non sono del repo e non li ho toccati). Nessuna correzione: non c'era una causa nel codice.
+
+**Terza corsa** (dopo 3215b8dd9): fermata da me. Suite e ci-sim verdi, poi **galleria uscita con codice 1**: 117 uguali e `plugin-autorizzazioni-scuro` diversa — la cattura mostrava «caricamento…» al posto delle 24 righe di strumenti, con la squadra ancora aperta nella barra. Gli strumenti del server arrivano da una RPC (`mcpTools`) che non passa dalla rete del renderer, e lì la galleria aspettava solo rete quieta e corpo fermo: sotto carico la cattura li precede. L'ho vista una volta sola, in quella corsa: da sola la scena è uguale tre volte su tre, quindi non so riprodurla a comando. Che gli strumenti non ancora arrivati siano la causa lo dice la cattura — «caricamento…» è ciò che la scheda rende finché `tools` è `null` (`PluginCard.tsx:401`) — non una riproduzione controllata. Corretto in df796380f: per quella scena la galleria aspetta la CONDIZIONE — i gruppi di strumenti nella scheda — come già fa per le sezioni asincrone di Impostazioni › Generali; se non arrivano entro 15 s la scena resta DIVERSA. È un'attesa nuova non vista rossa in modo controllato: questo è il limite della prova.
+
+**Quarta corsa** (dopo df796380f): VERDE — i numeri stanno in «La corsa di fatto.mjs».
+
+### Il rosso che conta: l'anello del fuoco che non si vedeva
+
+Il controllo caduto nella prima corsa è B5, «con il Tab VERO l'anello di fuoco si vede sul controllo che ha il focus». La sonda preme un clic vero sul bottone «Elenco» della Libreria e poi Tab. Sulla base c'erano due «Elenco» (testata e barra) e la sonda passava 76/76; con R2 ne resta uno, l'ultimo controllo della barra, e il Tab da lì cade sulla scheda di un documento: `{"testid":"library-open-…","outline":"none 2px oklch(0.704 0.04 256.788)","shadow":"none","focusVisible":true,"focusFrom":"keyboard"}` — fuoco da tastiera, e nessun anello.
+
+**Causa prima, misurata dal vivo** (stesso elemento, stesso fuoco): con la classe `outline-none` l'outline è `none`; tolta quella classe, `solid 2px` nel colore dell'anello. In Tailwind 4 `.outline-none { --tw-outline-style: none; outline-style: none }`, e `outline-<n>` — anche nella variante `focus-visible` — rimette lo stile da `var(--tw-outline-style)`: sullo stesso elemento l'una azzera l'altra. L'anello della scheda della Libreria non si è mai visto da tastiera: un difetto dell'app che esisteva prima di questa fase, e che R2 ha solo reso raggiungibile dal Tab della sonda.
+
+**La correzione** (3215b8dd9): via `outline-none` dove sta accanto a `focus-visible:outline-2` — quattro punti: la scheda della Libreria e quella in chat (`DOC_CARD.focus`), la riga di una decisione (`DecidedRow`), le righe cliccabili delle Impostazioni (`SettingsRow`) e `ANELLO_DENTRO` di `ModelsPage`. L'outline nativo dopo un clic lo toglie già la regola unica di B5 in `styles.css`; a riposo non cambia un pixel (la galleria della quarta corsa: 118 su 118). **La guardia nuova** (`focus-ring-guard.test.ts`): il CSS compilato dice che `outline-none` azzera la variabile che `focus-visible:outline-2` legge, e nessun sorgente del renderer le ha sulla stessa riga — vista ROSSA prima con i quattro punti, verde dopo. I due test DS4 che pretendevano `outline-none` su quelle righe seguono (stesso controllo, senza la classe). Sonda fase-b20-bug da sola: **76/76**; C5 da sola: DIFFERENZE 0.
+
+## Vincoli rispettati
+
+Niente Docker né `npm run dist`; nessun modello cloud; nessun eval col modello. Nessun download e nessun pacchetto nuovo (`npm install` mai lanciato). Rete solo su 127.0.0.1, su porte scelte dal sistema: mai 11434 né 1234. Mai `open` vero, mai `osascript`, mai `sudo`. Nessuna app o daemon sui dati veri dell'utente (sempre `SANDBOT_TEST_USER_DATA` con la HOME finta). Catture solo via CDP, mai `screencapture`. `vendor/`, `dist-installers/`, `~/Projects/Bot/engramma`, `out-review/` e `scripts/vetrina/` intatti. Mai letto un file vero di configurazione delle altre app. Nessuna migrazione di database. Le catture e le misure che le sonde riscrivono in `docs/` sono riportate a HEAD dopo ogni corsa.
+
+**Tre deviazioni, dichiarate:**
+- **`/tmp`.** All'inizio, per un istante, due file di appoggio in `/tmp`: `ritocchi-run-path` e una copia di `messages.po`, tolti col comando subito dopo. Tutto il resto sta in una radice `mktemp -d` della base dei vincoli. Alla chiusura in `/tmp` non c'è nulla di mio.
+- **Sonde con l'uscita in pipe.** Le corse che valgono come prova (la prova ROSSA, C5, b20-bug, le letture del DOM, le quattro corse di fatto.mjs) hanno l'uscita su file. Ma una decina di corse di galleria di diagnosi (`--solo …`, mentre correggevo i controlli) le ho lanciate con `| grep` e `| tail`: la regola «mai pipe su un processo vivo» l'ho rispettata dopo, non da subito.
+- **Due corse di fatto.mjs fermate a mano.** La seconda e la terza le ho interrotte io con SIGTERM, perché erano già rosse (ci-sim, galleria): a `fatto.mjs` spento restava viva la sonda figlia con la sua app, fermata poi col SIGTERM del suo gestore. Processi del repo tornati 0 e 0; le tre radici `fatto-*` rimaste (delle corse interrotte; dentro solo cache di jiti e node-compile-cache) le ho tolte a mano, guardate prima di cancellarle.
+
+Alla chiusura: processi Electron e `--homun-daemon` del repo 0 e 0; nessuna temporanea mia né delle sonde (compresa la radice di lavoro); REPORT con la sezione in cima e la coda byte-identica; CHANGELOG invariato; tag annotato `fase-linguaggio-ritocchi`; nessun push, nessun tag `v*`.
+
+---
+
 # REPORT FASE LINGUAGGIO: un linguaggio grafico solo, fatto di oggetti riusati
 
 Base: `main` al tag `fase-fondamenta-galleria` (bb5cddea), verifica fatta: HEAD era esattamente lì, git pulito a parte `out-review/` e `scripts/vetrina/` (non toccate, come chiedono i vincoli). Chiusura con `node scripts/fatto.mjs --sonde fase-design,fase-plugin-pulita,fase-b20-bug,fase-centro,fase-squadra` lanciata DA SOLA dopo l'ultimo commit di codice: **VERDE in 25 min 16 s** — typecheck OK · suite 566 file / 6930 test OK · ci-sim OK · build OK · galleria 118/118 uguali (8,4 MB su 15) · sonde design 7/7 (15 min 3 s), plugin-pulita 113/113, b20-bug 76/76, centro 55/55, squadra 32/32 · 0 Electron e 0 daemon del repo · 0 temporanee nuove del repo e radice della corsa vuota. CHANGELOG invariato; tag annotato `fase-linguaggio`; nessun push, nessun tag `v*`.
