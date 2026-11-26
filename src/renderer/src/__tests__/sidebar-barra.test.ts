@@ -94,11 +94,11 @@ describe('R1: buildSidebarModel con stati e tempi (le righe col pallino)', () =>
 describe('R1: l\'ordine dentro ogni sezione — prima chi aspetta te, poi ultima attività', () => {
   it('le righe in attesa salgono; le altre per lastAt decrescente (null in fondo)', () => {
     const rows = [
-      { id: 'a', waiting: false, works: false, lastAt: 100 },
-      { id: 'b', waiting: true, works: false, lastAt: 5 },
-      { id: 'c', waiting: false, works: false, lastAt: 300 },
-      { id: 'd', waiting: false, works: false, lastAt: null },
-      { id: 'e', waiting: true, works: false, lastAt: 900 }
+      { id: 'a', name: 'a', waiting: false, works: false, lastAt: 100 },
+      { id: 'b', name: 'b', waiting: true, works: false, lastAt: 5 },
+      { id: 'c', name: 'c', waiting: false, works: false, lastAt: 300 },
+      { id: 'd', name: 'd', waiting: false, works: false, lastAt: null },
+      { id: 'e', name: 'e', waiting: true, works: false, lastAt: 900 }
     ]
     // tra due in attesa vince l'ultima attività: e (900) prima di b (5)
     expect(orderRows(rows).map((r) => r.id)).toEqual(['e', 'b', 'c', 'a', 'd'])
@@ -110,17 +110,17 @@ describe('R1: l\'ordine dentro ogni sezione — prima chi aspetta te, poi ultima
 describe('M4: chi lavora adesso sta subito dopo chi aspetta te', () => {
   it('un bot che lavora (thinking/speaking/listening) con attività VECCHIA sta sopra un bot fermo più recente', () => {
     const rows = [
-      { id: 'recente', waiting: false, works: false, lastAt: 900 },
-      { id: 'lavora', waiting: false, works: true, lastAt: 5 }
+      { id: 'recente', name: 'recente', waiting: false, works: false, lastAt: 900 },
+      { id: 'lavora', name: 'lavora', waiting: false, works: true, lastAt: 5 }
     ]
     expect(orderRows(rows).map((r) => r.id)).toEqual(['lavora', 'recente'])
   })
 
   it('chi aspetta te resta PRIMA di chi lavora; tra chi lavora vince l\'ultima attività', () => {
     const rows = [
-      { id: 'lavora-vecchio', waiting: false, works: true, lastAt: 5 },
-      { id: 'aspetta', waiting: true, works: false, lastAt: 1 },
-      { id: 'lavora-nuovo', waiting: false, works: true, lastAt: 800 }
+      { id: 'lavora-vecchio', name: 'lavora-vecchio', waiting: false, works: true, lastAt: 5 },
+      { id: 'aspetta', name: 'aspetta', waiting: true, works: false, lastAt: 1 },
+      { id: 'lavora-nuovo', name: 'lavora-nuovo', waiting: false, works: true, lastAt: 800 }
     ]
     expect(orderRows(rows).map((r) => r.id)).toEqual(['aspetta', 'lavora-nuovo', 'lavora-vecchio'])
   })
@@ -353,5 +353,84 @@ describe('R1 render: la rotaia — icone fisse, robottini e cerchi con l\'inizia
     const tree = renderSidebar(layoutRail)
     const ricerche = findAll(tree, (n) => (accessibleName(n) ?? '').includes('Ricerche'))
     expect(ricerche.length).toBeGreaterThan(0)
+  })
+})
+
+// ---- S3 (fase isolamento-suite): a parità, l'ordine è FISSO ----
+// Sulla base orderRows lasciava all'ordine d'arrivo chi era a parità di stato
+// e di attività (due membri «adesso», due bot creati nello stesso istante): la
+// stessa barra usciva in due modi a seconda di chi passava la lista e in che
+// ordine — e l'ordine d'arrivo nessuno lo garantisce (per i membri aggiunti
+// uno alla volta, a parità di joined_at, conta l'id: casuale). Qui si provano
+// TUTTE le permutazioni: l'ordine d'arrivo non deve contare.
+// (Il salto della galleria «chat-team» aveva UN'ALTRA causa — la nascita dei
+// due membri a orologio reale, a volta nello stesso millisecondo — corretta
+// nella scena: scripts/lib/scene.mjs, fissaNascitaMembri.)
+
+type RigaOrdine = { id: string; name: string; waiting: boolean; works: boolean; lastAt: number | null }
+const riga = (id: string, name: string, over: Partial<RigaOrdine> = {}): RigaOrdine => ({ id, name, waiting: false, works: false, lastAt: null, ...over })
+
+/** tutte le permutazioni di una lista: l'ordine d'arrivo non deve contare */
+function permutazioni<T>(xs: readonly T[]): T[][] {
+  if (xs.length <= 1) return [[...xs]]
+  return xs.flatMap((x, i) => permutazioni([...xs.slice(0, i), ...xs.slice(i + 1)]).map((resto) => [x, ...resto]))
+}
+
+describe('S3: orderRows — a parità l\'ordine è FISSO: il nome, poi l\'id, qualunque sia l\'ordine d\'arrivo', () => {
+  it('righe uguali per stato e attività escono sempre nello stesso ordine', () => {
+    const righe = [riga('z', 'Zeta'), riga('m', 'Alfa'), riga('a', 'Alfa'), riga('b', 'beta'), riga('A', 'Àncora')]
+    // stesso nome (Alfa): decide l\'id, a prima di m. I nomi si confrontano per
+    // codice Unicode, non per lingua: lo stesso su ogni Mac, qualunque sia la
+    // lingua di sistema (mai localeCompare)
+    const atteso = 'a m z b A'
+    for (const p of permutazioni(righe)) {
+      expect(orderRows(p).map((r) => r.id).join(' '), `ordine d\'arrivo: ${p.map((r) => r.id).join(' ')}`).toBe(atteso)
+    }
+  })
+
+  it('vale in ogni gruppo — tra chi aspetta, tra chi lavora, tra i fermi — e SOLO dopo lo stato e l\'attività', () => {
+    const righe = [
+      riga('w-z', 'Zeta', { waiting: true }), riga('w-a', 'Alfa', { waiting: true }),
+      riga('l-b', 'beta', { works: true }), riga('l-a', 'Alfa', { works: true }),
+      riga('f-z', 'Zeta', { lastAt: 5 }), riga('f-a', 'Alfa', { lastAt: 5 }),
+      riga('n-b', 'beta'), riga('n-a', 'Alfa')
+    ]
+    const atteso = 'w-a w-z l-a l-b f-a f-z n-a n-b'
+    for (const p of permutazioni(righe)) {
+      expect(orderRows(p).map((r) => r.id).join(' '), `ordine d\'arrivo: ${p.map((r) => r.id).join(' ')}`).toBe(atteso)
+    }
+  })
+
+  it('l\'attività più recente vince ancora: il nome non la scavalca (è l\'ULTIMO criterio)', () => {
+    const righe = [riga('z', 'Zeta', { lastAt: 10 }), riga('a', 'Alfa', { lastAt: 5 }), riga('c', 'Alfa'), riga('b', 'Alfa')]
+    // Zeta prima di Alfa anche se viene dopo per nome; in fondo, a parità, b prima di c
+    expect(orderRows(righe).map((r) => r.id)).toEqual(['z', 'a', 'b', 'c'])
+  })
+
+  it('buildSidebarModel: le righe portano nome e id dell\'agente — due bot creati nello stesso istante stanno per nome', () => {
+    const agents = [agent('m', 'Main'), agent('z', 'Zeta'), agent('a', 'Alfa'), agent('b', 'beta')]
+    const mdl = buildSidebarModel(agents, [], 'm')
+    // come arrivano (createdAt uguale per tutti: parità perfetta)
+    expect(mdl.bots.map((b) => b.id)).toEqual(['z', 'a', 'b'])
+    expect(mdl.bots.map((b) => b.name)).toEqual(['Zeta', 'Alfa', 'beta'])
+    expect(orderRows(mdl.bots).map((b) => b.id)).toEqual(['a', 'z', 'b']) // ROSSO sulla base: l\'ordine d\'arrivo (z, a, b); Alfa < Zeta < beta per codice Unicode
+  })
+
+  it('la BARRA: i membri di una squadra aperta, a parità di attività, stanno per nome — da qualunque parte arrivino', () => {
+    // due membri mai usati, creati nello stesso istante: parità perfetta
+    const nomi: Record<string, string> = { capo: 'Capo', z: 'Zeta', a: 'Alfa' }
+    const nomiInBarra = (ordine: string[]): string[] => {
+      const tree = renderSidebar(layoutFull, {
+        agents: [agent('main', 'Bot'), agent('capo', 'Capo'), agent('z', 'Zeta'), agent('a', 'Alfa')],
+        groups: [group(77, 'Squadra', ordine.map((id) => ({ agentId: id, name: nomi[id]!, coordinator: id === 'capo' })), 'capo')],
+        openGroupId: 77, lastSendAt: {}
+      })
+      // la riga d\'un membro è un bottone che comincia col nome (il tempo sta a destra)
+      const testi = findAll(tree, (n) => n.tag === 'button').map(textOf)
+      const posto = (nome: string): number => testi.findIndex((t) => t.startsWith(nome))
+      return ['Alfa', 'Zeta'].sort((x, y) => posto(x) - posto(y))
+    }
+    expect(nomiInBarra(['capo', 'z', 'a'])).toEqual(['Alfa', 'Zeta']) // ROSSO sulla base: Zeta, Alfa (l\'ordine d\'arrivo)
+    expect(nomiInBarra(['capo', 'a', 'z'])).toEqual(['Alfa', 'Zeta'])
   })
 })

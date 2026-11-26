@@ -54,6 +54,9 @@ export interface SidebarTeam {
 
 /** Un bot singolo della barra (né principale, né in squadra, né figlio). */
 export interface SidebarBot {
+  /** S3 (fase isolamento-suite): id e nome RIPETUTI in testa alla riga — li legge orderRows, per l'ordine fisso a parità */
+  id: string
+  name: string
   agent: Agent
   /** la sezione «progetto», se c'è */
   section: string | null
@@ -164,6 +167,8 @@ export function buildSidebarModel(
   const botsOut: SidebarBot[] = free.map((agent) => {
     const state = stateOfAgent(agent, opts.states)
     return {
+      id: agent.id,
+      name: agent.name,
       agent,
       section: agent.section || null,
       childWaiting: waitingOnChildren.has(agent.id),
@@ -232,19 +237,38 @@ function stateOfAgent(a: Agent, states?: Readonly<Record<string, BotState>>): Bo
   return 'idle'
 }
 
+/** Una riga che orderRows sa ordinare: stato, attività e — a parità — nome e id. */
+export interface OrderRow {
+  waiting: boolean
+  works: boolean
+  lastAt: number | null
+  /** S3 (fase isolamento-suite): il nome, l'ultimo criterio — fisso a parità */
+  name: string
+  /** S3: l'id, se anche il nome è uguale */
+  id: string
+}
+
 /**
  * L'ordine dentro ogni sezione: prima chi aspetta te, poi chi lavora adesso,
  * poi ultima attività.
  * M4 (fase beta12-correzioni): un bot in thinking/speaking/listening conta
  * come attività ADESSO — sta subito dopo chi aspetta te, sopra un bot fermo
  * più recente (nella cattura «Ricerche» che lavorava non compariva in cima).
+ * S3 (fase isolamento-suite): a PARITÀ l'ordine è fisso — il nome, poi l'id.
+ * Prima valeva l'ordine d'arrivo, che orderRows non sceglie e nessuno gli
+ * garantisce: dipende da chi passa la lista (per i membri aggiunti uno alla
+ * volta, a parità di joined_at, conta l'id — casuale). I nomi si confrontano
+ * per codice Unicode, non per lingua: lo stesso su ogni Mac, qualunque sia la
+ * lingua di sistema.
  */
-export function orderRows<T extends { waiting: boolean; works: boolean; lastAt: number | null }>(rows: T[]): T[] {
+export function orderRows<T extends OrderRow>(rows: T[]): T[] {
   return [...rows].sort(
     (a, b) =>
       Number(b.waiting) - Number(a.waiting) ||
       Number(b.works) - Number(a.works) ||
-      (b.lastAt ?? -Infinity) - (a.lastAt ?? -Infinity)
+      (b.lastAt ?? -Infinity) - (a.lastAt ?? -Infinity) ||
+      (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) ||
+      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   )
 }
 

@@ -575,6 +575,9 @@ function TeamRows({ team, states, lastSendAt, now }: { team: SidebarTeam; states
   const [allMembers, setAllMembers] = useState(() => readLS(`${SECTION_OPEN_PREFIX}members.${team.group.id}`) === '1')
   const members = orderRows(
     team.members.map((m) => ({
+      // S3 (fase isolamento-suite): nome e id, per l'ordine fisso a parità
+      id: m.id,
+      name: m.name,
       member: m,
       waiting: states[m.id] === 'waiting',
       // M4 (fase beta12-correzioni): chi lavora adesso conta per l'ordine
