@@ -289,6 +289,23 @@ const log = (...a) => console.log('[galleria]', `+${((Date.now() - T0) / 1000).t
  * Con tema 'solo-controllo' (R3, la passata a 900 delle scene senza cattura):
  * apre la scena, fa i controlli e basta — niente tema, maschere né foto.
  */
+/**
+ * Il LAYOUT ASSESTATO dopo un cambio di misura. L'app ricalcola il layout con
+ * un resize DEBOUNCED (App.tsx, RESIZE_DEBOUNCE_MS), e fino a quel momento la
+ * pagina è com'era: a 900 la barra laterale resta LARGA e l'area della pagina
+ * è 636 invece di 824. La stabilità a due frame del motore (attendiStabile) ci
+ * casca, perché nel transitorio i rettangoli sono fermi. Qui si chiede che
+ * barra e colonna tengano lo stesso rettangolo per più del debounce: se dopo
+ * di esso cambiano, quello non era il layout della finestra, e si ripete.
+ * Torna false (senza lanciare) se non si assesta mai: la scena è ROSSA col
+ * motivo, la corsa non muore.
+ */
+const attendiLayout = (s) => s.attendi(`(() => new Promise((ok) => {
+  const leggi = () => ['aside', 'main'].map((q) => { const el = document.querySelector(q); if (!el) return 'x'; const r = el.getBoundingClientRect(); return Math.round(r.left) + ',' + Math.round(r.width) }).join('|')
+  const prima = leggi()
+  setTimeout(() => ok(leggi() === prima), 180)
+}))()`, { entro: 6_000, motivo: 'il layout della finestra nuova sia applicato (il resize dell\'app è debounced)' })
+
 const cattura = async (s, page, ctx, w, tema, errori = []) => {
   const solo = tema === 'solo-controllo'
   await s.viewport(w, 800 - 800 + (w === 900 ? 640 : 800))
@@ -300,6 +317,7 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
     // CHIUDE, e la barra cambierebbe secondo il NUMERO di passate, non secondo
     // l'app. Si riapre solo quel che il cambio di misura chiude da sé: i
     // dialoghi, i menu, i fogli (openOverlay rifà lui le sue condizioni)
+    if (!(await attendiLayout(s).catch(() => false))) errori.push('il layout non si è assestato dopo il cambio di misura')
     if (page.overlay) { await closeOverlays(s); await openOverlay(s, page) }
     await s.attendiRete({ quieta: 300, entro: 8_000 }).catch(() => undefined)
     await s.attendiStabile('body', { entro: 4_000 }).catch(() => undefined)

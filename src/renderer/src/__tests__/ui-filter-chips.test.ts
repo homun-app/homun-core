@@ -44,6 +44,18 @@ describe('C1: FilterChips — le tre pillole di filtro', () => {
     expect(bottone.attrs['aria-pressed']).toBe('true')
     expect(textOf(bottone)).toBe('Archiviati')
   })
+
+  // fase linguaggio-ritocchi (R3): il conteggio accanto all'etichetta, come la
+  // pillola di scelta — «Da sistemare · 13» in Plugin › Collegati
+  it('interruttore col conteggio: «Da sistemare · 13», spenta resta secondaria e aria-pressed false', () => {
+    const conConteggio = parseHtml(renderHtml(ce(FilterChipsInterruttore, { active: false, count: 13, onToggle: () => undefined }, 'Da sistemare')))
+    const bottone = findAll(conConteggio, (n) => (n.attrs['data-slot'] ?? '') === 'button')[0]!
+    expect(textOf(bottone)).toBe('Da sistemare · 13')
+    expect(bottone.attrs['aria-pressed']).toBe('false')
+    // senza il conteggio il testo resta la sola etichetta
+    const senza = parseHtml(renderHtml(ce(FilterChipsInterruttore, { active: false, onToggle: () => undefined }, 'Da sistemare')))
+    expect(textOf(findAll(senza, (n) => (n.attrs['data-slot'] ?? '') === 'button')[0]!)).toBe('Da sistemare')
+  })
 })
 
 const textAll = (root: ReturnType<typeof parseHtml>): string => findAll(root, () => true).map((n) => textOf(n)).join('')
