@@ -8,7 +8,7 @@ import type { ReactNode } from 'react'
 import { cn } from '../../lib/utils'
 
 export type TextSize = 'page' | 'title' | 'body' | 'small' | 'caption' | 'reading'
-export type TextTone = 'normal' | 'muted' | 'destructive'
+export type TextTone = 'normal' | 'muted' | 'destructive' | 'ok' | 'waiting'
 export type TextWeight = 'normal' | 'medium' | 'semibold'
 
 const SIZE: Record<TextSize, string> = {
@@ -23,7 +23,11 @@ const SIZE: Record<TextSize, string> = {
 const TONE: Record<TextTone, string> = {
   normal: '',
   muted: 'text-muted-foreground',
-  destructive: 'text-destructive'
+  destructive: 'text-destructive',
+  // K2 (fase conversione-chat): l'esito in cima alle card in chat — riuscito
+  // (il verde dei grafici) e l'attesa (l'ambra: l'avviso dei terzi)
+  ok: 'text-chart-2',
+  waiting: 'text-waiting'
 }
 
 const WEIGHT: Record<TextWeight, string> = {
@@ -40,7 +44,7 @@ const WEIGHT: Record<TextWeight, string> = {
 export function Text({ size = 'body', tone = 'normal', weight = 'normal', truncate, className, children, testId, ...rest }: {
   /** la taglia: page 28 · title 20 · body 14 (default) · small 13 · caption 12 · reading 16 */
   size?: TextSize
-  /** il tono: normale · grigio (le seconde righe) · errore */
+  /** il tono: normale · grigio (le seconde righe) · errore · riuscito · attesa */
   tone?: TextTone
   /** il peso: 400 (default) · 500 (etichette e titoli di riga) · 600 (titoli) */
   weight?: TextWeight

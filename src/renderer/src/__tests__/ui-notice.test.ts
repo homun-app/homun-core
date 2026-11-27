@@ -160,4 +160,20 @@ describe('DS2: Notice — la riga di sistema compatta della chat', () => {
     // il controllo non è vuoto: un nome sbagliato lo vede
     expect(deadClasses(css, [...tutte, 'gap-row-gapp'])).toEqual(['gap-row-gapp'])
   })
+
+  it('K2 (fase conversione-chat): fill — la riga RIEMPITA del suo tono (la fascia in cima a una card): raggio dei controlli, respiro 12/8, il fondo del tono; il testo resta del suo tono', () => {
+    const FIRME: Array<[string, string, string]> = [
+      ['neutral', 'bg-muted', 'text-muted-foreground'],
+      ['warning', 'bg-waiting/15', 'text-waiting'],
+      ['destructive', 'bg-destructive/15', 'text-destructive']
+    ]
+    for (const [tone, fondo, testo] of FIRME) {
+      const c = classes(noticeOf(render({ children: 'x', tone, fill: true })))
+      for (const k of ['rounded-control', 'px-3', 'py-2', fondo, testo]) expect(c, `${tone}: ${k}`).toContain(k)
+    }
+    // senza fill niente fondo né respiro: com'era
+    const nuda = classes(noticeOf(render({ children: 'x', tone: 'destructive' })))
+    for (const k of ['rounded-control', 'px-3', 'py-2']) expect(nuda).not.toContain(k)
+    expect(nuda.filter((c) => c.startsWith('bg-'))).toEqual([])
+  })
 })

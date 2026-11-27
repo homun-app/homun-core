@@ -232,7 +232,7 @@ La riga dell'impaginazione (NON la riga di elenco: quella è ListRow): figli uno
 Galleria: impaginazione.
 
 ### text
-Il testo del catalogo: le sei taglie dei token (page 28 · title 20 · body 14, il default · small 13 · caption 12 · reading 16), ognuna con la sua interlinea; `tone` normale · grigio (le seconde righe) · errore; `weight` i tre pesi del tema (400 · 500 etichette e titoli di riga · 600 titoli); `truncate` per la riga che si taglia. Fuori da ui/ non si sceglie più la taglia di un testo col className.
+Il testo del catalogo: le sei taglie dei token (page 28 · title 20 · body 14, il default · small 13 · caption 12 · reading 16), ognuna con la sua interlinea; `tone` normale · grigio (le seconde righe) · errore · riuscito · attesa; `weight` i tre pesi del tema (400 · 500 etichette e titoli di riga · 600 titoli); `truncate` per la riga che si taglia. Fuori da ui/ non si sceglie più la taglia di un testo col className.
 Galleria: testo.
 
 ### app-logo
@@ -264,8 +264,8 @@ Il selettore del modello per provider: riga chiusa col nome e il provider grigio
 Galleria: impostazioni-modelli, chat-pannello.
 
 ### button
-Il bottone unico dell'interfaccia: primary/secondary/ghost/destructive, altezze md 36 e sm 32, forma pill per le azioni principali e per il ghost solo-icona (tondo), control per il resto; `icon` per i bottoni con la sola icona (con aria-label); `asChild` per vestire un link. Non usarlo per le righe cliccabili di un elenco (FlatRow), le voci di menu (dropdown-menu) o per scrivere pillole a mano.
-Galleria: da-approvare (Consenti pillola, Rifiuta destructive), dialogo-nuovo.
+Il bottone unico dell'interfaccia: primary/secondary/ghost/destructive, altezze md 36 e sm 32, forma pill per le azioni principali e per il ghost solo-icona (tondo), control per il resto; `icon` per i bottoni con la sola icona (con aria-label); `asChild` per vestire un link. `link` è il bottone di PAROLE: un'azione dentro una frase («— chiudi», «· Vedi perché») o un link nel testo («repository») — niente riquadro, altezza e respiro; la taglia e il peso sono quelli del testo in cui sta, il colore quello dei link, la sottolineatura al passaggio (con `asChild` veste un `<a>`). Non usarlo per le righe cliccabili di un elenco (FlatRow), le voci di menu (dropdown-menu) o per scrivere pillole a mano.
+Galleria: da-approvare (Consenti pillola, Rifiuta destructive), dialogo-nuovo, card-in-chat (link).
 
 ### column-head
 La riga di 52 px in cima a OGNI colonna (barra, chat, squadra, pannello destro, pagine): è la fascia di trascinamento della finestra, marcata `data-col-head` perché la sonda la riconosca. Non usarlo per righe di contenuto né fuori dalla cima di una colonna; ogni controllo dentro porta `no-drag`, e il contenuto va in una PageColumn perché titolo e azioni stiano alla larghezza del contenuto.
@@ -291,9 +291,17 @@ Galleria: superfici.
 Le pillole di filtro della barra, in TRE varianti chiuse: `Scelta` (la scelta singola col conteggio, accesa piena) · `Menu` (la pillola-menu «Bot: tutti ▾», che prende il posto dei `<select>` di filtro di Libreria) · `Interruttore` (la pillola che accende un filtro, «Archiviati»). Prendono il posto di FilterPill e dei Button shape="pill" usati come filtro. Sono FILTRI: la scelta di un'impostazione è Segmented; i conteggi li porta chi le usa.
 Galleria: ricerca.
 
+### chat-card
+IL GUSCIO DI OGNI CARD IN CHAT. La superficie è una sola: raggio di superficie, respiro di 16, nessun bordo, larga al massimo l'85% della colonna, il testo lungo va a capo DENTRO; `tone` decide il fondo (tenue, il default · attesa · errore). Dentro il ritmo è chiuso: avviso in cima · testata (il segno da 32 — `logo` (il file), `nome` (l'iniziale) o `icona` (un'icona lucide), in quest'ordine di precedenza — · `titolo` in peso medio · `sottotitolo` grigio che si tronca · `nota` contro il bordo destro) · il corpo, i blocchi a 8 px (Text, Stack) · `azioni` in fondo, a 16, i bottoni in fila. Le card portano solo il corpo e i clic: chi scrive margini, testate o righe di bottoni fuori da ui/ sta riscrivendo questo pezzo. Le proposte stanno sopra di lui (ProposalCard). Non usarla per le superfici con bordo delle pagine (quella è card).
+Galleria: card-in-chat.
+
 ### proposal-card
-LA card di proposta in chat — un oggetto solo per «il bot propone, tu clicchi», nelle varianti app Composio · server MCP · plugin da accendere · plugin da installare. Gli slot sono delimitati: `testata` (logo 32 + titolo) · `righe` (la COSA: fiducia, dove gira, accesso — testo small grigio) · `perché` (la frase del bot) · `avviso` (le letture esterne in cima, l'ambra dei terzi) · `configurazione` (il modulo quando manca qualcosa) · `stato` (gli esiti finali: Collegata, Non riuscito) · `azioni` (i bottoni, in fila in fondo). La forma è quella delle card in chat (rounded-surface, fondo tenue, il lungo va a capo dentro). ConnectorCard.tsx e ConnectorCards13.tsx restano LOGICA — i dati e i clic — sopra questa card.
+LA card di proposta in chat — un oggetto solo per «il bot propone, tu clicchi», nelle varianti app Composio · server MCP · plugin da accendere · plugin da installare. Sta sopra ChatCard (il guscio: superficie, testata con `logo`/`nome`/`icona`, `titolo`, `sottotitolo`, `nota`, `avviso`, `azioni`) e ne prende il `tone`. Gli slot della proposta sono delimitati: `righe` (la COSA: fiducia, dove gira, accesso — testo small grigio, a 4 px l'una dall'altra) · `perché` (la frase del bot, in corpo) · `configurazione` (il modulo quando manca qualcosa, a 12) · `stato` (gli esiti finali: Collegata, Non riuscito — a 12). Le righe si scrivono con Text; gli esiti con i toni `ok`, `waiting` e `destructive` di Text; le azioni dentro una frase con il bottone `link`. ConnectorCard.tsx e ConnectorCards13.tsx restano LOGICA — i dati e i clic — sopra questa card.
 Galleria: proposta.
+
+### tag
+L'etichetta piccola di stato, accanto a un titolo («token scaduto», «in attesa di conferma»): testo didascalia su un fondo tenue del suo tono (`tone`: neutro, il default · attesa · errore · riuscito), col raggio dei controlli. Si legge e basta: non è un bottone (Button), non è un filtro (FilterChips).
+Galleria: tag.
 
 ### page-toolbar
 La barra degli strumenti della pagina, FERMA sopra il corpo: `ricerca` (SearchField) a sinistra · `pillole` (FilterChips) accanto · `vista` a destra (le schede, il cambio di rappresentazione — ml-auto). Riga alta almeno 40 (min-h-10). La pagina la riempie, non la disegna: l'involupcro col margine lo dà PageShell, la barra la dà questo.
@@ -340,8 +348,8 @@ Il campo di testo dell'interfaccia: 36 px (`h-control`), raggio dei controlli, t
 Galleria: impostazioni-approvazioni, impostazioni-modelli (foglio di collegamento).
 
 ### notice
-La riga di sistema compatta della chat: icona · testo grigio `text-small` (va a capo, non tronca) · «· N volte» · azione a destra; tono neutral, warning o destructive. È solo la vista: raggruppare e contare gli avvisi sta in lib/notice-rows.ts. Non usarlo per i messaggi di bot o le bolle (quello è il testo reso), né per blocchi: è una riga.
-Galleria: chat-avvisi.
+La riga di sistema compatta della chat: icona · testo grigio `text-small` (va a capo, non tronca) · «· N volte» · azione a destra; tono neutral, warning o destructive; `fill` è la stessa riga RIEMPITA del suo tono (la fascia d'avviso in cima a una card). È solo la vista: raggruppare e contare gli avvisi sta in lib/notice-rows.ts. Non usarlo per i messaggi di bot o le bolle (quello è il testo reso), né per blocchi: è una riga.
+Galleria: chat-avvisi, card-in-chat (fill).
 
 ### page-header
 La testata di una pagina a tutta area: indietro · icona (20, grigia) o logo (40) · titolo `text-page` in font-display · azioni a destra; la descrizione sta sotto, in una riga sua, mai dentro la riga dei 52. Le misure le decide la testata, non chi la usa. Non usarlo per le testate di colonna di chat, barra e pannelli (lì ColumnHead senza PageHeader); i controlli nelle azioni portano `no-drag`.

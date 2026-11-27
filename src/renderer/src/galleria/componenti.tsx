@@ -34,7 +34,7 @@ import { i18n, activateUiLanguage } from '../lib/i18n'
 // inietta a runtime (è un sovrainsieme identico del foglio dell'app: i token
 // e le utility, già deduplicati per nome)
 import '../styles.css'
-import { Loader2, TriangleAlert, CircleHelp, CheckCircle2, Plus, Settings } from 'lucide-react'
+import { Loader2, TriangleAlert, CircleHelp, CheckCircle2, Plus, Settings, Plug } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Stack } from '../components/ui/stack'
 import { Row } from '../components/ui/row'
@@ -56,6 +56,9 @@ import { SearchField } from '../components/ui/search-field'
 import { FilterChipsScelta, FilterChipsMenu, FilterChipsInterruttore } from '../components/ui/filter-chips'
 import { PageToolbar } from '../components/ui/page-toolbar'
 import { ProposalCard } from '../components/ui/proposal-card'
+import { ChatCard } from '../components/ui/chat-card'
+import { Tag } from '../components/ui/tag'
+import { catalogLogoUrl } from '../lib/app-logos'
 import { ListPage } from '../components/ui/list-page'
 import { DetailPage } from '../components/ui/detail-page'
 import { DocumentPage } from '../components/ui/document-page'
@@ -170,6 +173,9 @@ export const SEZIONI = [
   { id: 'testate', titolo: 'section, page-header, column-head', componenti: ['section', 'page-header', 'column-head'] },
   { id: 'ricerca', titolo: 'search-field, filter-chips e page-toolbar', componenti: ['search-field', 'filter-chips', 'page-toolbar'] },
   { id: 'proposta', titolo: 'proposal-card — il bot propone, tu clicchi', componenti: ['proposal-card'] },
+  // K2 (fase conversione-chat): il guscio di ogni card in chat (su di lui sta ProposalCard) e l'etichetta di stato
+  { id: 'card-in-chat', titolo: 'chat-card — il guscio di ogni card in chat', componenti: ['chat-card'] },
+  { id: 'tag', titolo: 'tag — le etichette di stato', componenti: ['tag'] },
   { id: 'superfici', titolo: 'card e empty-state — superfici', componenti: ['card', 'empty-state'] },
   { id: 'schede', titolo: 'underline-tabs', componenti: ['underline-tabs'] },
   { id: 'dialogo', titolo: 'dialog aperto', componenti: ['dialog'] },
@@ -630,14 +636,16 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               <div className="flex flex-col gap-4 lg:flex-row">
                 <ProposalCard
                   testId="galleria-proposal-card-1"
-                  testata={<div className="flex items-center gap-2"><AppLogo logo="asana.svg" name="Asana" className="size-8 text-body" /><Text weight="semibold">Aggiungi server MCP: Asana</Text></div>}
+                  logo={catalogLogoUrl('asana.svg')}
+                  titolo="Aggiungi server MCP: Asana"
                   righe={<><Text size="small" tone="muted">Pubblicato da asana (dominio verificato) · remoto</Text><Text size="small" tone="muted">Accesso: con il tuo account (si apre il browser)</Text></>}
                   perché={<Text>Per cercare i task del tuo piano senza lasciare la chat.</Text>}
                   azioni={<><Button>Aggiungi</Button><Button variant="ghost">No</Button></>}
                 />
                 <ProposalCard
                   testId="galleria-proposal-card-2"
-                  testata={<div className="flex items-center gap-2"><AppLogo logo="asana.svg" name="Asana" className="size-8 text-body" /><Text weight="semibold">Aggiungi server MCP: Asana</Text></div>}
+                  logo={catalogLogoUrl('asana.svg')}
+                  titolo="Aggiungi server MCP: Asana"
                   stato={<Text size="small" tone="muted">✓ Asana collegato · 12 strumenti</Text>}
                 />
               </div>
@@ -647,28 +655,107 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               <div className="flex flex-col gap-4 lg:flex-row">
                 <ProposalCard
                   testId="galleria-proposal-card-3"
-                                    testata={<div className="flex items-center gap-2"><AppLogo logo={null} name="Ricette" className="size-8 text-body" /><Text weight="semibold">Installa plugin: ricette-claude</Text></div>}
+                                    nome="Ricette"
+                  titolo="Installa plugin: ricette-claude"
                   righe={<Text size="small" tone="muted">fiducia: marketplace ufficiale · commit 9c31f0aa2b4c · skill: ricette, spesa</Text>}
                   perché={<Text>Mi serve per salvare le ricette che trovi nei documenti.</Text>}
                   azioni={<><Button>Installa</Button><Button variant="ghost">No</Button></>}
                 />
                 <ProposalCard
                   testId="galleria-proposal-card-4"
-                                    testata={<div className="flex items-center gap-2"><AppLogo logo={null} name="Posta" className="size-8 text-body" /><Text weight="semibold">Accendi il plugin Posta</Text></div>}
+                  nome="Posta"
+                  titolo="Accendi il plugin Posta"
                   righe={<Text size="small" tone="muted">Server MCP · sul Mac · spento</Text>}
                   perché={<Text>Per cercare la mail della prenotazione che ti ho chiesto.</Text>}
                   azioni={<><Button>Attiva</Button><Button variant="ghost">Non ora</Button></>}
                 />
                 <ProposalCard
                   testId="galleria-proposal-card-5"
-                                    avviso={<p className="rounded-control bg-destructive/15 px-3 py-2 text-small text-destructive">Proposta fatta dopo aver letto contenuti esterni: controlla che sia quello che volevi</p>}
-                  testata={<div className="flex items-center gap-2"><AppLogo logo="gmail.svg" name="Gmail" className="size-8 text-body" /><Text weight="semibold">Collega Gmail</Text></div>}
+                  avviso={<Notice tone="destructive" fill>Proposta fatta dopo aver letto contenuti esterni: controlla che sia quello che volevi</Notice>}
+                  logo={catalogLogoUrl('gmail.svg')}
+                  titolo="Collega Gmail"
                   righe={<Text size="small" tone="muted">App del catalogo · tramite Composio</Text>}
                   perché={<Text>Così posso cercare i messaggi quando me lo chiedi.</Text>}
                   azioni={<><Button>Connetti</Button><Button variant="ghost">No</Button></>}
                 />
               </div>
             </div>
+          </div>
+        </Section>
+      )}
+
+      {/* K2 (fase conversione-chat): il guscio di ogni card in chat — la superficie, i toni, la testata nei suoi tre segni, l'avviso in cima, la riga delle azioni */}
+      {id === 'card-in-chat' && (
+        <Section title="chat-card — il guscio di ogni card in chat" testId="galleria-section-chat-card">
+          <div className="flex flex-col gap-6">
+            <div>
+              <Etichetta>la testata: il file del logo · l’iniziale · il segno di un collegamento</Etichetta>
+              <div className="flex flex-col gap-4 lg:flex-row">
+                <ChatCard
+                  logo={catalogLogoUrl('asana.svg')}
+                  titolo="Aggiungi server MCP: Asana"
+                  nota={<Tag tone="error">token scaduto</Tag>}
+                  azioni={<><Button variant="link">Apri la scheda</Button><Button variant="ghost">Non ora</Button></>}
+                >
+                  <Text size="small" tone="muted">Pubblicato da asana (dominio verificato) · remoto</Text>
+                  <Text>Per cercare i task del tuo piano senza lasciare la chat.</Text>
+                </ChatCard>
+                <ChatCard nome="Posta" titolo="Accendi il plugin Posta" sottotitolo="Server MCP · sul Mac · spento" azioni={<Button>Attiva</Button>}>
+                  <Text>Per cercare la mail della prenotazione che ti ho chiesto.</Text>
+                </ChatCard>
+                <ChatCard icona={Plug} titolo="Collega Notion" azioni={<Button>Collega</Button>}>
+                  <Text size="small" tone="muted">MCP diretto · nessun intermediario</Text>
+                  <Text size="small" tone="waiting">I segreti stanno cifrati sul tuo Mac</Text>
+                </ChatCard>
+              </div>
+            </div>
+            <div>
+              <Etichetta>i toni e l’avviso in cima: attesa · errore — in fondo la riga delle azioni</Etichetta>
+              <div className="flex flex-col gap-4 lg:flex-row">
+                <ChatCard
+                  tone="waiting"
+                  titolo="Eseguire un comando"
+                  avviso={<Notice tone="warning" fill>Il comando usa la rete: può raggiungere un indirizzo qualsiasi</Notice>}
+                  azioni={<><Button>Consenti una volta</Button><Button variant="secondary">Rifiuta</Button></>}
+                >
+                  <Text tone="muted">curl -s https://api.treni.example/v1/partenze</Text>
+                </ChatCard>
+                <ChatCard
+                  tone="error"
+                  titolo="L’ultimo tentativo non è partito"
+                  avviso={<Notice tone="destructive" fill>Il comando non è riuscito: controlla l’indirizzo e riprova</Notice>}
+                  azioni={<><Text tone="destructive">Non riuscito</Text><Button>Riprova</Button></>}
+                >
+                  <Text size="small" tone="muted">curl: (7) Failed to connect to api.treni.example</Text>
+                </ChatCard>
+              </div>
+            </div>
+            <div>
+              <Etichetta>senza testata: la card chiusa in una riga, con l’esito</Etichetta>
+              <div className="flex flex-col gap-4 lg:flex-row">
+                <ChatCard testId="galleria-chat-card-chiusa">
+                  <Text tone="ok">✓ Asana collegato · 12 strumenti</Text>
+                </ChatCard>
+              </div>
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {id === 'tag' && (
+        <Section title="tag — le etichette di stato" testId="galleria-section-tag">
+          <div className="flex flex-col gap-6">
+            <Riga label="i quattro toni: neutro · attesa · errore · riuscito">
+              <Tag>in pausa</Tag>
+              <Tag tone="waiting">in attesa di conferma</Tag>
+              <Tag tone="error">non parte</Tag>
+              <Tag tone="ok">collegata</Tag>
+            </Riga>
+            <Riga label="accanto al titolo di una card, contro il bordo destro">
+              <ChatCard logo={catalogLogoUrl('asana.svg')} titolo="Riconnetti Asana" nota={<Tag tone="error">sessione scaduta</Tag>} azioni={<Button>Riconnetti</Button>}>
+                <Text size="small" tone="muted">Il bot ha provato a usare questa app ma la sessione è scaduta.</Text>
+              </ChatCard>
+            </Riga>
           </div>
         </Section>
       )}

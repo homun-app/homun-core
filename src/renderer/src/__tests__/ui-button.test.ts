@@ -262,3 +262,37 @@ describe('DS2: Button — asChild e className', () => {
     expect(variantOf({ className: 'mt-2' })).toContain('mt-2')
   })
 })
+
+describe('K2 (fase conversione-chat): Button link — il bottone di PAROLE', () => {
+  it('niente riquadro: in linea, senza altezza, respiro e peso suoi — e SENZA taglia: prende quella del testo in cui sta', () => {
+    const cls = of({ variant: 'link' }, 'chiudi')
+    for (const k of ['inline', 'h-auto', 'px-0', 'font-normal', 'whitespace-normal']) expect(cls, k).toContain(k)
+    for (const k of ['inline-flex', 'h-control', 'h-control-sm', 'px-3', 'px-4', 'font-medium', 'whitespace-nowrap']) expect(cls, k).not.toContain(k)
+    expect(cls.filter((c) => /^text-(?:caption|small|body|reading|title|page|xs|sm|base|lg|xl)$/.test(c))).toEqual([])
+  })
+
+  it('nel colore dei link, sottolineato al passaggio; mai un fondo', () => {
+    const cls = of({ variant: 'link' }, 'x')
+    for (const k of ['text-primary', 'underline-offset-2', 'hover:underline']) expect(cls, k).toContain(k)
+    expect(cls.filter((c) => c.startsWith('bg-'))).toEqual([])
+  })
+
+  it('le quattro varianti a riquadro restano com’erano: il testo è il corpo (14/20), con o senza icona', () => {
+    for (const variant of VARIANTI) for (const icon of [false, true]) expect(of({ variant, icon, 'aria-label': 'x' }, ...(icon ? [createElement(X)] : ['x']))).toContain('text-body')
+  })
+
+  it('asChild veste un link: resta un <a> con le classi del bottone di parole — nessun bottone intorno', () => {
+    const html = render({ variant: 'link', asChild: true }, createElement('a', { href: 'https://example.it', 'data-testid': 'link' }, 'repository'))
+    expect(buttons(html)).toHaveLength(0)
+    const a = first(tree(html), (n) => n.attrs['data-testid'] === 'link')
+    expect(a.tag).toBe('a')
+    for (const k of ['text-primary', 'inline', 'h-auto']) expect(classes(a), k).toContain(k)
+  })
+
+  it('nessuna classe morta', async () => {
+    const tutte = new Set<string>()
+    for (const size of ['sm', 'md']) for (const c of of({ variant: 'link', size }, 'x')) tutte.add(c)
+    const css = await compileRenderer([...tutte])
+    expect(deadClasses(css, [...tutte])).toEqual([])
+  })
+})

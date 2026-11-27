@@ -21,7 +21,7 @@ import { Slot } from 'radix-ui'
 import { cva } from 'class-variance-authority'
 import { cn } from '../../lib/utils'
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive'
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive' | 'link'
 export type ButtonSize = 'sm' | 'md'
 /** pill: rotonda (rounded-full) · control: rettangolare (rounded-control) */
 export type ButtonShape = 'pill' | 'control'
@@ -38,17 +38,23 @@ const buttonClasses = cva(
   [
     'inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap font-medium transition',
     'disabled:pointer-events-none disabled:opacity-50',
-    // il testo è il default dell'interfaccia (14/20) e le icone sono 16 px, qualunque taglia portino
-    'text-body [&_svg]:size-4 [&_svg]:shrink-0',
+    // le icone sono 16 px, qualunque taglia portino; il testo è il default
+    // dell'interfaccia (14/20) per le QUATTRO varianti a riquadro — il
+    // bottone di parole (link) prende la taglia del testo in cui sta
+    '[&_svg]:size-4 [&_svg]:shrink-0',
     'outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
   ],
   {
     variants: {
       variant: {
-        primary: 'bg-foreground text-background hover:opacity-90',
-        secondary: 'bg-muted text-foreground hover:bg-muted/70',
-        ghost: 'text-muted-foreground hover:bg-muted hover:text-foreground',
-        destructive: 'bg-destructive text-destructive-foreground hover:opacity-90'
+        primary: 'bg-foreground text-background hover:opacity-90 text-body',
+        secondary: 'bg-muted text-foreground hover:bg-muted/70 text-body',
+        ghost: 'text-muted-foreground hover:bg-muted hover:text-foreground text-body',
+        destructive: 'bg-destructive text-destructive-foreground hover:opacity-90 text-body',
+        // K2 (fase conversione-chat): il bottone di PAROLE — un'azione DENTRO una
+        // frase («— chiudi», «· Vedi perché») o un link nel testo («repository»):
+        // niente riquadro, la taglia e il peso del testo intorno
+        link: 'text-primary underline-offset-2 hover:underline'
       },
       // l'altezza è la misura (h-), non padding + testo: due bottoni affiancati si allineano sempre
       size: { sm: 'h-control-sm', md: 'h-control' },
@@ -61,7 +67,10 @@ const buttonClasses = cva(
       { size: 'md', icon: false, class: 'px-4' },
       // …con la sola icona: nessun respiro, la larghezza è l'altezza
       { size: 'sm', icon: true, class: 'w-control-sm' },
-      { size: 'md', icon: true, class: 'w-control' }
+      { size: 'md', icon: true, class: 'w-control' },
+      // il bottone di parole: via l'altezza, il respiro e il peso del bottone —
+      // sta in linea dentro la frase e va a capo con lei
+      { variant: 'link', class: 'inline h-auto px-0 font-normal whitespace-normal' }
     ],
     defaultVariants: { variant: 'primary', size: 'md', icon: false }
   }
@@ -75,6 +84,7 @@ const buttonClasses = cva(
 const shapeOf = (variant: ButtonVariant, icon: boolean): ButtonShape =>
   variant === 'primary' || (variant === 'ghost' && icon) ? 'pill' : 'control'
 
+/**
 /**
  * Le classi del bottone, da sole (per esempio su un link reso a mano): le
  * stesse di <Button>, forma di tipo compresa.

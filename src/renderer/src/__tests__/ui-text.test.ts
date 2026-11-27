@@ -40,4 +40,15 @@ describe('C1: Text — le sei taglie dei token, il tono e il peso', () => {
   it('è un <p>: un blocco di testo, non un involucro qualunque', () => {
     expect(rootOf({ children: 'x' }).tag).toBe('p')
   })
+
+  it('K2 (fase conversione-chat): i toni dell’esito nelle card in chat — riuscito (il verde dei grafici) e attesa (l’ambra)', () => {
+    expect(cls({ children: 'x', tone: 'ok' })).toContain('text-chart-2')
+    expect(cls({ children: 'x', tone: 'waiting' })).toContain('text-waiting')
+    // un tono alla volta: il nuovo non porta dietro gli altri
+    for (const tone of ['ok', 'waiting']) {
+      const c = cls({ children: 'x', tone })
+      expect(c).not.toContain('text-muted-foreground')
+      expect(c).not.toContain('text-destructive')
+    }
+  })
 })

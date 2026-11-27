@@ -1,52 +1,80 @@
 // C1 (fase linguaggio): ProposalCard — UN oggetto per «il bot propone, tu
 // clicchi»: la card di proposta in chat (app Composio, server MCP, plugin da
-// accendere, plugin da installare). La VISTA sta tutta qui — testata col
+// accendere, plugin da installare). La VISTA sta tutta qui — la testata col
 // logo, le righe della COSA, il PERCHÉ del bot, l'AVVISO, le AZIONI, lo
 // STATO finale («Collegata», «Non riuscito») — mentre ConnectorCard.tsx e
 // ConnectorCards13.tsx restano LOGICA: i dati e i clic, sopra questa card.
+//
+// K2 (fase conversione-chat): sta SOPRA ChatCard, il guscio di ogni card in
+// chat (la superficie, l'85% della colonna, la testata con il segno e il
+// titolo, la riga delle azioni in fondo): qui restano solo gli slot della
+// PROPOSTA. Il ritmo è chiuso: i blocchi a 8 px, le righe grigie a 4, lo
+// stato e il modulo a 12 da ciò che li precede, le azioni a 16.
 import type { ReactNode } from 'react'
-import { cn } from '../../lib/utils'
+import type { LucideIcon } from 'lucide-react'
+import { ChatCard, type ChatCardTone } from './chat-card'
 
 /**
  * La card di proposta. Gli slot sono delimitati (non classi libere):
- *   testata          logo + titolo (cosa propone il bot)
- *   righe            le righe grigie della COSA (fiducia, dove gira, accesso)
- *   perché           la frase del bot, in corpo
- *   avviso           l'avviso in cima (proposta nata dopo letture esterne) o ambra
- *   configurazione   il modulo quando manca qualcosa (ServerSetupModule)
- *   azioni           i bottoni (Aggiungi/No, Attiva/Non ora…)
- *   stato            la riga dello stato finale o dell'esito
+ *   logo · nome · icona   il segno della testata (32): il file, l'iniziale, o un'icona
+ *   titolo                cosa propone il bot
+ *   sottotitolo           la riga grigia sotto il titolo
+ *   nota                  ciò che completa il titolo, contro il bordo destro
+ *   righe                 le righe grigie della COSA (fiducia, dove gira, accesso)
+ *   perché                la frase del bot, in corpo
+ *   avviso                l'avviso in cima (proposta nata dopo letture esterne)
+ *   configurazione        il modulo quando manca qualcosa (ServerSetupModule)
+ *   stato                 la riga dello stato finale o dell'esito
+ *   azioni                i bottoni (Aggiungi/No, Attiva/Non ora…)
  */
-export function ProposalCard({ testata, righe, perché, avviso, configurazione, azioni, stato, className, testId }: {
-  /** la riga di testa: il logo (32) e il titolo della proposta */
-  testata: ReactNode
+export function ProposalCard({ tone, avviso, logo, nome, icona, titolo, sottotitolo, nota, righe, perché, configurazione, stato, azioni, className, testId }: {
+  /** il fondo della card: tenue (il default) · attesa · errore */
+  tone?: ChatCardTone
+  /** l'avviso in cima alla card */
+  avviso?: ReactNode
+  /** il file del logo (un URL), nella testata ai 32 */
+  logo?: string | null
+  /** senza file, l'iniziale di questo nome sulla piastrella */
+  nome?: string
+  /** senza logo né iniziale, il segno: un'icona lucide nella piastrella da 32 */
+  icona?: LucideIcon
+  /** il titolo della proposta */
+  titolo?: ReactNode
+  /** la riga grigia sotto il titolo (si tronca) */
+  sottotitolo?: ReactNode
+  /** ciò che completa il titolo, contro il bordo destro */
+  nota?: ReactNode
   /** le righe grigie della cosa: fiducia · dove gira · accesso · versione */
   righe?: ReactNode
   /** la frase del bot, in corpo */
   perché?: ReactNode
-  /** l'avviso: la proposta nata dopo letture esterne (in cima) o l'ambra dei terzi */
-  avviso?: ReactNode
   /** il modulo di configurazione quando manca qualcosa */
   configurazione?: ReactNode
-  /** le azioni dell'utente */
-  azioni?: ReactNode
   /** la riga dello stato (finali compresi: Collegata, Non riuscito) */
   stato?: ReactNode
+  /** le azioni dell'utente */
+  azioni?: ReactNode
   className?: string
   testId?: string
 }): ReactNode {
   return (
-    <div
-      className={cn('flex min-w-0 flex-col gap-2 rounded-surface bg-muted p-4 wrap-anywhere', className)}
-      {...(testId ? { 'data-testid': testId } : {})}
+    <ChatCard
+      tone={tone}
+      avviso={avviso}
+      logo={logo}
+      nome={nome}
+      icona={icona}
+      titolo={titolo}
+      sottotitolo={sottotitolo}
+      nota={nota}
+      azioni={azioni}
+      className={className}
+      testId={testId}
     >
-      {avviso}
-      {testata}
       {righe !== undefined && <div className="flex min-w-0 flex-col gap-1">{righe}</div>}
       {perché}
-      {configurazione}
-      {stato}
-      {azioni !== undefined && <div className="mt-2 flex flex-wrap items-center gap-2">{azioni}</div>}
-    </div>
+      {configurazione !== undefined && <div className="mt-1 flex min-w-0 flex-col gap-2">{configurazione}</div>}
+      {stato !== undefined && <div className="mt-1">{stato}</div>}
+    </ChatCard>
   )
 }
