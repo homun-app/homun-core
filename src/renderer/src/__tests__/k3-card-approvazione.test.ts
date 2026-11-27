@@ -63,3 +63,18 @@ describe('K3 (e): «Rifiuta» è UNA regola sola, quella del catalogo (Button de
     }
   })
 })
+
+describe('K3: la riga delle azioni della card porta solo bottoni', () => {
+  it('nessun testo fuori dai bottoni — un commento // scritto dentro il JSX diventa una riga visibile (visto in galleria: le card crescevano e componenti-card-approvazione-1 usciva dal viewport)', () => {
+    for (const [dove, tipo, props] of [
+      ['card', ApprovalCard, { entry: COMANDO() }],
+      ['riquadro', ApprovalRequestContent, { entry: COMANDO(), agentName: 'Nora' }]
+    ] as const) {
+      const azioni = findAll(albero(tipo, props), (n) => classes(n).includes('mt-2') && findAll(n, (x) => x.tag === 'button').length > 0)
+      expect(azioni, dove).toHaveLength(1)
+      expect(azioni[0]!.text.trim(), `${dove}: testo fuori dai bottoni`).toBe('')
+      expect(azioni[0]!.children.map((c) => c.tag), dove).toEqual(['button', 'button', 'button'])
+      expect(azioni[0]!.children.map((c) => textOf(c)), dove).toEqual(['Consenti', 'Rifiuta', 'Altre scelte ▾'])
+    }
+  })
+})

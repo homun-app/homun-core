@@ -279,8 +279,7 @@ export function ApprovalRequestContent({
                   >
                     <Trans>Consenti</Trans>
                   </Button>
-                  // K3, difetto (e): una regola sola, quella del catalogo — «Rifiuta» è destructive
-                  // (Button), come nel centro «Da approvare» e nella coda della squadra
+                  {/* K3, difetto (e): una regola sola, quella del catalogo — «Rifiuta» è destructive (Button), come nel centro «Da approvare» e nella coda della squadra */}
                   <Button
                     variant="destructive"
                     onClick={() => { resolve(entry.agentId, approvalId!, 'deny', 'once', 'chat'); refreshSquadData({ forceBadges: true }) }}
