@@ -495,18 +495,26 @@ describe('DS4: la coda «Da approvare» della squadra', () => {
     expect(useStore.getState().setApprovalsQueueOpen).toHaveBeenCalledWith(false)
   })
 
-  it('le tre sezioni del disegno sono Section col titolo grande; le richieste sono schede (approval-row) coi bottoni del sistema; «Consenti per questa missione» solo dove Q2 la permette', () => {
+  it('K3 (fase conversione-chat): le tre sezioni del disegno sono ListGroup (il titolo di sezione del catalogo); le richieste sono ProposalCard (approval-row: il guscio delle card in chat, tone attesa) coi bottoni del sistema; «Consenti per questa missione» solo dove Q2 la permette', () => {
     const root = renderCoda([pendente(), pendente({ approvalId: 'ap-s', category: 'sito-interattivo', tool: 'browser_click', why: 'revisore', fromSubagent: true })])
-    const titoli = all(root, (n) => n.tag === 'h2')
+    const titoli = all(root, (n) => n.tag === 'h3')
     expect(titoli.map((h) => textOf(h))).toEqual(['Solo tu puoi decidere', 'Fatto da soli, senza chiederti', 'Lasciato passare dal revisore'])
-    for (const h of titoli) expectHasAll(h, ['text-title', 'font-semibold', 'text-foreground'])
+    for (const h of titoli) expectHasAll(h, ['text-caption', 'font-medium', 'text-muted-foreground'])
     const cards = withTestid(root, 'approval-row')
-    expect(cards.map((c) => c.tag)).toEqual(['article', 'article'])
-    for (const c of cards) expectHasAll(c, ['rounded-surface', 'border', 'border-border', 'bg-card', 'p-4'])
+    expect(cards.map((c) => c.tag)).toEqual(['div', 'div'])
+    // la superficie è quella di ChatCard: raggio di superficie, respiro 16, il fondo dell'attesa, nessun bordo (non è la Card con bordo delle pagine)
+    for (const c of cards) {
+      expectHasAll(c, ['rounded-surface', 'p-4', 'bg-waiting/10', 'flex-col', 'gap-2'])
+      expect(has(c, 'border')).toBe(false)
+      expect(has(c, 'bg-card')).toBe(false)
+    }
     const card = cards[0]!
     expectHasAll(ofText(card, 'Turismo'), ['font-medium'])
-    expectHasAll(ofText(card, 'i tuoi dati'), ['rounded-full', 'bg-muted', 'text-caption'])
-    expectHasAll(ofText(card, '· 2 min'), ['text-small', 'text-muted-foreground'])
+    // l'etichetta di categoria è Tag (il raggio dei controlli, testo grigio), contro il bordo destro del titolo
+    expectHasAll(ofText(card, 'i tuoi dati'), ['rounded-control', 'bg-muted', 'text-caption', 'text-muted-foreground'])
+    // la riga grigia sotto il nome: il quando, poi via via chi chiede e perché arriva a te (prima: un pezzo per parola)
+    expect(textOf(first(card, (n) => has(n, 'text-small') && textOf(n).startsWith('2 min')))).toBe('2 min · sempre a te')
+    expectHasAll(first(card, (n) => has(n, 'text-small') && textOf(n).startsWith('2 min')), ['text-small', 'text-muted-foreground'])
     expectHasAll(first(card, (n) => n.tag === 'button' && textOf(n) === 'Consenti una volta'), ['h-control', 'rounded-full', 'bg-foreground'])
     expectHasAll(first(card, (n) => n.tag === 'button' && textOf(n) === 'Rifiuta'), ['h-control', 'rounded-control', 'bg-destructive'])
     expect(withTestid(card, 'approval-mission')).toHaveLength(0)
@@ -521,21 +529,22 @@ describe('DS4: la coda «Da approvare» della squadra', () => {
     expect(useStore.getState().resolveGroupApproval).toHaveBeenCalledWith('a2', 'ap-1', 'allow', 'once')
   })
 
-  it('«Fatto da soli» e «Lasciato passare dal revisore»: righe a filo (FlatList: un filetto fra loro; FlatRow: il respiro dei token), l\'annullamento è un bottone ghost', async () => {
+  it('K3: «Fatto da soli» e «Lasciato passare dal revisore» sono ListGroup con righe ListRow (il filetto del gruppo, il respiro e le misure della riga di elenco); l\'annullamento è il bottone della riga (secondary sm), come dice la regola del catalogo', async () => {
     const root = renderCoda([])
-    expect(all(root, (n) => has(n, 'divide-y'))).toHaveLength(2)
+    // un gruppo per sezione: tre gruppi, tre contenitori col filetto
+    expect(all(root, (n) => has(n, 'divide-y'))).toHaveLength(3)
     const righe = all(root, (n) => has(n, 'py-row-pad'))
     expect(righe).toHaveLength(3)
     for (const r of righe) expectHasAll(r, ['flex', 'w-full', 'items-center', 'gap-row-gap', 'min-h-row-text'])
     const titolo = (r: HtmlNode): string => textOf(first(r, (n) => has(n, 'truncate')))
-    expect(righe.map(titolo)).toEqual([
-      '14 file scritti nel computer · Treni, Alloggio, Turismo',
-      '44 pagine web lette · —',
-      'Treni · serve alla tua richiesta'
-    ])
+    // K3: il conteggio è il titolo e chi l'ha fatto la riga grigia sotto (i nomi possono essere molti: si tronca il resto)
+    const sotto = (r: HtmlNode): string => textOf(all(r, (n) => has(n, 'truncate'))[1]!)
+    expect(righe.map(titolo)).toEqual(['14 file scritti nel computer', '44 pagine web lette', 'Treni · serve alla tua richiesta'])
+    expect(sotto(righe[0]!)).toBe('Treni, Alloggio, Turismo')
+    expect(sotto(righe[1]!)).toBe('—')
     const annulla = first(righe[2]!, (n) => n.tag === 'button')
     expect(textOf(annulla)).toBe('Annulla la concessione')
-    expectHasAll(annulla, ['h-control-sm', 'text-muted-foreground'])
+    expectHasAll(annulla, ['h-control-sm', 'bg-muted'])
     ;(nativeOf(root, (n) => n.tag === 'button' && textOf(n) === 'Annulla la concessione').onClick as () => void)()
     expect(callsOf('grantRevoke').slice(-1)[0]!.args).toEqual([5])
     await new Promise((r) => setTimeout(r, 0))

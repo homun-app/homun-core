@@ -14,6 +14,17 @@
 // lasciato passare sono righe a filo (FlatList / FlatRow); i bottoni sono
 // Button. Testid e testi restano quelli di oggi: li cercano la sonda della
 // fase squadra e i test (approvals-queue, ds4-approvazioni).
+//
+// K3 (fase conversione-chat): la coda non si disegna più. Il guscio è
+// PageShell e la testata PageHeader (com'era); le tre parti del disegno sono
+// ListGroup (il titolo di sezione e le righe a filo); una richiesta è
+// ProposalCard — lo stesso guscio delle card in chat (ChatCard, tone attesa):
+// il nome del bot, l'etichetta della categoria (Tag), la riga grigia del
+// quando e del perché, la frase e i tre bottoni; i contatori e ciò che il
+// revisore ha lasciato passare sono ListRow; i bottoni sono Button. Stesse
+// sezioni, stesse azioni (compreso «Consenti per questa missione»), stessi
+// testi e testid: li cercano la sonda della fase squadra e i test
+// (approvals-queue, ds4-approvazioni).
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
@@ -21,10 +32,14 @@ import { ShieldCheck } from 'lucide-react'
 import { api, useStore } from '../store'
 import type { SquadPendingApprovalInfo } from '../../../shared/types'
 import { Button } from './ui/button'
-import { FlatList, FlatRow } from './ui/flat-list'
+import { ListGroup } from './ui/list-group'
+import { ListRow } from './ui/list-row'
 import { PageHeader } from './ui/page-header'
 import { PageShell } from './ui/page-shell'
-import { Section } from './ui/section'
+import { ProposalCard } from './ui/proposal-card'
+import { Stack } from './ui/stack'
+import { Tag } from './ui/tag'
+import { Text } from './ui/text'
 
 /** Le etichette dei chip di categoria (tavola 2: «i tuoi dati», «sito nuovo, interattivo»…). */
 const CATEGORY_LABEL: Record<SquadPendingApprovalInfo['category'], MessageDescriptor> = {
@@ -114,83 +129,83 @@ export function ApprovalsQueue() {
         contentClassName="flex flex-col gap-section pt-4 pb-6"
       >
         {/* ——— Solo tu puoi decidere ——— */}
-        <Section size="title" title={<Trans>Solo tu puoi decidere</Trans>}>
-          {groupPending.length === 0 && (
-            <p className="text-small text-muted-foreground"><Trans>Nessuna richiesta in attesa.</Trans></p>
-          )}
-          {groupPending.map((r) => (
-            // la scheda della richiesta: la stessa del centro (rounded-surface, bordo, p-4)
-            <article key={`${r.agentId}:${r.approvalId}`} className="rounded-surface border border-border bg-card p-4" data-testid="approval-row">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-muted px-2 py-0.5 text-caption">{i18n.t(CATEGORY_LABEL[r.category])}</span>
-                <span className="text-body font-medium">{r.agentName}</span>
-                <span className="text-small text-muted-foreground">· {timeAgo(r.when, now)}</span>
-                {r.fromSubagent && <span className="text-small text-muted-foreground">· <Trans>aiutante</Trans></span>}
-                {r.why && <span className="text-small text-muted-foreground">· {i18n.t(WHY_LABEL[r.why])}</span>}
-              </div>
-              <p className="mt-2 text-body">{r.phrase}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button
-                  onClick={() => resolveGroupApproval(r.agentId, r.approvalId, 'allow', 'once')}
-                >
-                  <Trans>Consenti una volta</Trans>
-                </Button>
-                {missionOffered(r.category, r.tool) && (
-                  <Button
-                    variant="secondary"
-                    data-testid="approval-mission"
-                    title={i18n.t(msg`Un consenso di 8 ore per tutto il team, solo per questo`)}
-                    onClick={() => resolveGroupApproval(r.agentId, r.approvalId, 'allow', 'mission')}
-                  >
-                    <Trans>Consenti per questa missione</Trans>
-                  </Button>
-                )}
-                <Button
-                  variant="destructive"
-                  onClick={() => resolveGroupApproval(r.agentId, r.approvalId, 'deny', 'once')}
-                >
-                  <Trans>Rifiuta</Trans>
-                </Button>
-              </div>
-            </article>
-          ))}
-        </Section>
+        <ListGroup titolo={<Trans>Solo tu puoi decidere</Trans>}>
+          {/* le card in una colonna sola: il filetto del gruppo divide le RIGHE, non le card */}
+          <Stack>
+            {groupPending.length === 0 && (
+              <Text size="small" tone="muted"><Trans>Nessuna richiesta in attesa.</Trans></Text>
+            )}
+            {groupPending.map((r) => {
+              // la riga grigia sotto il nome: quando, da chi (un aiutante) e perché arriva a te
+              const note = [timeAgo(r.when, now), r.fromSubagent ? i18n.t(msg`aiutante`) : null, r.why ? i18n.t(WHY_LABEL[r.why]) : null].filter((x): x is string => x !== null)
+              return (
+                <ProposalCard
+                  key={`${r.agentId}:${r.approvalId}`}
+                  tone="waiting"
+                  className="max-w-full"
+                  testId="approval-row"
+                  titolo={r.agentName}
+                  nota={<Tag>{i18n.t(CATEGORY_LABEL[r.category])}</Tag>}
+                  righe={<Text size="small" tone="muted">{note.join(' · ')}</Text>}
+                  perché={r.phrase}
+                  azioni={
+                    <>
+                      <Button
+                        onClick={() => resolveGroupApproval(r.agentId, r.approvalId, 'allow', 'once')}
+                      >
+                        <Trans>Consenti una volta</Trans>
+                      </Button>
+                      {missionOffered(r.category, r.tool) && (
+                        <Button
+                          variant="secondary"
+                          data-testid="approval-mission"
+                          title={i18n.t(msg`Un consenso di 8 ore per tutto il team, solo per questo`)}
+                          onClick={() => resolveGroupApproval(r.agentId, r.approvalId, 'allow', 'mission')}
+                        >
+                          <Trans>Consenti per questa missione</Trans>
+                        </Button>
+                      )}
+                      <Button
+                        variant="destructive"
+                        onClick={() => resolveGroupApproval(r.agentId, r.approvalId, 'deny', 'once')}
+                      >
+                        <Trans>Rifiuta</Trans>
+                      </Button>
+                    </>
+                  }
+                />
+              )
+            })}
+          </Stack>
+        </ListGroup>
 
         {/* ——— Fatto da soli, senza chiederti ——— */}
-        <Section size="title" title={<Trans>Fatto da soli, senza chiederti</Trans>}>
-          <FlatList>
-            {groupActivity.map((a) => (
-              // UNA riga sola: il conteggio, poi chi l'ha fatto in grigio (i nomi possono essere molti: con lui tronca il resto)
-              <FlatRow
-                key={a.id}
-                title={
-                  <>
-                    <Trans>{a.count} {i18n.t(ACTIVITY_LABEL[a.id]!)}</Trans>
-                    <span className="font-normal text-muted-foreground"> · {a.who.length > 0 ? a.who.join(', ') : '—'}</span>
-                  </>
-                }
-              />
-            ))}
-          </FlatList>
-        </Section>
+        <ListGroup titolo={<Trans>Fatto da soli, senza chiederti</Trans>}>
+          {groupActivity.map((a) => (
+            // il conteggio è il titolo; chi l'ha fatto è la riga grigia (i nomi possono essere molti: si tronca)
+            <ListRow
+              key={a.id}
+              titolo={<Trans>{a.count} {i18n.t(ACTIVITY_LABEL[a.id]!)}</Trans>}
+              sottotitolo={a.who.length > 0 ? a.who.join(', ') : '—'}
+            />
+          ))}
+        </ListGroup>
 
         {/* ——— Lasciato passare dal revisore ——— */}
         {groupReviewerPassed.length > 0 && (
-          <Section size="title" title={<Trans>Lasciato passare dal revisore</Trans>}>
-            <FlatList>
-              {groupReviewerPassed.map((r, i) => (
-                <FlatRow
-                  key={i}
-                  title={<Trans>{r.agentName} · {r.reason ?? r.tool}</Trans>}
-                  trailing={r.grantId !== null ? (
-                    <Button variant="ghost" size="sm" onClick={() => { void api.grantRevoke(r.grantId!).then(() => refreshSquadData({ forceBadges: true })) }}>
-                      <Trans>Annulla la concessione</Trans>
-                    </Button>
-                  ) : undefined}
-                />
-              ))}
-            </FlatList>
-          </Section>
+          <ListGroup titolo={<Trans>Lasciato passare dal revisore</Trans>}>
+            {groupReviewerPassed.map((r, i) => (
+              <ListRow
+                key={i}
+                titolo={<Trans>{r.agentName} · {r.reason ?? r.tool}</Trans>}
+                azione={r.grantId !== null ? (
+                  <Button variant="secondary" size="sm" onClick={() => { void api.grantRevoke(r.grantId!).then(() => refreshSquadData({ forceBadges: true })) }}>
+                    <Trans>Annulla la concessione</Trans>
+                  </Button>
+                ) : undefined}
+              />
+            ))}
+          </ListGroup>
         )}
       </PageShell>
     </section>
