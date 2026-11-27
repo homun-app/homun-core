@@ -5,6 +5,42 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.23] — 2026-11-28
+
+La memoria passa al motore nuovo di Engramma, con una copia di sicurezza
+prima dell'aggiornamento, e le card della chat hanno tutte lo stesso
+aspetto.
+
+### Novità
+
+- **Il motore della memoria si aggiorna (Engramma 0.6.20).** Alla prima
+  apertura Homun fa una copia delle tue memorie accanto alla cartella
+  originale, e solo dopo le aggiorna. Le note restano come le avevi
+  lasciate. Se il disco non ha spazio per la copia, la memoria aspetta e
+  ti dice quanto spazio liberare: il resto dell'app funziona. Come
+  tornare indietro dalla copia è spiegato nella guida della memoria.
+- **La memoria usa meno RAM**: circa 250 MB in meno quando è a riposo.
+- **Le card in chat sono fatte tutte allo stesso modo.** Le proposte di
+  server, plugin e app, le richieste di approvazione, le regole proposte
+  e la coda della squadra hanno la stessa testata, lo stesso corpo e gli
+  stessi bottoni, in chiaro e in scuro.
+
+### Correzioni
+
+- **Gli errori sono in italiano.** Quando una proposta o la memoria non
+  riescono, il motivo è scritto in parole tue; il testo tecnico sta in
+  «Dettagli tecnici».
+- **Il pannello della memoria mostra gli errori** quando salvi, confermi,
+  scarti, elimini o ripristini una nota, invece di non dire niente.
+- **Una memoria aggiornata da un Engramma più recente** non si rovina: la
+  memoria dice di aggiornare Homun e la lascia com'è.
+- **Le tue modifiche alla memoria contano come tue**: conferme, scarti ed
+  eliminazioni fatte dal pannello non risultano più fatte dal bot.
+- **La coda della squadra mostra i nomi dei bot** e scrive «1 comando»,
+  «1 pagina web letta».
+- **«Scaduta»** al posto di «expired» sulle richieste scadute, e lo stesso
+  «Rifiuta» in ogni richiesta.
+
 ## [0.3.1001-beta.22] — 2026-11-27
 
 Le pagine di Homun ora sono costruite con gli stessi pezzi: barre,
