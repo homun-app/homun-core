@@ -13,67 +13,54 @@
 //  - le righe di sistema che si aprono (le aperture automatiche, il
 //    ragionamento, i passaggi di debug, la delega a un altro bot) sono
 //    SystemRow + SystemText: la riga è Notice, il testo un blocco di codice.
+//
+// K3 (fase conversione-chat): il file non disegna più. La riga che si apre è
+// Disclosure (ui/disclosure.tsx), il testo per il modello è Code (ui/code.tsx).
+// CardShell, CardBlock e SU_CARD restano qui come NOMI DI PRIMA per le card
+// non ancora convertite (K4: bozze, domande, aiutanti, presa di controllo…;
+// K5: la chat) e sono già pezzi del catalogo: la superficie di ChatCard
+// senza il suo ritmo (ChatSurface), l'incavo dentro la card (CardBlock). Le
+// card convertite usano ChatCard e i pezzi di components/ui/ direttamente;
+// questi nomi spariscono con l'ultima.
 import { useState } from 'react'
 import { useLingui } from '@lingui/react/macro'
-import { Check, ChevronDown, ChevronRight, X, type LucideIcon } from 'lucide-react'
+import { Check, X } from 'lucide-react'
 import { formatTime } from '../lib/i18n'
 import { cn } from '../lib/utils'
-import { Button } from './ui/button'
-import { Notice } from './ui/notice'
+import { Disclosure, DisclosureSummary } from './ui/disclosure'
+import { ChatSurface, CardBlock as Block } from './ui/chat-card'
+import { Code } from './ui/code'
 
-/** Quanto è larga una card nella colonna della chat: al massimo l'85%, come le bolle. */
-const LARGHEZZA_CARD = 'max-w-[85%]'
-
-/**
- * Un bottone SECONDARIO dentro una card. La card è già `bg-muted`: con il suo
- * fondo di fabbrica il bottone secondary ci sparirebbe dentro. Sulla pagina è
- * un passo più scuro del fondo; sulla card resta un passo più chiaro (fondo
- * card), com'è sempre stato. Si aggiunge a `<Button variant="secondary">`.
- */
-export const SU_CARD = 'bg-card hover:bg-card/80'
+export { SU_CARD } from './ui/button'
 
 /**
  * Una riga di sistema che si apre (DS4): le righe di sistema sono Notice
  * (components/ui/notice) — icona lucide da 16 · testo grigio text-small · il
  * segno che si apre a destra — e il testo per il modello sta in un <details>
- * chiuso sotto. <summary> è la riga: un clic ovunque su di lei apre. Essendo
- * flex non ha più il triangolo del browser (il segno lo mette Notice, a
- * destra); l'anello del fuoco è quello delle righe di tabella — verso
- * l'interno, solo da tastiera — perché la riga è larga quanto la colonna e
- * scorre sotto la testata.
+ * chiuso sotto. <summary> è la riga: un clic ovunque su di lei apre.
  * Vive qui, e non in Chat.tsx, perché la usano anche le righe che stanno in
  * un file loro (AgentSendRow): da Chat verrebbe un import circolare.
  */
-export function SystemRow({ icon: Icon, children, tone = 'neutral', testId }: {
-  icon: LucideIcon
+export function SystemRow({ icon, children, tone = 'neutral', testId }: {
+  icon: Parameters<typeof DisclosureSummary>[0]['icon']
   children: React.ReactNode
   tone?: 'neutral' | 'warning' | 'destructive'
   testId?: string
 }) {
   return (
-    <summary
-      className="flex cursor-pointer items-center select-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden"
-      data-testid={testId}
-    >
-      <Notice icon={<Icon className="size-4" />} tone={tone} action={<ChevronDown className="size-4" aria-hidden="true" />}>
-        {children}
-      </Notice>
-    </summary>
+    <DisclosureSummary icon={icon} tone={tone} testId={testId}>
+      {children}
+    </DisclosureSummary>
   )
 }
 
 /**
  * Il testo per il modello dentro una riga di sistema (DS4): un blocco di
- * codice come gli altri del markdown — raggio di controllo, text-small
- * monospazio — che scorre dentro se stesso. `className` porta quanto è alto
- * al più (si legge scorrendo dentro).
+ * codice come gli altri del markdown, che scorre dentro se stesso.
+ * `className` porta quanto è alto al più (si legge scorrendo dentro).
  */
 export function SystemText({ text, className = 'max-h-40' }: { text: string; className?: string }) {
-  return (
-    <pre className={cn('mt-1 scroll-thin overflow-auto whitespace-pre-wrap wrap-anywhere rounded-control bg-muted p-3 font-mono text-small text-muted-foreground', className)}>
-      {text}
-    </pre>
-  )
+  return <Code aCapo className={cn('mt-1', className)}>{text}</Code>
 }
 
 export function DecidedRow({
@@ -100,34 +87,22 @@ export function DecidedRow({
       {/* il bottone del sistema (ghost, 32) con il testo di una riga di sistema:
           text-small grigia, in peso normale — si legge come una riga, non come
           un'etichetta. Sulla riga intera, allineato a sinistra */}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="w-full justify-start font-normal text-small"
+      <Disclosure
+        tone={ok ? 'ok' : 'muted'}
+        segno={ok ? <Check className="size-4" /> : <X className="size-4" />}
+        testo={<>{label}{summary ? ` · ${summary}` : ''}</>}
+        metadato={at !== undefined ? formatTime(at) : undefined}
+        aperto={open}
+        apribile={children !== undefined}
         onClick={() => children && setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <span className={ok ? 'text-chart-2' : 'text-muted-foreground'}>
-          {ok ? <Check className="size-4" /> : <X className="size-4" />}
-        </span>
-        <span className="min-w-0 flex-1 truncate">
-          {label}
-          {summary ? ` · ${summary}` : ''}
-        </span>
-        {at !== undefined && <span className="shrink-0 text-caption">{formatTime(at)}</span>}
-        {children && (
-          <span aria-hidden="true" className="shrink-0">
-            {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-          </span>
-        )}
-      </Button>
+      />
       {open && <div className="mt-2">{children}</div>}
       {!open && <span className="sr-only">{t`riapri in sola lettura`}</span>}
     </div>
   )
 }
 
-/** Il contenitore di tutte le card: una superficie (raggio di superficie, respiro 16), al massimo l'85% della colonna (S6, DS4). */
+/** K3: la superficie di ChatCard senza il suo ritmo (ChatSurface) — per le card non ancora convertite (K4, K5). */
 export function CardShell({
   tone = 'muted',
   className,
@@ -140,35 +115,24 @@ export function CardShell({
   testid?: string
   children: React.ReactNode
 }) {
-  const toneCls =
-    tone === 'waiting'
-      ? 'bg-waiting/10'
-      : tone === 'error'
-        ? 'bg-destructive/10'
-        : 'bg-muted'
   return (
     // RW4: min-w-0 + overflow-wrap — il contenuto lungo (endpoint, comandi)
     // va a capo DENTRO la card, mai una card che allarga la chat
-    <div className={cn(LARGHEZZA_CARD, 'min-w-0 rounded-surface p-4 wrap-anywhere', toneCls, className)} {...(testid ? { 'data-testid': testid } : {})}>
+    <ChatSurface tone={tone === 'bot' ? 'muted' : tone} className={className} testId={testid}>
       {children}
-    </div>
+    </ChatSurface>
   )
 }
 
-/**
- * Un blocco DENTRO una card (DS4): il comando da approvare, i dettagli, il
- * corpo di una bozza — su fondo card, col raggio di controllo (8: dentro una
- * superficie da 14) e il respiro di 12. Le card della chat lo usano al posto
- * di riquadri scritti ognuno a mano.
- */
+/** K3: l'incavo dentro una card (CardBlock del catalogo), col nome di prima. */
 export function CardBlock({ className, testid, children }: {
   className?: string
   testid?: string
   children: React.ReactNode
 }): React.ReactNode {
   return (
-    <div className={cn('rounded-control bg-card p-3', className)} {...(testid ? { 'data-testid': testid } : {})}>
+    <Block className={className} testId={testid}>
       {children}
-    </div>
+    </Block>
   )
 }
