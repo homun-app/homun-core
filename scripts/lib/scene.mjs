@@ -295,12 +295,13 @@ export const PAGES = [
 /**
  * Le richieste in attesa della squadra della galleria (la coda ne legge
  * `membro`, l'indice in ctx.others; `at` in ms dall'istante fermo). Sono nate
- * nei turni PRIVATI dei membri: senza meta.squadId, perché la coda le raccoglie
- * lo stesso (collectPendingApprovals legge tutte le entry in attesa dei
- * membri) mentre NON entrano nella timeline della squadra — le card
- * «timeline-approval» di TeamChat non sono marcate come riga e, con la coda
- * aperta, il controllo dei doppioni della galleria (R2) le darebbe rosse: è
- * un difetto del prodotto che risolve la conversione di TeamChat (K5).
+ * nei turni della squadra, CON meta.squadId com'è nel prodotto: la coda le
+ * raccoglie (collectPendingApprovals legge le entry in attesa dei membri) e
+ * la timeline le mostra nel punto in cui sono nate. In K1 stavano senza
+ * squadId perché le card «timeline-approval» di TeamChat non erano marcate
+ * come riga e, con la coda aperta, il controllo dei doppioni della galleria
+ * (R2) le dava rosse; da K3 la card è una voce della lista (role="listitem")
+ * e la scena torna a essere quella vera.
  */
 const CODA_SQUADRA = [
   { id: 'gall-coda-1', membro: 1, at: -120_000, tool: 'browser_open', input: { url: 'https://www.museoegizio.it/orari' }, frase: 'Apre il sito museoegizio.it per controllare gli orari di sabato.', extra: {} },
@@ -329,7 +330,7 @@ export const seminaCodaSquadra = (s, ctx) => withDb(s, (db) => {
   const indice = db.prepare('INSERT OR REPLACE INTO approvals(id, agent_id, tool, input, status, created_at, entry_id) VALUES(?,?,?,?,?,?,?)')
   for (const r of CODA_SQUADRA) {
     const bot = ctx.others[r.membro].id
-    const meta = { approvalId: r.id, tool: r.tool, input: r.input, status: 'pending', ...r.extra }
+    const meta = { approvalId: r.id, tool: r.tool, input: r.input, status: 'pending', squadId: gid, ...r.extra }
     const e = insert.run(bot, 'approval', 'system', r.frase, JSON.stringify(meta), ISTANTE_FERMO + r.at)
     indice.run(r.id, bot, r.tool, JSON.stringify(r.input), 'pending', ISTANTE_FERMO + r.at, Number(e.lastInsertRowid))
   }

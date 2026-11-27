@@ -26,6 +26,11 @@ describe('Q4: la timeline della squadra nel renderer (guardie sul sorgente)', ()
     expect(SRC).toContain('resolveGroupApproval(c.agentId, c.approvalId')
   })
 
+  it('K3, difetto (f): la card di approvazione della timeline è marcata come RIGA (role="listitem", dentro la lista role="list" della timeline): due approvazioni con gli stessi bottoni non sono doppioni per la regola R2 della galleria', () => {
+    expect(SRC).toMatch(/<div[^>]*role="listitem"[^>]*data-testid="timeline-approval"|<div[^>]*data-testid="timeline-approval"[^>]*role="listitem"/)
+    expect(SRC).toContain('role="list"')
+  })
+
   it('il documento apre la pagina a lato (openPage dalla Libreria), il file si apre qui', () => {
     expect(SRC).toContain("openPage(p.id!, 'library')")
     expect(SRC).toContain('api.filesRead(')

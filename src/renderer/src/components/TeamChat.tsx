@@ -189,7 +189,8 @@ function ArtifactCard({ m, agents }: { m: GroupMessageInfo; agents: Agent[] }) {
 function TimelineApprovalCard({ c }: { c: { agentId: string; agentName: string; approvalId: string; phrase: string; pending: boolean; fixed: boolean } }) {
   const resolveGroupApproval = useStore((s) => s.resolveGroupApproval)
   return (
-    <div className="w-fit max-w-[85%] rounded-surface bg-card px-4 py-3 shadow-soft" data-testid="timeline-approval">
+    // K3, difetto (f): la card è una VOCE della lista della timeline (role="listitem" — riga per R2)
+    <div role="listitem" className="w-fit max-w-[85%] rounded-surface bg-card px-4 py-3 shadow-soft" data-testid="timeline-approval">
       <p className="text-caption text-muted-foreground">
         {c.agentName} · <Trans>chiede a te</Trans>{c.fixed ? <> · <Trans>sempre a te</Trans></> : null}
       </p>
@@ -446,7 +447,13 @@ export function TeamChat() {
                 rows.push({ key: `c${c.id}`, at: c.when, node: <TimelineApprovalCard c={c} /> })
               }
               rows.sort((a, b) => a.at - b.at)
-              return rows.map((r) => <div key={r.key}>{r.node}</div>)
+              // K3, difetto (f): le righe della timeline sono una LISTA (role="list" sul
+              // contenitore, che non dispone nulla: contents) e la card di approvazione è
+              // una sua voce (role="listitem"): per il controllo dei doppioni della
+              // galleria (R2) è una riga — due approvazioni con gli stessi bottoni non
+              // sono un difetto. `contents`: il ritmo resta quello della colonna (gap-3)
+              const lista = rows.map((r) => <div key={r.key}>{r.node}</div>)
+              return rows.length > 0 ? <div role="list" className="contents">{lista}</div> : null
             })()}
             {working.length > 0 && (
               <div className="flex flex-col gap-2 pt-1">
