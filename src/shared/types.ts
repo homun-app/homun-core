@@ -1763,9 +1763,11 @@ export interface MemoryOverview {
   /**
  * Lo stato del motore per l'interfaccia. `reason` è un CODICE del catalogo:
  * 'space' (fase memoria-engramma v0.6.19, E1) dice che non c'è lo spazio
- * per copiare le celle prima di aggiornarle, e `neededBytes` quanti byte mancano.
+ * per copiare le celle prima di aggiornarle, e `neededBytes` quanti byte mancano;
+ * 'schema-too-new' (E3) che una cella è stata aggiornata da un Engramma più
+ * recente del motore: la memoria non si tocca, l'utente aggiorna Homun.
  */
-engine: { available: boolean; reason?: 'module' | 'open' | 'closed' | 'space'; error?: string; version?: string; neededBytes?: number }
+engine: { available: boolean; reason?: 'module' | 'open' | 'closed' | 'space' | 'schema-too-new'; error?: string; version?: string; neededBytes?: number }
   model: { present: boolean; id?: string; bytes?: number; pulling: boolean }
   counts: { own: number; shared: number; pending: number; deleted: number }
   /** l'indicizzazione iniziale delle conversazioni è fatta? */

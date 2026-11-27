@@ -2456,6 +2456,11 @@ msgstr "Continua da solo quando…"
 msgid "Controlla aggiornamenti"
 msgstr "Controlla aggiornamenti"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.pullFailed.io"
+msgstr "controlla la connessione e lo spazio su disco, poi riprova"
+
 #: src/renderer/src/lib/activity.ts
 msgid "controlla le app collegate…"
 msgstr "controlla le app collegate…"
@@ -4088,6 +4093,26 @@ msgstr "Il modello non risponde ({why}): turno interrotto."
 msgid "notice.modelFallback"
 msgstr "Il modello principale {model} non risponde ({why}): uso la riserva {fallback}."
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.closed"
+msgstr "Il motore della memoria è chiuso: riavvia Homun."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.pullFailed.unavailable"
+msgstr "il motore della memoria non è disponibile (riavvia Homun)"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.unavailable"
+msgstr "Il motore della memoria non è disponibile: leggi l’avviso in cima alla sezione."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.io"
+msgstr "Il motore della memoria non ha potuto leggere o scrivere le celle: riprova."
+
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Il nome del modello"
 msgstr "Il nome del modello"
@@ -4770,6 +4795,16 @@ msgstr "La libreria è vuota: i documenti, i grafici e i file che i bot preparan
 msgid "La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico)."
 msgstr "La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico)."
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.empty"
+msgstr "La memoria è vuota: non ho salvato nulla."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.generic"
+msgstr "La memoria non ha risposto: riprova."
+
 #. placeholder {0}: openAiCompatBase({ baseUrl: setup.baseUrl || 'http://…' }) + '/models'
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "La prova chiama {0}"
@@ -5081,6 +5116,11 @@ msgstr "mai"
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Manca il kernel di Linux"
 msgstr "Manca il kernel di Linux"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.modelMissing"
+msgstr "Manca il modello della ricerca: scaricalo dal pulsante della sezione Memoria."
 
 #. placeholder {0}: agent.name
 #: src/renderer/src/components/Chat.tsx
@@ -6120,7 +6160,7 @@ msgstr "ogni…"
 msgid "Online"
 msgstr "Online"
 
-#: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/MemoryEngineNotice.tsx
 msgid "Operazione non riuscita."
 msgstr "Operazione non riuscita."
 
@@ -6729,7 +6769,7 @@ msgstr "Quanto posso fare da solo?"
 msgid "Quanto posso fare senza chiederti?"
 msgstr "Quanto posso fare senza chiederti?"
 
-#: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/MemoryEngineNotice.tsx
 msgid "Quasi dimenticato: alcuni byte restano nel registro delle scritture e vengono rimossi alla prossima scrittura del motore."
 msgstr "Quasi dimenticato: alcuni byte restano nel registro delle scritture e vengono rimossi alla prossima scrittura del motore."
 
@@ -6761,6 +6801,50 @@ msgstr "Questa è una chiave di Composio «For You» (inizia con ck_). Homun usa
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Questa memoria è eliminata: puoi ripristinarla dall'ultima versione qui sotto."
 msgstr "Questa memoria è eliminata: puoi ripristinarla dall'ultima versione qui sotto."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.alreadyActive"
+msgstr "Questa memoria è già confermata."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.pending"
+msgstr "Questa memoria è in attesa di conferma: confermala prima di spostarla."
+
+#: src/renderer/src/components/MemoryEngineNotice.tsx
+msgid "Questa memoria è stata aggiornata da una versione più recente di Engramma: aggiorna Homun"
+msgstr "Questa memoria è stata aggiornata da una versione più recente di Engramma: aggiorna Homun"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.schemaTooNew"
+msgstr "Questa memoria è stata aggiornata da una versione più recente di Engramma: aggiorna Homun."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.purged"
+msgstr "Questa memoria è stata dimenticata per sempre: non si può riportare indietro."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.deleted"
+msgstr "Questa memoria è stata eliminata: ripristinala dalle eliminate prima di cambiarla."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.notFound"
+msgstr "Questa memoria non c’è più: l’elenco si è aggiornato."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.notPending"
+msgstr "Questa memoria non è più in attesa di conferma."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.error.invalid"
+msgstr "Questa modifica non è valida: ricarica e riprova."
 
 #: src/renderer/src/components/PluginPanel.tsx
 msgid "questa settimana"
@@ -7102,6 +7186,11 @@ msgstr "Ripristina"
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Ripristina v{version} come nuova versione"
 msgstr "Ripristina v{version} come nuova versione"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "memory.pullFailed"
+msgstr "riprova"
 
 #: src/renderer/src/App.tsx
 #: src/renderer/src/components/ActivityPanel.tsx

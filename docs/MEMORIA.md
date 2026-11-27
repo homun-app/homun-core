@@ -43,6 +43,13 @@ le celle com'erano.
   non disponibile («Serve spazio sul disco per aggiornare la memoria in
   sicurezza: liberane N GB») e il resto di Homun funziona. Liberato lo
   spazio, al boot dopo la copia si fa da sé e la memoria torna.
+- **Una memoria più nuova di Homun non si apre.** Se un Engramma più recente
+  del motore di Homun ha già aggiornato le celle (per esempio la CLI o l'MCP
+  di Engramma), Homun **non le tocca**: la memoria risulta non disponibile
+  («Questa memoria è stata aggiornata da una versione più recente di
+  Engramma: aggiorna Homun») e il resto di Homun funziona. Non c'è nulla da
+  ripristinare: con una versione di Homun che porta quel motore la memoria
+  torna da sé.
 - **Non si cancella da sola.** La copia si può cancellare a mano solo quando
   si è sicuri di non dover tornare indietro.
 

@@ -250,6 +250,12 @@ async function backupStillValid(backupDir: string, memoryDir: string, older: rea
 export type BackupOutcome =
   /** nessuna cella più vecchia del motore: niente da copiare */
   | { kind: 'none' }
+  /**
+   * E3: una cella PIÙ NUOVA del motore (SCHEMA_TOO_NEW: l'ha aggiornata un
+   * Engramma più recente del .node). Non si copia e non si migra nulla: la
+   * memoria non si apre e la cella resta com'è.
+   */
+  | { kind: 'too-new'; file: string; schema: number }
   | { kind: 'done'; dir: string; fromSchema: number; files: number }
   /** la copia per quello schema c'è già e vale ancora */
   | { kind: 'skipped'; dir: string; fromSchema: number }
@@ -276,7 +282,9 @@ export interface BackupOpts {
 /**
  * La copia delle celle prima che il motore le apra. A motore chiuso (la chiama
  * openMemoryEngine prima di Engine.open). Non lancia mai: l'esito dice cosa
- * è successo, e «no-space» e «failed» vogliono dire NON aprire.
+ * è successo, e «too-new», «no-space» e «failed» vogliono dire NON aprire.
+ * E3: prima di qualsiasi altra cosa, una cella più nuova del motore lo dice
+ * qui («too-new»), anche accanto a celle vecchie: finché c'è, non si migra.
  */
 export async function backupCellsBeforeMigration(opts: BackupOpts): Promise<BackupOutcome> {
   const { dataDir, engineSchema } = opts
@@ -291,13 +299,19 @@ export async function backupCellsBeforeMigration(opts: BackupOpts): Promise<Back
   // le celle più vecchie del motore: lo schema lo si legge da soli, mai col motore
   const older: string[] = []
   let fromSchema = 0
+  let tooNew: { file: string; schema: number } | null = null
   for (const file of files) {
     const read = readCellSchema(file, opts)
     if (!read.ok) return { kind: 'failed', error: `cannot read the schema of ${relative(dataDir, file)}: ${read.error}` }
+    if (read.schema !== null && read.schema > engineSchema) {
+      if (!tooNew) tooNew = { file, schema: read.schema }
+      continue
+    }
     if (read.schema === null || read.schema >= engineSchema) continue
     older.push(file)
     fromSchema = Math.max(fromSchema, read.schema)
   }
+  if (tooNew) return { kind: 'too-new', file: tooNew.file, schema: tooNew.schema }
   if (!older.length) return { kind: 'none' }
   // una volta sola: la copia fatta per questo schema vale finché quelle celle restano com'erano
   for (const dir of backupsOf(dataDir, fromSchema)) {

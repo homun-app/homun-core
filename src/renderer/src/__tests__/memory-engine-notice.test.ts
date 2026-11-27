@@ -47,6 +47,13 @@ describe('E1: l’avviso del motore della memoria', () => {
     expect(renderHtml(createElement(MemoryEngineNotice, { engine: { available: true, version: '0.6.19-beta.1' } }))).toBe('')
   })
 
+  // E3: una cella aggiornata da un Engramma più recente del .node (SCHEMA_TOO_NEW)
+  it('E3: col motivo schema-too-new dice di aggiornare Homun — è la memoria che non si tocca, non lui', () => {
+    expect(render({ available: false, reason: 'schema-too-new' })).toBe(
+      'Questa memoria è stata aggiornata da una versione più recente di Engramma: aggiorna Homun'
+    )
+  })
+
   it('la sezione Memoria mostra l’avviso al posto del testo fisso di prima', () => {
     const src = readFileSync(join(import.meta.dirname, '..', 'components', 'MemoryPanel.tsx'), 'utf8')
     expect(src).toContain('<MemoryEngineNotice engine={overview.engine} />')

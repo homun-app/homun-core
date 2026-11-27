@@ -13,12 +13,21 @@
 //   dimentica per sempre  purge: l'esito dice se qualcosa trattiene ancora
 //            byte (pending) e quale vista non è stata raggiunta;
 //   modello  stato e download SOLO dal click dell'utente (pullModel),
-//            con l'avanzamento all'interfaccia (evento memory model-pull).
+//            con l'avanzamento all'interfaccia (evento memory model-pull);
+//   errori   fase v0.6.19 (E3): un errore del motore non arriva mai all'utente
+//            col suo messaggio inglese. Ogni RPC memory:* e l'esito del
+//            download passano dal code dell'errore a una frase del catalogo
+//            UI, nella lingua dell'interfaccia (errorePerLaUi,
+//            modelPullErrorText); al modello resta l'inglese (memory-store.ts).
 import type {
   EngrammaNoteView, EngrammaSearchHit, EngrammaCell, EngrammaListFilter
 } from './engine'
 import { botCell, userCell, memoryEngineStatus, botCellName, USER_CELL, listAll } from './engine'
 import { locateMemoryNote, writeMemoryNote, updateMemoryNote, MemoryNoteError } from './memory-store'
+import { MemoryUnavailableError, engineCodeOf } from './engine'
+import { uiText } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
+import type { UiMessage } from '../../shared/ui-messages'
 import type {
   MemoryNoteInfo, MemoryNoteDetail, MemorySearchHitInfo, MemoryOverview, MemoryPurgeResult
 } from '../../shared/types'
@@ -56,13 +65,91 @@ async function ownerCell(agentId: string, owner: 'bot' | 'user'): Promise<Engram
   return owner === 'user' ? userCell(null) : botCell(agentId)
 }
 
+// ---- E3: gli errori del motore, detti all'interfaccia ----
+
+/** Dal e.code del motore alla frase: per i code che l'utente può incontrare quella giusta, per gli altri quella generica (mai il messaggio). */
+const DAL_CODE: Record<string, UiMessage> = {
+  NOT_FOUND: UI.memoryErrorNotFound,
+  INVALID_NOTE: UI.memoryErrorInvalid,
+  QUARANTINED: UI.memoryErrorAlreadyActive,
+  NOTE_PURGED: UI.memoryErrorPurged,
+  CLOSED: UI.memoryErrorClosed,
+  IO: UI.memoryErrorIo,
+  SCHEMA_TOO_NEW: UI.memorySchemaTooNew,
+  MODEL_MISSING: UI.memoryErrorModelMissing
+}
+/** Gli errori di Homun per la memoria (MemoryNoteError): prima il caso (reason), poi il code. */
+const DAL_CASO: Record<NonNullable<MemoryNoteError['reason']>, UiMessage> = {
+  deleted: UI.memoryErrorDeleted,
+  pending: UI.memoryErrorPending,
+  empty: UI.memoryErrorEmpty,
+  'not-pending': UI.memoryErrorNotPending
+}
+const DAL_CODE_DI_HOMUN: Record<MemoryNoteError['code'], UiMessage> = {
+  NOT_FOUND: UI.memoryErrorNotFound,
+  CONFLICT: UI.memoryErrorDeleted,
+  INVALID: UI.memoryErrorInvalid
+}
+/** Il motore non c'è: dal motivo (l'avviso in cima alla sezione dice il perché). */
+const DAL_MOTIVO: Record<MemoryUnavailableError['reason'], UiMessage> = {
+  'schema-too-new': UI.memorySchemaTooNew,
+  closed: UI.memoryErrorClosed,
+  module: UI.memoryErrorUnavailable,
+  open: UI.memoryErrorUnavailable,
+  space: UI.memoryErrorUnavailable
+}
+
+/**
+ * Un errore diventato frase per l'interfaccia, nella sua lingua: dal code
+ * del motore, dal code e dal caso degli errori di Homun, dal motivo per cui
+ * il motore non c'è. Un errore senza un code riconosciuto (uno imprevisto)
+ * dà la frase generica: un testo che non è del catalogo non parte mai.
+ */
+function errorePerLaUi(e: unknown): Error {
+  let frase: UiMessage | undefined
+  if (e instanceof MemoryUnavailableError) frase = DAL_MOTIVO[e.reason]
+  else if (e instanceof MemoryNoteError) frase = (e.reason && DAL_CASO[e.reason]) || DAL_CODE_DI_HOMUN[e.code]
+  else {
+    const code = engineCodeOf(e)
+    if (code) frase = DAL_CODE[code] ?? UI.memoryErrorGeneric
+  }
+  return new Error(uiText(frase ?? UI.memoryErrorGeneric))
+}
+
+/** Il testo dell'errore per l'interfaccia (frase del catalogo UI, nella lingua dell'interfaccia). */
+export function memoryErrorText(e: unknown): string {
+  return errorePerLaUi(e).message
+}
+
+/** Il download del modello non riuscito: la frase completa «Download non riuscito: » (MemoryPanel). */
+export function modelPullErrorText(e: unknown): string {
+  if (e instanceof MemoryUnavailableError || engineCodeOf(e) === 'CLOSED') return uiText(UI.memoryPullFailedUnavailable)
+  return uiText(engineCodeOf(e) === 'IO' ? UI.memoryPullFailedIo : UI.memoryPullFailed)
+}
+
+/**
+ * Le vie dell'interfaccia: ogni RPC memory:* esce da qui, e un errore che
+ * la fa fallire arriva alla UI come frase del catalogo (errorePerLaUi). Il
+ * confine RPC (ws-server) manda e.message così com'è: qui il messaggio È la
+ * frase.
+ */
+function perLaUi<A extends unknown[], R>(fn: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+  return async (...args: A): Promise<R> => {
+    try {
+      return await fn(...args)
+    } catch (e) {
+      throw errorePerLaUi(e)
+    }
+  }
+}
+
 /**
  * L'elenco con i filtri. Correzioni C4: anche «eliminate» — le lapidi si
  * elencano (v0.4.2, col corpo) così l'utente le ripristina o le dimentica
  * per sempre; senza filtro di stato restano le note VIVE (attive e in attesa
  * di conferma).
  */
-export async function memoryList(agentId: string, opts: { owner?: 'bot' | 'user'; tier?: 'core' | 'log'; status?: 'active' | 'quarantined' | 'deleted'; limit?: number; offset?: number } = {}): Promise<{ notes: MemoryNoteInfo[]; more: boolean }> {
+export const memoryList = perLaUi(async function memoryList(agentId: string, opts: { owner?: 'bot' | 'user'; tier?: 'core' | 'log'; status?: 'active' | 'quarantined' | 'deleted'; limit?: number; offset?: number } = {}): Promise<{ notes: MemoryNoteInfo[]; more: boolean }> {
   const owner = opts.owner === 'user' ? 'user' : 'bot'
   const cell = await ownerCell(agentId, owner)
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 1000)
@@ -79,10 +166,10 @@ export async function memoryList(agentId: string, opts: { owner?: 'bot' | 'user'
   const page = await cell.list(filter)
   const more = page.length > limit
   return { notes: page.slice(0, limit).map((n) => toNoteInfo(n, owner)), more }
-}
+})
 
 /** Il dettaglio: la nota (o la lapide) e lo storico delle versioni. */
-export async function memoryNote(agentId: string, id: string): Promise<MemoryNoteDetail> {
+export const memoryNote = perLaUi(async function memoryNote(agentId: string, id: string): Promise<MemoryNoteDetail> {
   const found = await locateMemoryNote(agentId, id)
   if (!found) throw new MemoryNoteError(`Memory "${id}" not found.`, 'NOT_FOUND')
   const cell = await ownerCell(agentId, found.scope === 'user' ? 'user' : 'bot')
@@ -92,10 +179,10 @@ export async function memoryNote(agentId: string, id: string): Promise<MemoryNot
     note: found.note ? toNoteInfo(found.note, found.scope === 'user' ? 'user' : 'bot') : null,
     history: versions.map((v) => ({ version: v.version, note: toNoteInfo(v.note, found.scope === 'user' ? 'user' : 'bot') }))
   }
-}
+})
 
 /** La ricerca della sezione Memoria: lo stesso motore del bot. */
-export async function memorySearch(agentId: string, query: string, opts: { explain?: boolean } = {}): Promise<MemorySearchHitInfo[]> {
+export const memorySearch = perLaUi(async function memorySearch(agentId: string, query: string, opts: { explain?: boolean } = {}): Promise<MemorySearchHitInfo[]> {
   const { memoryEngine, ensureSearchCells } = await import('./engine')
   await ensureSearchCells(agentId)
   const engine = await memoryEngine()
@@ -115,7 +202,7 @@ export async function memorySearch(agentId: string, query: string, opts: { expla
     updatedAt: h.updatedAt,
     ...(h.explain ? { explain: h.explain as MemorySearchHitInfo['explain'] } : {})
   }))
-}
+})
 
 /** Lo stato per l'interfaccia: motore, modello, conteggi, indicizzazione. */
 export async function memoryOverview(agentId: string, getSetting: <T>(key: string, dflt: T) => T): Promise<MemoryOverview> {
@@ -157,42 +244,42 @@ export async function memoryOverview(agentId: string, getSetting: <T>(key: strin
 }
 
 /** Conferma: la quarantena diventa attiva (l'utente l'ha vista). */
-export async function memoryConfirm(agentId: string, id: string): Promise<void> {
+export const memoryConfirm = perLaUi(async function memoryConfirm(agentId: string, id: string): Promise<void> {
   const found = await locateMemoryNote(agentId, id)
   if (!found) throw new MemoryNoteError(`Memory "${id}" not found.`, 'NOT_FOUND')
   if (found.state !== 'quarantined') return
   await (await ownerCell(agentId, found.scope === 'user' ? 'user' : 'bot')).confirm(found.id)
-}
+})
 
 /** Scarta: la quarantena si elimina (lapide). */
-export async function memoryDiscard(agentId: string, id: string): Promise<void> {
+export const memoryDiscard = perLaUi(async function memoryDiscard(agentId: string, id: string): Promise<void> {
   const found = await locateMemoryNote(agentId, id)
   if (!found || found.state === 'deleted') return
-  if (found.state !== 'quarantined') throw new MemoryNoteError(`Memory "${id}" is not pending confirmation.`, 'INVALID')
+  if (found.state !== 'quarantined') throw new MemoryNoteError(`Memory "${id}" is not pending confirmation.`, 'INVALID', 'not-pending')
   await (await ownerCell(agentId, found.scope === 'user' ? 'user' : 'bot')).delete(found.id)
-}
+})
 
 /** Elimina: lapide reversibile. */
-export async function memoryDelete(agentId: string, id: string): Promise<void> {
+export const memoryDelete = perLaUi(async function memoryDelete(agentId: string, id: string): Promise<void> {
   const found = await locateMemoryNote(agentId, id)
   if (!found || found.state === 'deleted') return
   await (await ownerCell(agentId, found.scope === 'user' ? 'user' : 'bot')).delete(found.id)
-}
+})
 
 /** Ripristino dallo storico: la lapide torna attiva. */
-export async function memoryRestore(agentId: string, id: string): Promise<void> {
+export const memoryRestore = perLaUi(async function memoryRestore(agentId: string, id: string): Promise<void> {
   const found = await locateMemoryNote(agentId, id)
   if (!found) throw new MemoryNoteError(`Memory "${id}" not found.`, 'NOT_FOUND')
   if (found.state !== 'deleted') return
   await (await ownerCell(agentId, found.scope === 'user' ? 'user' : 'bot')).setStatus(found.id, 'active')
-}
+})
 
 /**
  * Dimentica per sempre: purge. L'esito dice se l'oblio è completo — qualcosa
  * può trattenere ancora byte (pending: il WAL, una vista): il demone lo
  * finisce alla scrittura successiva, e l'interfaccia lo mostra.
  */
-export async function memoryPurge(agentId: string, id: string): Promise<MemoryPurgeResult> {
+export const memoryPurge = perLaUi(async function memoryPurge(agentId: string, id: string): Promise<MemoryPurgeResult> {
   const found = await locateMemoryNote(agentId, id)
   if (!found) throw new MemoryNoteError(`Memory "${id}" not found.`, 'NOT_FOUND')
   // vale anche per una lapide (la si dimentica dallo storico) e per una
@@ -200,12 +287,12 @@ export async function memoryPurge(agentId: string, id: string): Promise<MemoryPu
   const cell = await ownerCell(agentId, found.scope === 'user' ? 'user' : 'bot')
   const view = await cell.purge(found.id, 'user request (Dimentica per sempre)')
   return { forgotten: view.forgottenPayloads, scrubbed: view.scrubbed, pending: view.pending, views: view.views.map((v) => ({ viewId: v.viewId ?? null, root: v.root, reason: v.reason })) }
-}
+})
 
 /** Scrittura dall'interfaccia: nuova nota o aggiornamento (actor homun:user). */
-export async function memorySave(agentId: string, input: { id?: string; body: string; tier: 'core' | 'log'; scope?: 'agent' | 'user' }): Promise<MemoryNoteInfo> {
+export const memorySave = perLaUi(async function memorySave(agentId: string, input: { id?: string; body: string; tier: 'core' | 'log'; scope?: 'agent' | 'user' }): Promise<MemoryNoteInfo> {
   const body = String(input.body ?? '').trim()
-  if (!body) throw new MemoryNoteError('Empty memory content: nothing written.', 'INVALID')
+  if (!body) throw new MemoryNoteError('Empty memory content: nothing written.', 'INVALID', 'empty')
   if (input.id) {
     const note = await updateMemoryNote(agentId, {
       id: input.id, content: body,
@@ -223,7 +310,7 @@ export async function memorySave(agentId: string, input: { id?: string; body: st
     userTurn: true
   }, { byUser: true })
   return toNoteInfo(note, input.scope === 'user' ? 'user' : 'bot')
-}
+})
 
 // ---- il download del modello (SOLO dal click dell'utente) ----
 
@@ -257,8 +344,8 @@ export function startModelPull(
       progress(1, 1)
       onDone({ ok: true })
     } catch (e) {
-      // il messaggio del motore non contiene contenuti di note
-      onDone({ ok: false, error: e instanceof Error ? e.message : String(e) })
+      // E3: la frase del catalogo, non il messaggio del motore (inglese, e con l'indirizzo dell'endpoint)
+      onDone({ ok: false, error: modelPullErrorText(e) })
     } finally {
       modelPullState.inFlight = false
     }

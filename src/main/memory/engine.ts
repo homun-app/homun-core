@@ -24,12 +24,12 @@
 // (index.d.ts, fase-v0.4.2): il .d.ts del crate non entra nel tsconfig di
 // Homun, quindi il contratto vive in questi nominali minimi.
 import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
 import { enqueueJob } from '../store/jobs'
-import { backupCellsBeforeMigration } from './cell-backup'
+import { backupCellsBeforeMigration, CELLS_DIR, readCellSchema } from './cell-backup'
 
 // ---- il contratto (docs/node.md e index.d.ts di engramma-node v0.4.1) ----
 
@@ -317,19 +317,33 @@ export function botActor(agentId: string): string {
 
 /**
  * Perché la memoria non c'è: il modulo non si carica, Engine.open fallisce,
- * il motore è chiuso (spegnimento), o — E1 — non c'è lo spazio per copiare
- * le celle prima che il motore nuovo le aggiorni ('space': la memoria resta
- * com'è, niente migra). L'interfaccia mostra il motivo dal catalogo it/en a
- * partire da questo CODICE; il testo inglese va al modello e ai log (mai
- * contenuti di note: il motore non ne mette nei suoi errori).
+ * il motore è chiuso (spegnimento); — E1 — non c'è lo spazio per copiare le
+ * celle prima che il motore nuovo le aggiorni ('space': la memoria resta
+ * com'è, niente migra); o — E3 — una cella è stata aggiornata da un Engramma
+ * più recente di questo motore ('schema-too-new': la cella non si tocca,
+ * l'utente aggiorna Homun). L'interfaccia mostra il motivo dal catalogo
+ * it/en a partire da questo CODICE; il testo inglese va al modello e ai log
+ * (mai contenuti di note: il motore non ne mette nei suoi errori).
  */
-export type MemoryUnavailableReason = 'module' | 'open' | 'closed' | 'space'
+export type MemoryUnavailableReason = 'module' | 'open' | 'closed' | 'space' | 'schema-too-new'
 
 const REASON_TEXT: Record<MemoryUnavailableReason, string> = {
   module: 'the Engramma native module does not load (vendor/engramma: npm run prepare-engramma)',
   open: 'the Engramma engine did not open',
   closed: 'the memory engine is closed (CLOSED)',
-  space: 'there is not enough free disk space to copy the cells of the memory before the engine updates them'
+  space: 'there is not enough free disk space to copy the cells of the memory before the engine updates them',
+  'schema-too-new': 'a cell of the memory was updated by a newer Engramma than this engine (SCHEMA_TOO_NEW)'
+}
+
+/** Il code di un errore del motore (Engramma dà a ognuno il suo), o null se non è un errore col code. */
+export function engineCodeOf(e: unknown): string | null {
+  const code = (e as { code?: unknown } | null | undefined)?.code
+  return typeof code === 'string' ? code : null
+}
+
+/** Il testo inglese (log e modello) di una cella troppo nuova: quale, a che schema, fino a quale. */
+function tooNewDetail(cell: string, schema: number | null, engineSchema: number | null): string {
+  return `cell ${cell} is at schema ${schema ?? '?'}, this engine supports up to ${engineSchema ?? '?'} (SCHEMA_TOO_NEW)`
 }
 
 /** L'errore chiaro quando il motore non c'è: mai un ripiego silenzioso. */
@@ -344,11 +358,25 @@ export class MemoryUnavailableError extends Error {
 
 type EngineState =
   | { kind: 'closed' }
-  | { kind: 'open'; engine: EngrammaEngine; root: string; version: string; cells: Map<string, EngrammaCell> }
+  | { kind: 'open'; engine: EngrammaEngine; root: string; version: string; schema: number | null; cells: Map<string, EngrammaCell> }
   | { kind: 'failed'; reason: MemoryUnavailableReason; detail?: string; neededBytes?: number }
 
 let state: EngineState = { kind: 'closed' }
 let opening: Promise<MemoryEngineStatus> | null = null
+/**
+ * E3: la cella trovata più nuova del motore MENTRE il motore è aperto (una
+ * cella può diventarlo dopo l'avvio: la apre un Engramma più recente). Da
+ * lì in poi, finché Homun non si riapre, la memoria risulta non disponibile
+ * col motivo 'schema-too-new'; il motore resta aperto per le altre celle.
+ * All'avvio non serve: lo stato è già 'failed' col motivo (openMemoryEngine).
+ */
+let tooNewCell: { name: string; schema: number | null } | null = null
+
+/** L'errore di una cella troppo nuova, e da qui il motivo per l'interfaccia. */
+function cellTooNew(name: string, schema: number | null, engineSchema: number | null): MemoryUnavailableError {
+  tooNewCell = { name, schema }
+  return new MemoryUnavailableError('schema-too-new', tooNewDetail(name, schema, engineSchema))
+}
 
 /** E1: la copia delle celle fatta PRIMA di aprire il motore (lo dice il log del demone). */
 export interface MemoryBackupInfo {
@@ -394,6 +422,7 @@ export function openMemoryEngine(opts: { dataDir: string; embedder?: 'builtin' |
     return Promise.resolve({ available: true, version: state.version, model: { present: false } })
   }
   opening = (async (): Promise<MemoryEngineStatus> => {
+    tooNewCell = null
     const mod = await engrammaModule()
     if (!mod) {
       state = { kind: 'failed', reason: 'module', detail: lastModuleLoadError ?? undefined }
@@ -409,6 +438,12 @@ export function openMemoryEngine(opts: { dataDir: string; embedder?: 'builtin' |
         state = { kind: 'failed', reason: 'space', detail, neededBytes: copy.missingBytes }
         return unavailable('space', detail, copy.missingBytes)
       }
+      // E3: una cella più nuova di questo motore — la memoria non si apre, la cella non si tocca
+      if (copy.kind === 'too-new') {
+        const detail = tooNewDetail(basename(copy.file), copy.schema, toSchema)
+        state = { kind: 'failed', reason: 'schema-too-new', detail }
+        return unavailable('schema-too-new', detail)
+      }
       if (copy.kind === 'failed') {
         const detail = `the copy of the cells before the update did not succeed, so the engine stays closed: ${copy.error}`
         state = { kind: 'failed', reason: 'open', detail }
@@ -423,7 +458,7 @@ export function openMemoryEngine(opts: { dataDir: string; embedder?: 'builtin' |
         ...(opts.embedder ? { embedder: opts.embedder } : {}),
         actor: 'homun'
       })
-      state = { kind: 'open', engine, root: join(opts.dataDir, 'memory'), version: mod.version(), cells: new Map() }
+      state = { kind: 'open', engine, root: join(opts.dataDir, 'memory'), version: mod.version(), schema: toSchema, cells: new Map() }
       return { available: true, version: mod.version(), model: await engine.modelStatus(), ...(backup ? { backup } : {}) }
     } catch (e) {
       // il messaggio del motore non contiene contenuti di note (contratto)
@@ -453,6 +488,8 @@ export function memoryEngineError(): string | null {
 
 /** Stato per l'interfaccia: motore, versione, modello (mai scarica nulla). */
 export async function memoryEngineStatus(): Promise<MemoryEngineStatus> {
+  // E3: una cella diventata troppo nuova mentre il motore è aperto
+  if (tooNewCell) return unavailable('schema-too-new', tooNewDetail(tooNewCell.name, tooNewCell.schema, state.kind === 'open' ? state.schema : null))
   if (state.kind === 'open') {
     let model: EngrammaModelStatus = { present: false }
     try {
@@ -475,6 +512,7 @@ export async function memoryEngineStatus(): Promise<MemoryEngineStatus> {
 export async function closeMemoryEngine(): Promise<void> {
   const current = state
   state = { kind: 'closed' }
+  tooNewCell = null
   if (current.kind === 'open') {
     try {
       await current.engine.close()
@@ -531,7 +569,23 @@ export async function memoryCell(name: string, actor: string): Promise<EngrammaC
   const key = `${name}::${actor}`
   const hit = state.cells.get(key)
   if (hit) return hit
-  const cell = await engine.cell(name, { actor })
+  // E3: lo schema lo legge Homun PRIMA di chiedere la cella al motore. La
+  // guardia del motore (SCHEMA_TOO_NEW) scatta solo quando l'ha già aperta,
+  // e accanto lascia un -wal vuoto; così la cella non si tocca affatto. Se
+  // gli sfuggisse (uno schema che il lettore non vede), la guardia del motore
+  // resta: lo stesso motivo, lo stesso divieto.
+  if (state.schema !== null) {
+    const file = join(state.root, CELLS_DIR, `${name}.sqlite`)
+    const read = existsSync(file) ? readCellSchema(file) : null
+    if (read && read.ok && read.schema !== null && read.schema > state.schema) throw cellTooNew(name, read.schema, state.schema)
+  }
+  let cell: EngrammaCell
+  try {
+    cell = await engine.cell(name, { actor })
+  } catch (e) {
+    if (engineCodeOf(e) === 'SCHEMA_TOO_NEW') throw cellTooNew(name, null, state.schema)
+    throw e
+  }
   state.cells.set(key, cell)
   return cell
 }

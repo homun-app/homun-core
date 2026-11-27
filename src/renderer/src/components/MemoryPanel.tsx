@@ -10,7 +10,10 @@
 //   Elimina  lapide, si ripristina dallo storico; il filtro «eliminate» le
 //             mostra (correzioni C4) e Dimentica per sempre: purge (conferma
 //             che spiega che non si torna indietro), anche dalla lapide;
-//   modello  stato e download SOLO dal click (circa 400 MB), con avanzamento.
+//   modello  stato e download SOLO dal click (circa 400 MB), con avanzamento;
+//   errori   un'azione rifiutata lo dice (run → MemoryNotice): la frase è del
+//            catalogo UI e arriva dal demone nella lingua dell'interfaccia,
+//            così come quella di un download non riuscito (v0.6.19, E3).
 //
 // Fase design (DS4): i testi ai token di DS1 — il corpo di una nota è
 // text-body (è il contenuto che si legge), le righe attorno text-small
@@ -33,7 +36,8 @@ import type { MemoryNoteInfo, MemoryNoteDetail, MemorySearchHitInfo, MemoryOverv
 import { cn } from '../lib/utils'
 import { Button } from './ui/button'
 import { SearchField } from './ui/search-field'
-import { MemoryEngineNotice } from './MemoryEngineNotice'
+import { MemoryEngineNotice, MemoryNotice } from './MemoryEngineNotice'
+import type { MemoryNoticeState } from './MemoryEngineNotice'
 
 /** Un contrassegno (proprietario, livello, stato): una pillola in text-caption, il colore la dà chi la usa. */
 const TAG = 'rounded-full px-2 py-0.5'
@@ -65,7 +69,7 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
   const [detail, setDetail] = useState<MemoryNoteDetail | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [confirmPurge, setConfirmPurge] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<MemoryNoticeState>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
 
@@ -117,22 +121,33 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
     if (detailId) openDetail(detailId)
   }
 
+  /**
+   * Fase memoria-engramma v0.6.19 (E3): ogni azione sulla memoria (salva,
+   * conferma, scarta, elimina, ripristina, dimentica per sempre) passa di
+   * qui. A riuscita ricarica e toglie l'avviso; se il demone rifiuta lo dice
+   * — la frase arriva dal catalogo UI, già nella lingua dell'interfaccia
+   * (memory-rpc.ts: dal e.code del motore, mai il suo messaggio inglese) — e
+   * ricarica lo stesso (una memoria che non c'è più sparisce dall'elenco).
+   * Prima il rifiuto non aveva voce: una promessa rifiutata e nulla a schermo.
+   */
+  const run = <T,>(p: Promise<T>, done?: (r: T) => void) => {
+    void p.then(
+      (r) => { setNotice(null); done?.(r); after() },
+      (e: unknown) => { setNotice(e instanceof Error && e.message ? { kind: 'text', text: e.message } : 'error'); after() }
+    )
+  }
+
   const purge = (id: string) => {
     setConfirmPurge(null)
-    void api.memoryPurge(agentId, id).then((r) => {
-      if (r.scrubbed) setNotice(null)
-      else setNotice('pending')
+    run(api.memoryPurge(agentId, id), (r) => {
+      setNotice(r.scrubbed ? null : 'pending')
       setDetailId(null)
       setDetail(null)
-      after()
-    }).catch(() => setNotice('error'))
+    })
   }
 
   const save = (id: string) => {
-    void api.memorySave(agentId, { id, body: draft, tier: editing === 'core' ? 'core' : 'log' }).then(() => {
-      setEditing(null)
-      after()
-    })
+    run(api.memorySave(agentId, { id, body: draft, tier: editing === 'core' ? 'core' : 'log' }), () => setEditing(null))
   }
 
   const search = () => {
@@ -290,14 +305,7 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
             <Button variant={status === 'deleted' ? 'secondary' : 'ghost'} size="sm" shape="pill" onClick={() => setStatus('deleted')}><Trans>eliminate</Trans></Button>
           </div>
 
-          {notice === 'pending' && (
-            <p className="mt-2 rounded-control bg-muted px-3 py-2 text-small text-muted-foreground">
-              <Trans>Quasi dimenticato: alcuni byte restano nel registro delle scritture e vengono rimossi alla prossima scrittura del motore.</Trans>
-            </p>
-          )}
-          {notice === 'error' && (
-            <p className="mt-2 rounded-control bg-destructive/10 px-3 py-2 text-small text-destructive"><Trans>Operazione non riuscita.</Trans></p>
-          )}
+          <MemoryNotice notice={notice} />
 
           {loading && <p className="mt-2 text-small text-muted-foreground">…</p>}
           {!loading && notes.length === 0 && (
@@ -350,13 +358,13 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
                     <div className="flex flex-wrap gap-1">
                       {m.status === 'quarantined' ? (
                         <>
-                          <Button variant="ghost" size="sm" className="-ml-3 text-foreground" onClick={() => { void api.memoryConfirm(agentId, m.id).then(after) }}><Trans>Conferma</Trans></Button>
-                          <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => { void api.memoryDiscard(agentId, m.id).then(after) }}><Trans>Scarta</Trans></Button>
+                          <Button variant="ghost" size="sm" className="-ml-3 text-foreground" onClick={() => run(api.memoryConfirm(agentId, m.id))}><Trans>Conferma</Trans></Button>
+                          <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => run(api.memoryDiscard(agentId, m.id))}><Trans>Scarta</Trans></Button>
                         </>
                       ) : m.status === 'deleted' ? (
                         /* correzioni C4: la lapide si ripristina o si dimentica per davvero */
                         <>
-                          <Button variant="ghost" size="sm" className="-ml-3 text-foreground" onClick={() => { void api.memoryRestore(agentId, m.id).then(after) }}><Trans>Ripristina</Trans></Button>
+                          <Button variant="ghost" size="sm" className="-ml-3 text-foreground" onClick={() => run(api.memoryRestore(agentId, m.id))}><Trans>Ripristina</Trans></Button>
                           <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => setConfirmPurge(m.id)}><Trans>Dimentica per sempre</Trans></Button>
                         </>
                       ) : (
@@ -364,7 +372,7 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
                           <Button variant="ghost" size="sm" className="-ml-3" onClick={() => { setEditing(m.tier); setDraft(m.body) }}>
                             <Trans>Modifica</Trans>
                           </Button>
-                          <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => { void api.memoryDelete(agentId, m.id).then(after) }}>
+                          <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => run(api.memoryDelete(agentId, m.id))}>
                             <Trans>Elimina</Trans>
                           </Button>
                           <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => setConfirmPurge(m.id)}>
@@ -449,7 +457,7 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
               {detail.state === 'deleted' && detail.history.length > 0 && (
                 // flex w-fit: da solo in una colonna a blocchi un inline-flex
                 // lascerebbe sotto di sé lo spazio della discesa del carattere
-                <Button variant="secondary" size="sm" className="flex w-fit" onClick={() => { void api.memoryRestore(agentId, detailId).then(after) }}>
+                <Button variant="secondary" size="sm" className="flex w-fit" onClick={() => run(api.memoryRestore(agentId, detailId))}>
                   <Trans>Ripristina</Trans>
                 </Button>
               )}

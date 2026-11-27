@@ -54,7 +54,13 @@ export interface UpdateMemoryNoteInput {
 }
 
 export class MemoryNoteError extends Error {
-  constructor(message: string, readonly code: 'NOT_FOUND' | 'CONFLICT' | 'INVALID') {
+  /**
+   * `reason` dice quale dei casi di un code è (E3: l'interfaccia ha una frase
+   * per la lapide e una per la nota in attesa, entrambe CONFLICT, e per il
+   * testo vuoto e lo scarto di una nota che non aspetta, entrambi INVALID);
+   * il modello legge il messaggio e non cambia.
+   */
+  constructor(message: string, readonly code: 'NOT_FOUND' | 'CONFLICT' | 'INVALID', readonly reason?: 'deleted' | 'pending' | 'empty' | 'not-pending') {
     super(message)
   }
 }
@@ -179,7 +185,7 @@ export async function updateMemoryNote(agentId: string, input: UpdateMemoryNoteI
   // lapide (lo scope NON è della nota: è DOVE la nota vive). Una nota in
   // quarantena non si sposta: prima la conferma dell'utente
   if (nextScope !== scope) {
-    if (found.state === 'quarantined') throw new MemoryNoteError(pendingConfirmationText(found.id), 'CONFLICT')
+    if (found.state === 'quarantined') throw new MemoryNoteError(pendingConfirmationText(found.id), 'CONFLICT', 'pending')
     const dst = await cellFor(agentId, nextScope, opts.byUser)
     let born = await dst.put({
       body: input.content !== undefined ? String(input.content) : note.body,

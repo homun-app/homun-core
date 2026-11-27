@@ -931,7 +931,44 @@ export const UI = {
     id: 'boxUninstall.unsafe',
     message: 'Lo script di disinstallazione di Apple non è come me lo aspetto: per sicurezza non rimuovo nulla. Disinstalla a mano dal Terminale: {command}'
   }),
-  boxUninstallFailed: msg({ id: 'boxUninstall.failed', message: 'La disinstallazione non è riuscita: prova di nuovo.' })
+  boxUninstallFailed: msg({ id: 'boxUninstall.failed', message: 'La disinstallazione non è riuscita: prova di nuovo.' }),
+
+  // Fase memoria-engramma v0.6.19 (E3): gli errori del motore della memoria,
+  // detti all'interfaccia. Li sceglie memory-rpc.ts dal code dell'errore
+  // (e.code del motore, il code di MemoryNoteError, il motivo per cui il
+  // motore non c'è): il messaggio inglese del motore non arriva mai all'utente.
+  /** NOT_FOUND: una memoria che non c'è più */
+  memoryErrorNotFound: msg({ id: 'memory.error.notFound', message: 'Questa memoria non c’è più: l’elenco si è aggiornato.' }),
+  /** CONFLICT su una lapide: si ripristina prima di cambiarla */
+  memoryErrorDeleted: msg({ id: 'memory.error.deleted', message: 'Questa memoria è stata eliminata: ripristinala dalle eliminate prima di cambiarla.' }),
+  /** CONFLICT su una nota in attesa: si conferma prima di spostarla */
+  memoryErrorPending: msg({ id: 'memory.error.pending', message: 'Questa memoria è in attesa di conferma: confermala prima di spostarla.' }),
+  /** INVALID, INVALID_NOTE: una modifica che il motore o Homun rifiutano */
+  memoryErrorInvalid: msg({ id: 'memory.error.invalid', message: 'Questa modifica non è valida: ricarica e riprova.' }),
+  /** il testo salvato dall'interfaccia è vuoto */
+  memoryErrorEmpty: msg({ id: 'memory.error.empty', message: 'La memoria è vuota: non ho salvato nulla.' }),
+  /** «Scarta» su una nota che non aspetta più */
+  memoryErrorNotPending: msg({ id: 'memory.error.notPending', message: 'Questa memoria non è più in attesa di conferma.' }),
+  /** QUARANTINED: «Conferma» su una nota già attiva */
+  memoryErrorAlreadyActive: msg({ id: 'memory.error.alreadyActive', message: 'Questa memoria è già confermata.' }),
+  /** NOTE_PURGED: dimenticata per sempre */
+  memoryErrorPurged: msg({ id: 'memory.error.purged', message: 'Questa memoria è stata dimenticata per sempre: non si può riportare indietro.' }),
+  /** CLOSED: il motore è chiuso (spegnimento) */
+  memoryErrorClosed: msg({ id: 'memory.error.closed', message: 'Il motore della memoria è chiuso: riavvia Homun.' }),
+  /** IO: il motore non legge o non scrive le celle */
+  memoryErrorIo: msg({ id: 'memory.error.io', message: 'Il motore della memoria non ha potuto leggere o scrivere le celle: riprova.' }),
+  /** SCHEMA_TOO_NEW: una cella aggiornata da un Engramma più recente del motore */
+  memorySchemaTooNew: msg({ id: 'memory.schemaTooNew', message: 'Questa memoria è stata aggiornata da una versione più recente di Engramma: aggiorna Homun.' }),
+  /** MODEL_MISSING: la ricerca col modello che non c'è */
+  memoryErrorModelMissing: msg({ id: 'memory.error.modelMissing', message: 'Manca il modello della ricerca: scaricalo dal pulsante della sezione Memoria.' }),
+  /** il motore non c'è (module, open, space): il perché sta nell'avviso in cima alla sezione */
+  memoryErrorUnavailable: msg({ id: 'memory.error.unavailable', message: 'Il motore della memoria non è disponibile: leggi l’avviso in cima alla sezione.' }),
+  /** un code del motore senza una frase sua, o un errore inatteso: mai il messaggio */
+  memoryErrorGeneric: msg({ id: 'memory.error.generic', message: 'La memoria non ha risposto: riprova.' }),
+  /** il download del modello non riuscito: completano «Download non riuscito: » */
+  memoryPullFailedIo: msg({ id: 'memory.pullFailed.io', message: 'controlla la connessione e lo spazio su disco, poi riprova' }),
+  memoryPullFailedUnavailable: msg({ id: 'memory.pullFailed.unavailable', message: 'il motore della memoria non è disponibile (riavvia Homun)' }),
+  memoryPullFailed: msg({ id: 'memory.pullFailed', message: 'riprova' })
 } as const
 
 export type UiMessage = (typeof UI)[keyof typeof UI]
