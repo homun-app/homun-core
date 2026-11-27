@@ -22,7 +22,7 @@
 import type {
   EngrammaNoteView, EngrammaSearchHit, EngrammaCell, EngrammaListFilter
 } from './engine'
-import { botCell, userCell, memoryEngineStatus, botCellName, USER_CELL, listAll } from './engine'
+import { botCell, botCellByUser, userCell, memoryEngineStatus, botCellName, USER_CELL, listAll } from './engine'
 import { locateMemoryNote, writeMemoryNote, updateMemoryNote, MemoryNoteError } from './memory-store'
 import { MemoryUnavailableError, engineCodeOf } from './engine'
 import { uiText } from '../ui-language'
@@ -60,9 +60,21 @@ function toNoteInfo(n: EngrammaNoteView, owner: 'bot' | 'user'): MemoryNoteInfo 
   }
 }
 
-/** Le due celle visibili a un bot: la sua e la condivisa. */
-async function ownerCell(agentId: string, owner: 'bot' | 'user'): Promise<EngrammaCell> {
-  return owner === 'user' ? userCell(null) : botCell(agentId)
+/**
+ * Le due celle visibili a un bot — la sua e la condivisa — con la mano
+ * dell'UTENTE (actor homun:user): ogni azione partita da un clic dell'interfaccia
+ * (conferma, scarta, elimina, ripristina, dimentica; salva passa da
+ * memory-store, byUser) è firmata da lui nel
+ * registro del motore. Col motore v0.6, nei conflitti, vince la mano umana
+ * anche se più vecchia, e il perdente di un bot va in quarantena
+ * (per-homun.md, v0.6.3–0.6.5): con la cella del bot com'è (botCell, actor
+ * homun:bot-<id>) le sue azioni sulla cella del bot passavano per mano del
+ * bot. Le letture (elenco, dettaglio) passano di qui: l'actor firma le
+ * scritture. Non c'è più, in questo file, una via a una cella col actor di
+ * un bot.
+ */
+async function cellaDellInterfaccia(agentId: string, owner: 'bot' | 'user'): Promise<EngrammaCell> {
+  return owner === 'user' ? userCell(null) : botCellByUser(agentId)
 }
 
 // ---- E3: gli errori del motore, detti all'interfaccia ----
@@ -151,7 +163,7 @@ function perLaUi<A extends unknown[], R>(fn: (...args: A) => Promise<R>): (...ar
  */
 export const memoryList = perLaUi(async function memoryList(agentId: string, opts: { owner?: 'bot' | 'user'; tier?: 'core' | 'log'; status?: 'active' | 'quarantined' | 'deleted'; limit?: number; offset?: number } = {}): Promise<{ notes: MemoryNoteInfo[]; more: boolean }> {
   const owner = opts.owner === 'user' ? 'user' : 'bot'
-  const cell = await ownerCell(agentId, owner)
+  const cell = await cellaDellInterfaccia(agentId, owner)
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 1000)
   const offset = Math.max(opts.offset ?? 0, 0)
   // senza filtro di stato: tutte le note vive (attive e in attesa di conferma)
@@ -172,7 +184,7 @@ export const memoryList = perLaUi(async function memoryList(agentId: string, opt
 export const memoryNote = perLaUi(async function memoryNote(agentId: string, id: string): Promise<MemoryNoteDetail> {
   const found = await locateMemoryNote(agentId, id)
   if (!found) throw new MemoryNoteError(`Memory "${id}" not found.`, 'NOT_FOUND')
-  const cell = await ownerCell(agentId, found.scope === 'user' ? 'user' : 'bot')
+  const cell = await cellaDellInterfaccia(agentId, found.scope === 'user' ? 'user' : 'bot')
   const versions = await cell.history(found.id)
   return {
     state: found.state,
@@ -248,7 +260,7 @@ export const memoryConfirm = perLaUi(async function memoryConfirm(agentId: strin
   const found = await locateMemoryNote(agentId, id)
   if (!found) throw new MemoryNoteError(`Memory "${id}" not found.`, 'NOT_FOUND')
   if (found.state !== 'quarantined') return
-  await (await ownerCell(agentId, found.scope === 'user' ? 'user' : 'bot')).confirm(found.id)
+  await (await cellaDellInterfaccia(agentId, found.scope === 'user' ? 'user' : 'bot')).confirm(found.id)
 })
 
 /** Scarta: la quarantena si elimina (lapide). */
@@ -256,14 +268,14 @@ export const memoryDiscard = perLaUi(async function memoryDiscard(agentId: strin
   const found = await locateMemoryNote(agentId, id)
   if (!found || found.state === 'deleted') return
   if (found.state !== 'quarantined') throw new MemoryNoteError(`Memory "${id}" is not pending confirmation.`, 'INVALID', 'not-pending')
-  await (await ownerCell(agentId, found.scope === 'user' ? 'user' : 'bot')).delete(found.id)
+  await (await cellaDellInterfaccia(agentId, found.scope === 'user' ? 'user' : 'bot')).delete(found.id)
 })
 
 /** Elimina: lapide reversibile. */
 export const memoryDelete = perLaUi(async function memoryDelete(agentId: string, id: string): Promise<void> {
   const found = await locateMemoryNote(agentId, id)
   if (!found || found.state === 'deleted') return
-  await (await ownerCell(agentId, found.scope === 'user' ? 'user' : 'bot')).delete(found.id)
+  await (await cellaDellInterfaccia(agentId, found.scope === 'user' ? 'user' : 'bot')).delete(found.id)
 })
 
 /** Ripristino dallo storico: la lapide torna attiva. */
@@ -271,7 +283,7 @@ export const memoryRestore = perLaUi(async function memoryRestore(agentId: strin
   const found = await locateMemoryNote(agentId, id)
   if (!found) throw new MemoryNoteError(`Memory "${id}" not found.`, 'NOT_FOUND')
   if (found.state !== 'deleted') return
-  await (await ownerCell(agentId, found.scope === 'user' ? 'user' : 'bot')).setStatus(found.id, 'active')
+  await (await cellaDellInterfaccia(agentId, found.scope === 'user' ? 'user' : 'bot')).setStatus(found.id, 'active')
 })
 
 /**
@@ -284,7 +296,7 @@ export const memoryPurge = perLaUi(async function memoryPurge(agentId: string, i
   if (!found) throw new MemoryNoteError(`Memory "${id}" not found.`, 'NOT_FOUND')
   // vale anche per una lapide (la si dimentica dallo storico) e per una
   // nota in quarantena
-  const cell = await ownerCell(agentId, found.scope === 'user' ? 'user' : 'bot')
+  const cell = await cellaDellInterfaccia(agentId, found.scope === 'user' ? 'user' : 'bot')
   const view = await cell.purge(found.id, 'user request (Dimentica per sempre)')
   return { forgotten: view.forgottenPayloads, scrubbed: view.scrubbed, pending: view.pending, views: view.views.map((v) => ({ viewId: v.viewId ?? null, root: v.root, reason: v.reason })) }
 })

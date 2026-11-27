@@ -5,7 +5,8 @@
 // non c'è, la ricerca è testo+grafo). Le celle di un bot si aprono con
 // engine.cell('bot-<id>', { actor: 'homun:bot-<id>' }) così il registro dice
 // quale bot ha scritto; la cella 'utente' con l'actor del bot che scrive o
-// 'homun:user' per le scritture dall'interfaccia.
+// 'homun:user' per le scritture dall'interfaccia; la cella di un bot, quando
+// agisce l'utente dall'interfaccia, con actor 'homun:user' (botCellByUser).
 //
 // Nessun ripiego silenzioso: se il modulo non si carica (o il motore è
 // chiuso), ogni chiamata fallisce con un errore CHIARO (MemoryUnavailable) —
@@ -316,6 +317,14 @@ export function botActor(agentId: string): string {
 }
 
 /**
+ * L'actor con cui l'UTENTE scrive dall'interfaccia: homun:user. Col motore
+ * v0.6 è l'unica mano umana (`homun`, `homun:bot-<id>` e `homun:story` sono
+ * agenti) e nei conflitti vince, anche se più vecchia (per-homun.md,
+ * v0.6.3–0.6.5): ogni azione partita da un clic dell'utente è firmata così.
+ */
+export const USER_ACTOR = 'homun:user'
+
+/**
  * Perché la memoria non c'è: il modulo non si carica, Engine.open fallisce,
  * il motore è chiuso (spegnimento); — E1 — non c'è lo spazio per copiare le
  * celle prima che il motore nuovo le aggiorni ('space': la memoria resta
@@ -595,9 +604,19 @@ export function botCell(agentId: string): Promise<EngrammaCell> {
   return memoryCell(botCellName(agentId), botActor(agentId))
 }
 
+/**
+ * La cella delle memorie di un bot con la mano dell'UTENTE (actor
+ * homun:user): è lui che agisce dall'interfaccia. Con botCell le azioni
+ * dell'interfaccia sulla cella del bot passavano per una mano d'agente, la
+ * stessa del bot; col motore v0.6, nei conflitti, vince la mano umana.
+ */
+export function botCellByUser(agentId: string): Promise<EngrammaCell> {
+  return memoryCell(botCellName(agentId), USER_ACTOR)
+}
+
 /** La cella condivisa: actor del bot che scrive, o homun:user dall'interfaccia. */
 export function userCell(writerAgentId: string | null): Promise<EngrammaCell> {
-  return memoryCell(USER_CELL, writerAgentId ? botActor(writerAgentId) : 'homun:user')
+  return memoryCell(USER_CELL, writerAgentId ? botActor(writerAgentId) : USER_ACTOR)
 }
 
 /**

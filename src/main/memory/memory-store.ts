@@ -25,7 +25,7 @@
 // codici e id.
 import type { EngrammaNoteView, EngrammaSearchHit } from './engine'
 import {
-  botCell, userCell, memoryCell, memoryEngine, ensureSearchCells, USER_CELL, botCellName,
+  botCell, botCellByUser, userCell, memoryCell, memoryEngine, ensureSearchCells, USER_CELL, botCellName,
   enqueueEmbedPending, listAll, MemoryUnavailableError, type EngrammaCell
 } from './engine'
 import { isSafeMemoryId, memorySectionPrompt, estimateTokensOf, type MemoryRecord, type MemoryTier, type MemoryScope } from '../agent/memory'
@@ -76,7 +76,7 @@ export function scopeLabelOfCell(cell: string): 'agent' | 'user' {
  * del motore dice sempre chi.
  */
 function cellFor(agentId: string, scope: MemoryScope, byUser = false): Promise<EngrammaCell> {
-  if (byUser) return scope === 'user' ? userCell(null) : memoryCell(botCellName(agentId), 'homun:user')
+  if (byUser) return scope === 'user' ? userCell(null) : botCellByUser(agentId)
   return scope === 'user' ? userCell(agentId) : botCell(agentId)
 }
 
