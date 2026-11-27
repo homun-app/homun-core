@@ -194,7 +194,7 @@ export interface SquadActivityCounter {
  */
 export function squadActivityCounters(
   entriesByAgent: ReadonlyArray<{ agentId: string; name: string; entries: TranscriptEntry[] }>,
-  agentGroupMessages: ReadonlyArray<{ author_kind: string; author_id: string | null }>,
+  agentGroupMessages: ReadonlyArray<{ author_kind: string; author_id: string | null; author_name?: string | null }>,
   groupId: number
 ): SquadActivityCounter[] {
   const files = new Map<string, number>()
@@ -213,11 +213,18 @@ export function squadActivityCounters(
     }
   }
   const msgs = new Map<string, number>()
+  // K3, difetto (b): un messaggio fra bot si CONTA per autore (l'id), ma si
+  // NOMINA col nome del bot — quello dei membri della squadra (entriesByAgent)
+  // o, per un autore che non è più tra loro, il nome salvato nel messaggio
+  // (author_name). Prima qui finiva l'id, e «Fatto da soli» diceva «a, b»
+  const nomeDi = new Map<string, string>()
+  for (const a of entriesByAgent) nomeDi.set(a.agentId, a.name)
   for (const m of agentGroupMessages) {
     if (m.author_kind !== 'agent' || !m.author_id) continue
+    if (m.author_name && !nomeDi.has(m.author_id)) nomeDi.set(m.author_id, m.author_name)
     bump(msgs, m.author_id)
   }
-  const names = (m: Map<string, number>): string[] => [...m.entries()].filter(([, n]) => n > 0).map(([k]) => k).sort()
+  const names = (m: Map<string, number>): string[] => [...m.entries()].filter(([, n]) => n > 0).map(([k]) => nomeDi.get(k) ?? k).sort()
   return [
     { id: 'files', count: [...files.values()].reduce((s, n) => s + n, 0), who: names(files) },
     { id: 'commands', count: [...commands.values()].reduce((s, n) => s + n, 0), who: names(commands) },

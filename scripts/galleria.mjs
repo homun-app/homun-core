@@ -109,19 +109,11 @@ const MASCHERE = {
   'dialogo-nuovo': [
     { espr: `(() => [...document.querySelectorAll('[role="dialog"] svg')].filter((sv) => { const r = sv.getBoundingClientRect(); return r.width >= 60 && r.height >= 60 }))()`,
       motivo: 'l\'anteprima della mascotte del nuovo bot: il colore è hash dell\'id casuale del bot che verrà creato — diverso a ogni corsa per definizione' }
-  ],
-  // K1 (fase conversione-chat): nella coda della squadra la riga «messaggi tra
-  // bot del team» di «Fatto da soli, senza chiederti» dice CHI con gli ID dei
-  // bot, non con i nomi (squad-approvals.ts conta per author_id e non lo
-  // traduce): gli id nascono casuali a ogni corsa. È un difetto del prodotto
-  // — la maschera copre il TITOLO della riga (larga quanto la riga: coprire il
-  // solo pezzo con gli id faceva cambiare di un pixel il bordo della maschera,
-  // perché la larghezza degli id cambia con le lettere che escono) e ci resta
-  // finché il prodotto non mostra i nomi
-  'chat-squadra-coda': [
-    { espr: `(() => [...document.querySelectorAll('[data-testid="approvals-queue"] span')].filter((sp) => (sp.previousSibling?.textContent ?? '').includes('messaggi tra bot del team')).map((sp) => sp.parentElement))()`,
-      motivo: '«messaggi tra bot del team» (Fatto da soli) mostra gli ID dei bot al posto dei nomi: casuali a ogni corsa — difetto del prodotto (squad-approvals.ts conta per author_id)' }
   ]
+  // K3, difetto (b): la maschera di chat-squadra-coda è TOLTA. Copriva il
+  // titolo di «messaggi tra bot del team» (Fatto da soli), che diceva chi con
+  // gli ID dei bot — casuali a ogni corsa. Il prodotto ora mostra i nomi
+  // (squadActivityCounters: nomeDi) e la riga è ferma come le altre.
 }
 /**
  * fase linguaggio-ritocchi: I TRE CONTROLLI che la macchina fa a OGNI scena,

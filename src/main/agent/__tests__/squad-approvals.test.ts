@@ -186,4 +186,28 @@ describe('Q2: i contatori di «Fatto da soli, senza chiederti»', () => {
     expect(byId.pages.who).toEqual(['Capo', 'Treni'])
     expect(byId['bot-messages'].count).toBe(2)
   })
+
+  it('K3, difetto (b): «messaggi tra bot del team» dice CHI con i nomi dei bot, non con gli id (prima: l\'id di author_id, che la galleria doveva mascherare)', () => {
+    const msgs = [
+      { author_kind: 'agent', author_id: 'b' },
+      { author_kind: 'agent', author_id: 'a' }
+    ]
+    const members = [
+      { agentId: 'a', name: 'Treni', entries: [] },
+      { agentId: 'b', name: 'Capo', entries: [] }
+    ] as never
+    const byId = Object.fromEntries(squadActivityCounters(members, msgs, 7).map((c) => [c.id, c]))
+    expect(byId['bot-messages'].who).toEqual(['Capo', 'Treni'])
+    // ordine alfabetico dei nomi, come per gli altri contatori; mai un id tra i nomi
+    for (const w of byId['bot-messages'].who) expect(w).not.toMatch(/^[a-z]-\d|^agent_/)
+  })
+
+  it('K3 (b): un autore che non è più tra i membri della squadra — oppure senza turni — si chiama col nome salvato nel messaggio (author_name); solo senza nessuno dei due resta l\'id', () => {
+    const msgs = [
+      { author_kind: 'agent', author_id: 'ex', author_name: 'Vecchio' },
+      { author_kind: 'agent', author_id: 'x9' }
+    ]
+    const byId = Object.fromEntries(squadActivityCounters([], msgs, 7).map((c) => [c.id, c]))
+    expect(byId['bot-messages'].who).toEqual(['Vecchio', 'x9'])
+  })
 })
