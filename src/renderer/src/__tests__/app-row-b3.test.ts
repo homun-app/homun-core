@@ -150,6 +150,7 @@ describe('B3: il cablaggio — la pagina passa alla riga l\'esito del flusso', (
   it('la card in chat sulla strada di apps:connect mostra il motivo (dalla risposta e dall\'esito pubblicato): non resta «In attesa» per sempre', () => {
     expect(CARD_SRC).toContain('appConnectPublishedFailure(route.appId, routeClickedAt.current, composioGateway?.appConnect)')
     expect(CARD_SRC).toContain("setRouteError(r.error ?? '')")
-    expect(CARD_SRC).toContain('data-testid="connector-card-error"')
+    // K2 (fase conversione-chat): il motivo è Text del catalogo — l'ancora sta nella sua prop testId, e nel DOM resta data-testid="connector-card-error"
+    expect(CARD_SRC).toContain('testId="connector-card-error"')
   })
 })

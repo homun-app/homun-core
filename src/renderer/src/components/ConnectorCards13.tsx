@@ -10,10 +10,14 @@
 // Impostazioni. Lo stato si legge dal SERVER (non dalla card): alla riapertura
 // la card torna modulo finché il collegamento non riesce, poi si chiude in
 // «✓ <Nome> collegato · N strumenti».
-// Fase design (DS4): le quattro card (server MCP, finestra Server MCP, plugin
-// da accendere, plugin da installare) ai token di DS1 — misure di testo,
-// distanze, il logo a 32 e i bottoni del sistema; la logica non cambia.
-import { useEffect, useState } from 'react'
+//
+// K2 (fase conversione-chat): le quattro card (server MCP, finestra Server
+// MCP, plugin da accendere, plugin da installare) sono LOGICA — i dati e i
+// clic — sopra ProposalCard, l'oggetto del catalogo (a sua volta sopra
+// ChatCard, il guscio): testata, righe, perché, stato e azioni sono suoi
+// slot; il testo è Text, le azioni dentro una frase sono il bottone link.
+// Qui non si disegna più niente: stessi testi, azioni e testid di prima.
+import { useEffect, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 // fase 17c (C5): fiducia, runtime e disabledReason arrivano come CODICI dal
 // daemon — qui si mostrano nella lingua attiva (fallback sul campo grezzo per
@@ -22,11 +26,14 @@ import { X } from 'lucide-react'
 import { api, useStore } from '../store'
 import { stradaOfServer, stradaLabel } from '../lib/plugins-view'
 import { logoUrlForName } from '../lib/app-logos'
-import { AppLogo } from './ui/app-logo'
+import { Icon } from './ui/icon'
+import { Notice } from './ui/notice'
+import { ChatCard } from './ui/chat-card'
+import { ProposalCard } from './ui/proposal-card'
+import { Text } from './ui/text'
 import { i18n } from '../lib/i18n'
 import { erroreOfMeta } from '../lib/ui-text'
 import type { McpServerSetupSpec, TranscriptEntry } from '../../../shared/types'
-import { CardShell } from './DecidedRow'
 import { Button } from './ui/button'
 import { ServerSetupModule } from './ServerSetup'
 
@@ -49,6 +56,9 @@ type EnablePluginMessage = Extract<
   { type: 'enable-plugin' }
 >
 
+/** V6: lo stato salvato dall'ultima decisione (la entry aggiornata lo riporta alla riapertura). */
+type StatoPlugin = 'pending' | 'activating' | 'activated' | 'failed' | 'declined'
+
 /** Il runtime di un server del plugin dal CODICE runtimeKind (fase 17c, C5);
  *  fallback sul label salvato (card vecchie). */
 function RuntimeOf({ sv }: { sv: { name: string; runtimeKind?: string; runtimeDetail?: string; runtimeLabel?: string } }) {
@@ -59,13 +69,12 @@ function RuntimeOf({ sv }: { sv: { name: string; runtimeKind?: string; runtimeDe
   return <>{sv.runtimeLabel ?? ''}</>
 }
 
-/** L'avviso per le proposte nate dopo letture esterne (punto 3). */
-function UntrustedBanner({ show }: { show: boolean }) {
-  if (!show) return null
+/** L'avviso in cima per le proposte nate dopo letture esterne (punto 3): la fascia rossa di Notice. */
+function UntrustedBanner(): ReactNode {
   return (
-    <p className="mb-3 rounded-control bg-destructive/15 px-3 py-2 text-small text-destructive">
+    <Notice tone="destructive" fill>
       <Trans>Proposta fatta dopo aver letto contenuti esterni: controlla che sia quello che volevi</Trans>
-    </p>
+    </Notice>
   )
 }
 
@@ -102,6 +111,15 @@ function specOfCard(message: McpServerMessage): McpServerSetupSpec | null {
   }
 }
 
+/** La riga dell'errore nelle card di proposta: il segno, il motivo, e «chiudi» (il bottone di parole). */
+function RigaErrore({ motivo, onChiudi }: { motivo: string; onChiudi: () => void }): ReactNode {
+  return (
+    <Text size="small" tone="destructive">
+      <Icon icon={X} className="inline-block align-text-bottom" /> {motivo} — <Button variant="link" onClick={onChiudi}><Trans>chiudi</Trans></Button>
+    </Text>
+  )
+}
+
 export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
   const { t } = useLingui()
   const message = (entry.meta?.message ?? {}) as McpServerMessage
@@ -129,6 +147,8 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
       .catch(() => { if (alive) setConnected(true) })
     return () => { alive = false }
   }, [status, message.serverId])
+
+  const rifiuta = (): void => { void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined) }
 
   const add = async (): Promise<void> => {
     setStatus('installing')
@@ -193,86 +213,103 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
   // dopo il collegamento riuscito la card si chiude in UNA riga (M4.3)
   if (status === 'installed' && connected === true) {
     return (
-      <CardShell testid="mcp-server-card">
-        <p className="text-body text-chart-2 wrap-anywhere" data-testid="mcp-card-connected">
+      // il guscio da solo: la card chiusa non è più una proposta, è una riga d'esito
+      <ChatCard testId="mcp-server-card">
+        <Text tone="ok">
           {toolsCount !== null
             ? t`✓ ${message.name} collegato · ${toolsCount} strumenti`
             : t`✓ ${message.name} collegato`}
-        </p>
-      </CardShell>
+        </Text>
+      </ChatCard>
     )
   }
 
+  // la coda della card — una sola alla volta, in quest'ordine (M4.2): il
+  // modulo da completare · il motivo per cui qui non si installa · l'esito ·
+  // l'errore · le azioni
+  const modulo = status === 'installed' && connected === false && cardSpec ? cardSpec : null
+  let coda: { slot: 'configurazione' | 'stato' | 'azioni'; nodo: ReactNode }
+  if (modulo) {
+    coda = { slot: 'configurazione', nodo: (
+      <>
+        <Text weight="medium"><Trans>Ultimo passo: collega {message.name}</Trans></Text>
+        <ServerSetupModule
+          spec={modulo}
+          testid="mcp-card-setup"
+          onConnected={(r) => {
+            setConnected(true)
+            setToolsCount((r.tools ?? []).length)
+          }}
+        />
+      </>
+    ) }
+  } else if (message.disabledReason) {
+    coda = { slot: 'stato', nodo: (
+      <Text size="small" tone="muted">
+        {message.disabledReason === 'host-mode' ? <Trans>si installa solo nel computer dei bot (modalità docker)</Trans> : message.disabledReason} — <Button variant="link" onClick={rifiuta}><Trans>No</Trans></Button>
+      </Text>
+    ) }
+  } else if (status === 'installed') {
+    coda = { slot: 'stato', nodo: <Text size="small" tone="ok"><Trans>✓ Aggiunto — il bot ha ricevuto l'esito</Trans></Text> }
+  } else if (status === 'error') {
+    coda = { slot: 'stato', nodo: <RigaErrore motivo={motivo} onChiudi={rifiuta} /> }
+  } else {
+    coda = { slot: 'azioni', nodo: (
+      <>
+        <Button disabled={status === 'installing'} onClick={() => void add()}>
+          {status === 'installing' ? <Trans>Aggiungo…</Trans> : <Trans>Aggiungi</Trans>}
+        </Button>
+        <Button variant="ghost" disabled={status === 'installing'} onClick={rifiuta}>
+          <Trans>No</Trans>
+        </Button>
+      </>
+    ) }
+  }
+
   return (
-    <CardShell>
-      <UntrustedBanner show={message.untrusted === true} />
-      <div className="flex min-w-8 items-center gap-2">
-        {message.logo ? (
-          <img src={message.logo} alt="" className="size-8 shrink-0 rounded-control object-cover dark:bg-white" />
-        ) : null}
-        <span className="min-w-0 wrap-anywhere text-body font-medium text-foreground"><Trans>Aggiungi server MCP: {message.name}</Trans></span>
-      </div>
-      <p className="mt-2 wrap-anywhere text-small text-muted-foreground">{trust} · {where}</p>
-      {access && <p className="mt-1 wrap-anywhere text-small text-muted-foreground">{access}</p>}
-      {/* E4 (fase mcp-env): i metadati del pacchetto npm e la RETE che avrà:
-          versione FISSATA, autore, pubblicazione, download settimanali, gli
-          host dichiarati e il computer isolato */}
-      {message.npmMeta && (
-        <p className="mt-1 wrap-anywhere text-small text-muted-foreground" data-testid="mcp-card-npm-meta">
-          {t`versione ${message.npmMeta.version} · di ${message.npmMeta.author ?? message.publisher ?? message.name}`
-            + (message.npmMeta.publishedAt ? ' · ' + t`pubblicato il ${new Date(message.npmMeta.publishedAt).toLocaleDateString()}` : '')
-            + ' · ' + t`download settimanali: ${message.npmMeta.weeklyDownloads.toLocaleString()}`}
-        </p>
-      )}
-      {message.allowHosts && message.allowHosts.length > 0 && (
-        <p className="mt-1 wrap-anywhere text-small text-muted-foreground" data-testid="mcp-card-allow-hosts">
-          {t`Rete: solo ${message.allowHosts.join(', ')} · gira nel computer isolato`}
-        </p>
-      )}
-      {message.siteUrl && (
-        <a className="mt-1 block truncate text-small text-primary hover:underline" href={message.siteUrl} target="_blank" rel="noreferrer">{message.siteUrl}</a>
-      )}
-      {message.reason && <p className="mt-2 wrap-anywhere text-body text-foreground">{message.reason}</p>}
-      {message.thirdPartyWarning && (
-        // l'ambra è il token --waiting (contrasto ≥ 4,5:1 in chiaro e in scuro)
-        <p className="mt-2 text-small text-waiting">
-          <Trans>Server di terzi: può leggere e fare quello che gli permettono i suoi strumenti</Trans>
-        </p>
-      )}
-      {/* dopo «Aggiungi» con configurazione da fare, la card DIVENTA il modulo (M4.2) */}
-      {status === 'installed' && connected === false && cardSpec ? (
-        <div className="mt-3 space-y-2">
-          <p className="text-body font-medium"><Trans>Ultimo passo: collega {message.name}</Trans></p>
-          <ServerSetupModule
-            spec={cardSpec}
-            testid="mcp-card-setup"
-            onConnected={(r) => {
-              setConnected(true)
-              setToolsCount((r.tools ?? []).length)
-            }}
-          />
-        </div>
-      ) : message.disabledReason ? (
-        <p className="mt-3 wrap-anywhere text-small text-muted-foreground">
-          {message.disabledReason === 'host-mode' ? <Trans>si installa solo nel computer dei bot (modalità docker)</Trans> : message.disabledReason} — <button className="text-muted-foreground underline hover:text-foreground" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}><Trans>No</Trans></button>
-        </p>
-      ) : status === 'installed' ? (
-        <p className="mt-3 text-small text-chart-2"><Trans>✓ Aggiunto — il bot ha ricevuto l'esito</Trans></p>
-      ) : status === 'error' ? (
-        <p className="mt-3 wrap-anywhere text-small text-destructive">
-          <X className="inline-block size-4 align-text-bottom" aria-hidden="true" /> {motivo} — <button className="underline" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}><Trans>chiudi</Trans></button>
-        </p>
-      ) : (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Button disabled={status === 'installing'} onClick={() => void add()}>
-            {status === 'installing' ? <Trans>Aggiungo…</Trans> : <Trans>Aggiungi</Trans>}
-          </Button>
-          <Button variant="ghost" disabled={status === 'installing'} onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}>
-            <Trans>No</Trans>
-          </Button>
-        </div>
-      )}
-    </CardShell>
+    <ProposalCard
+      avviso={message.untrusted === true ? <UntrustedBanner /> : undefined}
+      logo={message.logo || undefined}
+      titolo={<Trans>Aggiungi server MCP: {message.name}</Trans>}
+      righe={<>
+        <Text size="small" tone="muted">{trust} · {where}</Text>
+        {access && <Text size="small" tone="muted">{access}</Text>}
+        {/* E4 (fase mcp-env): i metadati del pacchetto npm e la RETE che avrà:
+            versione FISSATA, autore, pubblicazione, download settimanali, gli
+            host dichiarati e il computer isolato */}
+        {message.npmMeta && (
+          <Text size="small" tone="muted" testId="mcp-card-npm-meta">
+            {t`versione ${message.npmMeta.version} · di ${message.npmMeta.author ?? message.publisher ?? message.name}`
+              + (message.npmMeta.publishedAt ? ' · ' + t`pubblicato il ${new Date(message.npmMeta.publishedAt).toLocaleDateString()}` : '')
+              + ' · ' + t`download settimanali: ${message.npmMeta.weeklyDownloads.toLocaleString()}`}
+          </Text>
+        )}
+        {message.allowHosts && message.allowHosts.length > 0 && (
+          <Text size="small" tone="muted" testId="mcp-card-allow-hosts">
+            {t`Rete: solo ${message.allowHosts.join(', ')} · gira nel computer isolato`}
+          </Text>
+        )}
+        {message.siteUrl && (
+          <Text size="small" tone="muted" truncate>
+            <Button variant="link" asChild>
+              <a href={message.siteUrl} target="_blank" rel="noreferrer">{message.siteUrl}</a>
+            </Button>
+          </Text>
+        )}
+      </>}
+      perché={<>
+        {message.reason && <Text>{message.reason}</Text>}
+        {message.thirdPartyWarning && (
+          // l'ambra è il token --waiting (contrasto ≥ 4,5:1 in chiaro e in scuro)
+          <Text size="small" tone="waiting">
+            <Trans>Server di terzi: può leggere e fare quello che gli permettono i suoi strumenti</Trans>
+          </Text>
+        )}
+      </>}
+      configurazione={coda.slot === 'configurazione' ? coda.nodo : undefined}
+      stato={coda.slot === 'stato' ? coda.nodo : undefined}
+      azioni={coda.slot === 'azioni' ? coda.nodo : undefined}
+    />
   )
 }
 
@@ -291,24 +328,15 @@ export function McpWindowCard({ entry }: { entry: TranscriptEntry }) {
   const message = (entry.meta?.message ?? {}) as McpWindowMessage
   if (message.type !== 'mcp-window') return null
   return (
-    <CardShell testid="mcp-window-card">
-      <div className="flex min-w-8 items-center gap-2">
-        <span className="min-w-0 wrap-anywhere text-body font-medium text-foreground">
-          {message.service
-            ? t`${message.service} non è tra le app del catalogo, ma si può collegare con un server MCP`
-            : t`Si può collegare con un server MCP`}
-        </span>
-      </div>
-      <p className="mt-2 text-small text-muted-foreground">
-        <Trans>Se lo usi già in Cursor o Claude è lo stesso server: si aggiunge con lo stesso comando o lo stesso indirizzo.</Trans>
-      </p>
-      {message.reason && <p className="mt-2 wrap-anywhere text-body text-foreground">{message.reason}</p>}
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button data-testid="mcp-window-card-open" onClick={() => openPlugin({ kind: 'mcp' })}>
-          <Trans>Apri Server MCP</Trans>
-        </Button>
-      </div>
-    </CardShell>
+    <ProposalCard
+      testId="mcp-window-card"
+      titolo={message.service
+        ? t`${message.service} non è tra le app del catalogo, ma si può collegare con un server MCP`
+        : t`Si può collegare con un server MCP`}
+      righe={<Text size="small" tone="muted"><Trans>Se lo usi già in Cursor o Claude è lo stesso server: si aggiunge con lo stesso comando o lo stesso indirizzo.</Trans></Text>}
+      perché={message.reason ? <Text>{message.reason}</Text> : undefined}
+      azioni={<Button data-testid="mcp-window-card-open" onClick={() => openPlugin({ kind: 'mcp' })}><Trans>Apri Server MCP</Trans></Button>}
+    />
   )
 }
 
@@ -324,7 +352,7 @@ export function McpWindowCard({ entry }: { entry: TranscriptEntry }) {
 export function EnablePluginCard({ entry }: { entry: TranscriptEntry }) {
   const { t } = useLingui()
   const message = (entry.meta?.message ?? {}) as EnablePluginMessage
-  const [status, setStatus] = useState<'pending' | 'activating' | 'activated' | 'failed' | 'declined'>(() => {
+  const [status, setStatus] = useState<StatoPlugin>(() => {
     const st = entry.meta?.status
     return st === 'activated' || st === 'failed' || st === 'declined' ? st : 'pending'
   })
@@ -361,44 +389,41 @@ export function EnablePluginCard({ entry }: { entry: TranscriptEntry }) {
       })
   }
   return (
-    <CardShell testid="enable-plugin-card">
-      <div className="flex items-center gap-3">
-        {logo
-          ? <img src={logo} alt="" className="size-8 shrink-0 rounded-control object-cover dark:bg-white" />
-          : <AppLogo logo={null} name={message.name} className="size-8 text-reading" />}
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-body font-medium text-foreground">{message.name}</span>
-          <span className="block truncate text-small text-muted-foreground" data-testid="enable-plugin-gray">{gray}</span>
-        </span>
-      </div>
-      {message.reason && <p className="mt-2 wrap-anywhere text-body text-foreground">{message.reason}</p>}
-      {status === 'pending' && (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+    <ProposalCard
+      testId="enable-plugin-card"
+      logo={logo}
+      nome={message.name}
+      titolo={message.name}
+      sottotitolo={<span data-testid="enable-plugin-gray">{gray}</span>}
+      perché={message.reason ? <Text>{message.reason}</Text> : undefined}
+      stato={status === 'activating' ? <Text size="small" tone="muted"><Trans>Attivazione…</Trans></Text>
+        : status === 'activated' ? (
+          <Text size="small" tone="ok" testId="enable-plugin-active">
+            <Trans>Attivo · {toolsCount ?? 0} strumenti</Trans>
+          </Text>
+        )
+        : status === 'failed' ? (
+          <Text size="small" tone="destructive" testId="enable-plugin-failed">
+            <Trans>Non parte</Trans>
+            {' · '}
+            <Button variant="link" onClick={() => openPlugin({ kind: 'server', serverId: message.pluginId })}>
+              <Trans>Vedi perché</Trans>
+            </Button>
+          </Text>
+        )
+        : status === 'declined' ? <Text size="small" tone="muted"><Trans>Non ora</Trans></Text>
+        : undefined}
+      azioni={status === 'pending' ? (
+        <>
           <Button data-testid="enable-plugin-activate" onClick={() => decide('enable')}>
             <Trans>Attiva</Trans>
           </Button>
           <Button variant="ghost" data-testid="enable-plugin-not-now" onClick={() => decide('not-now')}>
             <Trans>Non ora</Trans>
           </Button>
-        </div>
-      )}
-      {status === 'activating' && <p className="mt-3 text-small text-muted-foreground"><Trans>Attivazione…</Trans></p>}
-      {status === 'activated' && (
-        <p className="mt-3 text-small text-chart-2" data-testid="enable-plugin-active">
-          <Trans>Attivo · {toolsCount ?? 0} strumenti</Trans>
-        </p>
-      )}
-      {status === 'failed' && (
-        <p className="mt-3 text-small text-destructive" data-testid="enable-plugin-failed">
-          <Trans>Non parte</Trans>
-          {' · '}
-          <button className="underline" onClick={() => openPlugin({ kind: 'server', serverId: message.pluginId })}>
-            <Trans>Vedi perché</Trans>
-          </button>
-        </p>
-      )}
-      {status === 'declined' && <p className="mt-3 text-small text-muted-foreground"><Trans>Non ora</Trans></p>}
-    </CardShell>
+        </>
+      ) : undefined}
+    />
   )
 }
 
@@ -440,51 +465,51 @@ export function PluginInstallProposal({ entry }: { entry: TranscriptEntry }) {
       setStatus('error')
     }
   }
+  const rifiuta = (): void => { void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined) }
 
   // K2: il motivo dell'errore, come nella card del server (il click, o l'entry salvata)
   const motivo = error ?? erroreOfMeta(entry.meta) ?? t`Non riuscito`
 
   return (
-    <CardShell>
-      <UntrustedBanner show={message.untrusted === true} />
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="min-w-0 wrap-anywhere text-body font-medium text-foreground"><Trans>Installa plugin: {message.name}</Trans></span>
-        <span className="text-caption text-muted-foreground">{message.marketplace}</span>
-      </div>
-      <p className="mt-2 wrap-anywhere text-small text-muted-foreground">
-        <Trans>fiducia: {pluginTrust} · commit {message.sha12}{message.repoUrl && <> · <a className="text-primary hover:underline" href={message.repoUrl} target="_blank" rel="noreferrer">{t`repository`}</a></>}</Trans>
-      </p>
-      {message.skills.length > 0 && (
-        <p className="mt-1 wrap-anywhere text-small text-muted-foreground"><Trans>skill: {message.skills.join(', ')}</Trans></p>
-      )}
-      {message.servers.length > 0 && (
-        <p className="mt-1 wrap-anywhere text-small text-muted-foreground">
-          <Trans>server: {serversList}</Trans>
-        </p>
-      )}
-      {message.settings.length > 0 && (
-        <p className="mt-1 wrap-anywhere text-small text-muted-foreground"><Trans>da configurare: {message.settings.map((st) => st.key).join(', ')} (Impostazioni)</Trans></p>
-      )}
-      {message.ignored.length > 0 && (
-        <p className="mt-1 wrap-anywhere text-small text-muted-foreground"><Trans>Non importati (non girano in Homun): {message.ignored.join(', ')}</Trans></p>
-      )}
-      {message.reason && <p className="mt-2 wrap-anywhere text-body text-foreground">{message.reason}</p>}
-      {status === 'installed' ? (
-        <p className="mt-3 text-small text-chart-2"><Trans>✓ Installato — il bot ha ricevuto l'esito</Trans></p>
+    <ProposalCard
+      avviso={message.untrusted === true ? <UntrustedBanner /> : undefined}
+      titolo={<Trans>Installa plugin: {message.name}</Trans>}
+      nota={<Text size="caption" tone="muted">{message.marketplace}</Text>}
+      righe={<>
+        <Text size="small" tone="muted">
+          <Trans>fiducia: {pluginTrust} · commit {message.sha12}{message.repoUrl && <> · <Button variant="link" asChild><a href={message.repoUrl} target="_blank" rel="noreferrer">{t`repository`}</a></Button></>}</Trans>
+        </Text>
+        {message.skills.length > 0 && (
+          <Text size="small" tone="muted"><Trans>skill: {message.skills.join(', ')}</Trans></Text>
+        )}
+        {message.servers.length > 0 && (
+          <Text size="small" tone="muted">
+            <Trans>server: {serversList}</Trans>
+          </Text>
+        )}
+        {message.settings.length > 0 && (
+          <Text size="small" tone="muted"><Trans>da configurare: {message.settings.map((st) => st.key).join(', ')} (Impostazioni)</Trans></Text>
+        )}
+        {message.ignored.length > 0 && (
+          <Text size="small" tone="muted"><Trans>Non importati (non girano in Homun): {message.ignored.join(', ')}</Trans></Text>
+        )}
+      </>}
+      perché={message.reason ? <Text>{message.reason}</Text> : undefined}
+      stato={status === 'installed' ? (
+        <Text size="small" tone="ok"><Trans>✓ Installato — il bot ha ricevuto l'esito</Trans></Text>
       ) : status === 'error' ? (
-        <p className="mt-3 wrap-anywhere text-small text-destructive">
-          <X className="inline-block size-4 align-text-bottom" aria-hidden="true" /> {motivo} — <button className="underline" onClick={() => void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined)}><Trans>chiudi</Trans></button>
-        </p>
-      ) : (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+        <RigaErrore motivo={motivo} onChiudi={rifiuta} />
+      ) : undefined}
+      azioni={status !== 'installed' && status !== 'error' ? (
+        <>
           <Button disabled={status === 'installing'} onClick={() => void install()}>
             {status === 'installing' ? <Trans>Installo…</Trans> : <Trans>Installa</Trans>}
           </Button>
-          <Button variant="ghost" disabled={status === 'installing'} onClick={() => void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined)}>
+          <Button variant="ghost" disabled={status === 'installing'} onClick={rifiuta}>
             <Trans>No</Trans>
           </Button>
-        </div>
-      )}
-    </CardShell>
+        </>
+      ) : undefined}
+    />
   )
 }
