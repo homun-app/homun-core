@@ -115,7 +115,12 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   { file: 'src/main/computeruse/index.ts', text: "non ammette l'accesso di assistenza" },
   // fase use-app (U4): l'errore del -2521１che il desktop FINTO restituisce
   // per simulare macOS in italiano (strumento di test, non UI)
-  { file: 'src/main/computeruse/fake.ts', text: 'osascript: non ammette l’accesso di assistenza. (-25211)' }
+  { file: 'src/main/computeruse/fake.ts', text: 'osascript: non ammette l’accesso di assistenza. (-25211)' },
+  // fase memoria-engramma v0.6.19 (E1): la riga di LOG del demone che dice dov'è
+  // la copia delle celle fatta prima che il motore le aggiorni — costruita da
+  // backupLogLine e scritta con console.log nel runner (runtime.ts), come le
+  // righe di LOG di box-setup e settings-migrations qui sopra; MAI nella UI
+  { file: 'src/main/memory/cell-backup.ts', text: '[sandbotd] memoria: copia delle celle prima dell’aggiornamento del motore (schema ' }
 ]
 
 // Allowlist per SIMBOLO — SOLO liste o dati per costruzione (D4). Anche queste
