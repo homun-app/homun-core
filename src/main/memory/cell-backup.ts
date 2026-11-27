@@ -32,8 +32,12 @@
 // Homun che scrive) o nella copia manca, la copia è vecchia e se ne fa
 // un'altra accanto: quelle fatte non si toccano mai.
 //
-// SENZA SPAZIO NON MIGRA: ci vogliono la cartella più il margine di 5 GB di
-// disk-space.ts, come prima di ogni build o download. La memoria risulta non
+// SENZA SPAZIO NON MIGRA: servono DUE volte la cartella più un margine fisso
+// piccolo (BACKUP_MARGIN_BYTES, 256 MB) — la copia, più quello che la
+// migrazione stessa scrive (WAL e tabelle nuove: circa un'altra cartella).
+// Tappa 3, correzione decisa dal revisore: prima si chiedeva la cartella più
+// i 5 GB delle build della box (DISK_MARGIN_BYTES), e con 3 GB liberi e una
+// memoria di pochi MB l'utente restava senza memoria. La memoria risulta non
 // disponibile col motivo «space» e il resto di Homun funziona.
 import { createHash } from 'node:crypto'
 import { copyFileSync, cpSync, createReadStream, existsSync, readdirSync, renameSync, rmSync, statSync, mkdtempSync } from 'node:fs'
@@ -41,7 +45,7 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { DatabaseSync } from 'node:sqlite'
-import { DISK_MARGIN_BYTES, enoughDiskSpace, freeDiskBytesOf } from '../sandbox/disk-space'
+import { freeDiskBytesOf } from '../sandbox/disk-space'
 
 /** La cartella del motore dentro la cartella dati (Engine.open la apre su <dataDir>/memory). */
 export const MEMORY_DIR = 'memory'
@@ -51,6 +55,31 @@ export const CELLS_DIR = 'cells'
 export const BACKUP_PREFIX = 'memory-backup-schema'
 /** La copia mentre si fa: nascosta (il punto), mai scambiata per una fatta; se la corsa muore, al boot dopo sparisce. */
 const PARTIAL_PREFIX = '.memory-backup-in-corso-'
+
+/**
+ * Il margine fisso di spazio libero sotto la copia e la migrazione (tappa 3):
+ * 256 MB, MB decimale come i GB di disk-space.ts. Sta in una costante sua,
+ * non in DISK_MARGIN_BYTES (i 5 GB che restano liberi prima di una build
+ * della box): sono due cose.
+ */
+export const BACKUP_MARGIN_BYTES = 256_000_000
+
+/**
+ * Lo spazio libero che serve per aggiornare le celle in sicurezza: DUE volte
+ * la dimensione di memory/ più il margine fisso. Una volta per la copia
+ * (cell-backup), una per ciò che la migrazione scrive (WAL e tabelle nuove),
+ * il margine per tutto il resto.
+ */
+export function bytesNeededForBackup(folderBytes: number): number {
+  return 2 * folderBytes + BACKUP_MARGIN_BYTES
+}
+
+/** Basta lo spazio libero per la copia e la migrazione? Libero ignoto → non si parte (mai migrare a ogni costo). */
+export function enoughSpaceForBackup(freeBytes: number | null, folderBytes: number): { ok: boolean; neededBytes: number; missingBytes: number } {
+  const neededBytes = bytesNeededForBackup(folderBytes)
+  if (freeBytes === null || !Number.isFinite(freeBytes)) return { ok: false, neededBytes, missingBytes: neededBytes }
+  return freeBytes >= neededBytes ? { ok: true, neededBytes, missingBytes: 0 } : { ok: false, neededBytes, missingBytes: neededBytes - freeBytes }
+}
 
 /** Lo schema di una cella: letto (anche null: il file non ha la tabella meta, non è una cella da migrare) o non letto. */
 export type CellSchemaRead = { ok: true; schema: number | null } | { ok: false; error: string }
@@ -274,11 +303,11 @@ export async function backupCellsBeforeMigration(opts: BackupOpts): Promise<Back
   for (const dir of backupsOf(dataDir, fromSchema)) {
     if (await backupStillValid(dir, memoryDir, older)) return { kind: 'skipped', dir, fromSchema }
   }
-  // lo spazio: la cartella più il margine, come prima di ogni build o download
+  // lo spazio: DUE volte la cartella più il margine fisso (bytesNeededForBackup) — la copia e la migrazione
   const bytes = dirBytes(memoryDir)
   const freeBytes = freeDiskBytesOf(dataDir)
-  const space = enoughDiskSpace(freeBytes, bytes)
-  if (!space.ok) return { kind: 'no-space', fromSchema, neededBytes: bytes + DISK_MARGIN_BYTES, missingBytes: space.missingBytes, freeBytes }
+  const space = enoughSpaceForBackup(freeBytes, bytes)
+  if (!space.ok) return { kind: 'no-space', fromSchema, neededBytes: space.neededBytes, missingBytes: space.missingBytes, freeBytes }
   // la copia: prima in una cartella nascosta, verificata, e solo allora col suo nome
   const partial = join(dataDir, `${PARTIAL_PREFIX}${process.pid}`)
   try {

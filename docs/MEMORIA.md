@@ -36,11 +36,13 @@ le celle com'erano.
   celle restano com'erano nella copia. Se una cella cambia prima di essere
   aggiornata, ne fa un'altra accanto (con `-2` nel nome) e non tocca quella
   fatta.
-- **Senza spazio non aggiorna nulla.** La copia vuole la dimensione di
-  `memory/` più 5 GB liberi. Se non ci sono, la memoria risulta non
-  disponibile («Serve spazio sul disco per aggiornare la memoria in sicurezza:
-  liberane N GB») e il resto di Homun funziona. Liberato lo spazio, al boot
-  dopo la copia si fa da sé e la memoria torna.
+- **Senza spazio non aggiorna nulla.** Per copiare e aggiornare le celle
+  servono liberi il doppio della dimensione di `memory/` più 256 MB (per
+  esempio 276 MB per una memoria di 10 MB): una volta per la copia, una per
+  lo spazio che l'aggiornamento stesso usa. Se non ci sono, la memoria risulta
+  non disponibile («Serve spazio sul disco per aggiornare la memoria in
+  sicurezza: liberane N GB») e il resto di Homun funziona. Liberato lo
+  spazio, al boot dopo la copia si fa da sé e la memoria torna.
 - **Non si cancella da sola.** La copia si può cancellare a mano solo quando
   si è sicuri di non dover tornare indietro.
 

@@ -2,10 +2,11 @@
 // «Memoria». Prima una frase sola per «il motore non c'è»; col motivo «space»
 // — non c'è lo spazio per copiare le celle prima che il motore nuovo le
 // aggiorni, e la memoria resta com'è — l'utente deve sapere cosa fare, cioè
-// quanto liberare (neededBytes è quanto manca: la cartella più il margine,
-// meno lo spazio libero). Il GB è decimale come in tutto Homun
-// (disk-space.ts), arrotondato per eccesso: meglio chiedere un po' di più
-// che pochi byte, e mai zero.
+// quanto liberare (neededBytes è quanto manca: il doppio della cartella più
+// 256 MB di margine — cell-backup.ts — meno lo spazio libero; per una
+// memoria piccola sono poche centinaia di MB). Il GB è decimale come in
+// tutto Homun (disk-space.ts), arrotondato per eccesso: meglio chiedere un
+// po' di più che pochi byte, e mai zero.
 //
 // Componente PURO: riceve lo stato del motore e non chiama nessuno. La
 // sezione Memoria lo carica con un effetto; così l'avviso si rende vero nei

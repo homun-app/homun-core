@@ -24,7 +24,9 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { TEST_TMP_BASE } from '../../../test-tmp'
-import { DISK_MARGIN_BYTES, setDiskSpaceProbeForTests } from '../../sandbox/disk-space'
+import { setDiskSpaceProbeForTests } from '../../sandbox/disk-space'
+/** Tappa 3 (correzione di E1): lo spazio che serve per copiare e migrare — DUE volte la cartella più 256 MB (cell-backup.ts: BACKUP_MARGIN_BYTES). */
+const servePer = (cartella: number): number => 2 * cartella + 256_000_000
 
 const ROOT = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-mem-backup-'))
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
@@ -277,14 +279,14 @@ describe('E1: la copia delle celle prima della prima apertura col motore nuovo',
     expect(sha(join(dir, COPIA, COPIA_CELL))).toBe(GOLDEN_SHA)
   })
 
-  it('senza spazio per la copia (la cartella più il margine) il motore NON si apre: motivo space, celle intatte, nessuna copia; il resto di Homun risponde', async () => {
+  it('senza spazio per la copia (il doppio della cartella più il margine fisso) il motore NON si apre: motivo space, celle intatte, nessuna copia; il resto di Homun risponde', async () => {
     const e = await eng()
     const m = await cb()
     const dir = celleVecchie('senza-spazio')
     const cella = join(dir, CELL)
     const prima = impronta(dir)
-    const manca = 1 // un byte sotto: la cartella più il margine, meno uno
-    setDiskSpaceProbeForTests(() => statSync(cella).size + DISK_MARGIN_BYTES - manca)
+    const manca = 1 // un byte sotto: il doppio della cartella più il margine, meno uno
+    setDiskSpaceProbeForTests(() => servePer(statSync(cella).size) - manca)
     const st = await e.openMemoryEngine({ dataDir: dir, now: GIORNO })
     expect(st.available).toBe(false)
     expect(st.reason).toBe('space')
@@ -301,10 +303,52 @@ describe('E1: la copia delle celle prima della prima apertura col motore nuovo',
     const comeDaImpostazioni = <T>(_key: string, dflt: T): T => dflt
     expect((await rpc.memoryOverview('bot-x', comeDaImpostazioni)).engine).toMatchObject({ available: false, reason: 'space', neededBytes: manca })
     // tornato lo spazio, al boot dopo la copia si fa e la memoria torna
-    setDiskSpaceProbeForTests(() => statSync(cella).size + DISK_MARGIN_BYTES)
+    setDiskSpaceProbeForTests(() => servePer(statSync(cella).size))
     const st2 = await e.openMemoryEngine({ dataDir: dir, now: GIORNO })
     expect(st2.available).toBe(true)
     expect(st2.backup?.dir).toBe(join(dir, COPIA))
+  })
+
+  it('tappa 3 (correzione di E1): con 1 GB libero e una memoria di 10 MB la memoria si aggiorna e torna — il margine non è più quello delle build della box (5 GB)', async () => {
+    const e = await eng()
+    // una memoria di circa 10 MB: la cella d'oro e altre 41 celle come lei (col tempo le celle della storia diventano grandi)
+    const dir = celleVecchie('un-gb-libero')
+    for (let i = 2; i <= 42; i++) cpSync(join(FIXTURE, 'cells', 'utente.sqlite'), join(dir, 'memory', 'cells', `storia-bot${i}.sqlite`))
+    const cartella = (await cb()).dirBytes(join(dir, 'memory'))
+    expect(cartella).toBeGreaterThan(9_900_000)
+    expect(cartella).toBeLessThan(10_100_000)
+    // con il margine di prima (la cartella più 5 GB) 1 GB non bastava: l'utente restava senza memoria
+    expect(cartella + 5_000_000_000).toBeGreaterThan(1_000_000_000)
+    setDiskSpaceProbeForTests(() => 1_000_000_000)
+    const st = await e.openMemoryEngine({ dataDir: dir, now: GIORNO })
+    expect(st.available).toBe(true)
+    expect(st.backup).toMatchObject({ dir: join(dir, COPIA), fromSchema: 12, toSchema: ENGINE_SCHEMA, files: 42 })
+    expect(nomi(dir)).toEqual(['memory', COPIA])
+    expect((await (await e.userCell(null)).list({ limit: 10 })).map((n) => n.body).sort()).toEqual(GOLDEN_BODIES)
+  })
+
+  it('tappa 3: servono il doppio della cartella più 256 MB — un byte sotto non migra (manca 1 byte), uno in più sì', async () => {
+    const e = await eng()
+    const dir = celleVecchie('confine')
+    const cella = join(dir, CELL)
+    const serve = servePer(statSync(cella).size)
+    expect(statSync(cella).size).toBeLessThan(1_000_000) // una memoria piccola: il margine fisso è quasi tutto ciò che serve
+    setDiskSpaceProbeForTests(() => serve - 1)
+    expect(await e.openMemoryEngine({ dataDir: dir, now: GIORNO })).toMatchObject({ available: false, reason: 'space', neededBytes: 1 })
+    expect(nomi(dir)).toEqual(['memory'])
+    setDiskSpaceProbeForTests(() => serve)
+    expect((await e.openMemoryEngine({ dataDir: dir, now: GIORNO })).available).toBe(true)
+    expect(nomi(dir)).toEqual(['memory', COPIA])
+  })
+
+  it('tappa 3: la regola sta in una funzione sola (BACKUP_MARGIN_BYTES è 256 MB, il resto viene dalla cartella)', async () => {
+    const m = await cb()
+    expect(m.BACKUP_MARGIN_BYTES).toBe(256_000_000)
+    expect(m.bytesNeededForBackup(10_000_000)).toBe(276_000_000)
+    expect(m.bytesNeededForBackup(0)).toBe(256_000_000)
+    // il margine delle build della box non c'entra più con la memoria: 5 GB restano di disk-space.ts
+    expect((await import('../../sandbox/disk-space')).DISK_MARGIN_BYTES).toBe(5_000_000_000)
+    expect(m.bytesNeededForBackup(10_000_000)).toBeLessThan((await import('../../sandbox/disk-space')).DISK_MARGIN_BYTES)
   })
 
   it('se la copia non viene verificata la memoria non si apre, e non resta una mezza copia', async () => {

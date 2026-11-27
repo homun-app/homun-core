@@ -69,6 +69,14 @@ describe('E1: il ripristino è scritto in docs/MEMORIA.md', () => {
     expect(doc()).toMatch(/rovina/)
   })
 
+  it('tappa 3: dice quanto spazio serve per copiare e aggiornare — il doppio di memory/ più 256 MB, non più i 5 GB delle build', () => {
+    const testo = doc()
+    expect(testo).toMatch(/doppio della dimensione di `memory\/` più 256 MB/)
+    expect(testo).not.toMatch(/più 5 GB/)
+    // l’avviso dell’interfaccia resta citato com’è
+    expect(testo).toContain('liberane N GB')
+  })
+
   it('ARCHITETTURA.md rimanda a questa guida accanto a data/memory/', () => {
     const arch = readFileSync(join(REPO, 'docs', 'ARCHITETTURA.md'), 'utf8')
     expect(arch).toContain('MEMORIA.md')
