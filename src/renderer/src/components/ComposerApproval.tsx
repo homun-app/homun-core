@@ -22,7 +22,8 @@ import { visibleApprovalsRows, byUrgency } from '../lib/approvals-center'
 import { Button } from './ui/button'
 // R1: il pezzo unico della richiesta — lo stesso della card nei messaggi
 import { ApprovalRequestContent } from './ApprovalCard'
-import { CardShell } from './DecidedRow'
+// K3 (fase conversione-chat): il riquadro è la card (ChatCard) che il pezzo unico disegna da sé; qui restano la distanza e il fuoco portato dal clic
+import { Text } from './ui/text'
 import type { TranscriptEntry } from '../../../shared/types'
 
 /** Il riquadro della richiesta in attesa del bot aperto, sopra il campo. */
@@ -77,9 +78,9 @@ export function ComposerApproval({ botId }: { botId: string }): React.ReactNode 
           >
             <ChevronLeft className="size-4" aria-hidden="true" />
           </Button>
-          <span className="text-caption text-muted-foreground" data-testid="composer-approval-step">
+          <Text size="caption" tone="muted" testId="composer-approval-step">
             {i18n.t(msg`${i + 1} di ${ordered.length}`)}
-          </span>
+          </Text>
           <Button
             variant="ghost"
             size="sm"
@@ -92,9 +93,7 @@ export function ComposerApproval({ botId }: { botId: string }): React.ReactNode 
           </Button>
         </div>
       )}
-      <CardShell tone="waiting" testid="composer-approval-card">
-        <ApprovalRequestContent entry={entry} agentName={r.botName} fromSubagent={r.fromSubagent} squad={r.squad !== null} />
-      </CardShell>
+      <ApprovalRequestContent entry={entry} agentName={r.botName} fromSubagent={r.fromSubagent} squad={r.squad !== null} testId="composer-approval-card" />
     </div>
   )
 }

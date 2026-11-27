@@ -1,5 +1,5 @@
 {
-  "__totale": 3110,
+  "__totale": 3108,
   "src/renderer/src/App.tsx": 33,
   "src/renderer/src/components/ActivityPanel.tsx": 20,
   "src/renderer/src/components/ApprovalCard.tsx": 0,
@@ -11,7 +11,7 @@
   "src/renderer/src/components/BoxSetupProgress.tsx": 42,
   "src/renderer/src/components/BriefCard.tsx": 7,
   "src/renderer/src/components/Chat.tsx": 130,
-  "src/renderer/src/components/ComposerApproval.tsx": 3,
+  "src/renderer/src/components/ComposerApproval.tsx": 1,
   "src/renderer/src/components/ComputerActivity.tsx": 50,
   "src/renderer/src/components/ComputerFiles.tsx": 47,
   "src/renderer/src/components/ComputerPanel.tsx": 12,
