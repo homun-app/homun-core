@@ -25,7 +25,7 @@
 // stesso schema di fetch-llama: URL ricavati da repo/tag/nome file, verifica
 // di sha256 E dimensione prima di toccare vendor (mai un file non verificato).
 // ENGRAMMA_RELEASE_BASE sposta la base degli URL (per i test, su 127.0.0.1).
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { homedir, tmpdir } from 'node:os'
@@ -39,6 +39,26 @@ export const ENGRAMMA_FILES = ['engramma.darwin-arm64.node', 'index.js', 'index.
 
 /** Il lock: hash SHA256 dei file sopra, versione e tag del motore agganciato. */
 export const LOCK_FILE = 'engramma.lock.json'
+
+/**
+ * I modi dei file del modulo in vendor: normali (0644). copyFileSync porta con sé
+ * quelli della SORGENTE, e la sorgente può essere in sola lettura (le cartelle
+ * aggancio-v*: .node 0555, index.js e index.d.ts 0444): in vendor restavano file
+ * in sola lettura, e l'aggancio SUCCESSIVO (il lock cambia, il .node va riscritto)
+ * cadeva con EACCES.
+ */
+const VENDOR_FILE_MODE = 0o644
+
+/**
+ * Copia un file del modulo in vendor coi modi normali. Anche la copia di prima,
+ * in vendor, può essere rimasta in sola lettura (fatta quando lo script portava
+ * con sé i modi della sorgente): si riapre alla scrittura PRIMA di scriverci.
+ */
+function copyIntoVendor(src, dst) {
+  if (existsSync(dst)) chmodSync(dst, VENDOR_FILE_MODE)
+  copyFileSync(src, dst)
+  chmodSync(dst, VENDOR_FILE_MODE)
+}
 
 /** La base degli URL degli asset: github.com, o ENGRAMMA_RELEASE_BASE nei test. */
 export function resolveBaseUrl(env = process.env) {
@@ -127,7 +147,7 @@ async function downloadFromRelease({ lock, vendorDir, fetchImpl, baseUrl }) {
     // TUTTO verificato: adesso (e solo adesso) si tocca vendor
     const copied = []
     for (const f of ENGRAMMA_FILES) {
-      copyFileSync(join(work, f), join(vendorDir, f))
+      copyIntoVendor(join(work, f), join(vendorDir, f))
       copied.push(f)
     }
     return copied
@@ -147,7 +167,9 @@ async function downloadFromRelease({ lock, vendorDir, fetchImpl, baseUrl }) {
  *   crate, poi tutto come sopra);
  * - altrimenti (la CI): i 3 file dagli ASSET della release del lock,
  *   verificati sha256 + dimensione prima di toccare vendor.
- * - destinazione già giusta → nessuna riscrittura (idempotente).
+ * - destinazione già giusta → nessuna riscrittura (idempotente);
+ * - i file COPIATI hanno sempre modi normali (0644), anche da una sorgente in
+ *   sola lettura o sopra una copia precedente rimasta tale (copyIntoVendor).
  */
 export async function prepareEngramma({ srcDir, vendorDir, run = defaultRun, fetchImpl = defaultFetch, baseUrl }) {
   const lockPath = join(vendorDir, LOCK_FILE)
@@ -228,7 +250,7 @@ export async function prepareEngramma({ srcDir, vendorDir, run = defaultRun, fet
         continue
       }
     }
-    copyFileSync(src, dst)
+    copyIntoVendor(src, dst)
     copied.push(f)
   }
   // index.js è CommonJS (caricatore napi-rs) ma il repo di Homun è

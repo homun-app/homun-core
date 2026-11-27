@@ -3,7 +3,7 @@
 // e verifica lo SHA256 contro engramma.lock.json. Test sul CUORE iniettabile
 // (cartelle fixture in una temporanea): niente crate vero, niente cargo.
 import { afterAll, describe, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync, chmodSync } from 'node:fs'
 import { TEST_TMP_BASE } from '../../src/test-tmp'
 import { join } from 'node:path'
 
@@ -140,6 +140,55 @@ describe('fase memoria-engramma M0: prepare-engramma', () => {
     })
     expect(runs).toEqual([{ cmd: 'npm', args: ['run', 'build'], cwd: src }])
     expect(r.copied).toContain('engramma.darwin-arm64.node')
+  })
+
+  // La sorgente può essere in SOLA LETTURA — le cartelle aggancio-v* lo sono (.node
+  // 0555, index.js e index.d.ts 0444) — e copyFileSync porta con sé i modi della
+  // sorgente: in vendor restavano file in sola lettura, e l'aggancio SUCCESSIVO (il
+  // lock cambia, il .node va riscritto) cadeva con EACCES. In vendor i modi sono
+  // quelli normali, 0644.
+  const modiSolaLettura = (f: string) => (f === 'engramma.darwin-arm64.node' ? 0o555 : 0o444)
+  const modiDi = (file: string) => statSync(file).mode & 0o777
+
+  it('da una sorgente in SOLA LETTURA (aggancio-v*) i file copiati in vendor hanno modi normali (0644)', async () => {
+    const src = makeDir('src-sola-lettura', BASE)
+    for (const f of ENGRAMMA_FILES) chmodSync(join(src, f), modiSolaLettura(f))
+    const vendor = await makeVendor()
+    const r = await prepareEngramma({ srcDir: src, vendorDir: vendor })
+    expect([...r.copied].sort()).toEqual([...ENGRAMMA_FILES].sort())
+    for (const f of ENGRAMMA_FILES) {
+      expect(readFileSync(join(vendor, f), 'utf8')).toBe(BASE[f])
+      expect(modiDi(join(vendor, f)), f).toBe(0o644)
+    }
+    // la sorgente non si tocca: resta in sola lettura
+    for (const f of ENGRAMMA_FILES) expect(modiDi(join(src, f))).toBe(modiSolaLettura(f))
+  })
+
+  it('l’aggancio SUCCESSIVO riesce anche se in vendor c’è una copia in sola lettura (prima: EACCES)', async () => {
+    const vendor = await makeVendor()
+    // la copia di prima, com'è rimasta con lo script vecchio: i modi della sorgente
+    await prepareEngramma({ srcDir: makeDir('src-vecchia', BASE), vendorDir: vendor })
+    for (const f of ENGRAMMA_FILES) chmodSync(join(vendor, f), modiSolaLettura(f))
+    // il lock passa alla versione dopo; la sorgente nuova è in sola lettura anche lei
+    const DOPO = { ...BASE, 'engramma.darwin-arm64.node': 'binario finto della versione DOPO' }
+    const srcDopo = makeDir('src-dopo-sola-lettura', DOPO)
+    for (const f of ENGRAMMA_FILES) chmodSync(join(srcDopo, f), modiSolaLettura(f))
+    const lockPath = join(vendor, 'engramma.lock.json')
+    const lock = JSON.parse(readFileSync(lockPath, 'utf8'))
+    for (const f of ENGRAMMA_FILES) lock.files[f] = await sha256File(join(srcDopo, f))
+    writeFileSync(lockPath, JSON.stringify(lock, null, 2))
+    const r = await prepareEngramma({ srcDir: srcDopo, vendorDir: vendor })
+    expect(r.copied).toEqual(['engramma.darwin-arm64.node'])
+    expect(r.skipped.sort()).toEqual(['index.d.ts', 'index.js'])
+    const node = join(vendor, 'engramma.darwin-arm64.node')
+    expect(readFileSync(node, 'utf8')).toBe(DOPO['engramma.darwin-arm64.node'])
+    expect(modiDi(node)).toBe(0o644)
+    // la terza volta non tocca più nulla: vendor già giusto
+    const past = new Date(Date.now() - 60_000)
+    utimesSync(node, past, past)
+    const r3 = await prepareEngramma({ srcDir: srcDopo, vendorDir: vendor })
+    expect(r3.copied).toEqual([])
+    expect(Math.abs(statSync(node).mtimeMs - past.getTime())).toBeLessThan(1000)
   })
 
   it('il lock nel repo ha modulo, versione, tag fase-v0.6.20 e i tre hash', () => {

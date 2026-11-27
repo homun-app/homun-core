@@ -6,7 +6,7 @@
 // file non verificato in vendor. Test con un SERVER FINTO su 127.0.0.1
 // (ENGRAMMA_RELEASE_BASE / baseUrl iniettabile): nessun download vero.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync, chmodSync } from 'node:fs'
 import { TEST_TMP_BASE } from '../../src/test-tmp'
 import { createServer, type Server } from 'node:http'
 import { join } from 'node:path'
@@ -130,6 +130,40 @@ describe('fase rilascio di prova (RP1): il download dagli asset (server finto su
     // il package.json commonjs arriva anche dalla via dell'asset
     expect(JSON.parse(readFileSync(join(vendor, 'package.json'), 'utf8'))).toEqual({ type: 'commonjs' })
     expect(fake.requests.length).toBeGreaterThanOrEqual(3)
+  })
+
+  // in vendor può esserci una copia in SOLA LETTURA, com'è rimasta da una sorgente
+  // aggancio-v* (.node 0555, gli altri 0444): anche la via dell'asset la deve
+  // riscrivere (prima: copyFile cadeva con EACCES), e lasciare i modi normali (0644)
+  it('vendor con una copia in SOLA LETTURA: la via dell’asset la riscrive (prima: EACCES) e lascia 0644', async () => {
+    const vendor = await makeVendor(FILES)
+    expect((await prepareEngramma({ srcDir: MISSING_SRC, vendorDir: vendor, baseUrl: fake.url })).source).toBe('release')
+    for (const f of ENGRAMMA_FILES) chmodSync(join(vendor, f), f === 'engramma.darwin-arm64.node' ? 0o555 : 0o444)
+    // la release passa alla versione dopo: il lock su file nuovi, serviti da un server suo
+    const DOPO = { ...FILES, 'engramma.darwin-arm64.node': 'binario finto della versione DOPO (RP1)' }
+    const lockPath = join(vendor, 'engramma.lock.json')
+    const lock = JSON.parse(readFileSync(lockPath, 'utf8'))
+    const ref = join(ROOT, `ref-dopo-${Math.random().toString(36).slice(2)}`)
+    mkdirSync(ref, { recursive: true })
+    for (const f of ENGRAMMA_FILES) {
+      writeFileSync(join(ref, f), DOPO[f])
+      lock.files[f] = await sha256File(join(ref, f))
+      lock.sizes[f] = statSync(join(ref, f)).size
+    }
+    writeFileSync(lockPath, JSON.stringify(lock, null, 2))
+    const dopo = startReleaseServer(DOPO)
+    await new Promise<void>((resolve) => dopo.server.once('listening', resolve))
+    try {
+      const r = await prepareEngramma({ srcDir: MISSING_SRC, vendorDir: vendor, baseUrl: dopo.url })
+      expect(r.source).toBe('release')
+      expect(r.copied).toEqual(ENGRAMMA_FILES)
+      for (const f of ENGRAMMA_FILES) {
+        expect(readFileSync(join(vendor, f), 'utf8')).toBe(DOPO[f])
+        expect(statSync(join(vendor, f)).mode & 0o777, f).toBe(0o644)
+      }
+    } finally {
+      dopo.server.close()
+    }
   })
 
   it('hash SBAGLIATO: fallisce NOMINANDO il file e NON lascia file in vendor', async () => {
