@@ -5958,14 +5958,39 @@ msgid "non riuscito"
 msgstr "non riuscito"
 
 #: src/renderer/src/components/ConnectorCard.tsx
-#: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/plugin/app-row.tsx
+#: src/renderer/src/lib/ui-text.ts
 msgid "Non riuscito"
 msgstr "Non riuscito"
 
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "Non riuscito: chiedi al bot di riprovare il collegamento."
 msgstr "Non riuscito: chiedi al bot di riprovare il collegamento."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.downloadFallito"
+msgstr "Non riuscito: il download non è andato a fondo"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.nonValido"
+msgstr "Non riuscito: il pacchetto non è valido"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.autorizzazioneRifiutata"
+msgstr "Non riuscito: l’autorizzazione è stata rifiutata"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.hostSpenti"
+msgstr "Non riuscito: questo server vive nel computer dei bot (modalità Docker), che qui è spento"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.reteNonGarantita"
+msgstr "Non riuscito: su questo computer la rete per i pacchetti npm non è garantita"
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Non salvare"
@@ -5993,6 +6018,11 @@ msgstr "Non si può collegare"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "proposta.nonInstallabile"
+msgstr "Non si può installare qui: il pacchetto non ha né una sorgente scaricabile né un pacchetto npm"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "dialog.moveToApplications.daemonNotStopped"
 msgstr "Non sono riuscito a fermare il bot in background: un’app in esecuzione non si sostituisce mai. Chiudi Homun e riprova."
 
@@ -6005,6 +6035,11 @@ msgstr "Non sono riuscito ad aprire il browser per il login di {name}."
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "non supportato: valore in argv ({0})"
 msgstr "non supportato: valore in argv ({0})"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.nonTrovata"
+msgstr "Non trovato nel catalogo: controlla l’indirizzo esatto"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -6922,6 +6957,11 @@ msgstr "Ragionamento"
 msgid "Ragionamento: Predefinito"
 msgstr "Ragionamento: Predefinito"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.nonParte"
+msgstr "Registrato, ma il server non risponde: riprova dalla scheda del server, in Plugin"
+
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Registro"
 msgstr "Registro"
@@ -7697,6 +7737,11 @@ msgstr "send_to_agent → {name}: il turno ha letto contenuti web non fidati"
 #: src/renderer/src/lib/approvals-center.ts
 msgid "senza risposta"
 msgstr "senza risposta"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.loginNecessario"
+msgstr "Serve accedere con il tuo account: fallo dalla scheda del server, in Plugin"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

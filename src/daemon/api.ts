@@ -1903,7 +1903,12 @@ export function buildApiMethods(
       } catch (e) {
         r = { ok: false, error: e instanceof Error ? e.message : String(e), category: classifyMcpError(e) }
       }
-      store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
+      // K3 (fase conversione-chat): accanto al testo tecnico va il suo CODICE
+      // (dove l'errore nasce: installErrorCodeOf) — la card mostra la frase del
+      // catalogo, il testo solo nei «Dettagli tecnici»; il codice torna anche al click
+      const { installErrorCodeOf } = await import('../main/connectors/install')
+      const code = r.ok ? undefined : (installErrorCodeOf(r.error) ?? undefined)
+      store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error, ...(code ? { errorCode: code } : {}) }) })
       emitUpdatedEntry(aid, entry.id)
       // fase mcp-setup (M5.2): se il server è GIÀ partito (niente da
       // configurare), il bot riceve subito CONNECTOR_CONNECTED; se invece
@@ -1940,7 +1945,7 @@ export function buildApiMethods(
         ui: r.ok ? ui(UI.sistemaServerAdded, { name: message.name }) : ui(UI.sistemaServerAddFailed, { name: message.name, error: clipErrorText(r.error) })
       })
       worker.poke()
-      return r
+      return r.ok ? r : { ...r, ...(code ? { code } : {}) }
     },
     /** Il click su Installa/No della card "Installa plugin" (codice del daemon). */
     // V6 (fase stato-vivo): il click su Attiva/Non ora della scheda offer_enable_plugin
@@ -1976,7 +1981,10 @@ export function buildApiMethods(
       } catch (e) {
         r = { ok: false, error: e instanceof Error ? e.message : String(e) }
       }
-      store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
+      // K3 (fase conversione-chat): come la card del server — il codice accanto al testo tecnico, e al click
+      const { installErrorCodeOf } = await import('../main/connectors/install')
+      const code = r.ok ? undefined : (installErrorCodeOf(r.error) ?? undefined)
+      store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error, ...(code ? { errorCode: code } : {}) }) })
       emitUpdatedEntry(aid, entry.id)
       // fase 17c (C2, MU): come la card del server — testo inglese al modello, ui alla vista
       const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Plugin "${message.name}" NOT installed: ${r.error}`
@@ -1984,7 +1992,7 @@ export function buildApiMethods(
         ui: r.ok ? ui(UI.sistemaPluginInstalled, { name: message.name }) : ui(UI.sistemaPluginInstallFailed, { name: message.name, error: r.error })
       })
       worker.poke()
-      return r
+      return r.ok ? r : { ...r, ...(code ? { code } : {}) }
     },
     /** Valori di chiavi/header/variabili/userConfig di un server: SOLO nello store cifrato. */
     'connectors:save-server-values': async ([serverId, kind, values]) => {

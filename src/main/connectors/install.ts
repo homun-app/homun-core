@@ -1507,6 +1507,32 @@ async function fixTitleFromRegistry(cfg: McpServerConfig, deps: InstallDeps): Pr
 }
 
 /** L'errore di connessione → codice umano per il modulo (puro). */
+/**
+ * K3 (fase conversione-chat): il CODICE del motivo di un errore
+ * d'installazione, assegnato QUI, dove l'errore nasce — le famiglie di
+ * testi che installMcpServer e installPlugin restituiscono. Il daemon lo
+ * salva accanto al testo (meta.errorCode) e lo manda nella RPC; la card
+ * mostra la frase del catalogo (ui-messages: proposta*) e il testo tecnico
+ * inglese solo nei «Dettagli tecnici». Un testo che non appartiene a nessuna
+ * famiglia restituisce null: la card dice «Non riuscito», mai un codice a
+ * caso. Le famiglie si riconoscono dai testi di questo file: se un messaggio
+ * cambia, cambia con lei la riga che lo riconosce (stesso file, una vicina
+ * all'altra).
+ */
+export function installErrorCodeOf(error: string): string | null {
+  const e = error.toLowerCase()
+  if (e.startsWith('not installable here') || e.includes('not supported')) return UI.propostaNonInstallabile.id
+  if (e.startsWith('registry entry not found') || e.startsWith('plugin not found')) return UI.propostaNonTrovata.id
+  if (e.includes('download failed')) return UI.propostaDownloadFallito.id
+  if (error === HOST_MODE_DISABLED) return UI.propostaHostSpenti.id
+  if (error === NPM_SERVERS_EGRESS_REFUSED) return UI.propostaReteNonGarantita.id
+  if (e.includes('sign-in with your account is needed')) return UI.propostaLoginNecessario.id
+  if (e.includes('authorization failed')) return UI.propostaAutorizzazioneRifiutata.id
+  if (e.includes('registered but does not start') || e.includes('registered but does not respond')) return UI.propostaNonParte.id
+  if (e.includes('invalid paths or files') || e.startsWith('invalid')) return UI.propostaNonValido.id
+  return null
+}
+
 export function classifyConnectError(error: string | undefined): 'unreachable' | 'unauthorized' | 'not-mcp' | undefined {
   const e = (error ?? '').toLowerCase()
   if (e.includes('401') || e.includes('unauthorized')) return 'unauthorized'

@@ -5958,14 +5958,39 @@ msgid "non riuscito"
 msgstr "failed"
 
 #: src/renderer/src/components/ConnectorCard.tsx
-#: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/plugin/app-row.tsx
+#: src/renderer/src/lib/ui-text.ts
 msgid "Non riuscito"
 msgstr "Didn't work"
 
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "Non riuscito: chiedi al bot di riprovare il collegamento."
 msgstr "Didn't work: ask the bot to retry the connection."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.downloadFallito"
+msgstr "Didn’t work: the download didn’t finish"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.nonValido"
+msgstr "Didn’t work: the package isn’t valid"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.autorizzazioneRifiutata"
+msgstr "Didn’t work: the authorization was refused"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.hostSpenti"
+msgstr "Didn’t work: this server lives in the bots’ computer (Docker mode), which is off here"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.reteNonGarantita"
+msgstr "Didn’t work: the network for npm packages isn’t guaranteed on this computer"
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Non salvare"
@@ -5993,6 +6018,11 @@ msgstr "Can't be connected"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "proposta.nonInstallabile"
+msgstr "Can’t be installed here: the package has neither a downloadable source nor an npm package"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "dialog.moveToApplications.daemonNotStopped"
 msgstr "I could not stop the background bot: an app that is running is never replaced. Quit Homun and try again."
 
@@ -6005,6 +6035,11 @@ msgstr "I couldn't open the browser to log in to {name}."
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "non supportato: valore in argv ({0})"
 msgstr "unsupported: value in argv ({0})"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.nonTrovata"
+msgstr "Not found in the catalog: check the exact address"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -6922,6 +6957,11 @@ msgstr "Reasoning"
 msgid "Ragionamento: Predefinito"
 msgstr "Reasoning: Default"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.nonParte"
+msgstr "Registered, but the server doesn’t answer: try again from the server’s card, in Plugins"
+
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Registro"
 msgstr "Log"
@@ -7697,6 +7737,11 @@ msgstr "send_to_agent → {name}: the turn has read untrusted web content"
 #: src/renderer/src/lib/approvals-center.ts
 msgid "senza risposta"
 msgstr "without an answer"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "proposta.loginNecessario"
+msgstr "You need to sign in with your account: do it from the server’s card, in Plugins"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

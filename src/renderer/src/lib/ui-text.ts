@@ -8,6 +8,8 @@
 // K2 (fase 17a): chi chiama queste funzioni deve usare useLingui() nel
 // componente, così il cambio lingua ri-renderizza e il testo si aggiorna.
 import { i18n } from '@lingui/core'
+import { msg } from '@lingui/core/macro'
+import { UI } from '../../../shared/ui-messages'
 import type { TranscriptEntry, UiText } from '../../../shared/types'
 import { toolDisplayName, type ToolDisplayCtx } from '../../../shared/tool-names'
 import type { UiLanguage } from '../../../shared/ui-language'
@@ -52,6 +54,27 @@ export function erroreOfMeta(meta: Record<string, unknown> | null | undefined): 
   const { id, values } = raw as { id?: unknown; values?: unknown }
   if (typeof id !== 'string') return null
   return i18n._(id, values && typeof values === 'object' ? (values as Record<string, string | number>) : {})
+}
+
+/**
+ * K3 (fase conversione-chat): l'errore di una card di proposta, DIVISO IN DUE.
+ * All'utente si mostra una FRASE del catalogo in italiano: quella del codice
+ * che il daemon ha assegnato dove l'errore nasce (`code`: un id di
+ * ui-messages, proposta*), oppure la generica «Non riuscito». Il testo
+ * tecnico — l'inglese del daemon — va solo nei «Dettagli tecnici» (tecnico:
+ * null quando non c'è, o quando è già una frase del catalogo).
+ */
+export function errorePropostaDi(tecnico: string | null, code: string | null | undefined): { frase: string; tecnico: string | null } {
+  const noto = typeof code === 'string' && Object.values(UI).some((m) => m.id === code)
+  const frase = noto ? i18n._(code!, {}) : i18n.t(msg`Non riuscito`)
+  return { frase, tecnico: tecnico !== null && tecnico !== frase ? tecnico : null }
+}
+
+/** K3: lo stesso, dall'entry salvata dal daemon (la riapertura della chat): meta.error con accanto meta.errorCode. */
+export function erroreDiPropostaMeta(meta: Record<string, unknown> | null | undefined): { frase: string; tecnico: string | null } {
+  // un CODICE del catalogo UI ({id, values}) è già una frase nella lingua attiva: niente dettagli sotto
+  if (meta?.error && typeof meta.error === 'object') return { frase: erroreOfMeta(meta) ?? i18n.t(msg`Non riuscito`), tecnico: null }
+  return errorePropostaDi(erroreOfMeta(meta), typeof meta?.errorCode === 'string' ? meta.errorCode : null)
 }
 
 /** Il testo da mostrare dell'entry: meta.ui se c'è (nella lingua attiva), altrimenti il content. */

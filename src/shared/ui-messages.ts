@@ -510,6 +510,23 @@ export const UI = {
   rpcMarketplacesUnavailable: msg({ id: 'rpc.marketplacesUnavailable', message: 'marketplace non disponibili' }),
   rpcMcpProposalNotFound: msg({ id: 'rpc.mcpProposalNotFound', message: 'Proposta di server non trovata' }),
   rpcPluginProposalNotFound: msg({ id: 'rpc.pluginProposalNotFound', message: 'Proposta di plugin non trovata' }),
+  /**
+   * K3 (fase conversione-chat): il MOTIVO IN PAROLE dell'errore di una card di
+   * proposta (server MCP, plugin). Il testo tecnico del daemon è inglese
+   * («not installable here: …»): arriva alla card SOLO nei «Dettagli tecnici».
+   * All'utente si mostra una di queste frasi, dal CODICE che il daemon
+   * assegna dove l'errore nasce (install.ts: installErrorCodeOf) e salva in
+   * meta.errorCode accanto al testo.
+   */
+  propostaNonInstallabile: msg({ id: 'proposta.nonInstallabile', message: "Non si può installare qui: il pacchetto non ha né una sorgente scaricabile né un pacchetto npm" }),
+  propostaNonTrovata: msg({ id: 'proposta.nonTrovata', message: 'Non trovato nel catalogo: controlla l’indirizzo esatto' }),
+  propostaDownloadFallito: msg({ id: 'proposta.downloadFallito', message: 'Non riuscito: il download non è andato a fondo' }),
+  propostaHostSpenti: msg({ id: 'proposta.hostSpenti', message: 'Non riuscito: questo server vive nel computer dei bot (modalità Docker), che qui è spento' }),
+  propostaReteNonGarantita: msg({ id: 'proposta.reteNonGarantita', message: 'Non riuscito: su questo computer la rete per i pacchetti npm non è garantita' }),
+  propostaLoginNecessario: msg({ id: 'proposta.loginNecessario', message: 'Serve accedere con il tuo account: fallo dalla scheda del server, in Plugin' }),
+  propostaAutorizzazioneRifiutata: msg({ id: 'proposta.autorizzazioneRifiutata', message: 'Non riuscito: l’autorizzazione è stata rifiutata' }),
+  propostaNonParte: msg({ id: 'proposta.nonParte', message: 'Registrato, ma il server non risponde: riprova dalla scheda del server, in Plugin' }),
+  propostaNonValido: msg({ id: 'proposta.nonValido', message: 'Non riuscito: il pacchetto non è valido' }),
   rpcRuleProposalNotFound: msg({ id: 'rpc.ruleProposalNotFound', message: 'Proposta di regola non trovata' }),
   rpcProposalHandled: msg({ id: 'rpc.proposalHandled', message: 'Proposta già gestita' }),
   rpcInstalling: msg({ id: 'rpc.installing', message: 'installazione in corso' }),

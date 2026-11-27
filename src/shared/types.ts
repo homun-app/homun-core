@@ -1412,7 +1412,8 @@ export interface SandbotApi {
   connectorsSaveStaticClient(id: string, clientId: string, clientSecret: string): Promise<void>
   // fase 13: registro, plugin, marketplace, gateway (installazione SOLO dal click)
   connectorsInstalled(): Promise<{ servers: McpServerInfo[]; plugins: unknown[] }>
-  connectorsResolveMcpServer(agentId: string, entryId: number, decision: 'add' | 'no'): Promise<{ ok: boolean; installed?: boolean; message?: string; error?: string }>
+  /** K3 (fase conversione-chat): `code` è il codice del motivo (installErrorCodeOf) quando l'installazione non riesce: la card lo traduce, l'errore va nei dettagli tecnici */
+  connectorsResolveMcpServer(agentId: string, entryId: number, decision: 'add' | 'no'): Promise<{ ok: boolean; installed?: boolean; message?: string; error?: string; code?: string }>
   connectorsSaveServerValues(serverId: string, kind: SecretKind, values: Record<string, string>): Promise<{ ok: boolean }>
   /** fase app (A5): kind 'composio' = toolkit Composio (per-bot, come i server) */
   connectorsSetEnabledFor(kind: 'server' | 'plugin' | 'composio', id: string, agentIds: string[]): Promise<{ ok: boolean }>
@@ -1426,7 +1427,7 @@ export interface SandbotApi {
   connectorsAddGateway(input: { name: string; url: string; auth: 'oauth' | 'bearer' | 'headers'; preset?: string; headerName?: string; token?: string; headers?: Record<string, string> }): Promise<McpServerInfo>
   connectorsGatewayPresets(): Promise<{ presets: Array<{ id: string; name: string; auth: string; headerName?: string; help: string }>; warning: string }>
   connectorsSetClientMetadataUrl(url: string): Promise<{ ok: boolean }>
-  pluginsResolve(agentId: string, entryId: number, decision: 'install' | 'no'): Promise<{ ok: boolean; installed?: boolean; message?: string; error?: string }>
+  pluginsResolve(agentId: string, entryId: number, decision: 'install' | 'no'): Promise<{ ok: boolean; installed?: boolean; message?: string; error?: string; code?: string }>
   /** V6 (fase stato-vivo): il click su Attiva/Non ora della scheda offer_enable_plugin */
   pluginsEnableCard(agentId: string, entryId: number, decision: 'enable' | 'not-now'): Promise<{ ok: true; status: 'activated' | 'failed' | 'declined'; toolsCount?: number }>
   pluginsUninstall(name: string, marketplace: string): Promise<{ ok: boolean }>

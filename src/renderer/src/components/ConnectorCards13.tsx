@@ -32,7 +32,8 @@ import { ChatCard } from './ui/chat-card'
 import { ProposalCard } from './ui/proposal-card'
 import { Text } from './ui/text'
 import { i18n } from '../lib/i18n'
-import { erroreOfMeta } from '../lib/ui-text'
+import { erroreDiPropostaMeta, errorePropostaDi } from '../lib/ui-text'
+import { TechDetails } from './ui/tech-details'
 import type { McpServerSetupSpec, TranscriptEntry } from '../../../shared/types'
 import { Button } from './ui/button'
 import { ServerSetupModule } from './ServerSetup'
@@ -111,12 +112,19 @@ function specOfCard(message: McpServerMessage): McpServerSetupSpec | null {
   }
 }
 
-/** La riga dell'errore nelle card di proposta: il segno, il motivo, e «chiudi» (il bottone di parole). */
-function RigaErrore({ motivo, onChiudi }: { motivo: string; onChiudi: () => void }): ReactNode {
+/**
+ * La riga dell'errore nelle card di proposta: il segno, la FRASE in italiano,
+ * e «chiudi» (il bottone di parole). K3 (fase conversione-chat): il testo
+ * tecnico del daemon (inglese) sta chiuso nei «Dettagli tecnici» sotto.
+ */
+function RigaErrore({ errore, onChiudi }: { errore: { frase: string; tecnico: string | null }; onChiudi: () => void }): ReactNode {
   return (
-    <Text size="small" tone="destructive">
-      <Icon icon={X} className="inline-block align-text-bottom" /> {motivo} — <Button variant="link" onClick={onChiudi}><Trans>chiudi</Trans></Button>
-    </Text>
+    <>
+      <Text size="small" tone="destructive">
+        <Icon icon={X} className="inline-block align-text-bottom" /> {errore.frase} — <Button variant="link" onClick={onChiudi}><Trans>chiudi</Trans></Button>
+      </Text>
+      {errore.tecnico !== null && <TechDetails testo={errore.tecnico} />}
+    </>
   )
 }
 
@@ -126,7 +134,8 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
   const [status, setStatus] = useState<'pending' | 'installing' | 'installed' | 'error'>(
     entry.meta?.status === 'installed' ? 'installed' : entry.meta?.status === 'error' ? 'error' : 'pending'
   )
-  const [error, setError] = useState<string | null>(null)
+  // K3: l'errore del click, diviso in frase da mostrare e testo tecnico (ui-text: errorePropostaDi)
+  const [error, setError] = useState<{ frase: string; tecnico: string | null } | null>(null)
   // fase mcp-setup (M4): lo spec VERO del modulo (dal server) dopo «Aggiungi»
   const [spec, setSpec] = useState<McpServerSetupSpec | null>(null)
   const [connected, setConnected] = useState<boolean | null>(null)
@@ -167,11 +176,11 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
           setConnected(true)
         }
       } else {
-        setError(r.error ?? t`errore`)
+        setError(errorePropostaDi(r.error ?? t`errore`, r.code))
         setStatus('error')
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorePropostaDi(e instanceof Error ? e.message : String(e), undefined))
       setStatus('error')
     }
   }
@@ -207,8 +216,9 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
 
   const cardSpec = spec ?? specOfCard(message)
   // K2: il motivo dell'errore — quello del click, oppure quello che il daemon
-  // ha salvato nell'entry (la riapertura della chat); senza, la frase di ripiego
-  const motivo = error ?? erroreOfMeta(entry.meta) ?? t`Non riuscito`
+  // ha salvato nell'entry (la riapertura della chat). K3: all'utente la FRASE
+  // del catalogo (dal codice, o «Non riuscito»), il testo tecnico nei dettagli
+  const errore = error ?? erroreDiPropostaMeta(entry.meta)
 
   // dopo il collegamento riuscito la card si chiude in UNA riga (M4.3)
   if (status === 'installed' && connected === true) {
@@ -252,7 +262,7 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
   } else if (status === 'installed') {
     coda = { slot: 'stato', nodo: <Text size="small" tone="ok"><Trans>✓ Aggiunto — il bot ha ricevuto l'esito</Trans></Text> }
   } else if (status === 'error') {
-    coda = { slot: 'stato', nodo: <RigaErrore motivo={motivo} onChiudi={rifiuta} /> }
+    coda = { slot: 'stato', nodo: <RigaErrore errore={errore} onChiudi={rifiuta} /> }
   } else {
     coda = { slot: 'azioni', nodo: (
       <>
@@ -439,7 +449,8 @@ export function PluginInstallProposal({ entry }: { entry: TranscriptEntry }) {
   const [status, setStatus] = useState<'pending' | 'installing' | 'installed' | 'error'>(
     entry.meta?.status === 'installed' ? 'installed' : entry.meta?.status === 'error' ? 'error' : 'pending'
   )
-  const [error, setError] = useState<string | null>(null)
+  // K3: come la card del server — la frase da mostrare e il testo tecnico
+  const [error, setError] = useState<{ frase: string; tecnico: string | null } | null>(null)
   if (message.type !== 'plugin') return null
 
   // fase 17c (C5): fiducia dal codice official, fallback sul campo grezzo
@@ -457,18 +468,18 @@ export function PluginInstallProposal({ entry }: { entry: TranscriptEntry }) {
       const r = await api.pluginsResolve(entry.agentId, entry.id, 'install')
       if (r.ok) setStatus('installed')
       else {
-        setError(r.error ?? t`errore`)
+        setError(errorePropostaDi(r.error ?? t`errore`, r.code))
         setStatus('error')
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorePropostaDi(e instanceof Error ? e.message : String(e), undefined))
       setStatus('error')
     }
   }
   const rifiuta = (): void => { void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined) }
 
-  // K2: il motivo dell'errore, come nella card del server (il click, o l'entry salvata)
-  const motivo = error ?? erroreOfMeta(entry.meta) ?? t`Non riuscito`
+  // K2: il motivo dell'errore, come nella card del server (il click, o l'entry salvata); K3: la frase del catalogo, il testo nei dettagli
+  const errore = error ?? erroreDiPropostaMeta(entry.meta)
 
   return (
     <ProposalCard
@@ -498,7 +509,7 @@ export function PluginInstallProposal({ entry }: { entry: TranscriptEntry }) {
       stato={status === 'installed' ? (
         <Text size="small" tone="ok"><Trans>✓ Installato — il bot ha ricevuto l'esito</Trans></Text>
       ) : status === 'error' ? (
-        <RigaErrore motivo={motivo} onChiudi={rifiuta} />
+        <RigaErrore errore={errore} onChiudi={rifiuta} />
       ) : undefined}
       azioni={status !== 'installed' && status !== 'error' ? (
         <>
