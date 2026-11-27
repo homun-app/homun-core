@@ -23,6 +23,14 @@
 // sistema: Consenti è la pillola, Rifiuta è secondario su fondo card, «Altre
 // scelte» è testo. La riga compatta è la riga di sistema che apre (come
 // quelle di DecidedRow). La logica NON cambia: stesse RPC, stessi testid.
+//
+// K3 (fase conversione-chat): la card non si disegna più. Il guscio è
+// ChatCard (tone attesa, il TITOLO GRANDE: la frase da leggere prima di
+// decidere, la riga delle azioni in fondo); le righe sono Text, i blocchi
+// dentro la card CardBlock, il comando Code, i dettagli tecnici TechDetails;
+// la riga compatta e la riga dopo la decisione sono Disclosure. Il ritmo è
+// quello del guscio: i blocchi a 8 px, le azioni a 16. Stesse RPC, stessi
+// testi, stessi testid.
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import { ArrowDown } from 'lucide-react'
@@ -39,8 +47,14 @@ import { accountLabelOf } from '../lib/apps-view'
 import { toolDisplayName } from '../../../shared/tool-names'
 import type { TranscriptEntry } from '../../../shared/types'
 import { visibleApprovalsRows } from '../lib/approvals-center'
-import { DecidedRow, CardShell, CardBlock, SU_CARD } from './DecidedRow'
-import { Button, buttonVariants } from './ui/button'
+import { DecidedRow } from './DecidedRow'
+import { Button, buttonVariants, SU_CARD } from './ui/button'
+// K3 (fase conversione-chat): la card è LOGICA sopra il guscio (ChatCard) e i pezzi del catalogo
+import { ChatCard, CardBlock } from './ui/chat-card'
+import { Code } from './ui/code'
+import { Disclosure } from './ui/disclosure'
+import { TechDetails } from './ui/tech-details'
+import { Text } from './ui/text'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 
 /** Suggerimento di regola allow partendo dall'azione della card (fase 8). */
@@ -90,7 +104,8 @@ export function ApprovalRequestContent({
   agentName,
   fromSubagent = false,
   readOnly = false,
-  squad = false
+  squad = false,
+  testId
 }: {
   entry: TranscriptEntry
   /** chi chiede: il bot della chat (card) o il bot PADRE della riga (riquadro) */
@@ -100,6 +115,8 @@ export function ApprovalRequestContent({
   /** il riquadro lo sa dalla riga del centro (r.squad): vale come meta.squadId
    *  per le scelte del modello unico (la missione) */
   squad?: boolean
+  /** K3: il testid del guscio (la card dei messaggi: «card-approvazione»; il riquadro: «composer-approval-card») */
+  testId?: string
 }) {
   const { t } = useLingui()
   // fase 17c (C6): la schedule in linguaggio naturale nella lingua attiva
@@ -236,43 +253,91 @@ export function ApprovalRequestContent({
   const isDraft = ((entry.meta?.message as { type?: string } | null)?.type) === 'draft'
 
   return (
-    <>
-      {useApp?.kind === 'url' && useApp.host ? (
+    <ChatCard
+      tone="waiting"
+      titoloGrande
+      titolo={useApp?.kind === 'url' && useApp.host
         // U2: l'host in evidenza — «Aprire sora.chatgpt.com nel tuo browser»
-        <p className="wrap-anywhere text-title font-semibold text-foreground">
-          <Trans>Aprire <b>{useApp.host}</b> nel tuo browser</Trans>
-        </p>
-      ) : useApp?.kind === 'app' && useApp.app ? (
-        <p className="wrap-anywhere text-title font-semibold text-foreground">
-          <Trans>{agentName} vuole usare {useApp.app} sul tuo Mac</Trans>
-        </p>
-      ) : (
-        <p className="wrap-anywhere text-title font-semibold text-foreground">
-          {resolvedTitle ?? i18n.t(approvalAskTitle(tool, entry.meta, agentName, activeLang))}
-        </p>
-      )}
-      {fromSubagent && (
-        <p className="mt-1 text-small text-muted-foreground"><Trans>tramite un sottoagente</Trans></p>
-      )}
-      {(composioAction || composioBatch) && (
-        <p className="mt-1 text-small text-muted-foreground"><Trans>tramite Composio</Trans></p>
+        ? <Trans>Aprire <b>{useApp.host}</b> nel tuo browser</Trans>
+        : useApp?.kind === 'app' && useApp.app
+          ? <Trans>{agentName} vuole usare {useApp.app} sul tuo Mac</Trans>
+          : (resolvedTitle ?? i18n.t(approvalAskTitle(tool, entry.meta, agentName, activeLang)))}
+      testId={testId}
+      azioni={!readOnly && status === 'pending'
+        ? (isDraft
+            // le bozze si decidono col campo della bozza: qui il rinvio al centro
+            ? (
+                <Button data-testid="approval-draft-open" onClick={() => setApprovalsOpen(true, approvalId)}>
+                  <Trans>Decidi la bozza</Trans>
+                </Button>
+              )
+            : (
+                <>
+                  <Button
+                    data-testid="approval-allow"
+                    onClick={() => { resolve(entry.agentId, approvalId!, 'allow', 'once', 'chat'); refreshSquadData({ forceBadges: true }) }}
+                  >
+                    <Trans>Consenti</Trans>
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className={SU_CARD}
+                    onClick={() => { resolve(entry.agentId, approvalId!, 'deny', 'once', 'chat'); refreshSquadData({ forceBadges: true }) }}
+                  >
+                    <Trans>Rifiuta</Trans>
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger data-testid="approval-altre-scelte" className={buttonVariants({ variant: 'ghost' })}>
+                      <Trans>Altre scelte ▾</Trans>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      {/* A1 (fase approvazioni-chiare): le scelte vengono dal modello
+                          UNICO approvalChoicesOf — le stesse del centro «Da approvare» */}
+                      {choices.map((c) => (
+                        <DropdownMenuItem
+                          key={c.kind}
+                          data-testid={`approval-choice-${c.kind}`}
+                          disabled={c.disabled === true}
+                          title={choiceTitleOf(c)}
+                          onClick={() => decideChoice(c)}
+                        >
+                          {choiceLabelOf(c)}
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuItem
+                        title={t`Apri Impostazioni → Approvazione automatica con una regola precompilata`}
+                        onClick={() => proposeRule(suggestedRule(tool, input))}
+                      >
+                        <Trans>Crea una regola</Trans>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </>
+              ))
+        : undefined}
+    >
+      {(fromSubagent || composioAction || composioBatch) && (
+        <div className="flex flex-col gap-1">
+          {fromSubagent && <Text size="small" tone="muted"><Trans>tramite un sottoagente</Trans></Text>}
+          {(composioAction || composioBatch) && <Text size="small" tone="muted"><Trans>tramite Composio</Trans></Text>}
+        </div>
       )}
       {composioBatch && composioBatch.actions.length > 0 && (
         // C7 punto 1: per ogni azione gli argomenti BREVI prima (destinatari e
         // posti), i testi lunghi DOPO (argumentLines di Rakazo), l'account se c'è
-        <CardBlock className="mt-3 space-y-1.5 text-small" testid="composio-batch-actions">
+        <CardBlock testId="composio-batch-actions" className="flex flex-col gap-1.5">
           {composioBatch.actions.map((a) => {
             const lines = approvalBatchArgumentLines(a.arguments ?? {})
             return (
               <div key={`${a.slug}-${a.app}`}>
-                <div className="font-medium">
-                  {a.app} · {a.action}
-                  {a.account ? <span className="ml-1 text-muted-foreground">({accountLabelOf(accountsOfApp(a.app), a.account)})</span> : null}
+                <div className="flex flex-wrap items-center gap-1">
+                  <Text size="small" weight="medium">{a.app} · {a.action}</Text>
+                  {a.account ? <Text size="small" tone="muted">({accountLabelOf(accountsOfApp(a.app), a.account)})</Text> : null}
                 </div>
                 {lines.first.map(([k, v]) => (
                   <div key={k} className="flex gap-2">
-                    <span className="shrink-0 text-muted-foreground">{k}:</span>
-                    <span className="min-w-0 break-all">{v}</span>
+                    <Text size="small" tone="muted" className="shrink-0">{k}:</Text>
+                    <Text size="small" className="break-all">{v}</Text>
                   </div>
                 ))}
               </div>
@@ -281,123 +346,66 @@ export function ApprovalRequestContent({
           {composioBatch.actions.flatMap((a) =>
             approvalBatchArgumentLines(a.arguments ?? {}).last.map(([k, v]) => (
               <div key={`${a.slug}-${k}`} className="flex gap-2">
-                <span className="shrink-0 text-muted-foreground">{a.action || a.slug} {k}:</span>
-                <span className="min-w-0 whitespace-pre-wrap break-all">{v}</span>
+                <Text size="small" tone="muted" className="shrink-0">{a.action || a.slug} {k}:</Text>
+                <Text size="small" className="whitespace-pre-wrap break-all">{v}</Text>
               </div>
             ))
           )}
           {composioBatch.incomplete && (
-            <div className="text-muted-foreground"><Trans>…e una voce senza nome: chiede sempre l'approvazione</Trans></div>
+            <Text size="small" tone="muted"><Trans>…e una voce senza nome: chiede sempre l'approvazione</Trans></Text>
           )}
         </CardBlock>
       )}
       {composioArgs && composioArgs.length > 0 && (
-        <CardBlock className="mt-3 space-y-0.5 text-small">
+        <CardBlock className="flex flex-col gap-0.5">
           {composioArgs.map(([k, v]) => (
             <div key={k} className="flex gap-2">
-              <span className="shrink-0 text-muted-foreground">{k}:</span>
-              <span className="min-w-0 break-all">{typeof v === 'string' ? v : JSON.stringify(v)}</span>
+              <Text size="small" tone="muted" className="shrink-0">{k}:</Text>
+              <Text size="small" className="break-all">{typeof v === 'string' ? v : JSON.stringify(v)}</Text>
             </div>
           ))}
         </CardBlock>
       )}
-      {command !== null && (
-        <code className="mt-3 block overflow-x-auto rounded-control bg-card p-3 font-mono text-small whitespace-nowrap">{command}</code>
-      )}
-      {filePath !== null && (
-        <code className="mt-3 block overflow-x-auto rounded-control bg-card p-3 font-mono text-small whitespace-nowrap">{filePath}</code>
-      )}
+      {command !== null && <Code tone="card">{command}</Code>}
+      {filePath !== null && <Code tone="card">{filePath}</Code>}
       {/* R3: per Composio e MCP la frase umana; gli altri motivi del gate
           restano i testi di sempre (sono già umani). C7: per il blocco la
           frase nomina le app (e dice quando non si può annullare); il motivo
           SPECIFICO del gate (fiducia C4, voce senza nome) vince sulla frase */}
       {composioBatch && composioBatch.reason === 'trust' && reasonText && reasonText !== tool ? (
-        <p className="mt-2 text-body text-muted-foreground wrap-anywhere">{reasonText}</p>
+        <Text tone="muted">{reasonText}</Text>
       ) : humanReason ? (
-        <p className="mt-2 text-body text-muted-foreground wrap-anywhere">{i18n.t(humanReason)}</p>
+        <Text tone="muted">{i18n.t(humanReason)}</Text>
       ) : reasonText && reasonText !== tool && (
-        <p className="mt-2 text-body text-muted-foreground wrap-anywhere">{reasonText}</p>
+        <Text tone="muted">{reasonText}</Text>
       )}
-      {appInfo && (
-        <details className="mt-3" data-testid="approval-tech-details">
-          <summary className="cursor-pointer text-small text-muted-foreground select-none"><Trans>Dettagli tecnici</Trans></summary>
-          <pre className="mt-1.5 max-h-40 scroll-thin overflow-auto whitespace-pre-wrap break-all rounded-control bg-muted p-3 font-mono text-small text-muted-foreground">
-            {approvalTechnicalLine(appInfo, tool)}
-          </pre>
-        </details>
-      )}
+      {appInfo && <TechDetails testo={approvalTechnicalLine(appInfo, tool)} testId="approval-tech-details" />}
       {isRoutine && (
-        <CardBlock className="mt-3 space-y-1 text-small">
-          <div><span className="text-muted-foreground">{t`Routine:`} </span>{st?.name ?? (st?.id !== undefined ? `#${st.id}` : '?')}</div>
+        <CardBlock className="flex flex-col gap-1">
+          <div className="flex gap-1">
+            <Text size="small" tone="muted" className="shrink-0">{t`Routine:`}</Text>
+            <Text size="small">{st?.name ?? (st?.id !== undefined ? `#${st.id}` : '?')}</Text>
+          </div>
           {st?.schedule && (
-            <div>
-              <span className="text-muted-foreground">{t`Schedule:`} </span>{describeCron(st.schedule, activeLang)}
-              {st.timezone ? <Trans>, fuso {st.timezone}</Trans> : ''}{' '}
-              <span className="font-mono text-muted-foreground">({st.schedule})</span>
+            <div className="flex flex-wrap items-center gap-1">
+              <Text size="small" tone="muted" className="shrink-0">{t`Schedule:`}</Text>
+              <Text size="small">{describeCron(st.schedule, activeLang)}{st.timezone ? <Trans>, fuso {st.timezone}</Trans> : ''}</Text>
+              <Code inline>({st.schedule})</Code>
             </div>
           )}
-          {st?.prompt && <div className="whitespace-pre-wrap"><span className="text-muted-foreground">{t`Prompt:`} </span>{st.prompt}</div>}
-          {isCreateActive && (
-            <div className="pt-1 font-medium"><Trans>Approvata, la routine nasce attiva e partirà da sola.</Trans></div>
+          {st?.prompt && (
+            <div className="flex gap-1">
+              <Text size="small" tone="muted" className="shrink-0">{t`Prompt:`}</Text>
+              <Text size="small" className="whitespace-pre-wrap">{st.prompt}</Text>
+            </div>
           )}
+          {isCreateActive && <Text size="small" weight="medium"><Trans>Approvata, la routine nasce attiva e partirà da sola.</Trans></Text>}
         </CardBlock>
       )}
       {secretRefs.length > 0 && (
-        <div className="mt-2 text-small text-muted-foreground"><Trans>Credenziali usate: {secretRefs.join(', ')}</Trans></div>
+        <Text size="small" tone="muted"><Trans>Credenziali usate: {secretRefs.join(', ')}</Trans></Text>
       )}
-      {!readOnly && status === 'pending' && (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          {isDraft ? (
-            // le bozze si decidono col campo della bozza: qui il rinvio al centro
-            <Button data-testid="approval-draft-open" onClick={() => setApprovalsOpen(true, approvalId)}>
-              <Trans>Decidi la bozza</Trans>
-            </Button>
-          ) : (
-            <>
-              <Button
-                data-testid="approval-allow"
-                onClick={() => { resolve(entry.agentId, approvalId!, 'allow', 'once', 'chat'); refreshSquadData({ forceBadges: true }) }}
-              >
-                <Trans>Consenti</Trans>
-              </Button>
-              <Button
-                variant="secondary"
-                className={SU_CARD}
-                onClick={() => { resolve(entry.agentId, approvalId!, 'deny', 'once', 'chat'); refreshSquadData({ forceBadges: true }) }}
-              >
-                <Trans>Rifiuta</Trans>
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger data-testid="approval-altre-scelte" className={buttonVariants({ variant: 'ghost' })}>
-                  <Trans>Altre scelte ▾</Trans>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  {/* A1 (fase approvazioni-chiare): le scelte vengono dal modello
-                      UNICO approvalChoicesOf — le stesse del centro «Da approvare» */}
-                  {choices.map((c) => (
-                    <DropdownMenuItem
-                      key={c.kind}
-                      data-testid={`approval-choice-${c.kind}`}
-                      disabled={c.disabled === true}
-                      title={choiceTitleOf(c)}
-                      onClick={() => decideChoice(c)}
-                    >
-                      {choiceLabelOf(c)}
-                    </DropdownMenuItem>
-                  ))}
-                  <DropdownMenuItem
-                    title={t`Apri Impostazioni → Approvazione automatica con una regola precompilata`}
-                    onClick={() => proposeRule(suggestedRule(tool, input))}
-                  >
-                    <Trans>Crea una regola</Trans>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </>
-          )}
-        </div>
-      )}
-    </>
+    </ChatCard>
   )
 }
 
@@ -415,12 +423,14 @@ export function focusComposerApproval(): void {
 /** La riga compatta che prende il posto della card nei messaggi finché la richiesta è in attesa (R1). */
 function CompactApprovalRow() {
   return (
-    // DS4: la riga di sistema che apre (il bottone del sistema, ghost, 32, col
-    // testo di una riga di sistema) — la stessa delle righe decise
-    <Button variant="ghost" size="sm" className="w-full justify-start font-normal text-small" data-testid="approval-compact-row" onClick={focusComposerApproval}>
-      <ArrowDown className="size-4 shrink-0" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate"><Trans>In attesa della tua scelta · qui sotto</Trans></span>
-    </Button>
+    // DS4: la riga di sistema che apre — il bottone del sistema, ghost, 32, col
+    // testo di una riga di sistema — la stessa delle righe decise (K3: Disclosure)
+    <Disclosure
+      segno={<ArrowDown className="size-4" aria-hidden="true" />}
+      testo={<Trans>In attesa della tua scelta · qui sotto</Trans>}
+      testId="approval-compact-row"
+      onClick={focusComposerApproval}
+    />
   )
 }
 
@@ -458,15 +468,12 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
         : i18n.t(msg`Approvato automaticamente dalla regola: ${String(entry.meta?.ruleMatched ?? '')}`)
     return (
       <DecidedRow ok label={autoLabel} at={entry.createdAt}>
-        <CardShell>
-          {/* R3: anche qui il titolo umano per Composio/MCP, mai il nome tecnico nudo */}
-          <p className="wrap-anywhere text-body font-medium text-foreground">
-            {resolvedTitle ?? String(entry.meta?.tool)}
-          </p>
-          <p className="mt-1 text-small text-muted-foreground wrap-anywhere">
+        {/* R3: anche qui il titolo umano per Composio/MCP, mai il nome tecnico nudo */}
+        <ChatCard titolo={resolvedTitle ?? String(entry.meta?.tool)}>
+          <Text size="small" tone="muted">
             {humanReason ? i18n.t(humanReason) : reasonText && reasonText !== entry.meta?.tool ? reasonText : ''}
-          </p>
-        </CardShell>
+          </Text>
+        </ChatCard>
       </DecidedRow>
     )
   }
@@ -488,6 +495,7 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
       entry={entry}
       agentName={agentName}
       readOnly={readOnly || status !== 'pending'}
+      testId="card-approvazione"
     />
   )
 
@@ -524,12 +532,12 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
         summary={appInfo ? (appInfo.kind === 'composio' && resolvedTitle ? resolvedTitle : appInfo.app) : useAppSummary ?? approvalSummary(tool, input, entry.meta, activeLang)}
         at={entry.createdAt}
       >
-        <CardShell tone="waiting" testid="card-approvazione">{body}</CardShell>
+        {body}
       </DecidedRow>
     )
   }
 
-  return <CardShell tone="waiting" testid="card-approvazione">{body}</CardShell>
+  return body
 }
 
 /** R1: il dominio del grant di sito per la riga decisa (senza importare il modello della card). */
