@@ -13,34 +13,36 @@
 // get, history e search di ogni cella.
 // Il motore SOTTO PROVA è quello del repo (vendor/engramma), oppure quello
 // che dice SANDBOT_TEST_ENGRAMMA_NUOVO_DIR: puntato al v0.4.3 gli stessi
-// test girano sul motore vecchio e devono essere ROSSI dove c'è una
-// differenza vera (lo sono: backup, schema, verify, conflicts(), le copie).
+// test girano sul motore vecchio e sono ROSSI dove c'è una differenza vera
+// (la copia di E1, lo schema e verify(), il messaggio in inglese, i vettori
+// ibridi, conflicts() del binding), verdi dove sono controlli di non
+// regressione.
 //
-// COSA ESCE (visto sul motore v0.6.19-beta.1, schema 24):
-// - UGUALE, campo per campo: ogni nota mai riscritta nel corpo (list, get,
-//   history; lapidi comprese), gli errori (stesso code; il messaggio ora è
-//   in inglese), la ricerca di una cosa precisa (la prima riga è quella di
-//   prima, a parte il punteggio) e i vettori di prima, che migrano con le
-//   loro note.
+// COSA ESCE (visto sul motore v0.6.20-beta.1, schema 24):
+// - UGUALE, campo per campo: ogni nota (list, get, history; lapidi comprese),
+//   anche quelle RISCRITTE col motore vecchio; gli errori (stesso code; il
+//   messaggio ora è in inglese), la ricerca di una cosa precisa (la prima riga
+//   è quella di prima, a parte il punteggio) e i vettori di prima, che
+//   migrano con le loro note.
 // - NON SI CONFRONTA (ranking del motore, cambiato dalla v0.4.5): punteggi,
 //   ordine e richiami deboli di una ricerca.
-// - DIVERSO, e NON per colpa degli actor di Homun: la migrazione di una
-//   cella v0.4.3 fa nascere una copia di conflitto per ogni RISCRITTURA
-//   vecchia (patch, re-index della storia). Le operazioni scritte prima
-//   della v0.6 non hanno «base» (migrate_log_v15: «base stays NULL») e la
-//   derivazione dei conflitti (conflicts.rs, v0.6.4) le tratta tutte come
-//   radici concorrenti: ogni corpo precedente diventa una nota «conflitto»
-//   (in quarantena se l'ha persa un agente, attiva se l'ha persa l'utente),
-//   e se l'utente aveva scritto la nota e il bot l'ha riscritta, il corpo
-//   torna quello dell'utente e la riscrittura del bot finisce in quarantena.
-//   È un difetto del motore (il commento della migrazione dice «sequential
-//   by declaration»): qui lo si tiene con it.fails (ciò che la spec chiede)
-//   e con la caratterizzazione di ciò che fa, finché non lo corregge.
-//   SUL MOTORE NUOVO, a celle fresche, la mano dell'utente e poi quella del
-//   bot sulla stessa nota NON creano nulla: è il test «una sola mano».
-// - VETTORI: due note di prima restano senza (il giro le incorpora di novo):
-//   una eliminata e ripristinata col motore vecchio, e quella col corpo
-//   cambiato dalla migrazione.
+// - NESSUNA COPIA DI CONFLITTO (tappa 6): dalla migrazione le celle restano
+//   com'erano. Con la 0.6.19 non era così, e non per colpa degli actor di
+//   Homun: una copia per ogni riscrittura vecchia (patch, re-index della
+//   storia), perché le operazioni scritte prima della v0.6 non hanno «base»
+//   (migrate_log_v15: «base stays NULL») e la derivazione dei conflitti
+//   (conflicts.rs, v0.6.4) le trattava come radici concorrenti. La 0.6.20
+//   lega una scrittura senza base e senza firma alla precedente (il segno
+//   meta.pre_v06_seq della migrazione v15). Una cella che un .node 0.6.16–
+//   0.6.19 aveva GIÀ migrato la 0.6.20 non la rifà: la apre com'è, senza
+//   pre_v06_seq e con quello che la migrazione vecchia aveva lasciato. Per
+//   questo le celle di prova nascono sempre dalla v0.4.3: della cartella di
+//   prova non si tiene nulla da una corsa all'altra.
+//   A celle fresche, sul motore nuovo, la mano dell'utente e poi quella del
+//   bot sulla stessa nota non creano nulla: è il test «una sola mano».
+// - VETTORI: una sola nota di prima resta senza (il giro la incorpora di
+//   nuovo): quella eliminata e ripristinata col motore vecchio. Le riscritte
+//   tengono il loro, come il corpo.
 // - FUNZIONANO sulle celle migrate: put, purge, dropCell, embedPending (senza
 //   modello risponde MODEL_MISSING come prima; col modello incorpora).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -152,10 +154,10 @@ function conVettore(dataDir: string, cella: string, root: string): Set<string> {
 
 /** Id delle note, per nome (i valori si riempiono quando il motore vecchio le scrive). */
 const IDS: Record<string, string> = {}
-/** Mai riscritta nel corpo: una sola scrittura (o solo stato, tier, cella): deve essere uguale in tutto. */
+/** Ogni nota (le riscritte col motore vecchio comprese: dalla 0.6.20 la migrazione le lascia com'erano): list, get e history devono essere uguali in tutto. */
 const MAI: Array<{ cella: string; id: string }> = []
-/** Riscritta nel corpo: [cella, chi ha perso, testo che la copia si porta]. */
-const RISCRITTE: Array<[cella: string, chi: 'bot' | 'utente' | 'storia', testo: string]> = []
+/** Riscritta nel corpo col motore vecchio: [cella, id della nota, corpo di PRIMA della riscrittura, corpo di DOPO]. */
+const RISCRITTE: Array<[cella: string, id: string, prima: string, dopo: string]> = []
 
 type Fotografia = Record<string, { note: EngrammaNoteView[]; get: Record<string, EngrammaNoteView | null>; history: Record<string, { version: number; opId: string; note: EngrammaNoteView }[]>; search: Record<string, EngrammaSearchHit[]> }>
 /** Il nome di cella per ogni bersaglio. */
@@ -175,7 +177,7 @@ const BERSAGLI: Array<[cella: 'bot' | 'utente' | 'storia' | 'bot2', query: strin
   ['utente', 'Torino San Salvario', 'u1'],
   ['utente', 'Riepilogo settimanale', 'u2'],
   ['utente', 'venerdì mattina', 'u3'],
-  ['utente', 'Epson XP-3100', 'u4'], // la riscrittura del bot: dopo la migrazione la nota torna al testo dell'utente (il test che fallisce lo dice)
+  ['utente', 'Epson XP-3100', 'u4'], // la nota dell’utente che il bot riscrisse col motore vecchio: resta com’era (la riscrittura del bot)
   ['utente', 'diventa condivisa', 'w11b'], // la nota nata dal cambio di cella (stesso corpo di quella vecchia, che è lapide)
   ['storia', 'Ciao puoi ricordarmi', 's1'],
   ['storia', 'ritardo di 20 minuti', 's3'],
@@ -199,7 +201,7 @@ async function scatta(dataDir: string): Promise<Fotografia> {
     }
     out[name] = { note, get, history, search: {} }
   }
-  // cella per cella, con ampio k: il confronto è sul ranking di OGNI cella, non sul taglio delle prime righe fra tre (che con le copie in più cambierebbe)
+  // cella per cella, con ampio k: il confronto è sulla prima riga di OGNI cella, non sul taglio delle prime righe fra tre
   for (const [name, foto] of Object.entries(out)) {
     for (const q of QUERY) foto.search[q] = await engine.search([name], { text: q, k: 50, mode, graphHops: 2 })
   }
@@ -255,7 +257,7 @@ describe.skipIf(!haV043)('E2: celle scritte dal .node v0.4.3, aperte col motore 
     await memoryConfirm(AG, IDS.w4) // external confermata
     IDS.w5 = (await w('Il progetto si chiama Alba.', 14)).id
     await updateMemoryNote(AG, { id: IDS.w5, content: 'Il progetto si chiama Alba, fase 2.' }) // RISCRITTA dal bot
-    RISCRITTE.push([nomeCella(AG), 'bot', 'Il progetto si chiama Alba.'])
+    RISCRITTE.push([nomeCella(AG), IDS.w5, 'Il progetto si chiama Alba.', 'Il progetto si chiama Alba, fase 2.'])
     IDS.w6 = (await w('Solo il tier cambia.', 15)).id
     await updateMemoryNote(AG, { id: IDS.w6, tier: 'core' }) // solo intestazione: nessun corpo riscritto
     IDS.w7 = (await w('Eliminata, da dimenticare per sempre.', 16)).id
@@ -271,15 +273,15 @@ describe.skipIf(!haV043)('E2: celle scritte dal .node v0.4.3, aperte col motore 
     IDS.w11b = (await updateMemoryNote(AG, { id: IDS.w11, scope: 'user' })).id // rinasce nell’altra cella, la vecchia è lapide
     IDS.w12 = (await w('Il mercato è chiuso il lunedì.', 21)).id
     await memorySave(AG, { id: IDS.w12, body: 'Il mercato è chiuso il martedì.', tier: 'log' }) // l’UTENTE riscrive una nota del bot
-    RISCRITTE.push([nomeCella(AG), 'bot', 'Il mercato è chiuso il lunedì.'])
+    RISCRITTE.push([nomeCella(AG), IDS.w12, 'Il mercato è chiuso il lunedì.', 'Il mercato è chiuso il martedì.'])
     IDS.u1 = (await w('Abita a Torino, zona San Salvario.', 22, { scope: 'user', userTurn: true })).id
     IDS.u2 = (await memorySave(AG, { body: 'Per i report si usa il template «Riepilogo settimanale».', tier: 'core', scope: 'user' })).id
     IDS.u3 = (await memorySave(AG, { body: 'Le riunioni del lunedì si preparano il venerdì pomeriggio.', tier: 'log', scope: 'user' })).id
     await memorySave(AG, { id: IDS.u3, body: 'Le riunioni del lunedì si preparano il venerdì mattina.', tier: 'log', scope: 'user' }) // l’utente corregge la sua
-    RISCRITTE.push([e.USER_CELL, 'utente', 'Le riunioni del lunedì si preparano il venerdì pomeriggio.'])
+    RISCRITTE.push([e.USER_CELL, IDS.u3, 'Le riunioni del lunedì si preparano il venerdì pomeriggio.', 'Le riunioni del lunedì si preparano il venerdì mattina.'])
     IDS.u4 = (await memorySave(AG, { body: 'La stampante è la Epson.', tier: 'log', scope: 'user' })).id
     await updateMemoryNote(AG, { id: IDS.u4, content: 'La stampante è la Epson XP-3100.' }) // il BOT riscrive una nota dell’utente
-    RISCRITTE.push([e.USER_CELL, 'bot', 'La stampante è la Epson XP-3100.'])
+    RISCRITTE.push([e.USER_CELL, IDS.u4, 'La stampante è la Epson.', 'La stampante è la Epson XP-3100.'])
     // la storia: due messaggi, e un entry indicizzato due volte (ogni re-index è una riscrittura)
     const t0 = Date.parse('2026-11-20T10:00:00Z')
     IDS.s1 = storyNoteId(AG, 1, t0)
@@ -289,7 +291,7 @@ describe.skipIf(!haV043)('E2: celle scritte dal .node v0.4.3, aperte col motore 
     await indexStoryNote(AG, 1, 'assistant', 'Certo, te lo ricordo: prenotare il dentista.', t0 + 1)
     await indexStoryNote(AG, 2, 'user', 'Ho letto che il treno delle 8 è in ritardo.', t0 + 2, { tainted: true })
     await indexStoryNote(AG, 2, 'user', 'Ho letto che il treno delle 8 è in ritardo di 20 minuti.', t0 + 2, { tainted: true })
-    RISCRITTE.push([e.storyCellName(AG), 'storia', 'Ho letto che il treno delle 8 è in ritardo.'])
+    RISCRITTE.push([e.storyCellName(AG), IDS.s3, 'Ho letto che il treno delle 8 è in ritardo.', 'Ho letto che il treno delle 8 è in ritardo di 20 minuti.'])
     // un secondo bot, la cui cella sarà dimenticata col motore nuovo
     IDS.a2a = (await writeMemoryNote(AG2, { content: 'Il secondo bot lavora di notte.', tier: 'log', source: `homun:chat/${AG2}/1` })).id
     IDS.a2b = (await writeMemoryNote(AG2, { content: 'Il secondo bot ha due note.', tier: 'core', source: `homun:chat/${AG2}/2`, userTurn: true })).id
@@ -303,10 +305,11 @@ describe.skipIf(!haV043)('E2: celle scritte dal .node v0.4.3, aperte col motore 
     expect(CELLE).toEqual(Object.values(cd).sort())
     for (const c of CELLE) expect(await schemaDi(join(DATA, 'memory', 'cells', c + '.sqlite'), ROOT)).toEqual({ ok: true, schema: 12 })
     HASH_PRIMA = Object.fromEntries(CELLE.map((c) => [c, sha(join(DATA, 'memory', 'cells', c + '.sqlite'))]))
-    // le mai riscritte nel corpo: list, get e history devono restare uguali in tutto
+    // ogni nota di prima, riscritte comprese: list, get e history devono restare uguali in tutto (manca solo la purgata)
+    const cellaDi: Record<string, keyof typeof cd> = { s1: 'storia', s2: 'storia', s3: 'storia', u1: 'utente', u2: 'utente', u3: 'utente', u4: 'utente', w11b: 'utente', a2a: 'bot2', a2b: 'bot2' }
     for (const [nome, id] of Object.entries(IDS)) {
-      if (['w5', 'w12', 'u3', 'u4', 's3', 'w9'].includes(nome)) continue // riscritte (o purgate: non c'è più)
-      MAI.push({ cella: nome === 's1' || nome === 's2' ? cd.storia : nome === 'u1' || nome === 'u2' || nome === 'w11b' ? cd.utente : nome === 'a2a' || nome === 'a2b' ? cd.bot2 : cd.bot, id })
+      if (nome === 'w9') continue // purgata: non c'è più
+      MAI.push({ cella: cd[cellaDi[nome] ?? 'bot'], id })
     }
     await e.openMemoryEngine({ dataDir: DATA })
     ERR_PRIMA = {
@@ -365,7 +368,33 @@ describe.skipIf(!haV043)('E2: celle scritte dal .node v0.4.3, aperte col motore 
     }
   }, LUNGO)
 
-  it('le note MAI riscritte sono uguali campo per campo: list, get e history dicono la stessa cosa di prima, e manca solo la purgata', async () => {
+  // Subito dopo l'apertura, prima che un test scriva nelle celle migrate: «le stesse note» si conta su ciò che la migrazione ha lasciato.
+  // È il test che fino alla 0.6.19 era it.fails (la migrazione faceva nascere una copia per ogni riscrittura vecchia).
+  it('ciò che la spec chiede: dalla migrazione nessuna copia di conflitto, le note com’erano (riscritte col motore vecchio comprese)', async () => {
+    await apri()
+    const e = await eng()
+    for (const c of CELLE) {
+      expect(await conflitti(c), c).toEqual([])
+      expect(await copieDi(c), c).toEqual([])
+      expect(Object.keys(perId(await tutte(await e.memoryCell(c, 'homun:user')))).sort(), c).toEqual(Object.keys(perId(FOTOGRAFIA[c]!.note)).sort())
+    }
+    // per ogni riscrittura vecchia (patch, re-index: dal bot, dall’utente, dalla storia) la nota resta col corpo di DOPO, e il corpo di PRIMA non è una nota
+    for (const [cella, id, prima, dopo] of RISCRITTE) {
+      const note = await tutte(await e.memoryCell(cella, 'homun:user'))
+      expect(note.some((n) => n.body === prima), `il corpo di prima è ancora una nota in ${cella}: ${prima}`).toBe(false)
+      expect(note.find((n) => n.id === id)?.body, `la riscritta ${id} in ${cella}`).toBe(dopo)
+    }
+    // il caso che la 0.6.19 girava: la nota dell’utente che il bot aveva riscritto resta com’era (la riscrittura del bot)
+    expect((await (await e.userCell(null)).list({ limit: 1000 })).find((n) => n.id === IDS.u4)!.body).toBe('La stampante è la Epson XP-3100.')
+    const dopo = await scatta(DATA)
+    const cd = await celleDi()
+    for (const [cella, q, nota] of BERSAGLI) {
+      expect(FOTOGRAFIA[cd[cella]]!.search[q]![0]?.id, `prima: «${q}»`).toBe(IDS[nota])
+      expect(dopo[cd[cella]]!.search[q]![0]?.id, `dopo: «${q}» trova ${nota}`).toBe(IDS[nota])
+    }
+  })
+
+  it('le note sono uguali campo per campo, le riscritte col motore vecchio comprese: list, get e history dicono la stessa cosa di prima, e manca solo la purgata', async () => {
     await apri()
     const e = await eng()
     for (const { cella, id } of MAI) {
@@ -385,26 +414,19 @@ describe.skipIf(!haV043)('E2: celle scritte dal .node v0.4.3, aperte col motore 
     expect(await (await e.botCell(AG)).get(IDS.w9)).toBeNull()
   })
 
-  it('chi cerca una cosa la trova: per ogni nota la ricerca dà la stessa prima riga di prima (stessi campi); una riga forte in più è solo una copia', async () => {
+  it('chi cerca una cosa la trova: per ogni nota la ricerca dà la stessa prima riga di prima (stessi campi), e nessuna riga è una copia', async () => {
     await apri()
     const dopo = await scatta(DATA)
     const cd = await celleDi()
-    // u4 è il caso che la migrazione cambia (il corpo torna all’utente): sta nel test che fallisce, non qui
-    for (const [cella, q, nota] of BERSAGLI.filter((b) => b[2] !== 'u4')) {
+    for (const [cella, q, nota] of BERSAGLI) {
       const prima = FOTOGRAFIA[cd[cella]]!.search[q]![0]
       expect(prima?.id, `prima: «${q}» trova ${nota}`).toBe(IDS[nota])
       const adesso = dopo[cd[cella]]!.search[q]![0]
       expect(adesso?.id, `dopo: «${q}» trova ${nota}`).toBe(IDS[nota])
       expect(riga(adesso!), q).toEqual(riga(prima!))
     }
-    // e una riga FORTE che prima non usciva è solo una copia (attiva: la migrazione l’ha fatta nascere); i richiami deboli cambiano col ranking
-    for (const c of CELLE) {
-      for (const q of QUERY) {
-        for (const h of dopo[c]!.search[q]!.filter((x) => x.score >= 0.5 && !FOTOGRAFIA[c]!.search[q]!.some((p) => p.id === x.id))) {
-          expect(h.tags, `${c} «${q}»: riga forte in più`).toContain('conflitto')
-        }
-      }
-    }
+    // i richiami deboli cambiano col ranking del motore; nessuna riga, forte o debole, è una copia
+    for (const c of CELLE) for (const q of QUERY) for (const h of dopo[c]!.search[q]!) expect(h.tags, `${c} «${q}»: ${h.id}`).not.toContain('conflitto')
   })
 
   it('gli errori del motore restano gli stessi (history di una nota che non c’è: NOT_FOUND; get: null), col messaggio in inglese (v0.6.19)', async () => {
@@ -421,7 +443,7 @@ describe.skipIf(!haV043)('E2: celle scritte dal .node v0.4.3, aperte col motore 
     expect(await cella.get(IDS.w9)).toBeNull()
   })
 
-  it('i vettori di prima migrano con le loro note: dopo aspettano l’incorporazione solo le copie e due note di prima; una nota nuova si incorpora e la ricerca la trova', async () => {
+  it('i vettori di prima migrano con le loro note: dopo aspettano l’incorporazione solo le note di prima che la migrazione ha lasciato senza; una nota nuova si incorpora e la ricerca la trova', async () => {
     await apri()
     const cella = await (await eng()).botCell(AG)
     if (!haModello) {
@@ -432,14 +454,16 @@ describe.skipIf(!haV043)('E2: celle scritte dal .node v0.4.3, aperte col motore 
     }
     const e = await eng()
     const celleDiAg = [e.botCellName(AG), e.storyCellName(AG), e.USER_CELL]
-    const copie = (await Promise.all(celleDiAg.map(copieDi))).reduce((n, l) => n + l.length, 0)
-    // due note di prima restano indietro: w8 (eliminata e ripristinata col motore vecchio) perde il vettore nella migrazione,
-    // e u4 cambia corpo (torna al testo dell'utente: il test delle copie lo dice), così il suo non vale più. Le altre ce l'hanno ancora
+    // dalla migrazione non è nata nessuna copia (lo dice il test «ciò che la spec chiede»): aspettano l'incorporazione solo note di prima.
+    // Prima del giro si guarda quali: lette su una COPIA della cella, mai col motore
+    const indietro = (await Promise.all(celleDiAg.map(async (c) => (await e.listAll(await e.memoryCell(c, 'homun:user'))).filter((n) => !conVettore(DATA, c, ROOT).has(n.id)).map((n) => n.id)))).flat().sort()
+    expect(indietro).toEqual([IDS.w8]) // eliminata e ripristinata col motore vecchio: perde il vettore nella migrazione, ed è la sola
     const vettori = conVettore(DATA, e.botCellName(AG), ROOT)
     expect(vettori.has(IDS.w1)).toBe(true)
-    expect(vettori.has(IDS.w8)).toBe(false)
-    expect((await e.listAll(await e.userCell(null))).find((n) => n.id === IDS.u4)!.body).not.toBe(FOTOGRAFIA[e.USER_CELL]!.get[IDS.u4]!.body)
-    expect(await e.embedCellsOfAgent(AG)).toBe(copie + 2)
+    // le riscritte col motore vecchio restano col corpo che avevano prima della migrazione, e col loro vettore
+    expect(await (await e.userCell(null)).get(IDS.u4)).toEqual(FOTOGRAFIA[e.USER_CELL]!.get[IDS.u4])
+    expect(conVettore(DATA, e.USER_CELL, ROOT).has(IDS.u4)).toBe(true)
+    expect(await e.embedCellsOfAgent(AG)).toBe(indietro.length)
     expect(await e.embedPendingCountOfAgent(AG)).toBe(0)
     // dopo il giro ogni nota viva delle tre celle ha il suo vettore (conVettore legge la cella aperta: file, -wal e -shm)
     for (const c of celleDiAg) {
@@ -479,59 +503,6 @@ describe.skipIf(!haV043)('E2: celle scritte dal .node v0.4.3, aperte col motore 
     }
     expect((await (await e.userCell(null)).get(n1))!.body).toBe('Nota dell’utente: la stampante è la Epson XP-3100.')
     expect((await (await e.memoryCell(e.botCellName(AG3), 'homun:user')).get(n2))!.body).toBe('Il bot riscrive: la riunione è il venerdì alle 10.')
-  })
-
-  it.fails('ciò che la spec chiede e OGGI IL MOTORE NON FA: dalla migrazione nessuna copia di conflitto, le note com’erano', async () => {
-    await apri()
-    const e = await eng()
-    for (const c of CELLE) expect(await conflitti(c), c).toEqual([])
-    for (const c of CELLE) expect(Object.keys(perId(await tutte(await e.memoryCell(c, 'homun:user')))).sort(), c).toEqual(Object.keys(perId(FOTOGRAFIA[c]!.note)).sort())
-    // la nota dell’utente che il bot aveva riscritto col motore vecchio: resta com’era (la riscrittura del bot)
-    expect((await (await e.userCell(null)).list({ limit: 1000 })).find((n) => n.id === IDS.u4)!.body).toBe('La stampante è la Epson XP-3100.')
-    const dopo = await scatta(DATA)
-    const cd = await celleDi()
-    for (const [cella, q, nota] of BERSAGLI) {
-      expect(FOTOGRAFIA[cd[cella]]!.search[q]![0]?.id, `prima: «${q}»`).toBe(IDS[nota])
-      expect(dopo[cd[cella]]!.search[q]![0]?.id, `dopo: «${q}» trova ${nota}`).toBe(IDS[nota]) // «Epson XP-3100»: dopo la migrazione la trova solo nella copia, in quarantena
-    }
-  })
-
-  it('CARATTERIZZAZIONE (finché il motore non lo corregge): la migrazione fa nascere una copia per ogni riscrittura vecchia — chi l’ha persa decide lo stato, e la nota dell’utente torna al suo testo', async () => {
-    await apri()
-    const e = await eng()
-    // per ogni riscrittura: una nota «conflitto» col corpo di PRIMA della riscrittura
-    const coppe: Record<string, EngrammaNoteView[]> = Object.fromEntries(await Promise.all(CELLE.map(async (c) => [c, await copieDi(c)])))
-    const attese: Record<string, EngrammaNoteView[]> = {}
-    for (const [cella, chi, testo] of RISCRITTE) {
-      const copia = coppe[cella]!.find((n) => n.body === testo)
-      expect(copia, `copia con il testo di prima in ${cella}`).toBeDefined()
-      // chi l’ha persa è un agente (il bot, la storia): la copia nasce in quarantena; l’utente: attiva e visibile
-      expect(copia!.status).toBe(chi === 'utente' ? 'active' : 'quarantined')
-      expect(copia!.tags.at(-1)).toBe('conflitto')
-      expect(copia!.version).toBe(0)
-      ;(attese[cella] ??= []).push(copia!)
-    }
-    for (const c of CELLE) expect(coppe[c]!.length, c).toBe((attese[c] ?? []).length)
-    // conflicts(): una per copia, con chi ha perso
-    for (const c of CELLE) {
-      const conflittiCella = await conflitti(c)
-      expect(conflittiCella.length, c).toBe((attese[c] ?? []).length)
-      for (const k of conflittiCella) {
-        expect(k.quarantined).toBe(k.loserClass === 'agent')
-        expect(k.visible).toBe(true)
-      }
-    }
-    expect((await conflitti(nomeCella(AG))).map((k) => k.loserActor).sort()).toEqual([`homun:bot-${AG}`, `homun:bot-${AG}`])
-    expect((await conflitti(e.USER_CELL)).map((k) => [k.loserActor, k.loserClass]).sort()).toEqual([
-      [`homun:bot-${AG}`, 'agent'],
-      ['homun:user', 'human']
-    ])
-    expect((await conflitti(e.storyCellName(AG))).map((k) => [k.loserActor, k.loserClass])).toEqual([['homun:story', 'agent']])
-    // la nota riscritta dal suo stesso autore resta com’era (il testo nuovo è suo); quella dell’utente riscritta dal bot NO: torna al testo dell’utente
-    expect((await (await e.botCell(AG)).get(IDS.w5))!.body).toBe('Il progetto si chiama Alba, fase 2.')
-    expect((await (await e.userCell(null)).list({ limit: 1000 })).find((n) => n.id === IDS.u4)!.body).toBe('La stampante è la Epson.')
-    // le altre riscritture non hanno fatto nascere nulla
-    expect(Object.values(coppe).flat().length).toBe(RISCRITTE.length)
   })
 
   it('una seconda apertura non rifà il backup (la copia c’è già e le celle sono migrate)', async () => {
