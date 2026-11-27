@@ -5410,7 +5410,7 @@ msgstr "Engine"
 msgid "motore {0}"
 msgstr "engine {0}"
 
-#: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/MemoryEngineNotice.tsx
 msgid "Motore della memoria non disponibile: le memorie non si leggono né si scrivono finché non torna."
 msgstr "The memory engine is unavailable: memories cannot be read or written until it comes back."
 
@@ -7630,6 +7630,10 @@ msgstr "Your password is needed"
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Serve macOS 26 o successivo, con chip Apple"
 msgstr "macOS 26 or later with an Apple chip is required"
+
+#: src/renderer/src/components/MemoryEngineNotice.tsx
+msgid "Serve spazio sul disco per aggiornare la memoria in sicurezza: liberane {gb} GB"
+msgstr "Not enough disk space to update the memory safely: free up {gb} GB."
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Serve un indirizzo completo, che comincia con https://"

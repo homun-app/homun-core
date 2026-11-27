@@ -77,6 +77,7 @@ import { freeDiskBytesOf } from '../main/sandbox/disk-space'
 import { containerCliPath } from '../main/sandbox/apple-container-engine'
 // fase memoria-engramma (M1): il motore Engramma vive solo qui, nel demone
 import { openMemoryEngine, closeMemoryEngine } from '../main/memory/engine'
+import { backupLogLine } from '../main/memory/cell-backup'
 
 /** Tempo massimo di attesa dei turni in corso durante un riavvio pulito (A2). */
 export const RESTART_DRAIN_MS = 10_000
@@ -251,6 +252,8 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     const st = await openMemoryEngine({ dataDir: dataDir() })
     if (st.available) {
       console.log(`[sandbotd] memoria Engramma attiva (motore ${st.version}, ${st.model.present ? 'modello presente' : 'senza modello: ricerca testo+grafo'})`)
+      // fase memoria-engramma v0.6.19 (E1): se prima di aprire ha copiato le celle (il motore le aggiorna), il log dice dove sta la copia
+      if (st.backup) console.log(backupLogLine(st.backup))
       // fase memoria-engramma · correzioni (C3): la data del primo avvio della
       // correzione — le risposte finali scritte PRIMA non hanno
       // meta.contaminated (nessuno lo registrava): il backfill le indicizza

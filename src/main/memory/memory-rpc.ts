@@ -145,6 +145,8 @@ export async function memoryOverview(agentId: string, getSetting: <T>(key: strin
     engine: {
       available: status.available,
       ...(status.reason ? { reason: status.reason } : {}),
+      // E1: col motivo 'space' quanti byte mancano per la copia delle celle (l'interfaccia dice quanti GB liberare)
+      ...(status.neededBytes !== undefined ? { neededBytes: status.neededBytes } : {}),
       ...(status.error ? { error: status.error } : {}),
       ...(status.version ? { version: status.version } : {})
     },

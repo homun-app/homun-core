@@ -25,7 +25,7 @@ Canali (chi → chi, come):
 - `src/renderer/` — la UI React (bot, chat, impostazioni); `src/preload/` — il bridge contextBridge (unica superficie API del renderer); `src/shared/` — tipi e moduli puri condivisi; `src/types/` — ambient d.ts.
 - **DB**: SQLite via `node:sqlite` in `<dataDir>/sandbot.db` (WAL, secure_delete). `dataDir` = `<userData>/data`, dove userData è **`~/Library/Application Support/sandbot`** (minuscolo, storico — `src/main/paths.ts`); override con `--data`, `SANDBOT_DATA_DIR`, `SANDBOT_TEST_USER_DATA`.
 - **Tabelle principali** (`src/main/store/db.ts` + DDL importate): `agents` (i bot, con archiviazione morbida), `entries` (transcript event-sourced), `settings` (chiave/valore), `grants` (permessi concessi, per bot e con scadenza), `approvals` (indice delle richieste pendenti + registro delle decisioni), `routines` (scheduler/trigger), `outbox`, `tasks`, `model_usage` (token/costi), `jobs`, `routine_runs`, `groups` + `group_members/group_messages/group_cursors/group_turns`, `shell_jobs`, `subagents`, `library_items`, `computer_actions`, `tool_use`.
-- **File dell'utente** in Application Support/sandbot: `data/sandbot.db` (+ WAL), `data/keys.json` (0600 — chiavi master cifrate con safeStorage), `data/models/` (GGUF), `data/memory/` (Engramma), `logs/` (daemon, lifecycle, llama-server a rotazione). **Cassaforte**: voci cifrate AES-256-GCM nel setting `vault.secrets`, chiave master in `data/keys.json` avvolta da safeStorage/Keychain (`src/main/vault.ts`, `src/daemon/master-keys.ts`).
+- **File dell'utente** in Application Support/sandbot: `data/sandbot.db` (+ WAL), `data/keys.json` (0600 — chiavi master cifrate con safeStorage), `data/models/` (GGUF), `data/memory/` (Engramma: le celle, la copia che Homun fa prima che un motore nuovo le aggiorni e come tornare indietro — `docs/MEMORIA.md`), `logs/` (daemon, lifecycle, llama-server a rotazione). **Cassaforte**: voci cifrate AES-256-GCM nel setting `vault.secrets`, chiave master in `data/keys.json` avvolta da safeStorage/Keychain (`src/main/vault.ts`, `src/daemon/master-keys.ts`).
 
 ## Gli invarianti
 
@@ -50,3 +50,4 @@ Canali (chi → chi, come):
   - `SANDBOT_TEST_MCP_URLS` — mappa JSON id→url che sposta voci del catalogo connettori.
   - `SANDBOT_TEST_CONTAINER_LOG` / `SANDBOT_TEST_CONTAINER_MODE` — log e comportamento della CLI `container` finta (scripts/fake-container.mjs).
   - `SANDBOT_TEST_APP_CONNECT_TIMEOUT_MS` — accorcia il timeout del «Connetti» app.
+  - `SANDBOT_TEST_ENGRAMMA_V043_DIR` — la cartella con il `.node` di Engramma v0.4.3 (`index.js` accanto), che non sta nel repo: i test che aprono le celle col motore vecchio (il ripristino di `docs/MEMORIA.md`) senza di essa saltano.

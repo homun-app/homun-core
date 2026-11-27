@@ -33,6 +33,7 @@ import type { MemoryNoteInfo, MemoryNoteDetail, MemorySearchHitInfo, MemoryOverv
 import { cn } from '../lib/utils'
 import { Button } from './ui/button'
 import { SearchField } from './ui/search-field'
+import { MemoryEngineNotice } from './MemoryEngineNotice'
 
 /** Un contrassegno (proprietario, livello, stato): una pillola in text-caption, il colore la dà chi la usa. */
 const TAG = 'rounded-full px-2 py-0.5'
@@ -175,12 +176,8 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
         <Trans>Fatti e regole che il bot ricorda tra i turni, sul motore Engramma. «Condivise» valgono per tutti i bot.</Trans>
       </p>
 
-      {/* motore e modello */}
-      {overview && !overview.engine.available && (
-        <p className="mt-2 rounded-control bg-destructive/10 px-3 py-2 text-small text-destructive">
-          <Trans>Motore della memoria non disponibile: le memorie non si leggono né si scrivono finché non torna.</Trans>
-        </p>
-      )}
+      {/* motore e modello: l'avviso del motore (E1) dice anche quanto spazio liberare quando manca */}
+      {overview && <MemoryEngineNotice engine={overview.engine} />}
       {overview?.engine.available && (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
           <span className={cn(TAG, 'bg-muted')}><Trans>motore {overview.engine.version}</Trans></span>

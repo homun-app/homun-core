@@ -1760,7 +1760,12 @@ export interface MemorySearchHitInfo {
 
 /** Lo stato della memoria per l'interfaccia: motore, modello, conteggi. */
 export interface MemoryOverview {
-  engine: { available: boolean; reason?: 'module' | 'open' | 'closed'; error?: string; version?: string }
+  /**
+ * Lo stato del motore per l'interfaccia. `reason` è un CODICE del catalogo:
+ * 'space' (fase memoria-engramma v0.6.19, E1) dice che non c'è lo spazio
+ * per copiare le celle prima di aggiornarle, e `neededBytes` quanti byte mancano.
+ */
+engine: { available: boolean; reason?: 'module' | 'open' | 'closed' | 'space'; error?: string; version?: string; neededBytes?: number }
   model: { present: boolean; id?: string; bytes?: number; pulling: boolean }
   counts: { own: number; shared: number; pending: number; deleted: number }
   /** l'indicizzazione iniziale delle conversazioni è fatta? */

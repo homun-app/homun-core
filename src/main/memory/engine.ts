@@ -14,6 +14,12 @@
 // risponde code 'CLOSED': qui viene normalizzato (lo spegnimento non deve
 // produrre errori nei log).
 //
+// Fase memoria-engramma v0.6.19 (E1): prima di Engine.open, se sotto memory/
+// c'è una cella di uno schema più vecchio di quello del motore, Homun ne
+// copia l'intera cartella (cell-backup.ts): il motore nuovo la migrerebbe
+// aprendola, e non si torna indietro. Senza spazio per la copia il motore
+// NON si apre: la memoria risulta non disponibile col motivo 'space'.
+//
 // I tipi qui sotto rispecchiano il contratto di crates/engramma-node
 // (index.d.ts, fase-v0.4.2): il .d.ts del crate non entra nel tsconfig di
 // Homun, quindi il contratto vive in questi nominali minimi.
@@ -23,6 +29,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import type { DatabaseSync } from 'node:sqlite'
 import { enqueueJob } from '../store/jobs'
+import { backupCellsBeforeMigration } from './cell-backup'
 
 // ---- il contratto (docs/node.md e index.d.ts di engramma-node v0.4.1) ----
 
@@ -192,6 +199,8 @@ export interface EngrammaEngine {
 export interface EngrammaModule {
   Engine: { open(opts: { root: string; modelDir?: string; embedder?: 'builtin' | 'none'; actor: string }): Promise<EngrammaEngine> }
   version(): string
+  /** v0.6.10+: di cosa è fatto il modulo. `schema` è lo schema delle celle che sostiene (il v0.4.3 non ha buildInfo). */
+  buildInfo?: () => { version: string; commit: string; schema: number }
 }
 
 // ---- caricamento del modulo nativo ----
@@ -308,16 +317,19 @@ export function botActor(agentId: string): string {
 
 /**
  * Perché la memoria non c'è: il modulo non si carica, Engine.open fallisce,
- * o il motore è chiuso (spegnimento). L'interfaccia mostra il motivo dal
- * catalogo it/en a partire da questo CODICE; il testo inglese va al modello
- * e ai log (mai contenuti di note: il motore non ne mette nei suoi errori).
+ * il motore è chiuso (spegnimento), o — E1 — non c'è lo spazio per copiare
+ * le celle prima che il motore nuovo le aggiorni ('space': la memoria resta
+ * com'è, niente migra). L'interfaccia mostra il motivo dal catalogo it/en a
+ * partire da questo CODICE; il testo inglese va al modello e ai log (mai
+ * contenuti di note: il motore non ne mette nei suoi errori).
  */
-export type MemoryUnavailableReason = 'module' | 'open' | 'closed'
+export type MemoryUnavailableReason = 'module' | 'open' | 'closed' | 'space'
 
 const REASON_TEXT: Record<MemoryUnavailableReason, string> = {
   module: 'the Engramma native module does not load (vendor/engramma: npm run prepare-engramma)',
   open: 'the Engramma engine did not open',
-  closed: 'the memory engine is closed (CLOSED)'
+  closed: 'the memory engine is closed (CLOSED)',
+  space: 'there is not enough free disk space to copy the cells of the memory before the engine updates them'
 }
 
 /** L'errore chiaro quando il motore non c'è: mai un ripiego silenzioso. */
@@ -333,26 +345,50 @@ export class MemoryUnavailableError extends Error {
 type EngineState =
   | { kind: 'closed' }
   | { kind: 'open'; engine: EngrammaEngine; root: string; version: string; cells: Map<string, EngrammaCell> }
-  | { kind: 'failed'; reason: MemoryUnavailableReason; detail?: string }
+  | { kind: 'failed'; reason: MemoryUnavailableReason; detail?: string; neededBytes?: number }
 
 let state: EngineState = { kind: 'closed' }
 let opening: Promise<MemoryEngineStatus> | null = null
+
+/** E1: la copia delle celle fatta PRIMA di aprire il motore (lo dice il log del demone). */
+export interface MemoryBackupInfo {
+  /** la cartella della copia, accanto a memory/ */
+  dir: string
+  fromSchema: number
+  toSchema: number
+  files: number
+}
 
 export interface MemoryEngineStatus {
   available: boolean
   /** il motivo come codice (catalogo UI) e come testo inglese (modello/log) */
   reason?: MemoryUnavailableReason
+  /** con reason 'space': quanti byte mancano per la copia (l'interfaccia dice quanti GB liberare) */
+  neededBytes?: number
   error?: string
   version?: string
   model: EngrammaModelStatus
+  /** E1: la copia fatta in questa apertura (non c'è se non serviva, o se c'era già) */
+  backup?: MemoryBackupInfo
 }
 
-function unavailable(reason: MemoryUnavailableReason, detail?: string): MemoryEngineStatus {
-  return { available: false, reason, error: new MemoryUnavailableError(reason, detail).message, model: { present: false } }
+function unavailable(reason: MemoryUnavailableReason, detail?: string, neededBytes?: number): MemoryEngineStatus {
+  return {
+    available: false,
+    reason,
+    error: new MemoryUnavailableError(reason, detail).message,
+    model: { present: false },
+    ...(neededBytes !== undefined ? { neededBytes } : {})
+  }
 }
 
-/** Apre (o riapre) il motore su <dataDir>/memory. Idempotente; non lancia mai. */
-export function openMemoryEngine(opts: { dataDir: string; embedder?: 'builtin' | 'none' }): Promise<MemoryEngineStatus> {
+/**
+ * Apre (o riapre) il motore su <dataDir>/memory. Idempotente; non lancia mai.
+ * E1: prima di Engine.open, se c'è una cella di uno schema più vecchio, la
+ * cartella si copia (cell-backup.ts); se la copia non si può fare il motore
+ * resta chiuso e la memoria risulta non disponibile.
+ */
+export function openMemoryEngine(opts: { dataDir: string; embedder?: 'builtin' | 'none'; now?: Date }): Promise<MemoryEngineStatus> {
   if (opening) return opening
   if (state.kind === 'open') {
     return Promise.resolve({ available: true, version: state.version, model: { present: false } })
@@ -363,6 +399,23 @@ export function openMemoryEngine(opts: { dataDir: string; embedder?: 'builtin' |
       state = { kind: 'failed', reason: 'module', detail: lastModuleLoadError ?? undefined }
       return unavailable('module', lastModuleLoadError ?? undefined)
     }
+    // E1: lo schema che questo motore sostiene (il v0.4.3 non lo dice: niente da copiare)
+    const toSchema = typeof mod.buildInfo === 'function' ? mod.buildInfo().schema : null
+    let backup: MemoryBackupInfo | undefined
+    if (toSchema !== null) {
+      const copy = await backupCellsBeforeMigration({ dataDir: opts.dataDir, engineSchema: toSchema, ...(opts.now ? { now: opts.now } : {}) })
+      if (copy.kind === 'no-space') {
+        const detail = `the cells are at schema ${copy.fromSchema}, this engine updates them to ${toSchema}, and the copy that must come first needs ${copy.neededBytes} bytes free (${copy.freeBytes ?? 'unknown'} free now)`
+        state = { kind: 'failed', reason: 'space', detail, neededBytes: copy.missingBytes }
+        return unavailable('space', detail, copy.missingBytes)
+      }
+      if (copy.kind === 'failed') {
+        const detail = `the copy of the cells before the update did not succeed, so the engine stays closed: ${copy.error}`
+        state = { kind: 'failed', reason: 'open', detail }
+        return unavailable('open', detail)
+      }
+      if (copy.kind === 'done') backup = { dir: copy.dir, fromSchema: copy.fromSchema, toSchema, files: copy.files }
+    }
     try {
       const engine = await mod.Engine.open({
         root: join(opts.dataDir, 'memory'),
@@ -371,7 +424,7 @@ export function openMemoryEngine(opts: { dataDir: string; embedder?: 'builtin' |
         actor: 'homun'
       })
       state = { kind: 'open', engine, root: join(opts.dataDir, 'memory'), version: mod.version(), cells: new Map() }
-      return { available: true, version: mod.version(), model: await engine.modelStatus() }
+      return { available: true, version: mod.version(), model: await engine.modelStatus(), ...(backup ? { backup } : {}) }
     } catch (e) {
       // il messaggio del motore non contiene contenuti di note (contratto)
       const detail = e instanceof Error ? e.message : String(e)
@@ -409,7 +462,7 @@ export async function memoryEngineStatus(): Promise<MemoryEngineStatus> {
     }
     return { available: true, version: state.version, model }
   }
-  if (state.kind === 'failed') return unavailable(state.reason, state.detail)
+  if (state.kind === 'failed') return unavailable(state.reason, state.detail, state.neededBytes)
   return unavailable('closed')
 }
 
