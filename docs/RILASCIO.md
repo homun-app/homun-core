@@ -48,10 +48,10 @@ Gli asset vanno caricati DA SOLI, con `gh`, dai file di `vendor/engramma`
 (che il lock ha già verificato):
 
 ```
-gh release create engramma-fase-v0.6.19 \
+gh release create engramma-fase-v0.6.20 \
   --repo homun-app/homun-core \
-  --title "Engramma fase-v0.6.19" \
-  --notes "Il motore Engramma agganciato da Homun (lock: fase-v0.6.19, commit 9929f5a)." \
+  --title "Engramma fase-v0.6.20" \
+  --notes "Il motore Engramma agganciato da Homun (lock: fase-v0.6.20, commit 81530c0)." \
   vendor/engramma/engramma.darwin-arm64.node \
   vendor/engramma/index.js \
   vendor/engramma/index.d.ts

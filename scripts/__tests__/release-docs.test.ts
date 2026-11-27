@@ -23,7 +23,7 @@ describe('fase rilascio di prova (RP4): docs/RILASCIO.md', () => {
 
   it('ha IL COMANDO esatto del caricamento degli asset di Engramma (lo esegue l\'utente)', () => {
     const doc = read('docs/RILASCIO.md')
-    expect(doc).toContain('gh release create engramma-fase-v0.6.19')
+    expect(doc).toContain('gh release create engramma-fase-v0.6.20')
     expect(doc).toContain('--repo homun-app/homun-core')
     // i 3 file del lock, dai percorsi di vendor
     for (const f of ['engramma.darwin-arm64.node', 'index.js', 'index.d.ts']) {

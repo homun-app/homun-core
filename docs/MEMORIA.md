@@ -20,7 +20,7 @@ Tutto sta nella cartella dei dati, `~/Library/Application Support/sandbot/data/`
 ## La copia prima che il motore aggiorni le celle
 
 Quando una versione di Homun porta un motore che cambia il formato delle celle
-(per esempio dalla v0.4.3 alla v0.6.19 di Engramma: dallo schema 12 al 24),
+(per esempio dalla v0.4.3 alla v0.6.20 di Engramma: dallo schema 12 al 24),
 succede questo:
 
 1. la prima volta che apre la memoria, Homun **prima** copia l'intera cartella

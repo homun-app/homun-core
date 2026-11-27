@@ -1,20 +1,20 @@
 {
   "module": "engramma-node",
-  "version": "0.6.19-beta.1",
-  "tag": "fase-v0.6.19",
-  "commit": "9929f5a1c5c48d32f3c9cc158a7629052b0451e2",
+  "version": "0.6.20-beta.1",
+  "tag": "fase-v0.6.20",
+  "commit": "81530c03c70628bf5d1f31fe8f94dad093b86f08",
   "files": {
-    "engramma.darwin-arm64.node": "217dc5c52e4e7f7a786a017f90bb3a2882987b7f8b8c316b880077f9cc411c26",
-    "index.js": "586f717f093b8eccf714bf310c0270fadfc64c0c5437c1d618b50fe5f8aa3a56",
+    "engramma.darwin-arm64.node": "6c6ae78ae19a22de0aae0ffdd04b449b98fa3281bd5eb5eb7ad2a36377c363b9",
+    "index.js": "5c6b9b6a10f14c4e7773a3d538f0ab4d2a5bdc34a7d17e6f29e708cca1782485",
     "index.d.ts": "b1807110e5330ec08a33f270a8e5d2e2dc5c185b9a62788973bfff8329996b9a"
   },
   "sizes": {
-    "engramma.darwin-arm64.node": 51258856,
+    "engramma.darwin-arm64.node": 51257272,
     "index.js": 36463,
     "index.d.ts": 32673
   },
   "release": {
     "repo": "homun-app/homun-core",
-    "tag": "engramma-fase-v0.6.19"
+    "tag": "engramma-fase-v0.6.20"
   }
 }
