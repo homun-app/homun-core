@@ -25,7 +25,7 @@
 // sezioni, stesse azioni (compreso «Consenti per questa missione»), stessi
 // testi e testid: li cercano la sonda della fase squadra e i test
 // (approvals-queue, ds4-approvazioni).
-import { useLingui, Trans } from '@lingui/react/macro'
+import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { ShieldCheck } from 'lucide-react'
@@ -74,11 +74,19 @@ export function pendingWantsLine(r: SquadPendingApprovalInfo, i18n: ReturnType<t
   return `${r.agentName} ${i18n.t(wants[r.category])}`
 }
 
-const ACTIVITY_LABEL: Record<string, MessageDescriptor> = {
-  files: msg`file scritti nel computer`,
-  commands: msg`comandi nel computer, senza rete`,
-  pages: msg`pagine web lette`,
-  'bot-messages': msg`messaggi tra bot del team`
+/**
+ * K3, difetto (d): il conteggio di «Fatto da soli, senza chiederti» col
+ * PLURALE di Lingui — prima «{count} {etichetta}» diceva «1 comandi nel
+ * computer». Le stringhe sono fisse, una voce per attività (il plurale si
+ * decide nel catalogo, non si costruisce).
+ */
+function Conteggio({ id, count }: { id: 'files' | 'commands' | 'pages' | 'bot-messages'; count: number }) {
+  switch (id) {
+    case 'files': return <Plural value={count} one="# file scritto nel computer" other="# file scritti nel computer" />
+    case 'commands': return <Plural value={count} one="# comando nel computer, senza rete" other="# comandi nel computer, senza rete" />
+    case 'pages': return <Plural value={count} one="# pagina web letta" other="# pagine web lette" />
+    case 'bot-messages': return <Plural value={count} one="# messaggio tra bot del team" other="# messaggi tra bot del team" />
+  }
 }
 
 const WHY_LABEL: Record<string, MessageDescriptor> = {
@@ -185,7 +193,7 @@ export function ApprovalsQueue() {
             // il conteggio è il titolo; chi l'ha fatto è la riga grigia (i nomi possono essere molti: si tronca)
             <ListRow
               key={a.id}
-              titolo={<Trans>{a.count} {i18n.t(ACTIVITY_LABEL[a.id]!)}</Trans>}
+              titolo={<Conteggio id={a.id} count={a.count} />}
               sottotitolo={a.who.length > 0 ? a.who.join(', ') : '—'}
             />
           ))}

@@ -184,12 +184,6 @@ msgstr "{0} · vale per tutti i bot del team, finché il team esiste"
 msgid "{0} ›"
 msgstr "{0} ›"
 
-#. placeholder {0}: a.count
-#. placeholder {1}: i18n.t(ACTIVITY_LABEL[a.id]!)
-#: src/renderer/src/components/ApprovalsQueue.tsx
-msgid "{0} {1}"
-msgstr "{0} {1}"
-
 #. placeholder {0}: fmtUsd(m.cost.input)
 #. placeholder {1}: fmtUsd(m.cost.output)
 #: src/renderer/src/components/ui/ModelPicker.tsx
@@ -318,6 +312,22 @@ msgstr "{agentName} vuole usare {0} sul tuo Mac"
 #: src/renderer/src/lib/approval-app.ts
 msgid "{agentName} vuole usare uno strumento di {0}"
 msgstr "{agentName} vuole usare uno strumento di {0}"
+
+#: src/renderer/src/components/ApprovalsQueue.tsx
+msgid "{count, plural, one {# comando nel computer, senza rete} other {# comandi nel computer, senza rete}}"
+msgstr "{count, plural, one {# comando nel computer, senza rete} other {# comandi nel computer, senza rete}}"
+
+#: src/renderer/src/components/ApprovalsQueue.tsx
+msgid "{count, plural, one {# file scritto nel computer} other {# file scritti nel computer}}"
+msgstr "{count, plural, one {# file scritto nel computer} other {# file scritti nel computer}}"
+
+#: src/renderer/src/components/ApprovalsQueue.tsx
+msgid "{count, plural, one {# messaggio tra bot del team} other {# messaggi tra bot del team}}"
+msgstr "{count, plural, one {# messaggio tra bot del team} other {# messaggi tra bot del team}}"
+
+#: src/renderer/src/components/ApprovalsQueue.tsx
+msgid "{count, plural, one {# pagina web letta} other {# pagine web lette}}"
+msgstr "{count, plural, one {# pagina web letta} other {# pagine web lette}}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1995,10 +2005,6 @@ msgstr "collegato · {0} strumenti"
 msgid "Colore {col}"
 msgstr "Colore {col}"
 
-#: src/renderer/src/components/ApprovalsQueue.tsx
-msgid "comandi nel computer, senza rete"
-msgstr "comandi nel computer, senza rete"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "mcp.commandNotFound"
@@ -3315,10 +3321,6 @@ msgstr "File che entrano"
 #: src/shared/ui-messages.ts
 msgid "rpc.filesNotFound"
 msgstr "File o cartella inesistente."
-
-#: src/renderer/src/components/ApprovalsQueue.tsx
-msgid "file scritti nel computer"
-msgstr "file scritti nel computer"
 
 #. placeholder {0}: updateDiff.diff.removed.join(', ')
 #. placeholder {0}: updatePreview.diff.removed.join(', ')
@@ -5218,10 +5220,6 @@ msgstr "mercoledì"
 msgid "mese"
 msgstr "mese"
 
-#: src/renderer/src/components/ApprovalsQueue.tsx
-msgid "messaggi tra bot del team"
-msgstr "messaggi tra bot del team"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.unknownMethod"
@@ -6271,10 +6269,6 @@ msgstr "Pagine"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "pagine lette"
 msgstr "pagine lette"
-
-#: src/renderer/src/components/ApprovalsQueue.tsx
-msgid "pagine web lette"
-msgstr "pagine web lette"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Pannello del bot"

@@ -112,3 +112,31 @@ describe('Q2: la coda «Da approvare» (tavola 2)', () => {
     expect(pendingWantsLine(row({ category: 'sito-interattivo' }) as never, i18n)).toContain('vuole aprire un sito')
   })
 })
+
+describe('K3, difetto (d): i plurali di «Fatto da soli, senza chiederti»', () => {
+  const testoCon = (groupActivity: Array<Record<string, unknown>>): string => {
+    setStoreStateForRender(useStore, { openGroupId: 1, groups: [group()], groupPending: [], groupActivity, groupReviewerPassed: [] })
+    return textOf(parseHtml(renderHtml(createElement(ApprovalsQueue))))
+  }
+
+  it('al singolare si dice «1 comando nel computer, senza rete», «1 pagina web letta», «1 file scritto nel computer», «1 messaggio tra bot del team» — il plurale di Lingui, mai «1 comandi»', () => {
+    const text = testoCon([
+      { id: 'commands', count: 1, who: ['Capo'] },
+      { id: 'pages', count: 1, who: [] },
+      { id: 'files', count: 1, who: ['Capo'] },
+      { id: 'bot-messages', count: 1, who: ['Capo'] }
+    ])
+    for (const frase of ['1 comando nel computer, senza rete', '1 pagina web letta', '1 file scritto nel computer', '1 messaggio tra bot del team']) expect(text).toContain(frase)
+    for (const sbagliato of ['1 comandi ', '1 pagine ', '1 file scritti ', '1 messaggi tra']) expect(text).not.toContain(sbagliato)
+  })
+
+  it('al plurale (2, 14, 44) le frasi sono quelle di sempre', () => {
+    const text = testoCon([
+      { id: 'commands', count: 2, who: ['Capo'] },
+      { id: 'pages', count: 44, who: [] },
+      { id: 'files', count: 14, who: ['Capo'] },
+      { id: 'bot-messages', count: 2, who: ['Capo'] }
+    ])
+    for (const frase of ['2 comandi nel computer, senza rete', '44 pagine web lette', '14 file scritti nel computer', '2 messaggi tra bot del team']) expect(text).toContain(frase)
+  })
+})
