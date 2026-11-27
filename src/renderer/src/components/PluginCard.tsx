@@ -54,6 +54,8 @@ import { FlatList, FlatRow } from './ui/flat-list'
 import { UnderlineTabs } from './ui/underline-tabs'
 import { Section } from './ui/section'
 import { Button } from './ui/button'
+// K2 (fase conversione-chat): il testo è Text del catalogo (stesse classi nel DOM: qui non cambia nessun pixel)
+import { Text } from './ui/text'
 // X2 (fase sicurezza-beta16): l'errore dell'ultima prova si mostra tagliato a 300
 import { clipErrorText } from '../../../main/mcp/error-category'
 
@@ -276,7 +278,7 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
           back={{ onClick: onClose, label: t`Torna ai plugin` }}
           logo={logoUrl
             ? <img src={logoUrl} alt="" className={`${LOGO_CLASS} size-10`} />
-            : <AppLogo logo={app?.row.app.logo ?? null} name={name} className="size-10 text-reading" />}
+            : <AppLogo logo={app?.row.app.logo ?? null} name={name} />}
           title={name}
           actions={(
             <>
@@ -395,12 +397,12 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
 
       {/* --- AUTORIZZAZIONI: una tabella a filo --- */}
       <div className="flex flex-col gap-block" hidden={tab !== 'permissions'} data-testid="plugin-permissions">
-        <p className="text-small text-muted-foreground">
+        <Text size="small" tone="muted">
           <Trans>Scegli cosa i bot possono fare da soli. Le regole valgono per tutti i bot che usano questo plugin.</Trans>
-        </p>
-        {tools === null && <p className="text-small text-muted-foreground"><Trans>caricamento…</Trans></p>}
+        </Text>
+        {tools === null && <Text size="small" tone="muted"><Trans>caricamento…</Trans></Text>}
         {tools !== null && tools.length === 0 && (
-          <p className="text-small text-muted-foreground"><Trans>Nessuno strumento elencato.</Trans></p>
+          <Text size="small" tone="muted"><Trans>Nessuno strumento elencato.</Trans></Text>
         )}
         {(['read', 'write', 'other'] as const).map((g) => {
           const list = groups[g]
@@ -450,9 +452,9 @@ export function PluginCard({ app, server, initial, initialTab, directEnabledFor,
           )
         })}
         {/* la frase F8 (vera nel codice: liftContaminatedAllow) */}
-        <p className="text-small text-muted-foreground">
+        <Text size="small" tone="muted">
           <Trans>Le scelte: Consenti sempre · Chiedi · Blocca. Dopo che un bot ha letto contenuti non fidati, le azioni di scrittura tornano a chiedere anche se le hai consentite.</Trans>
-        </p>
+        </Text>
       </div>
 
       {/* --- ACCOUNT E BOT: riga Account (con PP2), poi i bot a filo --- */}
@@ -632,7 +634,7 @@ function groupValueOf(perms: PermissionsConfig | null, list: CardTool[]): Permis
 function FactGroup({ label, children }: { label: ReactNode; children: ReactNode }): ReactNode {
   return (
     <div className="grid grid-cols-1 gap-x-8 border-t border-border/50 py-3 @[560px]:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-      <p className="text-small text-muted-foreground">{label}</p>
+      <Text size="small" tone="muted">{label}</Text>
       <div className="mt-1 flex min-w-0 flex-col gap-0.5 text-body @[560px]:mt-0">{children}</div>
     </div>
   )
@@ -661,7 +663,7 @@ function Overview({ app, server, directConnector, via, composioSlug, hidden }: {
     const cmd = serverCommandLine(server) || server.url || ''
     if (cmd) provenance.push(<p key="c" className="truncate font-mono text-small text-muted-foreground" title={cmd}>{cmd}</p>)
     if (server.source?.kind === 'npm') {
-      provenance.push(<p key="v" className="text-small text-muted-foreground">{t`versione fissata ${server.source.version}`}</p>)
+      provenance.push(<Text key="v" size="small" tone="muted">{t`versione fissata ${server.source.version}`}</Text>)
     }
     security.push(<p key="w">{server.source?.kind === 'npm' || server.box ? t`gira nel computer isolato` : t`gira sul tuo Mac`}</p>)
     if (server.url) {
@@ -669,7 +671,7 @@ function Overview({ app, server, directConnector, via, composioSlug, hidden }: {
       if (host) data.push(<p key="h">{t`i dati vanno a ${host}`}</p>)
     }
     if (server.egress) {
-      data.push(<p key="e" className="text-small text-muted-foreground">{t`rete: solo ${server.egress.allowHosts.join(', ')}`}</p>)
+      data.push(<Text key="e" size="small" tone="muted">{t`rete: solo ${server.egress.allowHosts.join(', ')}`}</Text>)
     }
   } else if (via === 'direct') {
     provenance.push(<p key="s">{t`MCP diretto di ${app!.app.name}`}</p>)
@@ -677,7 +679,7 @@ function Overview({ app, server, directConnector, via, composioSlug, hidden }: {
       const host = hostOf(directConnector.mcpUrl)
       if (host) provenance.push(<p key="h" className="font-mono text-small text-muted-foreground">{host}</p>)
     }
-    if (composioSlug) provenance.push(<p key="a" className="text-small text-muted-foreground">{t`Alternativa: tramite Composio`}</p>)
+    if (composioSlug) provenance.push(<Text key="a" size="small" tone="muted">{t`Alternativa: tramite Composio`}</Text>)
     security.push(<p key="l">{t`login con il tuo account`}</p>)
     security.push(<p key="n">{t`nessun intermediario`}</p>)
     if (directConnector?.mcpUrl) {
@@ -686,7 +688,7 @@ function Overview({ app, server, directConnector, via, composioSlug, hidden }: {
     }
   } else {
     provenance.push(<p key="s">{t`tramite Composio`}</p>)
-    if (app?.app.directId) provenance.push(<p key="a" className="text-small text-muted-foreground">{t`Alternativa: MCP diretto`}</p>)
+    if (app?.app.directId) provenance.push(<Text key="a" size="small" tone="muted">{t`Alternativa: MCP diretto`}</Text>)
     security.push(<p key="h">{t`i login e le azioni passano dai server di Composio`}</p>)
   }
   security.push(<p key="t">{t`i segreti stanno cifrati sul tuo Mac`}</p>)
@@ -694,7 +696,7 @@ function Overview({ app, server, directConnector, via, composioSlug, hidden }: {
     <div className="@container" hidden={hidden} data-testid="plugin-overview">
       <div className="flex flex-col gap-block">
         {/* la descrizione, quando c'è: in testa, il testo di riga */}
-        {app?.tagline && <p className="text-body">{app.tagline}</p>}
+        {app?.tagline && <Text>{app.tagline}</Text>}
         <div>
           <FactGroup label={t`Provenienza`}>{provenance}</FactGroup>
           <FactGroup label={t`Sicurezza`}>{security}</FactGroup>

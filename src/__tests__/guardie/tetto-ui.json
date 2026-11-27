@@ -1,5 +1,5 @@
 {
-  "__totale": 3223,
+  "__totale": 3194,
   "src/renderer/src/App.tsx": 33,
   "src/renderer/src/components/ActivityPanel.tsx": 20,
   "src/renderer/src/components/ApprovalCard.tsx": 62,
@@ -19,7 +19,7 @@
   "src/renderer/src/components/ComputerTerminal.tsx": 13,
   "src/renderer/src/components/ConnectorCard.tsx": 0,
   "src/renderer/src/components/ConnectorCards13.tsx": 0,
-  "src/renderer/src/components/DecidedRow.tsx": 16,
+  "src/renderer/src/components/DecidedRow.tsx": 15,
   "src/renderer/src/components/DocumentMarkdown.tsx": 67,
   "src/renderer/src/components/DraftCard.tsx": 45,
   "src/renderer/src/components/GuideComputerStep.tsx": 43,
@@ -32,8 +32,8 @@
   "src/renderer/src/components/MemoryEngineNotice.tsx": 12,
   "src/renderer/src/components/PageView.tsx": 41,
   "src/renderer/src/components/PipView.tsx": 21,
-  "src/renderer/src/components/PluginCard.tsx": 55,
-  "src/renderer/src/components/PluginPanel.tsx": 114,
+  "src/renderer/src/components/PluginCard.tsx": 35,
+  "src/renderer/src/components/PluginPanel.tsx": 113,
   "src/renderer/src/components/RightPanel.tsx": 151,
   "src/renderer/src/components/RoutineCreatedRow.tsx": 1,
   "src/renderer/src/components/RuleProposalCard.tsx": 7,
@@ -66,5 +66,5 @@
   "src/renderer/src/components/settings/ModelsPage.tsx": 123,
   "src/renderer/src/components/settings/SettingsAdvanced.tsx": 5,
   "src/renderer/src/components/settings/SettingsGroup.tsx": 6,
-  "src/renderer/src/components/settings/SettingsRow.tsx": 23
+  "src/renderer/src/components/settings/SettingsRow.tsx": 22
 }
