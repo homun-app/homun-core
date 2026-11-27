@@ -1,3 +1,304 @@
+# REPORT FASE CI-PERCORSO-TEMPORANEI: la CI della beta.21 era rossa per un percorso del Mac scritto fisso — il censimento usa la base condivisa e una guardia non lo fa tornare
+
+Base: `main` al commit `3fa9142e` («CHANGELOG: beta.21», dove sta il tag `v0.3.1001-beta.21`), verificata: HEAD era esattamente lì, git pulito a parte `out-review/` e `scripts/vetrina/` (non toccate). Freeze 0.3.1002: solo i due punti della spec, niente altro. Due commit di codice, uno per punto: P1 `7e6f9bce`, P2 `f51f79fe`; più questo REPORT. CHANGELOG invariato.
+
+- **Il problema.** `scripts/esporta-inutilizzati.mjs` aveva scritto fisso il percorso della temporanea del Mac di sviluppo e lo usava senza alternativa. Sul Mac quella cartella c'è, sul runner di GitHub no: la CI del tag `v0.3.1001-beta.21` e quella di main sono rosse con `ENOENT` su `mkdtemp`, un test su 7011. Sul Mac la suite era verde per lo stesso motivo.
+- **P1.** La base delle mkdtemp la sceglie una funzione condivisa, `scripts/lib/base-temporanea.mjs`, con la regola di `src/test-tmp.ts`: `SANDBOT_TEST_TMP_BASE` se c'è, poi la cartella del Mac se c'è, altrimenti la temporanea di sistema. Vista ROSSA prima, con la funzione senza l'alternativa e senza toccare la cartella vera: dallo script vero usciva lo stesso `ENOENT` della CI, sulla stessa riga (`esporta-inutilizzati.mjs:216:28`). Verde dopo.
+- **P2.** Una guardia nella suite, `src/__tests__/guardie/percorso-fisso.test.ts`: nei file che la suite carica o lancia il pezzo di percorso del Mac può stare solo nei due posti che hanno l'alternativa. Vista ROSSA sulla base `3fa9142e`, letta da git senza checkout: `scripts/esporta-inutilizzati.mjs:28`. Verde su HEAD. Chi porta il percorso e la suite non lo carica né lo lancia è dichiarato fuori dalla guardia, col perché (8 voci), e la guardia tiene quell'elenco esatto.
+- **Le prove.** `npm test` e `npm run test:ci-sim` dopo l'ultimo commit di codice, entrambi verdi e senza «Errors»: 575 file, 7023 test passati e 2 saltati (7025: i 7011 di prima più i 5 di P1 e i 9 di P2); nella ci-sim 573 file passati e 2 saltati, 7019 test passati e 6 saltati.
+
+## Il problema
+
+Alla base `scripts/esporta-inutilizzati.mjs:28` aveva `const DEV_TMP = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'` e alla riga 216 `mkdtempSync(`${DEV_TMP}/sandbot-esporta-inutilizzati-`)`. Quel percorso è la cartella per-utente sotto `/var/folders` del Mac di sviluppo: il vincolo «temporanei solo in quella cartella» dice dove si lanciano i comandi, non che cosa si scrive nel codice del repo. Nel repo il modo giusto c'era già: `src/test-tmp.ts` usa `SANDBOT_TEST_TMP_BASE` se c'è, poi quella cartella solo se esiste, altrimenti la temporanea di sistema.
+
+La CI (run 45948150613 sul tag, run 45948149686 su main, job «Typecheck and tests»; il testo è quello riportato nella spec, la CI non la raggiungo da qui):
+
+```
+FAIL src/__tests__/guardie/regole-secche-ui.test.ts > C4 regola 6: nessun componente INUTILIZZATO
+Error: ENOENT: no such file or directory, mkdtemp '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/sandbot-esporta-inutilizzati-XXXXXX'
+    at main (scripts/esporta-inutilizzati.mjs:216:28)
+```
+
+Sulla base, sul Mac, lo stesso test è verde — la cartella c'è — e così erano verdi `npm test` e ci-sim:
+
+```
+$ node_modules/.bin/vitest run src/__tests__/guardie/regole-secche-ui.test.ts
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+```
+
+L'errore che fa il sistema su una base che non c'è è quello della CI:
+
+```
+$ node -e "require('node:fs').mkdtempSync('<una cartella che non c'è>/sandbot-esporta-inutilizzati-')"
+Error: ENOENT: no such file or directory, mkdtemp '…/non-esiste/sandbot-esporta-inutilizzati-XXXXXX'
+    at Object.mkdtempSync (node:fs:3144:18)
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'mkdtemp',
+```
+
+## P1 — il censimento usa la base temporanea condivisa (`7e6f9bce`)
+
+**Che cosa fa.** Tre file.
+
+- `scripts/lib/base-temporanea.mjs` (nuovo): `baseTemporanea(env)` sceglie la base con la regola di `src/test-tmp.ts` — `SANDBOT_TEST_TMP_BASE` se c'è (e DEVE essere una cartella che esiste: un valore rotto si rifiuta subito, con lo stesso messaggio della suite), poi la cartella del Mac se esiste, altrimenti la temporanea di sistema risolta. C'è una variabile SOLO-TEST, `SANDBOT_TEST_DEV_TMP`: fa le veci della cartella del Mac, così un test può fingere di essere sul runner puntandola su un percorso che non c'è.
+- `scripts/esporta-inutilizzati.mjs`: via il percorso fisso; la temporanea delle dichiarazioni nasce in `mkdtempSync(`${baseTemporanea()}/sandbot-esporta-inutilizzati-`)`.
+- `scripts/__tests__/base-temporanea.test.ts` (nuovo, 5 test): le due regole danno lo stesso risultato (stessa cartella del Mac; senza variabili e con `SANDBOT_TEST_TMP_BASE` su una cartella che esiste; `SANDBOT_TEST_TMP_BASE` rotto, su una cartella che non c'è e su un file, con lo stesso errore); con la cartella del Mac che manca si cade sulla temporanea di sistema; `esporta-inutilizzati.mjs --json`, lanciato vero con quella cartella che manca, esce 0.
+
+`src/test-tmp.ts` non si tocca. La regola resta scritta due volte, come prevede P2 (i due posti che hanno l'alternativa), e il test nuovo controlla che le due copie concordino.
+
+**Visto ROSSO — senza toccare la cartella vera.** La cartella del Mac non si rinomina né si sposta. Il rosso l'ho preso con la funzione condivisa già al suo posto ma SENZA l'alternativa — la cartella del Mac, o quella che la sostituisce, e basta: il comportamento della base, più la variabile del test — e con lo script che già la usava:
+
+```
+$ node_modules/.bin/vitest run scripts/__tests__/base-temporanea.test.ts
+ FAIL  scripts/__tests__/base-temporanea.test.ts > la CI sul Mac: la cartella del Mac manca (com'è sul runner di GitHub) > esporta-inutilizzati senza --out esce 0 (nessun ENOENT), e la cartella che manca nessuno l'ha creata
+AssertionError: node:fs:3144
+Error: ENOENT: no such file or directory, mkdtemp '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/sandbot-base-temporanea-che-manca-54572/sandbot-esporta-inutilizzati-XXXXXX'
+    at main (file:///Users/fabio/Projects/Bot/sandbot/scripts/esporta-inutilizzati.mjs:216:28)
+      Tests  2 failed | 3 passed (5)
+```
+
+I due rossi sono lo stesso difetto: l'altro è che `baseTemporanea({ SANDBOT_TEST_DEV_TMP: <che manca> })` restituiva il percorso che manca invece della temporanea di sistema. I tre verdi sono le regole che concordano.
+
+Lo stesso `ENOENT`, sulla stessa riga (`216:28`), dal test stesso della CI, lanciato con la variabile:
+
+```
+$ SANDBOT_TEST_DEV_TMP=/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/p1-ci-percorso-oSo4Dl/cartella-del-mac-che-manca node_modules/.bin/vitest run src/__tests__/guardie/regole-secche-ui.test.ts
+ FAIL  src/__tests__/guardie/regole-secche-ui.test.ts > C4 regola 6: nessun componente INUTILIZZATO (la logica del censimento) > il censimento di esporta-inutilizzati non trova COMPONENTI inutilizzati (nome maiuscolo, nessuno li importa)
+Error: ENOENT: no such file or directory, mkdtemp '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/p1-ci-percorso-oSo4Dl/cartella-del-mac-che-manca/sandbot-esporta-inutilizzati-XXXXXX'
+    at main (file:///Users/fabio/Projects/Bot/sandbot/scripts/esporta-inutilizzati.mjs:216:28)
+      Tests  1 failed | 7 passed (8)
+```
+
+Alla prima corsa il file del test nuovo non partiva: un apostrofo mio, non escapato, in un titolo. Corretto prima di prendere il rosso: non era il rosso cercato. Sulla base intatta il test nuovo non può nemmeno caricarsi (la funzione condivisa non c'è), e il test della CI è verde: per questo il rosso si prende con la variabile.
+
+**VERDE dopo**, con l'alternativa:
+
+```
+$ node_modules/.bin/vitest run scripts/__tests__/base-temporanea.test.ts scripts/__tests__/esporta-inutilizzati.test.ts src/__tests__/guardie/regole-secche-ui.test.ts src/__tests__/guardie/temporanei.test.ts src/__tests__/guardie/percorsi-personali.test.ts src/__tests__/test-tmp.test.ts
+ Test Files  6 passed (6)
+      Tests  25 passed (25)
+$ SANDBOT_TEST_DEV_TMP=/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/p1-ci-percorso-oSo4Dl/cartella-del-mac-che-manca node_modules/.bin/vitest run src/__tests__/guardie/regole-secche-ui.test.ts
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+```
+
+E la base che la funzione sceglie con la cartella del Mac che manca — la temporanea di sistema, che su questo Mac è la stessa cartella risolta:
+
+```
+$ SANDBOT_TEST_DEV_TMP=…/cartella-del-mac-che-manca node --input-type=module -e "…baseTemporanea()…"
+{"base":"/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T","temporaneaDiSistema":"/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T","cadeSulSistema":true,"senzaVariabile":"/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T","letterale":"/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T"}
+```
+
+Prima del commit anche: tutte le guardie e i test degli script 42 file / 331 test; `tsc --noEmit` pulito; cinque dei sei file di sopra nell'ambiente della ci-sim (`SANDBOT_TEST_FAKE_MACOS_MAJOR=15 SANDBOT_TEST_NO_LOCAL_MODELS=1 SANDBOT_TEST_TMP_BASE=<la temporanea di sistema risolta>`, come `npm run test:ci-sim`): 5 file / 24 test.
+
+## P2 — la guardia: il percorso fisso sta solo dove c'è l'alternativa (`f51f79fe`)
+
+**Che cosa fa.** Un test nella suite, `src/__tests__/guardie/percorso-fisso.test.ts`: 4 test sul repo e 5 su un albero finto. Nei file che la suite carica o lancia il pezzo `r6fbsdsn3z58bkbb9w55nn780000gn` (la cartella per-utente: è quello che rende il percorso QUELLO del Mac) può stare solo in `src/test-tmp.ts` e in `scripts/lib/base-temporanea.mjs`; tutti e due devono esistere, portare il percorso e avere ancora l'alternativa (`tmpdir()`). Altrove è rosso, con file e riga.
+
+L'ambito:
+
+- `src/**`, il prodotto e i suoi test;
+- `scripts/__tests__/**`, i test degli script;
+- `scripts/lib/**`, le aiutanti degli script;
+- gli script che un test NOMINA con una stringa letterale nel codice — `scripts/x.mjs`, l'ultimo pezzo di una `join`, un percorso relativo al test, anche dentro un `import`. È un sovrainsieme prudente di «quelli che `spawnSync`/`execFileSync` nominano»: un test che nomina uno script lo importi, lo lanci, lo copi da qualche parte come strumento finto (i `fake-container.mjs`, `fake-browser-mcp.mjs`…) o ne legga il sorgente; se lo nomina, è affare della suite. Oggi gli altri 574 file di test nominano 29 file di `scripts/` (inventario in fondo alla sezione).
+
+I commenti di riga non contano, come in CB1 (fase ci-beta5: `scripts/__tests__/test-tmp-guard.test.ts` vieta `/var/folders/` nel codice dei test e resta com'era). Chi porta il percorso e la suite non lo carica né lo lancia sta in `FUORI_DALLA_GUARDIA`, col perché; la guardia controlla che l'elenco sia ESATTO: ogni voce corrisponde a almeno un portatore (una voce rimasta senza è da togliere) e ogni portatore fuori dalla suite è elencato (uno nuovo va dichiarato).
+
+**Visto ROSSO — sulla base `3fa9142e`, senza checkout e senza cambiare ramo.** La guardia sa leggere l'albero di un commit da git (`ls-tree` e `cat-file`) quando le si dà `SANDBOT_TEST_PERCORSO_FISSO_REF=<commit>`. È l'unico uso di quella variabile: rivedere la guardia su una base passata, dove è rossa per costruzione.
+
+```
+$ SANDBOT_TEST_PERCORSO_FISSO_REF=3fa9142e node_modules/.bin/vitest run src/__tests__/guardie/percorso-fisso.test.ts
+ ❯ src/__tests__/guardie/percorso-fisso.test.ts (9 tests | 2 failed) 469ms
+   ❯ P2 (fase ci-percorso-temporanei): il percorso fisso del Mac sta solo dove c'è l'alternativa — albero del commit 3fa9142e (4)
+     × nei file che la suite carica o lancia compare solo in src/test-tmp.ts e in scripts/lib/base-temporanea.mjs 465ms
+     × i due posti ammessi esistono, portano il percorso e hanno l'alternativa (la temporanea di sistema) 0ms
+
+ FAIL  src/__tests__/guardie/percorso-fisso.test.ts > P2 (…) > nei file che la suite carica o lancia compare solo in src/test-tmp.ts e in scripts/lib/base-temporanea.mjs
+AssertionError: il percorso fisso del Mac (cartella r6fbsdsn3z58bkbb9w55nn780000gn) nel codice di 1 file che la suite carica o lancia:
+  scripts/esporta-inutilizzati.mjs:28
+la base delle mkdtemp la scelgono src/test-tmp.ts (la suite) e scripts/lib/base-temporanea.mjs (gli script), che dove quella cartella non c'è cadono sulla temporanea di sistema: chi la scrive fissa cade con ENOENT sul runner di GitHub (la CI della beta.21).
+fuori dalla guardia, dichiarati col perché in FUORI_DALLA_GUARDIA: scripts/*-probe.mjs (…) · scripts/fatto.mjs (…) · scripts/genera-icone.mjs (…) · scripts/misura-memoria-engramma.ts (…) · scripts/lib/sonda.mjs (…) · scripts/lib/primo-avvio.mjs (…) · scripts/__tests__/primo-avvio-probe-guard.test.ts (…) · scripts/__tests__/schermo-vivo-probe-guard.test.ts (…)
+
+ FAIL  src/__tests__/guardie/percorso-fisso.test.ts > P2 (…) > i due posti ammessi esistono, portano il percorso e hanno l'alternativa (la temporanea di sistema)
+AssertionError: posti ammessi senza il percorso o senza l'alternativa: scripts/lib/base-temporanea.mjs
+
+      Tests  2 failed | 7 passed (9)
+```
+
+(L'ultima riga del primo messaggio riporta il perché di ogni voce per intero; qui accorcio con «…».) I due rossi sono la base: la riga della CI, `esporta-inutilizzati.mjs:28`, e la funzione condivisa che là non c'è. Gli altri sette sono verdi anche sulla base: le dichiarazioni sono già esatte, la lettura dei nomi vede già `esporta-inutilizzati.mjs`, e i cinque test sull'albero finto non guardano il commit.
+
+**VERDE su HEAD:**
+
+```
+$ node_modules/.bin/vitest run src/__tests__/guardie/percorso-fisso.test.ts
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+```
+
+**Il lato rosso delle dichiarazioni**, che sulla base e su HEAD si vedono solo verdi. Con una modifica temporanea alle dichiarazioni (tolta la voce di `scripts/genera-icone.mjs`, aggiunta una voce inventata), rimessa com'era subito dopo e ricontrollata con `cmp`:
+
+```
+$ node_modules/.bin/vitest run src/__tests__/guardie/percorso-fisso.test.ts
+AssertionError: portatori che la suite non carica né lancia e nessuno ha dichiarato (vanno in FUORI_DALLA_GUARDIA col perché):
+  scripts/genera-icone.mjs:34
+voci dichiarate senza più nessun portatore (da togliere): scripts/mai-esistito.mjs
+      Tests  1 failed | 8 passed (9)
+```
+
+I cinque test sull'albero finto tengono fisso il resto: uno script che un test nomina e ha il percorso è rosso con file e riga; un percorso solo in un commento no; i quattro modi di nominare uno script; chi porta il percorso e nessun test lo nomina va dichiarato; `scripts/lib` e i test degli script sono dentro anche se nessun test li nomina; i due posti ammessi senza l'alternativa sono rossi.
+
+Prima del commit anche: tutte le guardie e i test degli script 43 file / 340 test; `tsc --noEmit` pulito (la guardia sta sotto `src/`, che il typecheck copre).
+
+## Chi porta il percorso: i file tenuti fuori dalla guardia, col perché
+
+Sotto `src/` e `scripts/` il pezzo di percorso sta in 42 file (`git grep -l r6fbsdsn3z58bkbb9w55nn780000gn HEAD -- src scripts`): 2 ammessi, 39 dichiarati fuori e la guardia stessa, che lo porta come pezzo cercato e salta se stessa. Sulla base erano 41: `esporta-inutilizzati.mjs` al posto di `lib/base-temporanea.mjs` e senza la guardia.
+
+Ammessi — i due posti che hanno l'alternativa: `src/test-tmp.ts:13` e `scripts/lib/base-temporanea.mjs:23`.
+
+Dichiarati fuori, in `FUORI_DALLA_GUARDIA` (il testo del perché è quello della guardia):
+
+| voce | perché la suite non la carica né la lancia | riga |
+| --- | --- | --- |
+| `scripts/*-probe.mjs` (32 file) | le sonde delle fasi: le lancia `fatto.mjs` (`--sonde`) o a mano, sul Mac. La suite non le lancia né le importa: i test `*-probe-guard` ne leggono il sorgente | vedi la sezione sotto |
+| `scripts/fatto.mjs` | la corsa di fine fase (`docs/FATTO.md`): si lancia a mano, mai dalla suite. La suite importa solo la sua aiutante, `scripts/lib/temporanei-fatto.mjs` | 24 |
+| `scripts/genera-icone.mjs` | genera le icone dell'app con l'Electron del repo: si lancia a mano quando cambia `build/icon.svg`. La suite controlla i file generati, non lo script | 34 |
+| `scripts/misura-memoria-engramma.ts` | la misura della memoria di Engramma su un utente simulato: si lancia a mano. Nessun test lo nomina | 14 |
+
+Dichiarati fuori, ma DENTRO l'ambito della guardia — per questo il perché è diverso: la suite li carica (sono aiutanti importate o test), solo che il percorso non è una base in cui la suite scrive:
+
+| voce | perché | riga |
+| --- | --- | --- |
+| `scripts/lib/sonda.mjs` | il motore delle sonde. Lo importa `llama-server-della-corsa.test.ts`, per `classificaLlamaServer` e le altre funzioni pure; `TMP_BASE` lo usano le sonde e la galleria, sul Mac | 29 |
+| `scripts/lib/primo-avvio.mjs` | l'aiutante della riproduzione e della sonda di primo-avvio. Lo importa `primo-avvio-probe-guard.test.ts`, per `resolveTestApp` e le altre funzioni pure; `TMP_BASE` lo usano la riproduzione e la sonda, sul Mac | 19 |
+| `scripts/__tests__/primo-avvio-probe-guard.test.ts` | la guardia della sonda di primo-avvio controlla CHE la sonda usi la T/ del Mac: il pezzo di percorso è il valore atteso di quell'asserzione (scritto a pezzi per CB1). Cambia con la sonda | 42 |
+| `scripts/__tests__/schermo-vivo-probe-guard.test.ts` | idem per la sonda fase-schermo-vivo: il valore atteso è la T/ del Mac | 53 |
+
+Come l'ho verificato: nei test, `probe\.mjs` compare in 14 righe e in nessun `import` né in un lancio — `readFileSync(new URL('../fase-…-probe.mjs', import.meta.url))`, `read('…')`, commenti, e la voce di un'eccezione di `porte-modelli.test.ts`. `fatto.mjs`, `genera-icone.mjs` e `misura-memoria-engramma.ts` non compaiono fra i 29 file che i test nominano.
+
+Fuori dalla guardia perché non è codice che la suite carica: `docs/catture/fase-memoria-engramma-correzioni/trascrizione-sonda.txt`, `docs/catture/fase-memoria-engramma/trascrizione-sonda.txt`, `docs/misure/fase-design/prima.json` e questo REPORT.
+
+## Da sistemare nella 0.3.2: gli script con il percorso fisso
+
+Non corretti in questa fase, come dice la spec. Con le righe (`git grep -n r6fbsdsn3z58bkbb9w55nn780000gn HEAD -- scripts`).
+
+Le 32 sonde (`const TMP = mkdtempSync('/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/…')` o `const TMP_BASE = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'`):
+
+```
+scripts/fase-0.3.1001-grafica-probe.mjs:25      scripts/fase-0.3.1001-probe.mjs:27
+scripts/fase-aiutanti-probe.mjs:32              scripts/fase-app-composio-probe.mjs:41
+scripts/fase-barra-probe.mjs:38                 scripts/fase-beta-4-probe.mjs:37
+scripts/fase-beta12-correzioni-probe.mjs:33     scripts/fase-box-container-probe.mjs:31
+scripts/fase-catalogo-app-probe.mjs:33          scripts/fase-chat-limiti-probe.mjs:28
+scripts/fase-composio-account-probe.mjs:34      scripts/fase-composio-oauth-probe.mjs:47
+scripts/fase-composio-prova-vera-probe.mjs:42   scripts/fase-deleghe-probe.mjs:43
+scripts/fase-impostazioni-probe.mjs:39          scripts/fase-mcp-setup-probe.mjs:64
+scripts/fase-memoria-engramma-correzioni-probe.mjs:34   scripts/fase-memoria-engramma-probe.mjs:25
+scripts/fase-modalita-box-probe.mjs:37          scripts/fase-onboarding-a-probe.mjs:41
+scripts/fase-pagine-probe.mjs:48                scripts/fase-plugin-probe.mjs:21
+scripts/fase-prima-release-probe.mjs:36         scripts/fase-pulizia-probe.mjs:57
+scripts/fase-risposta-probe.mjs:39              scripts/fase-schermo-vivo-probe.mjs:40
+scripts/fase-skill-catalogo-probe.mjs:37        scripts/fase-skill-probe.mjs:37
+scripts/fase-team-bot-probe.mjs:31              scripts/fase-use-app-probe.mjs:44
+scripts/fase-uso-permessi-probe.mjs:32          scripts/fase-velocita-probe.mjs:32
+```
+
+Le due aiutanti che le sonde importano: `scripts/lib/sonda.mjs:29`, `scripts/lib/primo-avvio.mjs:19`. Cambiando la seconda cambiano anche le sonde che ne prendono la base (`fase-primo-avvio-probe.mjs`, `fase-primo-avvio-p2-riproduzione.mjs`) e i due test che della T/ del Mac fanno il valore atteso (`primo-avvio-probe-guard.test.ts:43`, `schermo-vivo-probe-guard.test.ts:54`).
+
+Gli script a mano: `scripts/fatto.mjs:24`, `scripts/genera-icone.mjs:34`, `scripts/misura-memoria-engramma.ts:14`.
+
+Non del repo: `scripts/vetrina/lib.mjs:30` (non tracciata, intatta per vincolo; la guardia la salta come le altre). Se entra nel repo, è un portatore come gli altri.
+
+Una strada per la 0.3.2, se serve: che sonde e aiutanti prendano la base da `scripts/lib/base-temporanea.mjs` come il censimento — sul Mac è la stessa T/, e le sonde non scrivono più il percorso. Poi le voci si tolgono da `FUORI_DALLA_GUARDIA` una alla volta: la guardia le segnala come scadute.
+
+## Suite e ci-sim dopo l'ultimo commit di codice
+
+Entrambe dopo `f51f79fe`, uscita su file, nessuna pipe su un processo vivo:
+
+```
+$ npm test
+ Test Files  575 passed (575)
+      Tests  7023 passed | 2 skipped (7025)
+    Start at  08:34:04
+    Duration  55.78s
+$ npm run test:ci-sim
+ci-sim: macOS 15 finto, modelli locali ASSENTI (SANDBOT_TEST_NO_LOCAL_MODELS=1), SANDBOT_TEST_TMP_BASE=/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T (la temporanea di sistema RISOLTA, come fa la CI)
+ Test Files  573 passed | 2 skipped (575)
+      Tests  7019 passed | 6 skipped (7025)
+    Start at  08:35:07
+    Duration  68.51s
+```
+
+Nessuna riga «Errors» in nessuna delle due, nessun «error during close» della guardia delle temporanee. Prima di P1 la suite era 573 file, 7009 test passati e 2 saltati (7011, come conta la CI): i 14 in più sono i 5 di P1 e i 9 di P2. I due file che la ci-sim salta sono `src/daemon/__tests__/model-pull.test.ts` e `src/main/memory/__tests__/embed-lane.test.ts`: saltano da soli quando manca il modello locale di incorporamento (`describe.skipIf(!hasLocalEmbedModel())`), come prima di questa fase.
+
+Dopo la tappa 1, con il solo P1: `npm test` 574 file, 7014 passati e 2 saltati (7016).
+
+`fatto.mjs` non l'ho lanciato: non serviva, per questa fase basta la suite intera (lo dice la spec). Nessuna sonda, nessuna cattura.
+
+## Che cosa i controlli NON vedono
+
+- **L'ambito.** La guardia guarda `src/` e `scripts/`: non `eval/`, non i file di configurazione alla radice, non `docs/`.
+- **«Nominato» è lessicale.** Uno script che un test lancia senza nominarne il file — il nome costruito con un template interpolato, o preso da un modulo d'aiuto — non entra nell'ambito. E la guardia non distingue un lancio da una lettura del sorgente: per questo le sonde, che i test si limitano a leggere, stanno nell'elenco dei dichiarati.
+- **Il perché dei dichiarati lo verifico io, non la guardia.** Che la suite non li carichi né li lanci l'ho controllato con `grep` sui test (sopra); la guardia controlla solo che l'elenco sia esatto.
+- **I commenti.** Un percorso in un commento in coda a una riga di codice viene segnalato, e anche una riga di un blocco `/* … */` che non comincia con `*`. Mai il contrario: il codice si vede sempre.
+- **Il percorso, non l'uso.** La guardia dice dove sta il pezzo di percorso, non se quel file lo usi come base senza alternativa: dentro l'ambito è rosso comunque. I due posti ammessi devono avere `tmpdir()`, ma la guardia non prova che cadano davvero: quello lo prova il test di P1.
+- **Il test di P1 non punta la temporanea di sistema su una cartella sua** (la guardia `temporanei.test.ts` vieta `TMPDIR` nei test). Che con la cartella del Mac che manca si scelga la temporanea di sistema lo prova sulla funzione, con lo stesso ambiente; dello script vero prova che esce 0 e che la cartella che manca resta non creata.
+- **Il rosso di P1 sulla base non è un checkout della base.** È la base più la variabile del test, senza l'alternativa: il modo più vicino che ho per far cadere lo script vero su una cartella che non c'è senza toccare quella vera.
+
+## Comandi negati dallo strumento
+
+Non ne ho cercato un altro per nessuno.
+
+- `git push --dry-run origin main` (passo 0 della tappa 1): negato, `Permission denied: shell`. Doveva esserlo.
+- `rm -rf` di tre cartelle orfane in T/ (`sandbot-esporta-inutilizzati-EQZhz8`, `sandbot-esporta-inutilizzati-ri5vMn`, `sandbot-vitest-run-EJEtaG`), rimaste quando la tappa 1 è stata interrotta a metà di una corsa: negato. Le ha cancellate l'utente.
+- `rm -rf` della mia cartella di lavoro `p1-ci-percorso-oSo4Dl` (fine della tappa 1): negato. L'utente la tiene fino alla fine della fase, per i log di questo REPORT, e la cancella lui.
+- `git config --get core.hooksPath`: negato, prima del commit di P1. In `.git/hooks` ci sono solo i `.sample` e nel repo non c'è nessuna `.husky` (letto con un elenco di file, non con quel comando).
+
+## Scelte fatte da me
+
+- **La variabile solo-test `SANDBOT_TEST_DEV_TMP`** (P1). La spec la lasciava come esempio («una variabile che solo il test imposta»). Fuori dai test nessuno la imposta; cambia solo dove lo script del censimento mette la sua temporanea di dichiarazioni.
+- **La regola resta scritta due volte** (P1): `src/test-tmp.ts` non si tocca, come dice P2, e il test controlla che le due copie concordino — rotto compreso.
+- **L'ambito della guardia come sovrainsieme** (P2): «script che un test nomina» invece di «che `spawnSync`/`execFileSync` nominano», e dentro anche `scripts/__tests__/**`. È più largo della spec nella direzione prudente; il costo è che le sonde lette dai loro test vanno dichiarate.
+- **L'elenco dei dichiarati tenuto esatto dalla guardia** (P2): la spec chiedeva di dichiararli col perché; che ogni voce corrisponda a un portatore e che nessun portatore resti fuori l'ho aggiunto io, così l'elenco non marcisce e la 0.3.2 parte da un inventario vero.
+- **I due posti ammessi devono avere l'alternativa** (P2): se uno perde `tmpdir()`, la guardia lo dice.
+- **`SANDBOT_TEST_PERCORSO_FISSO_REF`** (P2): la spec offriva due modi per vedere il rosso sulla base; ho scelto «il test puntato su quel commit», così il rosso si rifà con un comando solo, anche quando la mia cartella con i log non ci sarà più.
+- **I commenti di riga non contano** (P2), come in CB1.
+- **`scripts/vetrina/` esclusa**, come nelle altre guardie: non è del repo.
+
+## Domande aperte
+
+Nessuna. Due note che non bloccano: i nomi delle due variabili nuove sono miei e si cambiano quando vuoi; `scripts/vetrina/lib.mjs` porta il percorso (riga 30) e la guardia non lo vede finché la vetrina resta fuori dal repo.
+
+## Chiusura
+
+- Tre commit sopra la base: P1 `7e6f9bce`, P2 `f51f79fe`, questo REPORT. Dalla base a HEAD, prima del REPORT: 4 file (tre di P1, uno di P2), 514 righe aggiunte e 4 tolte. CHANGELOG invariato.
+- Tag annotato `fase-ci-percorso-temporanei`, messo dopo questo commit, locale. Nessun push. Nessun tag `v*`: `v0.3.1001-beta.21` non si tocca e punta ancora a `3fa9142e`.
+- git status pulito a parte `out-review/` e `scripts/vetrina/`, intatte.
+- Processi del repo — Electron e `--homun-daemon` di `/Users/fabio/Projects/Bot/sandbot`, per eseguibile, `ps -axo pid=,comm=` —: 0, misurati alle 08:38:25 dopo le due corse e di nuovo alle 08:44:59, prima di questo commit.
+- Temporanee: una sola, la mia cartella di lavoro `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/p1-ci-percorso-oSo4Dl` (nata con `mktemp -d` nella cartella dei vincoli: i log di questo REPORT e la copia dell'REPORT di prima della sezione); la cancella l'utente a fine fase. Niente `sandbot-*` né `fatto-*` in T/ dopo ogni corsa. Niente del repo in `/tmp`.
+- Vincoli di sempre: nessuna sonda, nessuna app né daemon avviati, nessun modello, nessun download, nessun pacchetto nuovo, nessun build, nessuna dist firmata, nessun `open` dell'Installer, `osascript` o `sudo`, nessuna cattura; mai letto né scritto nulla nelle cartelle dati vere; `vendor/llama`, `vendor/engramma`, `dist-installers/`, i repo di fianco e l'Homebrew llama-server mai toccati (`--update-lock` mai: il pretest di `npm test` ha fatto il suo passaggio rapido, «già presenti — verificati 3/3», e ha ricopiato i due `.wasm` di tree-sitter in `vendor/`, come a ogni `npm test`); migrazioni del DB nessuna.
+
+## Inventario — i 29 file di `scripts/` che i test nominano (codice, commenti esclusi)
+
+```
+scripts/after-pack.mjs                       scripts/aggiorna-catalogo-composio.mjs
+scripts/aggiorna-loghi-provider.mjs          scripts/copia-fixture-container-1.7.1.mjs
+scripts/design-migrazione.mjs                scripts/esporta-inutilizzati.mjs
+scripts/extract-release-notes.mjs            scripts/fake-browser-mcp.mjs
+scripts/fake-container.mjs                   scripts/fake-open.mjs
+scripts/fake-pkgutil.mjs                     scripts/fake-spctl.mjs
+scripts/fase-aiutanti-probe.mjs              scripts/fase-impostazioni-probe.mjs
+scripts/fase-modalita-box-probe.mjs          scripts/fase-primo-avvio-p2-riproduzione.mjs
+scripts/fase-primo-avvio-probe.mjs           scripts/fase-schermo-vivo-probe.mjs
+scripts/fetch-llama.mjs                      scripts/galleria.mjs
+scripts/lib/base-temporanea.mjs              scripts/lib/primo-avvio.mjs
+scripts/lib/probe-daemons.mjs                scripts/lib/sonda.mjs
+scripts/lib/temporanei-fatto.mjs             scripts/lib/window-list.swift
+scripts/llama-pin.json                       scripts/prepare-engramma.mjs
+scripts/verify-release.mjs
+```
+
 # REPORT FASE ISOLAMENTO-SUITE: la suite non tocca i servizi locali veri, il download annullato non lascia errori in giro, la barra ha un ordine stabile
 
 Base: `main` al tag `fase-isolamento-locale` (d65e876ec), verificata: HEAD era esattamente lì, git pulito a parte `out-review/` e `scripts/vetrina/` (non toccate). È una correzione delle prove e di un ordine instabile (freeze 0.3.1002): niente di nuovo. Tre commit, uno per punto: S1 `b1d823da9`, S2 `a34f91f09`, S3 `2a5d7315e`.
