@@ -768,7 +768,7 @@ const Sezione = ({ id }: { id: IdSezione }) => {
       {id === 'card-corpo' && (
         <Section title="chat-card, disclosure, code, tech-details — il corpo di una card in chat" testId="galleria-section-card-corpo">
           <div className="flex flex-col gap-6">
-            <Riga label="chat-card · il titolo GRANDE (la frase che si legge prima di decidere), la riga grigia, il comando (Code su fondo card), l'incavo (CardBlock), i dettagli tecnici chiusi (TechDetails)">
+            <Riga label="chat-card · il titolo grande, la riga grigia, il comando (Code), l’incavo (CardBlock), i dettagli tecnici chiusi (TechDetails)">
               <ChatCard
                 tone="waiting"
                 titoloGrande
@@ -784,22 +784,19 @@ const Sezione = ({ id }: { id: IdSezione }) => {
                 <TechDetails testo="run-command · nel computer del bot" />
               </ChatCard>
             </Riga>
-            <Riga label="disclosure · la riga di sistema che si apre: chiusa · aperta · quella che non apre (porta al riquadro del campo); a destra la riga <summary> di un <details>, con il codice che va a capo">
-              <div className="flex w-full flex-col">
+            <Riga label="disclosure · la riga che si apre (chiusa · aperta · che non apre) — il summary di un details col codice — tech-details aperto, code in una frase">
+              <div className="flex w-96 flex-col">
                 <Disclosure tone="ok" segno={<Check className="size-4" />} testo="Consentito una volta · git status --short" metadato="10:44" aperto={false} apribile />
                 <Disclosure tone="muted" segno={<X className="size-4" />} testo="Rifiutato · pulizia dei vecchi report" metadato="10:45" aperto apribile />
                 <Disclosure tone="muted" segno={<ArrowDown className="size-4" aria-hidden="true" />} testo="In attesa della tua scelta · qui sotto" />
               </div>
-              <details open className="w-full max-w-96">
+              <details open className="w-96">
                 <DisclosureSummary icon={ScrollText}>Riepilogo turni precedenti</DisclosureSummary>
                 <Code aCapo className="mt-1">L'utente ha chiesto di ordinare i preventivi per cliente.</Code>
               </details>
-            </Riga>
-            <Riga label="code · il blocco che va a capo (fondo tenue, testo grigio) e il pezzo dentro una frase; tech-details · aperto: il testo tecnico com'è arrivato dal daemon">
-              <Code aCapo className="max-w-96">cd ~/Progetti && npm test -- --run</Code>
-              <div className="flex w-full max-w-96 flex-col gap-2">
+              <div className="flex w-96 flex-col gap-2">
                 <TechDetails aperto testo="not installable here: the entry exposes neither remotes nor npm packages" />
-                <Text size="small">La schedule è <Code inline>(0 9 * * 1)</Code>, nel fuso del bot.</Text>
+                <Text size="small">Il pezzo in una frase: <Code inline>(0 9 * * 1)</Code>.</Text>
               </div>
             </Riga>
           </div>
