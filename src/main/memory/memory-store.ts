@@ -160,9 +160,10 @@ export function deletedMemoryText(id: string): string {
  * in quarantine: `confirm` promotes it» — e Homun la prendeva per una lapide
  * («was deleted»). Così la nota torna in quarantena col testo nuovo, external
  * com'era, e torna attiva solo quando l'utente la conferma di nuovo: la
- * conferma è dell'utente, mai della riscrittura. Vale per il bot
- * (update_memory), per l'interfaccia (memorySave) e per il solo cambio di
- * tier: il motore non fa distinzioni.
+ * conferma è dell'utente, mai della riscrittura del BOT (update_memory).
+ *
+ * Tappa 4 (correzione): dall'INTERFACCIA la mano dell'utente vale già come
+ * conferma — la nota resta attiva col testo nuovo (confirmedByUsersHand).
  */
 export async function updateMemoryNote(agentId: string, input: UpdateMemoryNoteInput & { contaminated?: boolean }, opts: WriterOpts = {}): Promise<EngrammaNoteView> {
   const id = String(input.id ?? '')
@@ -180,7 +181,7 @@ export async function updateMemoryNote(agentId: string, input: UpdateMemoryNoteI
   if (nextScope !== scope) {
     if (found.state === 'quarantined') throw new MemoryNoteError(pendingConfirmationText(found.id), 'CONFLICT')
     const dst = await cellFor(agentId, nextScope, opts.byUser)
-    const born = await dst.put({
+    let born = await dst.put({
       body: input.content !== undefined ? String(input.content) : note.body,
       tags: [tier],
       source: note.source,
@@ -188,6 +189,7 @@ export async function updateMemoryNote(agentId: string, input: UpdateMemoryNoteI
       extensions: { 'x-homun': { ...((note.extensions['x-homun'] as object | undefined) ?? {}), tier, scope: nextScope } }
     })
     await (await cellFor(agentId, scope, opts.byUser)).delete(found.id)
+    born = await confirmedByUsersHand(dst, born, found.state, opts)
     try {
       markEmbedDirtyFor(db(), agentId)
       enqueueEmbedPending(db(), agentId)
@@ -197,12 +199,14 @@ export async function updateMemoryNote(agentId: string, input: UpdateMemoryNoteI
 
   const xhomun = (note.extensions['x-homun'] as Record<string, unknown> | undefined) ?? {}
   try {
-    const updated = await (await cellFor(agentId, scope, opts.byUser)).patch(found.id, {
+    const cell = await cellFor(agentId, scope, opts.byUser)
+    const patched = await cell.patch(found.id, {
       ...(input.content !== undefined ? { body: String(input.content) } : {}),
       ...(input.tier !== undefined ? { tags: [tier] } : {}),
       ...(input.contaminated || note.confidence === 'external' ? { confidence: 'external' as const } : {}),
       extensions: { 'x-homun': { ...xhomun, tier, scope: nextScope } }
     })
+    const updated = await confirmedByUsersHand(cell, patched, found.state, opts)
     try {
       markEmbedDirtyFor(db(), agentId)
       enqueueEmbedPending(db(), agentId)
@@ -211,6 +215,24 @@ export async function updateMemoryNote(agentId: string, input: UpdateMemoryNoteI
   } catch (e) {
     throw recodeEngineError(e, found.id)
   }
+}
+
+/**
+ * La mano dell'utente vale come conferma (tappa 4, correzione di E2). Il
+ * motore fa nascere in quarantena ogni riscrittura external di una nota
+ * attiva — «an external note is born in quarantine: `confirm` promotes it» —
+ * e rifiuta (CONFLICT) quella che la lascerebbe attiva: giusto per il bot,
+ * la cui riscrittura non conferma nulla. Dall'interfaccia no: se la nota ERA
+ * attiva, lo stesso utente (actor homun:user) la conferma subito dopo averla
+ * scritta — patch e confirm, due operazioni sue — e la nota resta attiva col
+ * testo nuovo. Una nota che era in quarantena ci resta: la conferma resta il
+ * suo bottone. Se la conferma non riesce, la nota resta in quarantena col
+ * testo nuovo: lo stato di prima di questa correzione, mai peggiore.
+ */
+async function confirmedByUsersHand(cell: EngrammaCell, written: EngrammaNoteView, was: LocatedNote['state'], opts: WriterOpts): Promise<EngrammaNoteView> {
+  if (!opts.byUser || was !== 'active' || written.status !== 'quarantined') return written
+  await cell.confirm(written.id)
+  return (await cell.get(written.id)) ?? written
 }
 
 /**

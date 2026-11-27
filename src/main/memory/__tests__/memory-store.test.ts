@@ -336,7 +336,7 @@ describe('fase memoria-engramma · correzioni C4: le lapidi si vedono e si dimen
 // quarantena, finché l'utente non la conferma di nuovo. Vale per il bot
 // (update_memory), per l'interfaccia (memorySave) e per il solo cambio di
 // tier: la regola è una. Le note che non sono external restano come prima.
-describe('fase memoria-engramma v0.6.19 (E2): la nota external confermata si riscrive tornando in quarantena', () => {
+describe('fase memoria-engramma v0.6.19 (E2): la nota external confermata si riscrive — dal bot torna in quarantena, dall’interfaccia resta attiva', () => {
   const A = 'agent_ext614'
 
   /** Una nota external (turno contaminato) che l'utente ha confermato: attiva. */
@@ -376,15 +376,54 @@ describe('fase memoria-engramma v0.6.19 (E2): la nota external confermata si ris
     await (await import('../engine')).closeMemoryEngine()
   })
 
-  it('dall’interfaccia (memorySave): uguale — la modifica dell’utente resta external e aspetta la sua conferma', async () => {
+  // Tappa 4 (correzione di E2): dal BOT la nota torna in attesa (sopra);
+  // dall’INTERFACCIA no — la mano dell’utente vale già come conferma. Il
+  // motore rifiuta la patch che la lascerebbe attiva (CONFLICT), quindi la
+  // riscrittura si fa external — nasce in quarantena — e lo STESSO utente la
+  // conferma subito (patch + confirm, entrambe homun:user). Vale per ciò che
+  // era attiva: una nota in attesa ci resta (la conferma resta il bottone).
+  it('dall’interfaccia (memorySave): la mano dell’utente vale come conferma — la nota resta ATTIVA col testo nuovo, external com’era', async () => {
     await fresh()
-    const { memorySave, memoryConfirm } = await import('../memory-rpc')
+    const { memorySave } = await import('../memory-rpc')
+    const { botCell } = await import('../engine')
     const n = await conferita('Dal sito: l’ufficio chiude alle 13.')
     const u = await memorySave(A, { id: n.id, body: 'Dal sito: l’ufficio chiude alle 14.', tier: 'log' })
     expect(u.id).toBe(n.id)
-    expect(await dove(n.id)).toMatchObject({ state: 'quarantined', note: { body: 'Dal sito: l’ufficio chiude alle 14.', confidence: 'external' } })
-    await memoryConfirm(A, n.id)
-    expect(await dove(n.id)).toMatchObject({ state: 'active', note: { body: 'Dal sito: l’ufficio chiude alle 14.' } })
+    expect(u).toMatchObject({ status: 'active', confidence: 'external', body: 'Dal sito: l’ufficio chiude alle 14.' })
+    expect(await dove(n.id)).toMatchObject({ state: 'active', note: { body: 'Dal sito: l’ufficio chiude alle 14.', confidence: 'external' } })
+    // nel registro la riscrittura e la conferma sono dell’UTENTE: mai del bot
+    const ops = await (await botCell(A)).changesSince(0)
+    expect('ops' in ops && ops.ops.slice(-2).map((o) => o.actor)).toEqual(['homun:user', 'homun:user'])
+    await (await import('../engine')).closeMemoryEngine()
+  })
+
+  it('dall’interfaccia, solo il tier: uguale — resta attiva col tier nuovo', async () => {
+    await fresh()
+    const { updateMemoryNote } = await import('../memory-store')
+    const n = await conferita('Dal web: il museo apre alle 9.')
+    expect(await updateMemoryNote(A, { id: n.id, tier: 'core' }, { byUser: true })).toMatchObject({ body: 'Dal web: il museo apre alle 9.', tags: ['core'], confidence: 'external', status: 'active' })
+    expect(await dove(n.id)).toMatchObject({ state: 'active', note: { tags: ['core'] } })
+    await (await import('../engine')).closeMemoryEngine()
+  })
+
+  it('dall’interfaccia, cambio di scope: la nota rinasce attiva nell’altra cella (la stessa regola)', async () => {
+    await fresh()
+    const { updateMemoryNote } = await import('../memory-store')
+    const n = await conferita('Dal sito: la birreria apre alle 18.')
+    const moved = await updateMemoryNote(A, { id: n.id, scope: 'user' }, { byUser: true })
+    expect(moved.id).not.toBe(n.id)
+    expect(moved).toMatchObject({ status: 'active', confidence: 'external', body: 'Dal sito: la birreria apre alle 18.' })
+    expect(await dove(n.id)).toMatchObject({ state: 'deleted' })
+    expect(await dove(moved.id)).toMatchObject({ state: 'active', scope: 'user', note: { confidence: 'external' } })
+    await (await import('../engine')).closeMemoryEngine()
+  })
+
+  it('dall’interfaccia, una external NON ancora confermata: la modifica resta in attesa (la conferma resta il bottone)', async () => {
+    await fresh()
+    const { writeMemoryNote, updateMemoryNote } = await import('../memory-store')
+    const n = await writeMemoryNote(A, { content: 'Dal sito: in attesa.', tier: 'log', source: 'homun:chat/x/3', contaminated: true })
+    expect(await updateMemoryNote(A, { id: n.id, content: 'Dal sito: in attesa, corretta.' }, { byUser: true })).toMatchObject({ status: 'quarantined', confidence: 'external' })
+    expect(await dove(n.id)).toMatchObject({ state: 'quarantined', note: { body: 'Dal sito: in attesa, corretta.' } })
     await (await import('../engine')).closeMemoryEngine()
   })
 
