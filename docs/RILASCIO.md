@@ -41,17 +41,17 @@ CHANGELOG) e si pubblica A MANO. Solo allora entra nel feed di tutti.
 
 ## Caricare gli asset di Engramma (una volta per versione del motore)
 
-La CI prende `engramma.darwin-arm64.node` (33 MB), `index.js` e `index.d.ts`
+La CI prende `engramma.darwin-arm64.node` (51 MB), `index.js` e `index.d.ts`
 dagli asset della release fissata in `vendor/engramma/engramma.lock.json`
 (`release: { repo, tag }` + hash e dimensioni: mai un file non verificato).
 Gli asset vanno caricati DA SOLI, con `gh`, dai file di `vendor/engramma`
 (che il lock ha già verificato):
 
 ```
-gh release create engramma-fase-v0.4.3 \
+gh release create engramma-fase-v0.6.19 \
   --repo homun-app/homun-core \
-  --title "Engramma fase-v0.4.3" \
-  --notes "Il motore Engramma agganciato da Homun (lock: fase-v0.4.3, commit bdb47871)." \
+  --title "Engramma fase-v0.6.19" \
+  --notes "Il motore Engramma agganciato da Homun (lock: fase-v0.6.19, commit 9929f5a)." \
   vendor/engramma/engramma.darwin-arm64.node \
   vendor/engramma/index.js \
   vendor/engramma/index.d.ts

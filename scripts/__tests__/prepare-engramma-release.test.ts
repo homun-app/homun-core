@@ -34,7 +34,7 @@ const FILES: Record<string, string> = {
   'index.js': 'module.exports = {}',
   'index.d.ts': 'export declare const version: string'
 }
-const RELEASE = { repo: 'homun-app/homun-core', tag: 'engramma-fase-v0.4.3' }
+const RELEASE = { repo: 'homun-app/homun-core', tag: 'engramma-fase-v0.6.19' }
 
 /** Il lock per i contenuti dati: hash, dimensioni e la release degli asset. */
 async function lockOf(files: Record<string, string>, over: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
@@ -44,7 +44,7 @@ async function lockOf(files: Record<string, string>, over: Record<string, unknow
     hashes[f] = await sha256File(join(files['__dir'] as string, f))
     sizes[f] = statSync(join(files['__dir'] as string, f)).size
   }
-  return { module: 'engramma-node', version: '0.1.0-dev', tag: 'fase-v0.4.3', files: hashes, sizes, release: RELEASE, ...over }
+  return { module: 'engramma-node', version: '0.6.19-beta.1', tag: 'fase-v0.6.19', files: hashes, sizes, release: RELEASE, ...over }
 }
 
 /** Una cartella coi file dati + il lock calcolato sopra quei file. */
@@ -214,7 +214,7 @@ describe('fase rilascio di prova (RP1): il download dagli asset (server finto su
 })
 
 describe('fase rilascio di prova (RP1): il lock del repo punta agli asset giusti', () => {
-  it('engramma.lock.json ha release {homun-app/homun-core, engramma-fase-v0.4.3} e le dimensioni dei 3 file', async () => {
+  it('engramma.lock.json ha release {homun-app/homun-core, engramma-fase-v0.6.19} e le dimensioni dei 3 file', async () => {
     const lockPath = join(REPO, 'vendor', 'engramma', 'engramma.lock.json')
     const lock = JSON.parse(readFileSync(lockPath, 'utf8'))
     expect(lock.release).toEqual(RELEASE)
