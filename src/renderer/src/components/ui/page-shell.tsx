@@ -82,7 +82,7 @@ export function useHeadName(): string {
  * contenitore a blocchi (il corpo che scorre, gli slot) le due classi non
  * contano: un blocco è già largo quanto il suo contenitore.
  */
-export function PageColumn({ width, children, className, testId }: {
+export function PageColumn({ width, children, className, testId, sottoTestata = false }: {
   /** la larghezza scelta; se manca, quella del guscio che la contiene (fuori da un guscio: wide) */
   width?: PageWidth
   children: ReactNode
@@ -93,6 +93,13 @@ export function PageColumn({ width, children, className, testId }: {
   className?: string
   /** il testid del gutter, la radice della colonna */
   testId?: string
+  /**
+   * K3 (fase conversione-chat): la colonna comincia SOTTO LA TESTATA della
+   * chat — la testata è sospesa in cima alla colonna (52, col-head) e il
+   * primo del flusso (il riquadro delle approvazioni, i messaggi) si
+   * riserva da sé lo spazio: 64, la testata più il respiro di 12
+   */
+  sottoTestata?: boolean
 }): ReactNode {
   const shellWidth = useContext(PageWidthContext)
   return (
@@ -106,7 +113,7 @@ export function PageColumn({ width, children, className, testId }: {
           (max-w-${…}) non verrebbe mai generata — Tailwind cerca i nomi interi
           nei sorgenti. Le variabili --w-* escono sempre nel CSS (@theme static) */}
       <div
-        className={cn('mx-auto w-full', className)}
+        className={cn('mx-auto w-full', sottoTestata && 'pt-16', className)}
         data-page-content
         style={{ maxWidth: `var(--w-${width ?? shellWidth})` }}
       >

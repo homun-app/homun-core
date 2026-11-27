@@ -93,6 +93,16 @@ export function buttonVariants({ variant = 'primary', size = 'md', icon = false,
   return cn(buttonClasses({ variant, size, icon, shape: shape ?? shapeOf(variant, icon) }), className)
 }
 
+/**
+ * K3 (fase conversione-chat): il bottone SECONDARIO dentro una card in chat.
+ * La card è già `bg-muted`: con il suo fondo di fabbrica il bottone secondary
+ * ci sparirebbe dentro. Sulla pagina è un passo più scuro del fondo; sulla
+ * card resta un passo più chiaro (fondo card), com'è sempre stato. Si aggiunge
+ * a `<Button variant="secondary">` (className) finché le card che lo usano
+ * (K4: bozze, domande) non passano a una variante chiusa.
+ */
+export const SU_CARD = 'bg-card hover:bg-card/80'
+
 export function Button({
   variant = 'primary',
   size = 'md',

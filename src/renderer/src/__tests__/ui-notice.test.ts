@@ -177,3 +177,24 @@ describe('DS2: Notice — la riga di sistema compatta della chat', () => {
     expect(nuda.filter((c) => c.startsWith('bg-'))).toEqual([])
   })
 })
+
+describe('K3 (fase conversione-chat): Notice — la taglia e il peso come varianti chiuse', () => {
+  it('size body SOSTITUISCE text-small (non si somma) e weight semibold mette il peso 600; tono, altezza e parti non cambiano; il default resta la riga di sistema (small, 400)', () => {
+    const base = noticeOf(render({ children: 'testo' }))
+    expect(has(base, 'text-small')).toBe(true)
+    expect(has(base, 'text-body')).toBe(false)
+    expect(classes(base).some((c) => c.startsWith('font-'))).toBe(false)
+    const corpo = noticeOf(render({ children: '+2 altrove', size: 'body', weight: 'semibold', tone: 'warning', icon: createElement(Timer, { className: 'size-4' }) }))
+    for (const k of ['text-body', 'font-semibold', 'text-waiting', 'min-h-6', 'w-full']) expect(has(corpo, k), k).toBe(true)
+    expect(has(corpo, 'text-small')).toBe(false)
+    expect(has(corpo, 'font-medium')).toBe(false)
+    expect(has(noticeOf(render({ children: 'x', size: 'body', weight: 'medium' })), 'font-medium')).toBe(true)
+  })
+
+  it('nessuna classe morta: nemmeno text-body e i pesi dentro Notice', async () => {
+    const tutte = new Set<string>()
+    for (const p of [{}, { size: 'body' }, { size: 'body', weight: 'medium', fill: true }, { size: 'body', weight: 'semibold', tone: 'warning' }]) for (const c of classes(noticeOf(render({ children: 'x', ...p })))) tutte.add(c)
+    const css = await compileRenderer([...tutte])
+    expect(deadClasses(css, [...tutte])).toEqual([])
+  })
+})

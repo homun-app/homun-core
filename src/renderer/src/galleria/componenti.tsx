@@ -34,7 +34,7 @@ import { i18n, activateUiLanguage } from '../lib/i18n'
 // inietta a runtime (è un sovrainsieme identico del foglio dell'app: i token
 // e le utility, già deduplicati per nome)
 import '../styles.css'
-import { Loader2, TriangleAlert, CircleHelp, CheckCircle2, Plus, Settings, Plug } from 'lucide-react'
+import { Loader2, TriangleAlert, CircleHelp, CheckCircle2, Plus, Settings, Plug, Check, X, ArrowDown, ScrollText, Wrench } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Stack } from '../components/ui/stack'
 import { Row } from '../components/ui/row'
@@ -56,8 +56,11 @@ import { SearchField } from '../components/ui/search-field'
 import { FilterChipsScelta, FilterChipsMenu, FilterChipsInterruttore } from '../components/ui/filter-chips'
 import { PageToolbar } from '../components/ui/page-toolbar'
 import { ProposalCard } from '../components/ui/proposal-card'
-import { ChatCard } from '../components/ui/chat-card'
+import { ChatCard, CardBlock } from '../components/ui/chat-card'
 import { Tag } from '../components/ui/tag'
+import { Disclosure, DisclosureSummary } from '../components/ui/disclosure'
+import { Code } from '../components/ui/code'
+import { TechDetails } from '../components/ui/tech-details'
 import { catalogLogoUrl } from '../lib/app-logos'
 import { ListPage } from '../components/ui/list-page'
 import { DetailPage } from '../components/ui/detail-page'
@@ -176,6 +179,8 @@ export const SEZIONI = [
   // K2 (fase conversione-chat): il guscio di ogni card in chat (su di lui sta ProposalCard) e l'etichetta di stato
   { id: 'card-in-chat', titolo: 'chat-card — il guscio di ogni card in chat', componenti: ['chat-card'] },
   { id: 'tag', titolo: 'tag — le etichette di stato', componenti: ['tag'] },
+  // K3 (fase conversione-chat): il corpo di una card in chat — il titolo grande, l'incavo, la riga che si apre, il codice, i dettagli tecnici
+  { id: 'card-corpo', titolo: 'chat-card, disclosure, code, tech-details — il corpo di una card in chat', componenti: ['chat-card', 'disclosure', 'code', 'tech-details'] },
   { id: 'superfici', titolo: 'card e empty-state — superfici', componenti: ['card', 'empty-state'] },
   { id: 'schede', titolo: 'underline-tabs', componenti: ['underline-tabs'] },
   { id: 'dialogo', titolo: 'dialog aperto', componenti: ['dialog'] },
@@ -755,6 +760,47 @@ const Sezione = ({ id }: { id: IdSezione }) => {
               <ChatCard logo={catalogLogoUrl('asana.svg')} titolo="Riconnetti Asana" nota={<Tag tone="error">sessione scaduta</Tag>} azioni={<Button>Riconnetti</Button>}>
                 <Text size="small" tone="muted">Il bot ha provato a usare questa app ma la sessione è scaduta.</Text>
               </ChatCard>
+            </Riga>
+          </div>
+        </Section>
+      )}
+
+      {id === 'card-corpo' && (
+        <Section title="chat-card, disclosure, code, tech-details — il corpo di una card in chat" testId="galleria-section-card-corpo">
+          <div className="flex flex-col gap-6">
+            <Riga label="chat-card · il titolo GRANDE (la frase che si legge prima di decidere), la riga grigia, il comando (Code su fondo card), l'incavo (CardBlock), i dettagli tecnici chiusi (TechDetails)">
+              <ChatCard
+                tone="waiting"
+                titoloGrande
+                titolo="Nora vuole eseguire un comando"
+                azioni={<><Button>Consenti</Button><Button variant="destructive">Rifiuta</Button><Button variant="ghost">Altre scelte ▾</Button></>}
+              >
+                <Text size="small" tone="muted">tramite un sottoagente</Text>
+                <Code tone="card">git status --short</Code>
+                <CardBlock className="flex flex-col gap-1">
+                  <div className="flex gap-2"><Text size="small" tone="muted" className="shrink-0">Routine:</Text><Text size="small">Ordina i preventivi</Text></div>
+                  <div className="flex gap-2"><Text size="small" tone="muted" className="shrink-0">Schedule:</Text><Text size="small">ogni lunedì alle 9 <Code inline>(0 9 * * 1)</Code></Text></div>
+                </CardBlock>
+                <TechDetails testo="run-command · nel computer del bot" />
+              </ChatCard>
+            </Riga>
+            <Riga label="disclosure · la riga di sistema che si apre: chiusa · aperta · quella che non apre (porta al riquadro del campo); a destra la riga <summary> di un <details>, con il codice che va a capo">
+              <div className="flex w-full flex-col">
+                <Disclosure tone="ok" segno={<Check className="size-4" />} testo="Consentito una volta · git status --short" metadato="10:44" aperto={false} apribile />
+                <Disclosure tone="muted" segno={<X className="size-4" />} testo="Rifiutato · pulizia dei vecchi report" metadato="10:45" aperto apribile />
+                <Disclosure tone="muted" segno={<ArrowDown className="size-4" aria-hidden="true" />} testo="In attesa della tua scelta · qui sotto" />
+              </div>
+              <details open className="w-full max-w-96">
+                <DisclosureSummary icon={ScrollText}>Riepilogo turni precedenti</DisclosureSummary>
+                <Code aCapo className="mt-1">L'utente ha chiesto di ordinare i preventivi per cliente.</Code>
+              </details>
+            </Riga>
+            <Riga label="code · il blocco che va a capo (fondo tenue, testo grigio) e il pezzo dentro una frase; tech-details · aperto: il testo tecnico com'è arrivato dal daemon">
+              <Code aCapo className="max-w-96">cd ~/Progetti && npm test -- --run</Code>
+              <div className="flex w-full max-w-96 flex-col gap-2">
+                <TechDetails aperto testo="not installable here: the entry exposes neither remotes nor npm packages" />
+                <Text size="small">La schedule è <Code inline>(0 9 * * 1)</Code>, nel fuso del bot.</Text>
+              </div>
             </Riga>
           </div>
         </Section>

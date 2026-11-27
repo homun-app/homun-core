@@ -2820,7 +2820,7 @@ msgstr "Bot description / role (goes in the system prompt)"
 msgid "Dettagli"
 msgstr "Details"
 
-#: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/ui/tech-details.tsx
 msgid "Dettagli tecnici"
 msgstr "Technical details"
 
@@ -3267,7 +3267,7 @@ msgid "fermo"
 msgstr "idle"
 
 #. placeholder {0}: message.sha12
-#. placeholder {1}: message.repoUrl && <> · <a className="text-primary hover:underline" href={message.repoUrl} target="_blank" rel="noreferrer">{t`repository`}</a></>
+#. placeholder {1}: message.repoUrl && <> · <Button variant="link" asChild><a href={message.repoUrl} target="_blank" rel="noreferrer">{t`repository`}</a></Button></>
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "fiducia: {pluginTrust} · commit {0}{1}"
 msgstr "trust: {pluginTrust} · commit {0}{1}"
@@ -5958,6 +5958,7 @@ msgid "non riuscito"
 msgstr "failed"
 
 #: src/renderer/src/components/ConnectorCard.tsx
+#: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/plugin/app-row.tsx
 msgid "Non riuscito"
 msgstr "Didn't work"

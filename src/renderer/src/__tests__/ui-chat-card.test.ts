@@ -120,3 +120,59 @@ describe('K2: ChatCard — il guscio di ogni card in chat', () => {
     expect(deadClasses(css, [...tutte])).toEqual([])
   })
 })
+
+describe('K3 (fase conversione-chat): ChatCard — la superficie da sola, il titolo grande, l\'incavo, il secondario sulla card', () => {
+  const tutto = (n: HtmlNode): string[] => [n, ...findAll(n, () => true)].flatMap(cls)
+
+  it('il titolo GRANDE (titoloGrande) è la frase che si legge prima di decidere: text-title, peso 600, e va a capo da sé (RW4); senza, il titolo resta la riga in peso medio', () => {
+    const grande = findAll(root({ titolo: 'Vuole eseguire un comando', titoloGrande: true }), (n) => n.tag === 'p')[0]!
+    for (const k of ['text-title', 'font-semibold', 'wrap-anywhere']) expect(cls(grande), k).toContain(k)
+    expect(cls(grande)).not.toContain('font-medium')
+    const riga = findAll(root({ titolo: 'Slack' }), (n) => n.tag === 'p')[0]!
+    for (const k of ['text-body', 'font-medium']) expect(cls(riga), k).toContain(k)
+    for (const k of ['text-title', 'font-semibold', 'wrap-anywhere']) expect(cls(riga), k).not.toContain(k)
+  })
+
+  it('ChatSurface è la superficie da sola: le stesse classi della radice di ChatCard (l\'85% della colonna, raggio di superficie, respiro 16, il testo che va a capo DENTRO, il fondo del tono) senza colonna, testata né ritmo', async () => {
+    const { ChatSurface } = await import('../components/ui/chat-card')
+    const albero = parseHtml(renderHtml(ce(ChatSurface, { testId: 'superficie-prova', tone: 'waiting' }, 'corpo')))
+    const n = findAll(albero, (x) => x.attrs['data-testid'] === 'superficie-prova')[0]!
+    for (const k of ['max-w-[85%]', 'min-w-0', 'rounded-surface', 'p-4', 'wrap-anywhere', 'bg-waiting/10']) expect(cls(n), k).toContain(k)
+    for (const k of ['flex', 'flex-col', 'gap-2', 'bg-muted']) expect(cls(n), k).not.toContain(k)
+    expect(textOf(n)).toBe('corpo')
+    // ed è DAVVERO la stessa superficie: la radice di ChatCard col suo tono ha tutte le classi della superficie
+    for (const k of cls(n)) expect(cls(root({ tone: 'waiting' })), k).toContain(k)
+    expect(cls(root({}))).toContain('bg-muted')
+    expect('data-testid' in findAll(parseHtml(renderHtml(ce(ChatSurface, {}, 'corpo'))), (x) => x.tag === 'div')[0]!.attrs).toBe(false)
+  })
+
+  it('CardBlock è l\'incavo dentro la card: raggio di controllo, fondo card, respiro 12 — e nient\'altro (il ritmo lo decide chi lo riempie)', async () => {
+    const { CardBlock } = await import('../components/ui/chat-card')
+    const n = findAll(parseHtml(renderHtml(ce(CardBlock, { testId: 'blocco-prova' }, 'riga'))), (x) => x.attrs['data-testid'] === 'blocco-prova')[0]!
+    expect(cls(n)).toEqual(['rounded-control', 'bg-card', 'p-3'])
+    expect(textOf(n)).toBe('riga')
+    // className del chiamante si aggiunge
+    expect(cls(findAll(parseHtml(renderHtml(ce(CardBlock, { className: 'mt-3 flex flex-col gap-1.5' }, 'x'))), (x) => x.tag === 'div')[0]!)).toEqual(['rounded-control', 'bg-card', 'p-3', 'mt-3', 'flex', 'flex-col', 'gap-1.5'])
+  })
+
+  it('SU_CARD (dal catalogo, con Button) è il secondario DENTRO una card in chat: fondo card, un passo più chiaro — si aggiunge a variant="secondary" senza togliergli il resto', async () => {
+    const { SU_CARD, Button } = await import('../components/ui/button')
+    expect(SU_CARD).toBe('bg-card hover:bg-card/80')
+    const n = findAll(parseHtml(renderHtml(ce(Button, { variant: 'secondary', className: SU_CARD }, 'Rifiuta'))), (x) => x.tag === 'button')[0]!
+    for (const k of ['bg-card', 'hover:bg-card/80', 'h-control', 'rounded-control', 'text-foreground', 'font-medium']) expect(cls(n), k).toContain(k)
+    expect(cls(n)).not.toContain('bg-muted')
+  })
+
+  it('nessuna classe morta: nemmeno quelle del titolo grande, della superficie, dell\'incavo e del secondario sulla card', async () => {
+    const { ChatSurface, CardBlock } = await import('../components/ui/chat-card')
+    const { SU_CARD, Button } = await import('../components/ui/button')
+    const tutte = new Set<string>([
+      ...tutto(root({ titolo: 'x', titoloGrande: true })),
+      ...tutto(parseHtml(renderHtml(ce(ChatSurface, { tone: 'error' }, 'x')))),
+      ...tutto(parseHtml(renderHtml(ce(CardBlock, {}, 'x')))),
+      ...cls(findAll(parseHtml(renderHtml(ce(Button, { variant: 'secondary', className: SU_CARD }, 'x'))), (x) => x.tag === 'button')[0]!)
+    ])
+    const css = await compileRenderer([...tutte])
+    expect(deadClasses(css, [...tutte])).toEqual([])
+  })
+})

@@ -264,8 +264,8 @@ Il selettore del modello per provider: riga chiusa col nome e il provider grigio
 Galleria: impostazioni-modelli, chat-pannello.
 
 ### button
-Il bottone unico dell'interfaccia: primary/secondary/ghost/destructive, altezze md 36 e sm 32, forma pill per le azioni principali e per il ghost solo-icona (tondo), control per il resto; `icon` per i bottoni con la sola icona (con aria-label); `asChild` per vestire un link. `link` è il bottone di PAROLE: un'azione dentro una frase («— chiudi», «· Vedi perché») o un link nel testo («repository») — niente riquadro, altezza e respiro; la taglia e il peso sono quelli del testo in cui sta, il colore quello dei link, la sottolineatura al passaggio (con `asChild` veste un `<a>`). Non usarlo per le righe cliccabili di un elenco (FlatRow), le voci di menu (dropdown-menu) o per scrivere pillole a mano.
-Galleria: da-approvare (Consenti pillola, Rifiuta destructive), dialogo-nuovo, card-in-chat (link).
+Il bottone unico dell'interfaccia: primary/secondary/ghost/destructive, altezze md 36 e sm 32, forma pill per le azioni principali e per il ghost solo-icona (tondo), control per il resto; `icon` per i bottoni con la sola icona (con aria-label); `asChild` per vestire un link. `link` è il bottone di PAROLE: un'azione dentro una frase («— chiudi», «· Vedi perché») o un link nel testo («repository») — niente riquadro, altezza e respiro; la taglia e il peso sono quelli del testo in cui sta, il colore quello dei link, la sottolineatura al passaggio (con `asChild` veste un `<a>`). `destructive` è per le azioni che rifiutano o tolgono (Rifiuta, Elimina): in un'approvazione è SEMPRE rosso pieno, nella card in chat come nel centro e nella coda della squadra (K3: una regola sola). `SU_CARD` sono le classi del secondario DENTRO una card in chat (fondo card: sulla card tenue il secondary di fabbrica ci sparirebbe), da aggiungere a `variant="secondary"` finché le card che lo usano (K4) non hanno una variante chiusa. Non usarlo per le righe cliccabili di un elenco (FlatRow), le voci di menu (dropdown-menu) o per scrivere pillole a mano.
+Galleria: da-approvare (Consenti pillola, Rifiuta destructive), dialogo-nuovo, card-in-chat (link), card-corpo (il secondario sulla card).
 
 ### column-head
 La riga di 52 px in cima a OGNI colonna (barra, chat, squadra, pannello destro, pagine): è la fascia di trascinamento della finestra, marcata `data-col-head` perché la sonda la riconosca. Non usarlo per righe di contenuto né fuori dalla cima di una colonna; ogni controllo dentro porta `no-drag`, e il contenuto va in una PageColumn perché titolo e azioni stiano alla larghezza del contenuto.
@@ -292,8 +292,8 @@ Le pillole di filtro della barra, in TRE varianti chiuse: `Scelta` (la scelta si
 Galleria: ricerca.
 
 ### chat-card
-IL GUSCIO DI OGNI CARD IN CHAT. La superficie è una sola: raggio di superficie, respiro di 16, nessun bordo, larga al massimo l'85% della colonna, il testo lungo va a capo DENTRO; `tone` decide il fondo (tenue, il default · attesa · errore). Dentro il ritmo è chiuso: avviso in cima · testata (il segno da 32 — `logo` (il file), `nome` (l'iniziale) o `icona` (un'icona lucide), in quest'ordine di precedenza — · `titolo` in peso medio · `sottotitolo` grigio che si tronca · `nota` contro il bordo destro) · il corpo, i blocchi a 8 px (Text, Stack) · `azioni` in fondo, a 16, i bottoni in fila. Le card portano solo il corpo e i clic: chi scrive margini, testate o righe di bottoni fuori da ui/ sta riscrivendo questo pezzo. Le proposte stanno sopra di lui (ProposalCard). Non usarla per le superfici con bordo delle pagine (quella è card).
-Galleria: card-in-chat.
+IL GUSCIO DI OGNI CARD IN CHAT. La superficie è una sola: raggio di superficie, respiro di 16, nessun bordo, larga al massimo l'85% della colonna, il testo lungo va a capo DENTRO; `tone` decide il fondo (tenue, il default · attesa · errore). Dentro il ritmo è chiuso: avviso in cima · testata (il segno da 32 — `logo` (il file), `nome` (l'iniziale) o `icona` (un'icona lucide), in quest'ordine di precedenza — · `titolo` in peso medio · `sottotitolo` grigio che si tronca · `nota` contro il bordo destro) · il corpo, i blocchi a 8 px (Text, Stack) · `azioni` in fondo, a 16, i bottoni in fila. Le card portano solo il corpo e i clic: chi scrive margini, testate o righe di bottoni fuori da ui/ sta riscrivendo questo pezzo. Le proposte stanno sopra di lui (ProposalCard). K3: `titoloGrande` fa del titolo la FRASE che si legge prima di decidere (le card di approvazione: text-title, peso 600, che va a capo da sé); `CardBlock` è l'incavo dentro la card (fondo card, raggio di controllo, respiro 12: gli argomenti di un'azione, i dettagli di una routine — le righe con Text); `ChatSurface` è la superficie da sola, e la usano solo i gusci di prima non ancora convertiti (K4, K5). Non usarla per le superfici con bordo delle pagine (quella è card).
+Galleria: card-in-chat, card-corpo.
 
 ### proposal-card
 LA card di proposta in chat — un oggetto solo per «il bot propone, tu clicchi», nelle varianti app Composio · server MCP · plugin da accendere · plugin da installare. Sta sopra ChatCard (il guscio: superficie, testata con `logo`/`nome`/`icona`, `titolo`, `sottotitolo`, `nota`, `avviso`, `azioni`) e ne prende il `tone`. Gli slot della proposta sono delimitati: `righe` (la COSA: fiducia, dove gira, accesso — testo small grigio, a 4 px l'una dall'altra) · `perché` (la frase del bot, in corpo) · `configurazione` (il modulo quando manca qualcosa, a 12) · `stato` (gli esiti finali: Collegata, Non riuscito — a 12). Le righe si scrivono con Text; gli esiti con i toni `ok`, `waiting` e `destructive` di Text; le azioni dentro una frase con il bottone `link`. ConnectorCard.tsx e ConnectorCards13.tsx restano LOGICA — i dati e i clic — sopra questa card.
@@ -302,6 +302,18 @@ Galleria: proposta.
 ### tag
 L'etichetta piccola di stato, accanto a un titolo («token scaduto», «in attesa di conferma»): testo didascalia su un fondo tenue del suo tono (`tone`: neutro, il default · attesa · errore · riuscito), col raggio dei controlli. Si legge e basta: non è un bottone (Button), non è un filtro (FilterChips).
 Galleria: tag.
+
+### disclosure
+LA RIGA DI SISTEMA CHE SI APRE della chat: compatta (text-small, peso normale — si legge come una riga, non come un'etichetta), larga quanto la colonna, con il segno da 16 · il testo che si tronca · il metadato ai didascalie (l'ora) · la freccia quando c'è qualcosa da aprire. `Disclosure` è il bottone (ghost, 32) di chi gestisce lo stato: `aperto` va in aria-expanded, `apribile` mostra la freccia, `tone` colora il segno (normale · riuscito · grigio); senza metadato né freccia è la riga che porta il fuoco altrove. `DisclosureSummary` è la riga `<summary>` di un `<details>` nativo: dentro Notice (icona · testo grigio · freccia), senza il triangolo del browser. È la riga che resta dopo una decisione («Consentito una volta · … · 10:44»), quella che apre il testo per il modello. Non usarla per i messaggi (quello è il testo reso) né per le righe di elenco (ListRow).
+Galleria: card-corpo.
+
+### code
+IL CODICE della chat, in monospacio alla taglia delle seconde righe: la riga che non va a capo e scorre in orizzontale (un `<code>` a blocco: il comando da approvare, il file da scrivere), il blocco che va a capo e scorre dentro se stesso (`aCapo`, un `<pre>`: il testo per il modello, i dettagli tecnici), il pezzo dentro una frase (`inline`: la schedule tra parentesi). `tone` decide il fondo: su fondo card dentro una card (la cosa da approvare si distingue dal fondo ambra) · su fondo tenue, col testo grigio. Raggio di controllo e respiro di 12; i margini e quanto è alto al più li decide chi lo mette (ChatCard, Stack, `className`). Non usarlo per le celle di una tabella (DataTable) né per i campi in monospazio (Input).
+Galleria: card-corpo.
+
+### tech-details
+I DETTAGLI TECNICI, chiusi: la card parla in parole, il nome tecnico (lo strumento, l'azione, il MOTIVO dell'errore com'è arrivato dal daemon) sta qui — una riga che si apre («Dettagli tecnici», grigio in didascalia) e sotto il blocco di codice (Code). Il testo è sempre com'è, mai tradotto; all'utente la frase del catalogo. `etichetta` cambia la riga che si apre, `aperto` mostra i dettagli senza clic. È l'unico posto dove l'interfaccia mostra un testo tecnico grezzo.
+Galleria: card-corpo.
 
 ### page-toolbar
 La barra degli strumenti della pagina, FERMA sopra il corpo: `ricerca` (SearchField) a sinistra · `pillole` (FilterChips) accanto · `vista` a destra (le schede, il cambio di rappresentazione — ml-auto). Riga alta almeno 40 (min-h-10). La pagina la riempie, non la disegna: l'involupcro col margine lo dà PageShell, la barra la dà questo.
@@ -348,7 +360,7 @@ Il campo di testo dell'interfaccia: 36 px (`h-control`), raggio dei controlli, t
 Galleria: impostazioni-approvazioni, impostazioni-modelli (foglio di collegamento).
 
 ### notice
-La riga di sistema compatta della chat: icona · testo grigio `text-small` (va a capo, non tronca) · «· N volte» · azione a destra; tono neutral, warning o destructive; `fill` è la stessa riga RIEMPITA del suo tono (la fascia d'avviso in cima a una card). È solo la vista: raggruppare e contare gli avvisi sta in lib/notice-rows.ts. Non usarlo per i messaggi di bot o le bolle (quello è il testo reso), né per blocchi: è una riga.
+La riga di sistema compatta della chat: icona · testo grigio `text-small` (va a capo, non tronca) · «· N volte» · azione a destra; tono neutral, warning o destructive; `fill` è la stessa riga RIEMPITA del suo tono (la fascia d'avviso in cima a una card); K3: `size` small (il default) · body e `weight` 400 · 500 · 600 — il riquadro in cima alle chat è in corpo e in peso 600, perché è un invito a decidere. È solo la vista: raggruppare e contare gli avvisi sta in lib/notice-rows.ts. Non usarlo per i messaggi di bot o le bolle (quello è il testo reso), né per blocchi: è una riga.
 Galleria: chat-avvisi, card-in-chat (fill).
 
 ### page-header
@@ -368,7 +380,7 @@ Il MODELLO della pagina di elenco (Plugin, Attività, Libreria, Da approvare, Re
 Galleria: gusci.
 
 ### page-shell
-Il guscio di ogni pagina a tutta area: `PageShell` (radice inchiodata all'area, testata/descrizione/toolbar ferme, corpo che scorre figlio diretto della radice, barra di scorrimento sul bordo) e `PageColumn` (gutter col margine della pagina, contenuto centrato a reading/page/wide; margine 32, 24 sotto i 900 px di area — container query, non media query). Non usarlo per la chat a colonne e i pannelli laterali, né centrare il corpo a mano: la larghezza la dà il guscio.
+Il guscio di ogni pagina a tutta area: `PageShell` (radice inchiodata all'area, testata/descrizione/toolbar ferme, corpo che scorre figlio diretto della radice, barra di scorrimento sul bordo) e `PageColumn` (gutter col margine della pagina, contenuto centrato a reading/page/wide; margine 32, 24 sotto i 900 px di area — container query, non media query; K3: `sottoTestata` fa cominciare la colonna sotto la testata sospesa della chat, 64 px — la testata 52 più il respiro di 12 — per il primo del flusso). Non usarlo per la chat a colonne e i pannelli laterali, né centrare il corpo a mano: la larghezza la dà il guscio.
 Galleria: plugin-lista, libreria-griglia.
 
 ### section

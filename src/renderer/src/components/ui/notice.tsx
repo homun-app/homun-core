@@ -13,6 +13,9 @@ import type { ReactNode } from 'react'
 import { Plural } from '@lingui/react/macro'
 import { cn } from '../../lib/utils'
 
+export type NoticeSize = 'small' | 'body'
+export type NoticeWeight = 'normal' | 'medium' | 'semibold'
+
 /** Il colore del testo e dell'icona, per tono: il neutral è il grigio delle righe di sistema. */
 const TONE = {
   neutral: 'text-muted-foreground',
@@ -27,7 +30,11 @@ const FILL = {
   destructive: 'bg-destructive/15'
 } as const
 
-export function Notice({ icon, children, repeat, action, tone = 'neutral', fill = false, testId, className }: {
+/** K3 (fase conversione-chat): la taglia della riga e il peso del testo — piccola (il default: le righe di sistema) · corpo (il riquadro in cima alle chat: un invito a decidere, che si deve vedere). */
+const SIZE: Record<NoticeSize, string> = { small: '', body: 'text-body' }
+const WEIGHT: Record<NoticeWeight, string> = { normal: '', medium: 'font-medium', semibold: 'font-semibold' }
+
+export function Notice({ icon, children, repeat, action, tone = 'neutral', fill = false, size = 'small', weight = 'normal', testId, className }: {
   /** l'icona lucide davanti al testo: la taglia la decide lo slot (16 px), non lei */
   icon?: ReactNode
   /** il testo dell'avviso: va a capo, non tronca */
@@ -39,6 +46,10 @@ export function Notice({ icon, children, repeat, action, tone = 'neutral', fill 
   tone?: 'neutral' | 'warning' | 'destructive'
   /** riempita del suo tono (la fascia d'avviso in cima a una card: «proposta fatta dopo letture esterne») */
   fill?: boolean
+  /** la taglia del testo: small (il default) · body */
+  size?: NoticeSize
+  /** il peso del testo: 400 (il default) · 500 · 600 */
+  weight?: NoticeWeight
   testId?: string
   className?: string
 }): ReactNode {
@@ -49,6 +60,8 @@ export function Notice({ icon, children, repeat, action, tone = 'neutral', fill 
       className={cn(
         // min-h-6: una riga di solo testo non è più sottile di 24 px (la sua interlinea è 18)
         'flex min-h-6 w-full items-center gap-row-gap text-small text-muted-foreground',
+        SIZE[size],
+        WEIGHT[weight],
         TONE[tone],
         fill && cn('rounded-control px-3 py-2', FILL[tone]),
         className

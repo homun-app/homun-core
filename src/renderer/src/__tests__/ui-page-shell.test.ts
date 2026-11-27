@@ -536,3 +536,12 @@ describe('DS2: il CSS compilato (il CSS vero di styles.css, compilato da Tailwin
     expect(silent, 'classi che non producono nessuna regola').toEqual([])
   })
 })
+
+describe('K3 (fase conversione-chat): PageColumn sottoTestata', () => {
+  it('la colonna comincia sotto la testata sospesa della chat (pt-16: la testata 52 più il respiro di 12), sull\'elemento del contenuto; senza, nessuna classe di respiro in cima', async () => {
+    const { PageColumn } = await import('../components/ui/page-shell')
+    const contenuto = (props: Record<string, unknown>): HtmlNode => parseHtml(renderHtml(createElement(PageColumn, { width: 'reading', children: 'x', ...props } as never))).children[0]!.children[0]!
+    expectHasAll(contenuto({ sottoTestata: true }), ['pt-16', 'mx-auto', 'w-full'])
+    expect(classes(contenuto({})).some((c) => c.startsWith('pt-'))).toBe(false)
+  })
+})
