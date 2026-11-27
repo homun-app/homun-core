@@ -519,7 +519,11 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
           ? i18n.t(msg`Rifiutato`)
           : status === 'cancelled'
             ? i18n.t(msg`Annullato (interrupt)`)
-            : status
+            : status === 'expired'
+              // K3, difetto (c): la richiesta è scaduta senza risposta — la frase del catalogo (la stessa della presa di controllo scaduta)
+              ? i18n.t(msg`Scaduta: il bot non aspetta più`)
+              // uno stato che il catalogo non conosce non si mostra com'è: la richiesta è chiusa
+              : i18n.t(msg`Chiusa`)
     // R6 (use-app · ritocchi): la riga decisa dice l'APP o l'HOST, col modello
     // puro della card — «Consentito una volta · Safari», non «· Computer e schermo»
     const useAppSummary = tool === 'use-app' ? useAppDecidedSummary(input) : null
