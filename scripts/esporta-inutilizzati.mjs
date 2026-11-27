@@ -14,18 +14,20 @@
 //
 //   node scripts/esporta-inutilizzati.mjs [--json] [--out=<cartella>]
 //
-// --out: dove scrivere i .d.ts (default: una mkdtemp nella cartella dei
-//        temporanei di sviluppo, cancellata alla fine). Uscita 0 sempre: è
+// --out: dove scrivere i .d.ts (default: una mkdtemp nella base temporanea
+//        condivisa degli script — scripts/lib/base-temporanea.mjs, la regola
+//        della suite: la cartella del Mac se c'è, altrimenti quella di
+//        sistema —, cancellata alla fine). Uscita 0 sempre: è
 //        un censimento, non un test. Non tocca nulla: legge i sorgenti e
 //        scrive solo nella cartella dei .d.ts.
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
+import { baseTemporanea } from './lib/base-temporanea.mjs'
 
 const ROOT = join(import.meta.dirname, '..')
 const SRC = join(ROOT, 'src')
 const EVAL = join(ROOT, 'eval')
-const DEV_TMP = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'
 
 /** Gli entry point: da loro parte l'esecuzione, nessuno li importa. */
 export const ENTRY_POINTS = ['src/renderer/src/main.tsx', 'src/main/index.ts', 'src/daemon/index.ts', 'src/preload/index.ts']
@@ -213,7 +215,7 @@ export function main(argv = process.argv.slice(2)) {
   const json = argv.includes('--json')
   const outArg = argv.find((a) => a.startsWith('--out='))?.slice('--out='.length)
   const ownTmp = outArg === undefined
-  const outDir = outArg ?? mkdtempSync(`${DEV_TMP}/sandbot-esporta-inutilizzati-`)
+  const outDir = outArg ?? mkdtempSync(`${baseTemporanea()}/sandbot-esporta-inutilizzati-`)
   const t0 = Date.now()
   const cleanup = () => {
     if (ownTmp) rmSync(outDir, { recursive: true, force: true })
