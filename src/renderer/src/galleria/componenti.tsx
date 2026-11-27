@@ -22,6 +22,10 @@
 // components/ui/ entra in questa pagina con tutti i suoi stati, in una
 // SEZIONE che lo dichiara in `componenti` (la guardia componenti.test.ts
 // controlla che ogni file di ui/ sia dichiarato da almeno una sezione).
+//
+// K1 (fase conversione-chat): le sezioni «Card in chat» (card-*, in
+// card-in-chat.tsx) sono il PRIMA delle card della chat, quelle che le tappe
+// K2–K5 convertono al catalogo: le card non si toccano, si mostrano com'è.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { I18nProvider } from '@lingui/react'
@@ -70,6 +74,7 @@ import { ModelPicker } from '../components/ui/ModelPicker'
 import { ModelSelect } from '../components/ui/ModelSelect'
 import { PageShell, PageColumn, type PageWidth } from '../components/ui/page-shell'
 import { DocumentBody } from '../components/DocumentMarkdown'
+import { CardInChat, isSezioneCard, seminaCard } from './card-in-chat'
 import { BOT_FAMILIES, BOT_COLORS } from '../../../shared/avatar'
 
 /** Le stesse tinte dei puntini di stato dei bot (Sidebar, ColorDot): 8 px, contrasto ≥ 3:1 in entrambi i temi. */
@@ -174,7 +179,26 @@ export const SEZIONI = [
   { id: 'pillole', titolo: 'pillole e badge', componenti: [] },
   { id: 'gusci', titolo: 'page-shell, list-page, detail-page e document-page', componenti: ['page-shell', 'list-page', 'detail-page', 'document-page'] },
   { id: 'markdown-1', titolo: 'DocumentBody — titoli, grassetti ed elenchi', componenti: [] },
-  { id: 'markdown-2', titolo: 'DocumentBody — elenchi annidati, tabella, citazione e codice', componenti: [] }
+  { id: 'markdown-2', titolo: 'DocumentBody — elenchi annidati, tabella, citazione e codice', componenti: [] },
+  // K1 (fase conversione-chat): «Card in chat» — IL PRIMA di ogni card della chat, uno stato per campione, prima della conversione al catalogo (galleria/card-in-chat.tsx). `componenti` è vuoto: le card non sono oggetti del catalogo, sono quelle che le tappe K2–K5 convertono
+  { id: 'card-proposta-1', titolo: 'Card in chat — McpServerCard: il bot propone un server MCP', componenti: [] },
+  { id: 'card-proposta-2', titolo: 'Card in chat — PluginInstallProposal e McpWindowCard', componenti: [] },
+  { id: 'card-plugin', titolo: 'Card in chat — EnablePluginCard: accendere un plugin', componenti: [] },
+  { id: 'card-connettore', titolo: 'Card in chat — ConnectorCard: collegare un’app', componenti: [] },
+  { id: 'card-in-corso', titolo: 'Card in chat — gli stati che durano quanto un’attesa', componenti: [] },
+  { id: 'card-approvazione-1', titolo: 'Card in chat — ApprovalCard: la richiesta in attesa', componenti: [] },
+  { id: 'card-approvazione-2', titolo: 'Card in chat — ApprovalCard: dopo la decisione', componenti: [] },
+  { id: 'card-regola', titolo: 'Card in chat — RuleProposalCard: la regola proposta', componenti: [] },
+  { id: 'card-compositore', titolo: 'Card in chat — ComposerApproval e ApprovalsBanner', componenti: [] },
+  { id: 'card-bozza-1', titolo: 'Card in chat — DraftCard: la bozza da inviare', componenti: [] },
+  { id: 'card-bozza-2', titolo: 'Card in chat — DraftCard: le altre bozze e la decisione', componenti: [] },
+  { id: 'card-widget', titolo: 'Card in chat — WidgetCard: la domanda con le scelte', componenti: [] },
+  { id: 'card-aiutante', titolo: 'Card in chat — SubagentCard: l’aiutante al lavoro', componenti: [] },
+  { id: 'card-aiutante-aspetta', titolo: 'Card in chat — SubagentCard: l’aiutante che aspetta te', componenti: [] },
+  { id: 'card-compito', titolo: 'Card in chat — BriefCard: il compito affidato', componenti: [] },
+  { id: 'card-attivita', titolo: 'Card in chat — TaskCard: il task', componenti: [] },
+  { id: 'card-presa', titolo: 'Card in chat — ImageGalleryCard e TakeoverCard', componenti: [] },
+  { id: 'card-routine', titolo: 'Card in chat — RoutineCreatedRow e RoutineTzAsk', componenti: [] }
 ] as const
 
 type IdSezione = (typeof SEZIONI)[number]['id']
@@ -196,8 +220,11 @@ const Sezione = ({ id }: { id: IdSezione }) => {
   ]
   const info = SEZIONI.find((s) => s.id === id)
   return (
-    <div className="p-8" data-testid="galleria-componenti-contenuto" data-sezione={id}>
+    <div className={isSezioneCard(id) ? 'px-4 py-8' : 'p-8'} data-testid="galleria-componenti-contenuto" data-sezione={id}>
       <PageHeader title={info?.titolo ?? id} description="La pagina dei componenti è solo di sviluppo e di test: una sezione per volta, tutti gli stati, dal vivo." testId="galleria-page-header" />
+
+      {/* K1: le sezioni «Card in chat» — due card da 612 per riga (per questo px-4) */}
+      {isSezioneCard(id) && <CardInChat id={id} />}
 
       {id === 'modulo' && (
         <Section title="field, textarea, switch e segmented — il modulo" testId="galleria-section-modulo">
@@ -768,9 +795,26 @@ const Sezione = ({ id }: { id: IdSezione }) => {
 let host: HTMLDivElement | null = null
 let radice: ReturnType<typeof createRoot> | null = null
 
+/**
+ * K1: il foglio delle sezioni «Card in chat». Le card della chat sono larghe
+ * al massimo l'85% della colonna; dentro un campione (data-card, largo 612
+ * com'è una card nella chat a 1280) la regola non vale: la card occupa tutta
+ * la larghezza del campione. È un foglio del MODULO, non una classe: l'app
+ * non deve compilare classi che usa solo la galleria.
+ */
+let foglioCard: HTMLStyleElement | null = null
+const montaFoglioCard = () => {
+  if (foglioCard) return
+  foglioCard = document.createElement('style')
+  foglioCard.textContent = '[data-card] [class~="max-w-[85%]"] { max-width: none }'
+  document.head.appendChild(foglioCard)
+}
+
 const monta = (id: IdSezione) => {
   if (!host) return
   radice?.unmount()
+  // K1: le sezioni «Card in chat» leggono il negozio del modulo: si semina coi dati fissi PRIMA di montare
+  if (isSezioneCard(id)) { seminaCard(id); montaFoglioCard() }
   radice = createRoot(host)
   radice.render(
     <I18nProvider i18n={i18n}>
@@ -783,6 +827,8 @@ const apri = (id?: IdSezione) => {
   chiudi()
   host = document.createElement('div')
   host.dataset.testid = 'galleria-componenti'
+  // K1: l'app STA SOTTO la pagina (il vaso è opaco): la si nasconde, alla vista e ai controlli della galleria. Il controllo dei doppioni (R2) guarda il DOM, non i pixel: contava anche i bottoni dell'app coperti — il «Invia» del campo di scrittura, sotto una bozza che ha il suo «Invia», faceva rossa la sezione senza che si vedessero due bottoni
+  document.getElementById('root')?.style.setProperty('visibility', 'hidden')
   // la pagina di test sta sopra tutto; il tema (la classe dark) lo decide la galleria sull'<html>
   // z-index 40: SOPRA il contenuto normale dell'app (z-auto), SOTTO il livello
   // dei portali (z-50) — così i dialoghi e i menu APERTI delle sezioni loro si
@@ -799,6 +845,9 @@ const chiudi = () => {
   radice = null
   host?.remove()
   host = null
+  foglioCard?.remove()
+  foglioCard = null
+  document.getElementById('root')?.style.removeProperty('visibility')
 }
 
 /** L'API che la galleria usa: apri(sezione)/chiudi() tra le scene, sezioni() per l'elenco. L'import del modulo NON apre nulla. */

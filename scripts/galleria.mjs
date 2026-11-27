@@ -27,11 +27,17 @@
 // scene, che va in un commit con il motivo.
 // Catture PNG alla scala 1 senza metadati (magick -strip). Le approvate stanno
 // in galleria/approvate/ (peso totale ≤ 15 MB, controllato a fine corsa).
+// K1 (fase conversione-chat): le sezioni «Card in chat» della pagina dei
+// componenti (componenti-card-*) sono IL PRIMA di ogni card della chat, prima
+// della conversione al catalogo: si approvano qui e non si toccano più finché
+// le tappe K2–K5 non le riconvertono. Le scene SEMINATE (GALLERIA_PAGES in
+// scene.mjs, oggi chat-squadra-coda) nascono da dati scritti nel DB dell'app
+// di prova solo per loro: vedi ricaricaRenderer.
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, existsSync, copyFileSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { avviaSonda, ROOT, messaggioTentativiLocali } from './lib/sonda.mjs'
-import { PAGES, NOMI, preparaDeterministica, closeOverlays, openPage, openOverlay, ISTANTE_FERMO } from './lib/scene.mjs'
+import { PAGES, GALLERIA_PAGES, NOMI, preparaDeterministica, closeOverlays, openPage, openOverlay, ISTANTE_FERMO } from './lib/scene.mjs'
 import { modelloFinto } from './lib/modello-finto.mjs'
 import { MODELLI_OLLAMA_FINTO, ollamaFinto } from './lib/servizio-locale-finto.mjs'
 
@@ -55,7 +61,7 @@ const approvaSet = APPROVA === 'tutte' ? 'tutte' : APPROVA?.split(',').map((x) =
 // davvero, una per una: niente «nessun difetto» per gruppi interi.
 if (argv.includes('--foglio')) {
   const idDi = (nome) => nome.replace(/\.png$/, '').replace(/-(chiaro|scuro)(-900)?$/, '')
-  const gruppoDi = (id) => id === 'guida' ? 'Guida' : id.startsWith('componenti-') ? 'Componenti' : PAGES.find((p) => p.id === id)?.group ?? 'Altre'
+  const gruppoDi = (id) => id === 'guida' ? 'Guida' : id.startsWith('componenti-') ? 'Componenti' : [...PAGES, ...GALLERIA_PAGES].find((p) => p.id === id)?.group ?? 'Altre'
   const ordine = ['Guida', 'Chat', 'Menu', 'Dialoghi', 'Barra', 'Plugin', 'Libreria', 'Approvazioni', 'Attività', 'Impostazioni', 'Componenti', 'Altre']
   const gruppi = new Map()
   for (const f of readdirSync(APPROVATE).filter((f) => f.endsWith('.png')).sort()) {
@@ -103,6 +109,18 @@ const MASCHERE = {
   'dialogo-nuovo': [
     { espr: `(() => [...document.querySelectorAll('[role="dialog"] svg')].filter((sv) => { const r = sv.getBoundingClientRect(); return r.width >= 60 && r.height >= 60 }))()`,
       motivo: 'l\'anteprima della mascotte del nuovo bot: il colore è hash dell\'id casuale del bot che verrà creato — diverso a ogni corsa per definizione' }
+  ],
+  // K1 (fase conversione-chat): nella coda della squadra la riga «messaggi tra
+  // bot del team» di «Fatto da soli, senza chiederti» dice CHI con gli ID dei
+  // bot, non con i nomi (squad-approvals.ts conta per author_id e non lo
+  // traduce): gli id nascono casuali a ogni corsa. È un difetto del prodotto
+  // — la maschera copre il TITOLO della riga (larga quanto la riga: coprire il
+  // solo pezzo con gli id faceva cambiare di un pixel il bordo della maschera,
+  // perché la larghezza degli id cambia con le lettere che escono) e ci resta
+  // finché il prodotto non mostra i nomi
+  'chat-squadra-coda': [
+    { espr: `(() => [...document.querySelectorAll('[data-testid="approvals-queue"] span')].filter((sp) => (sp.previousSibling?.textContent ?? '').includes('messaggi tra bot del team')).map((sp) => sp.parentElement))()`,
+      motivo: '«messaggi tra bot del team» (Fatto da soli) mostra gli ID dei bot al posto dei nomi: casuali a ogni corsa — difetto del prodotto (squad-approvals.ts conta per author_id)' }
   ]
 }
 /**
@@ -306,6 +324,19 @@ const sceneComponenti = (sezioni) => sezioni.map((id) => ({
 
 const nomeCattura = (page, tema, w) => `${page.id}-${tema}${w !== 1280 ? `-${w}` : ''}.png`
 
+/**
+ * K1 (fase conversione-chat): il renderer si RICARICA dopo una scena seminata
+ * (GALLERIA_PAGES: seed e unseed). Lo stato del renderer nasce dal DB — la
+ * coda della squadra, i numeri sulla barra — e nessuna scena di prima vede i
+ * dati seminati. Dopo il reload si rifà quel che fa il setup deterministico
+ * (scene.mjs): la pagina torna, il pannello del bot si chiude.
+ */
+const ricaricaRenderer = async (s) => {
+  await s.eval(`location.reload(); return true`)
+  await s.attendi(`!!document.querySelector('form textarea')`, { entro: 30_000, motivo: 'la pagina sia tornata dopo il reload (scena seminata)' })
+  await s.eval(`document.querySelector('button[aria-label="Chiudi il pannello"]')?.click(); return true`)
+}
+
 const T0 = Date.now()
 const log = (...a) => console.log('[galleria]', `+${((Date.now() - T0) / 1000).toFixed(1)}s`, ...a)
 
@@ -389,11 +420,18 @@ const cattura = async (s, page, ctx, w, tema, errori = []) => {
       const r = el.getBoundingClientRect()
       if (r.height === 0) return 'la sezione è alta 0'
       if (r.top < -0.5 || r.bottom > window.innerHeight + 0.5) {
-        return 'la sezione ' + (sezione ?? '(pagina intera)') + ' esce dal viewport: top ' + Math.round(r.top) + ', bottom ' + Math.round(r.bottom) + ' su ' + window.innerHeight
+        // K1 (fase conversione-chat): le sezioni a CAMPIONI (data-card) dicono anche quanto è alto ognuno: si vede cosa togliere o dove dividere, senza tirare a indovinare
+        const campioni = [...el.querySelectorAll('[data-card]')].map((c) => (c.dataset.card ?? '?') + '/' + (c.dataset.stato ?? '') + ' ' + Math.round(c.getBoundingClientRect().height))
+        return 'la sezione ' + (sezione ?? '(pagina intera)') + ' esce dal viewport: top ' + Math.round(r.top) + ', bottom ' + Math.round(r.bottom) + ' su ' + window.innerHeight + (campioni.length ? ' · campioni (altezza): ' + campioni.join(' · ') : '')
       }
       return null
     })()`)
     if (fuori) errori.push(fuori)
+    // K1 (fase conversione-chat): le sezioni a CAMPIONI dicono quanto sono alti, a 1280: si sa dove dividere prima che una esca dal viewport
+    if (w === 1280 && !fuori) {
+      const misure = await s.eval(`return (() => { const el = document.querySelector('[data-testid="galleria-componenti-contenuto"]'); if (!el) return null; const c = [...el.querySelectorAll('[data-card]')]; return c.length ? c.map((x) => (x.dataset.card ?? '?') + ' ' + Math.round(x.getBoundingClientRect().height)).join(' · ') + ' · sezione ' + Math.round(el.getBoundingClientRect().height) : null })()`)
+      if (misure) log('campioni (altezza):', misure)
+    }
   } else {
     await openPage(s, page, ctx)
   }
@@ -619,13 +657,22 @@ try {
   // delle scene (la chat nuda) non deve tingere la prima scena
   await s.eval('return window.__sandbotTraduzioniMancanti ? window.__sandbotTraduzioniMancanti.drain().length : 0').then((n) => { if (n) log('svuotati', n, 'id mancanti resi prima delle scene') }).catch(() => undefined)
 
+  // K1 (fase conversione-chat): le IMMAGINI FISSE della galleria di immagini (sezione card-presa della pagina dei componenti). La card legge homun://app/media/<sha256>.png e il protocollo lo serve dalla cartella delle immagini della chat dei dati di prova: i tre file stanno nel repo (galleria/immagini-card/) e si copiano qui. Nessun processo vero
+  {
+    const cartella = join(s.data, 'data', 'chat-images')
+    mkdirSync(cartella, { recursive: true })
+    for (const f of readdirSync(join(GALLERIA, 'immagini-card'))) copyFileSync(join(GALLERIA, 'immagini-card', f), join(cartella, f))
+  }
+
   // le sezioni della pagina dei componenti le dichiara la PAGINA (componenti.tsx):
   // la galleria non tiene una lista sua da far driftare
   const sezioni = await s.attendi(`(() => { const a = window.__galleriaComponenti?.sezioni?.(); return Array.isArray(a) && a.length > 0 ? a : null })()`, { entro: 15_000, motivo: 'la pagina dei componenti dia le sue sezioni' })
   log('le sezioni dei componenti:', sezioni.join(', '))
-  const pages = [...PAGES.filter((p) => p.when !== 'prima-del-setup'), ...sceneComponenti(sezioni)]
+  const pages = [...PAGES.filter((p) => p.when !== 'prima-del-setup'), ...sceneComponenti(sezioni), ...GALLERIA_PAGES]
   const vuole = (p) => !SOLO || SOLO.includes(p.id)
   for (const page of pages.filter(vuole)) {
+    // K1 (fase conversione-chat): le scene SEMINATE (GALLERIA_PAGES). I loro dati nascono nel DB dell'app di prova subito prima e spariscono subito dopo; il renderer si ricarica dopo l'uno e dopo l'altro, così lo stato nasce dal DB e nessuna scena di prima (la chat di squadra approvata) li vede. Stanno in FONDO alla corsa per la stessa ragione
+    if (page.seed) { await page.seed(s, ctx); await ricaricaRenderer(s) }
     for (const [w, tema] of combinazioni(page)) {
       const errori = []
       await cattura(s, page, ctx, w, tema, errori)
@@ -639,6 +686,7 @@ try {
       // cattura, niente confronto): i suoi errori, semmai, sono già sopra
       if (tema !== 'solo-controllo') esiti.push(confronta(page, tema, w))
     }
+    if (page.unseed) { await page.unseed(s, ctx); await ricaricaRenderer(s) }
     log(page.id, '→', esiti.filter((e) => e.scena === page.id).map((e) => `${e.esito}${e.ae ? ` (${e.ae} px)` : ''}`).join(', '))
   }
 
@@ -680,7 +728,10 @@ try {
         }
       }
     }
-    const rimosse = readdirSync(APPROVATE).filter((f) => f.endsWith('.png') && !valide.has(f))
+    // K1: con --solo le approvate delle ALTRE scene non sono orfane (non hanno
+    // corso): si tolgono solo dalla corsa intera. Con --solo si cancellavano
+    // tutte — 118 approvate in una corsa di sola approvazione
+    const rimosse = SOLO ? [] : readdirSync(APPROVATE).filter((f) => f.endsWith('.png') && !valide.has(f))
     for (const f of rimosse) rmSync(join(APPROVATE, f))
     if (copiate.length) log('APPROVATE (da committare con elenco e motivo):', [...new Set(copiate)].join(', '))
     else log('--approva: nessuna cattura da copiare per le scene richieste')

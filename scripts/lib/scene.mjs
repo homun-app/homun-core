@@ -41,6 +41,8 @@ export const SETTINGS_ROOT = `[...document.querySelectorAll('[role="dialog"]')].
 
 /** Chiude menu, dialoghi, fogli e il pannello del bot: si riparte dalla chat nuda. */
 export const closeOverlays = async (s) => {
+  // la pagina dei componenti della galleria (se aperta): la chiusura rimette in vista l'app (K1: la pagina, aperta, la nasconde)
+  await s.eval(`window.__galleriaComponenti?.chiudi?.(); return true`).catch(() => undefined)
   for (let i = 0; i < 2; i++) {
     await s.eval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true`)
     await s.attendi(`(() => { return true })()`, { entro: 150, passo: 150 }).catch(() => undefined)
@@ -89,6 +91,15 @@ export const OVERLAYS = {
   },
   'pannello': async (s) => { await s.clicAria('Mostra il pannello del bot'); await s.attendi(`!!document.querySelector('[data-testid="bot-panel"]')`, { entro: 6_000, motivo: 'il pannello del bot si apra' }) },
   'pannello-attivita': async (s) => { await s.clicAria('Mostra il pannello del bot'); await s.attendi(`!!document.querySelector('[data-testid="bot-panel"]')`, { entro: 6_000, motivo: 'il pannello del bot si apra' }); await s.clic('bot-tab-activity'); await s.attendiStabile('[data-testid="bot-panel"]', { entro: 4_000 }).catch(() => undefined) },
+  // K1 (fase conversione-chat): la coda «Da approvare» della squadra si apre dalla barra in cima alla chat («Rivedi tutte», solo con richieste in attesa: vedi GALLERIA_PAGES). Resta aperta tra una passata e l'altra: si torna al team col suo bottone
+  'coda-squadra': async (s) => {
+    if (await s.eval(`return !!document.querySelector('[data-testid="approvals-queue"]')`).catch(() => false)) {
+      await s.eval(`document.querySelector('[data-testid="approvals-back"]')?.click(); return true`)
+      await s.attendi(`!document.querySelector('[data-testid="approvals-queue"]')`, { entro: 4_000, motivo: 'la coda «Da approvare» si chiuda' })
+    }
+    await s.clicTesto('Rivedi tutte', `document.querySelector('[data-testid="team-pending-bar"]')`)
+    await s.attendi(`!!document.querySelector('[data-testid="approvals-queue"]')`, { entro: 6_000, motivo: 'la coda «Da approvare» si apra con «Rivedi tutte»' })
+  },
   'pannello-libreria': async (s) => { await s.clicAria('Mostra il pannello del bot'); await s.attendi(`!!document.querySelector('[data-testid="bot-panel"]')`, { entro: 6_000, motivo: 'il pannello del bot si apra' }); await s.clic('bot-tab-library'); await s.attendiStabile('[data-testid="bot-panel"]', { entro: 4_000 }).catch(() => undefined) }
 }
 
@@ -269,6 +280,84 @@ export const PAGES = [
   { id: 'impostazioni-cassaforte-plugin', label: 'Impostazioni › Cassaforte › Dei plugin', group: 'Impostazioni', root: SETTINGS_ROOT, sizes: 'all', scroll: 'wide', overlay: impostazioni('Cassaforte', 'Dei plugin'), focus: null },
   { id: 'impostazioni-routine', label: 'Impostazioni › Routine', group: 'Impostazioni', root: SETTINGS_ROOT, sizes: 'all', scroll: 'wide', overlay: impostazioni('Routine'), focus: null },
   { id: 'impostazioni-uso', label: 'Impostazioni › Uso e costi', group: 'Impostazioni', root: SETTINGS_ROOT, sizes: 'all', scroll: 'wide', overlay: impostazioni('Uso e costi'), focus: null }
+]
+
+/**
+ * K1 (fase conversione-chat): le scene SOLO della galleria. Non stanno in
+ * PAGES perché nascono da dati SEMINATI nel DB dell'app di prova (le
+ * approvazioni in attesa della squadra), che le sonde di misura non hanno: in
+ * PAGES la sonda di design le aprirebbe senza trovare nulla. `seed` scrive i
+ * dati PRIMA della scena e `unseed` li toglie DOPO; la galleria ricarica il
+ * renderer dopo l'uno e dopo l'altro, così lo stato del renderer nasce dal DB
+ * e niente passa alle scene di prima (la chat di squadra approvata resta com'è).
+ */
+
+/**
+ * Le richieste in attesa della squadra della galleria (la coda ne legge
+ * `membro`, l'indice in ctx.others; `at` in ms dall'istante fermo). Sono nate
+ * nei turni PRIVATI dei membri: senza meta.squadId, perché la coda le raccoglie
+ * lo stesso (collectPendingApprovals legge tutte le entry in attesa dei
+ * membri) mentre NON entrano nella timeline della squadra — le card
+ * «timeline-approval» di TeamChat non sono marcate come riga e, con la coda
+ * aperta, il controllo dei doppioni della galleria (R2) le darebbe rosse: è
+ * un difetto del prodotto che risolve la conversione di TeamChat (K5).
+ */
+const CODA_SQUADRA = [
+  { id: 'gall-coda-1', membro: 1, at: -120_000, tool: 'browser_open', input: { url: 'https://www.museoegizio.it/orari' }, frase: 'Apre il sito museoegizio.it per controllare gli orari di sabato.', extra: {} },
+  { id: 'gall-coda-2', membro: 2, at: -45_000, tool: 'fill_credential', input: { origin: 'https://spa.example', user: 'utente-musei' }, frase: 'Compila il modulo di prenotazione con i tuoi dati.', extra: { contaminated: true } }
+]
+/** Il lavoro della squadra nei turni (meta.squadId): «Fatto da soli, senza chiederti» conta le entry tool-call per strumento. */
+const LAVORO_SQUADRA = [
+  { membro: 1, nome: 'write-file' }, { membro: 1, nome: 'write-file' }, { membro: 1, nome: 'run-command' }, { membro: 2, nome: 'web_fetch' }
+]
+/** Due azioni passate dal revisore (approvate da sole, con meta.squadId): la seconda coperta da una concessione ancora valida, che si può annullare. */
+const REVISORE_SQUADRA = [
+  { id: 'gall-coda-r1', membro: 1, tool: 'web_fetch', motivo: 'pagina di sola lettura di un dominio noto', concessione: null },
+  { id: 'gall-coda-r2', membro: 2, tool: 'browser_open', motivo: null, concessione: 'gall-coda:www.museoegizio.it' }
+]
+
+/**
+ * Le card com'è nel database dopo che il loop le ha scritte (loop.ts: la
+ * entry kind «approval» col suo approvalId, e per quelle in attesa la riga
+ * dell'INDICE del centro, recordPendingApproval in approvals-center.ts). La
+ * coda della squadra legge le entry; il centro e i numeri sulla barra leggono
+ * l'indice.
+ */
+export const seminaCodaSquadra = (s, ctx) => withDb(s, (db) => {
+  const gid = ctx.group.id
+  const insert = db.prepare('INSERT INTO entries (agent_id, kind, role, content, meta, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+  const indice = db.prepare('INSERT OR REPLACE INTO approvals(id, agent_id, tool, input, status, created_at, entry_id) VALUES(?,?,?,?,?,?,?)')
+  for (const r of CODA_SQUADRA) {
+    const bot = ctx.others[r.membro].id
+    const meta = { approvalId: r.id, tool: r.tool, input: r.input, status: 'pending', ...r.extra }
+    const e = insert.run(bot, 'approval', 'system', r.frase, JSON.stringify(meta), ISTANTE_FERMO + r.at)
+    indice.run(r.id, bot, r.tool, JSON.stringify(r.input), 'pending', ISTANTE_FERMO + r.at, Number(e.lastInsertRowid))
+  }
+  for (const [i, l] of LAVORO_SQUADRA.entries()) {
+    insert.run(ctx.others[l.membro].id, 'tool-call', 'assistant', l.nome, JSON.stringify({ name: l.nome, squadId: gid, galleria: 'coda' }), ISTANTE_FERMO - 600_000 + i)
+  }
+  for (const [i, r] of REVISORE_SQUADRA.entries()) {
+    const bot = ctx.others[r.membro].id
+    const at = ISTANTE_FERMO - 900_000 + i
+    insert.run(bot, 'approval', 'system', '', JSON.stringify({ approvalId: r.id, tool: r.tool, status: 'allowed', autoApproved: true, ...(r.motivo ? { reason: r.motivo } : {}), squadId: gid }), at)
+    if (r.concessione) db.prepare('INSERT INTO grants(tool, target, created_at, agent_id) VALUES(?,?,?,NULL)').run(r.tool, r.concessione, at)
+  }
+})
+
+/** Toglie tutto quello che la scena ha seminato: nessuna scena dopo la coda deve vederlo (i numeri sulla barra, l'indice del centro). */
+export const pulisciCodaSquadra = (s) => withDb(s, (db) => {
+  db.prepare("DELETE FROM approvals WHERE id LIKE 'gall-coda-%'").run()
+  db.prepare("DELETE FROM grants WHERE target LIKE 'gall-coda:%'").run()
+  db.prepare("DELETE FROM entries WHERE (kind = 'approval' AND meta LIKE '%\"approvalId\":\"gall-coda-%') OR (kind = 'tool-call' AND meta LIKE '%\"galleria\":\"coda\"%')").run()
+})
+
+export const GALLERIA_PAGES = [
+  {
+    id: 'chat-squadra-coda', label: 'Chat di una squadra · la coda «Da approvare»', group: 'Chat',
+    root: `document.querySelector('[data-testid="approvals-queue"]')`, sizes: '1280', withSidebar: true, scroll: 'wide',
+    open: 'team', overlay: 'coda-squadra', seed: seminaCodaSquadra, unseed: pulisciCodaSquadra,
+    focus: `document.querySelector('[data-testid="approvals-back"]')`
+  }
 ]
 
 // ---- il seed dei dati finti (spostato dalla sonda di misura di design) ----
