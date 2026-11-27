@@ -5,6 +5,42 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.21] — 2026-11-27
+
+Le pagine di Homun ora sono costruite con gli stessi pezzi: barre,
+ricerche, filtri e righe si comportano allo stesso modo ovunque.
+
+### Novità
+
+- **Una sola ricerca e gli stessi filtri in ogni pagina.** Libreria,
+  Plugin, Attività, Da approvare e Registro hanno la stessa barra: la
+  ricerca a sinistra, i filtri a pillola accanto, la vista a destra. I
+  menu a tendina dei filtri diventano pillole («Bot: Tutti i bot ▾»,
+  «Tipo: Tutti i tipi ▾»).
+- **Plugin › Collegati sta su una riga sola.** Le strade di collegamento
+  si scelgono dalla pillola «Strada: tutte ▾», e «Da sistemare» è un
+  interruttore che dice quanti sono.
+- **Impostazioni più pulite:** le righe stanno a filo, senza i riquadri
+  grigi attorno.
+- **Attività:** il nome del bot torna nel colore del testo, e il colore
+  del bot sta nel suo puntino.
+- **I link nei documenti si riconoscono**, sottolineati come nei
+  messaggi.
+
+### Correzioni
+
+- **La Libreria mostra il selettore griglia/elenco una volta sola**, e
+  la pillola del tipo dice «Tipo» invece di un codice.
+- **Con la tastiera si vede sempre dove sei:** l'anello attorno alle
+  schede della Libreria, alle righe delle decisioni e alle righe delle
+  Impostazioni non spariva più.
+- **I bot e i membri di una squadra non si scambiano più di posto**
+  nella barra laterale quando sono fermi allo stesso modo.
+- **Annullare il download del modello locale non lascia più errori**
+  dietro di sé.
+- **Il «+» del titolo Team si chiama «Nuovo bot»**, per i lettori di
+  schermo.
+
 ## [0.3.1001-beta.20] — 2026-11-24
 
 Homun ha un aspetto nuovo, uguale in ogni pagina, e i bot non si
