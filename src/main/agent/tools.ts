@@ -993,9 +993,10 @@ async function runMemoryAction(agentId: string, input: Record<string, unknown>, 
         ...(ctx.contaminated ? { contaminated: true } : {})
       })
       // regola del motore: la riscrittura CONSERVA lo stato — una nota in
-      // quarantena resta in attesa dell'utente, e il result lo dice
+      // quarantena resta in attesa dell'utente, e il result lo dice. Dal
+      // v0.6.19 anche una external CONFERMATA ci torna (memory-store.ts)
       if (note.status === 'quarantined') {
-        return { output: `Memory ${note.id.slice(-8)} updated, still pending the user's confirmation: it will not be recalled until the user confirms it.`, meta: { memoryId: note.id, quarantined: true } }
+        return { output: `Memory ${note.id.slice(-8)} updated: it is pending the user's confirmation — it will not be recalled until the user confirms it.`, meta: { memoryId: note.id, quarantined: true } }
       }
       return { output: `Memory ${note.id.slice(-8)} updated (tier ${note.tags.includes('core') ? 'core' : 'log'}, scope ${scopeLabel(note)}).`, meta: { memoryId: note.id } }
     }

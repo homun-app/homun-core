@@ -325,3 +325,77 @@ describe('fase memoria-engramma · correzioni C4: le lapidi si vedono e si dimen
     await e.closeMemoryEngine()
   })
 })
+
+// Fase memoria-engramma v0.6.19 (E2): la nota «external» CONFERMATA.
+// Col v0.4.3 Homun la riscriveva e restava attiva (memory-store.ts: patch).
+// Dal v0.6.14 (per-homun.md) il motore rifiuta una riscrittura che lascerebbe
+// attiva una nota external — CONFLICT, «an external note is born in
+// quarantine: `confirm` promotes it» — e Homun la prendeva per una lapide
+// («was deleted»). L'unica via che il motore lascia è la deriva che c'è
+// dalla v0.4.1: la riscrittura si dice external e la nota torna in
+// quarantena, finché l'utente non la conferma di nuovo. Vale per il bot
+// (update_memory), per l'interfaccia (memorySave) e per il solo cambio di
+// tier: la regola è una. Le note che non sono external restano come prima.
+describe('fase memoria-engramma v0.6.19 (E2): la nota external confermata si riscrive tornando in quarantena', () => {
+  const A = 'agent_ext614'
+
+  /** Una nota external (turno contaminato) che l'utente ha confermato: attiva. */
+  async function conferita(content: string): Promise<{ id: string }> {
+    const { writeMemoryNote } = await import('../memory-store')
+    const { memoryConfirm } = await import('../memory-rpc')
+    const n = await writeMemoryNote(A, { content, tier: 'log', source: 'homun:chat/x/1', contaminated: true })
+    await memoryConfirm(A, n.id)
+    return n
+  }
+  const dove = async (id: string) => (await import('../memory-store')).locateMemoryNote(A, id)
+
+  it('dal bot (update_memory): la riscrittura non è «was deleted» — la nota resta external e torna in attesa; l’utente la conferma di nuovo', async () => {
+    await fresh()
+    const { updateMemoryNote } = await import('../memory-store')
+    const { memoryConfirm } = await import('../memory-rpc')
+    const n = await conferita('Dalla mail: la cena è il 20.')
+    expect(await dove(n.id)).toMatchObject({ state: 'active', note: { confidence: 'external', body: 'Dalla mail: la cena è il 20.' } })
+    const u = await updateMemoryNote(A, { id: n.id, content: 'Dalla mail: la cena è il 21.' })
+    expect(u).toMatchObject({ id: n.id, body: 'Dalla mail: la cena è il 21.', confidence: 'external', status: 'quarantined' })
+    expect(await dove(n.id)).toMatchObject({ state: 'quarantined', note: { body: 'Dalla mail: la cena è il 21.', confidence: 'external' } })
+    // di nuovo attiva solo per mano dell'utente
+    await memoryConfirm(A, n.id)
+    expect(await dove(n.id)).toMatchObject({ state: 'active', note: { body: 'Dalla mail: la cena è il 21.', confidence: 'external' } })
+    await (await import('../engine')).closeMemoryEngine()
+  })
+
+  it('solo il tier (nessun corpo): uguale — torna in attesa col tier nuovo', async () => {
+    await fresh()
+    const { updateMemoryNote } = await import('../memory-store')
+    const { memoryConfirm } = await import('../memory-rpc')
+    const n = await conferita('Dal web: il museo apre alle 9.')
+    const u = await updateMemoryNote(A, { id: n.id, tier: 'core' })
+    expect(u).toMatchObject({ body: 'Dal web: il museo apre alle 9.', tags: ['core'], confidence: 'external', status: 'quarantined' })
+    await memoryConfirm(A, n.id)
+    expect(await dove(n.id)).toMatchObject({ state: 'active', note: { tags: ['core'] } })
+    await (await import('../engine')).closeMemoryEngine()
+  })
+
+  it('dall’interfaccia (memorySave): uguale — la modifica dell’utente resta external e aspetta la sua conferma', async () => {
+    await fresh()
+    const { memorySave, memoryConfirm } = await import('../memory-rpc')
+    const n = await conferita('Dal sito: l’ufficio chiude alle 13.')
+    const u = await memorySave(A, { id: n.id, body: 'Dal sito: l’ufficio chiude alle 14.', tier: 'log' })
+    expect(u.id).toBe(n.id)
+    expect(await dove(n.id)).toMatchObject({ state: 'quarantined', note: { body: 'Dal sito: l’ufficio chiude alle 14.', confidence: 'external' } })
+    await memoryConfirm(A, n.id)
+    expect(await dove(n.id)).toMatchObject({ state: 'active', note: { body: 'Dal sito: l’ufficio chiude alle 14.' } })
+    await (await import('../engine')).closeMemoryEngine()
+  })
+
+  it('una nota che non è external resta come prima: la riscrittura conserva lo stato (attiva resta attiva)', async () => {
+    await fresh()
+    const { writeMemoryNote, updateMemoryNote } = await import('../memory-store')
+    const { memorySave } = await import('../memory-rpc')
+    const n = await writeMemoryNote(A, { content: 'Detta dall’utente: la cena è il 20.', tier: 'log', source: 'homun:chat/x/2', userTurn: true })
+    expect(await updateMemoryNote(A, { id: n.id, content: 'Detta dall’utente: la cena è il 21.' })).toMatchObject({ confidence: 'stated', status: 'active' })
+    expect(await memorySave(A, { id: n.id, body: 'Detta dall’utente: la cena è il 22.', tier: 'log' })).toMatchObject({ status: 'active', confidence: 'stated' })
+    await (await import('../engine')).closeMemoryEngine()
+  })
+})
+

@@ -153,6 +153,16 @@ export function deletedMemoryText(id: string): string {
  * resto è un Cell.patch che CONSERVA lo stato (quarantena compresa: regola
  * del motore). In un turno contaminato la riscrittura è external: una nota
  * attiva va in quarantena (l'unica deriva consentita dal motore).
+ *
+ * Fase v0.6.19 (E2): anche una nota che È external si dice external nella
+ * riscrittura. Dal v0.6.14 il motore rifiuta (CONFLICT) una riscrittura che
+ * lascerebbe attiva una nota external confermata — «an external note is born
+ * in quarantine: `confirm` promotes it» — e Homun la prendeva per una lapide
+ * («was deleted»). Così la nota torna in quarantena col testo nuovo, external
+ * com'era, e torna attiva solo quando l'utente la conferma di nuovo: la
+ * conferma è dell'utente, mai della riscrittura. Vale per il bot
+ * (update_memory), per l'interfaccia (memorySave) e per il solo cambio di
+ * tier: il motore non fa distinzioni.
  */
 export async function updateMemoryNote(agentId: string, input: UpdateMemoryNoteInput & { contaminated?: boolean }, opts: WriterOpts = {}): Promise<EngrammaNoteView> {
   const id = String(input.id ?? '')
@@ -190,7 +200,7 @@ export async function updateMemoryNote(agentId: string, input: UpdateMemoryNoteI
     const updated = await (await cellFor(agentId, scope, opts.byUser)).patch(found.id, {
       ...(input.content !== undefined ? { body: String(input.content) } : {}),
       ...(input.tier !== undefined ? { tags: [tier] } : {}),
-      ...(input.contaminated ? { confidence: 'external' } : {}),
+      ...(input.contaminated || note.confidence === 'external' ? { confidence: 'external' as const } : {}),
       extensions: { 'x-homun': { ...xhomun, tier, scope: nextScope } }
     })
     try {

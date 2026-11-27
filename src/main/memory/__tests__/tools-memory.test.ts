@@ -73,6 +73,19 @@ describe('fase memoria-engramma M3: update_memory sul motore', () => {
     expect(u.output).toMatch(/pending the user's confirmation/i)
   })
 
+  it('fase v0.6.19 (E2): una external CONFERMATA si può riscrivere, e torna in attesa — il result lo dice al modello, mai «was deleted»', async () => {
+    const w = await exec('update_memory', { action: 'write', content: 'dal sito il volo è alle 7 di sera', tier: 'log' }, { contaminated: true, turnEntryId: 79 })
+    const short = /id ([0-9A-Z]{8})/.exec(w.output)![1]!
+    // l'utente la conferma dalla sezione Memoria
+    const { memoryConfirm } = await import('../memory-rpc')
+    await memoryConfirm(AGENT, short)
+    const u = await exec('update_memory', { action: 'update', id: short, content: 'dal sito il volo è alle 8 di sera' }, { userTurn: true })
+    expect(u.output).not.toMatch(/deleted/i)
+    expect(u.meta.error).toBeUndefined()
+    expect(u.output).toMatch(/pending the user's confirmation/i)
+    expect(u.meta.quarantined).toBe(true)
+  })
+
   it('id malevolo: rifiutato prima del motore', async () => {
     const r = await exec('update_memory', { action: 'delete', id: '../../x' })
     expect(r.output).toMatch(/invalid memory id/i)
