@@ -48,7 +48,7 @@ import { toolDisplayName } from '../../../shared/tool-names'
 import type { TranscriptEntry } from '../../../shared/types'
 import { visibleApprovalsRows } from '../lib/approvals-center'
 import { DecidedRow } from './DecidedRow'
-import { Button, buttonVariants, SU_CARD } from './ui/button'
+import { Button, buttonVariants } from './ui/button'
 // K3 (fase conversione-chat): la card è LOGICA sopra il guscio (ChatCard) e i pezzi del catalogo
 import { ChatCard, CardBlock } from './ui/chat-card'
 import { Code } from './ui/code'
@@ -279,9 +279,10 @@ export function ApprovalRequestContent({
                   >
                     <Trans>Consenti</Trans>
                   </Button>
+                  // K3, difetto (e): una regola sola, quella del catalogo — «Rifiuta» è destructive
+                  // (Button), come nel centro «Da approvare» e nella coda della squadra
                   <Button
-                    variant="secondary"
-                    className={SU_CARD}
+                    variant="destructive"
                     onClick={() => { resolve(entry.agentId, approvalId!, 'deny', 'once', 'chat'); refreshSquadData({ forceBadges: true }) }}
                   >
                     <Trans>Rifiuta</Trans>

@@ -39,3 +39,27 @@ describe('K3 (c): la card scaduta dice una frase del catalogo, mai lo stato grez
     expect(rigaDecisa('uno-stato-mai-visto')).not.toContain('uno-stato-mai-visto')
   })
 })
+
+describe('K3 (e): «Rifiuta» è UNA regola sola, quella del catalogo (Button destructive)', () => {
+  /** Per ogni bottone «Rifiuta» il suo fondo: rosso pieno (destructive), fondo card o tenue (secondario). */
+  const fondi = (root: HtmlNode): string[][] => findAll(root, (n) => n.tag === 'button' && textOf(n) === 'Rifiuta')
+    .map((b) => classes(b).filter((c) => c === 'bg-destructive' || c === 'bg-card' || c === 'bg-muted'))
+
+  it('nella card dei messaggi, nel riquadro sopra il campo e nella coda della squadra «Rifiuta» è lo STESSO bottone: rosso pieno, mai secondario', () => {
+    const card = fondi(albero(ApprovalCard, { entry: COMANDO() }))
+    const riquadro = fondi(albero(ApprovalRequestContent, { entry: COMANDO(), agentName: 'Nora' }))
+    setStoreStateForRender(useStore, {
+      openGroupId: 1,
+      groups: [{ id: 1, name: 'Weekend Torino', description: '', createdBy: 'user', coordinatorId: 'a1', members: [{ agentId: 'a1', name: 'Capo', coordinator: true }], createdAt: 1, lastMessageAt: null, autonomy: 'box' }],
+      groupPending: [{ agentId: 'a2', agentName: 'Turismo', approvalId: 'ap-1', tool: 'fill_credential', phrase: 'Compilare il modulo.', category: 'dati-tuoi', why: 'fisso', when: Date.now() - 120_000, fromSubagent: false }],
+      groupActivity: [], groupReviewerPassed: []
+    })
+    const coda = fondi(albero(ApprovalsQueue, {}))
+    expect(card).toHaveLength(1)
+    expect(riquadro).toHaveLength(1)
+    expect(coda).toHaveLength(1)
+    for (const [dove, f] of [['card', card], ['riquadro', riquadro], ['coda', coda]] as const) {
+      expect(f[0], dove).toEqual(['bg-destructive'])
+    }
+  })
+})
