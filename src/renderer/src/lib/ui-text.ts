@@ -37,6 +37,23 @@ export function uiTextOfMeta(meta: Record<string, unknown> | null | undefined): 
   return list.map((u) => i18n._(u.id, u.values ?? {})).join('; ')
 }
 
+/**
+ * K2 (fase conversione-chat): il MOTIVO dell'errore di una card, dal meta
+ * dell'entry. Il daemon lo salva in `error` quando il click non riesce
+ * (Aggiungi · Installa): alla RIAPERTURA della chat la card lo ritrova qui,
+ * non nel risultato della chiamata — prima lo perdeva e diceva solo «— chiudi».
+ * Il testo com'è quando è testo; quando è un CODICE del catalogo UI
+ * ({id, values}, come meta.ui) nella lingua attiva. Null se non c'è.
+ */
+export function erroreOfMeta(meta: Record<string, unknown> | null | undefined): string | null {
+  const raw = meta?.error
+  if (typeof raw === 'string') return raw.trim() ? raw : null
+  if (!raw || typeof raw !== 'object') return null
+  const { id, values } = raw as { id?: unknown; values?: unknown }
+  if (typeof id !== 'string') return null
+  return i18n._(id, values && typeof values === 'object' ? (values as Record<string, string | number>) : {})
+}
+
 /** Il testo da mostrare dell'entry: meta.ui se c'è (nella lingua attiva), altrimenti il content. */
 export function uiTextOf(entry: Pick<TranscriptEntry, 'content' | 'meta'>): string {
   return uiTextOfMeta(entry.meta) ?? entry.content

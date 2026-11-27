@@ -289,7 +289,8 @@ export const CardInChat = ({ id }: { id: IdCard }) => {
           <Campione card="mcp-server" stato="in attesa (remoto, di terze parti)"><McpServerCard entry={card(1, serverRemoto)} /></Campione>
           <Campione card="mcp-server" stato="in attesa (npm, non fidato)"><McpServerCard entry={card(2, serverNpm)} /></Campione>
           <Campione card="mcp-server" stato="decisa: aggiunto"><McpServerCard entry={card(3, serverRemoto, { status: 'installed' })} /></Campione>
-          <Campione card="mcp-server" stato="errore"><McpServerCard entry={card(5, serverRemoto, { status: 'error' })} /></Campione>
+          {/* K2: il motivo c'è — è quello che il daemon salva nell'entry quando il click non riesce (prima la card diceva solo «✕ — chiudi») */}
+          <Campione card="mcp-server" stato="errore"><McpServerCard entry={card(5, serverRemoto, { status: 'error', error: 'not installable here: the entry exposes neither remotes nor npm packages' })} /></Campione>
         </Sezione>
       )
     case 'card-proposta-2':
@@ -297,7 +298,7 @@ export const CardInChat = ({ id }: { id: IdCard }) => {
         <Sezione titolo="PluginInstallProposal e McpWindowCard — plugin e server" testId="galleria-section-card-proposta-2">
           <Campione card="plugin-da-installare" stato="in attesa"><PluginInstallProposal entry={card(12, plugin)} /></Campione>
           <Campione card="plugin-da-installare" stato="decisa: installato"><PluginInstallProposal entry={card(13, plugin, { status: 'installed' })} /></Campione>
-          <Campione card="plugin-da-installare" stato="errore"><PluginInstallProposal entry={card(14, plugin, { status: 'error' })} /></Campione>
+          <Campione card="plugin-da-installare" stato="errore"><PluginInstallProposal entry={card(14, plugin, { status: 'error', error: 'plugin download failed: 404 Not Found' })} /></Campione>
           <Campione card="finestra-mcp" stato="in attesa"><McpWindowCard entry={card(7, { type: 'mcp-window', service: 'Mattermost', reason: 'Per postare nel canale #lancio del tuo team.' })} /></Campione>
         </Sezione>
       )

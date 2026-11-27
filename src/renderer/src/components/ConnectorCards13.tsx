@@ -24,6 +24,7 @@ import { stradaOfServer, stradaLabel } from '../lib/plugins-view'
 import { logoUrlForName } from '../lib/app-logos'
 import { AppLogo } from './ui/app-logo'
 import { i18n } from '../lib/i18n'
+import { erroreOfMeta } from '../lib/ui-text'
 import type { McpServerSetupSpec, TranscriptEntry } from '../../../shared/types'
 import { CardShell } from './DecidedRow'
 import { Button } from './ui/button'
@@ -107,7 +108,7 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
   const [status, setStatus] = useState<'pending' | 'installing' | 'installed' | 'error'>(
     entry.meta?.status === 'installed' ? 'installed' : entry.meta?.status === 'error' ? 'error' : 'pending'
   )
-  const [error, setError] = useState<string>('')
+  const [error, setError] = useState<string | null>(null)
   // fase mcp-setup (M4): lo spec VERO del modulo (dal server) dopo «Aggiungi»
   const [spec, setSpec] = useState<McpServerSetupSpec | null>(null)
   const [connected, setConnected] = useState<boolean | null>(null)
@@ -185,6 +186,9 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
           : null
 
   const cardSpec = spec ?? specOfCard(message)
+  // K2: il motivo dell'errore — quello del click, oppure quello che il daemon
+  // ha salvato nell'entry (la riapertura della chat); senza, la frase di ripiego
+  const motivo = error ?? erroreOfMeta(entry.meta) ?? t`Non riuscito`
 
   // dopo il collegamento riuscito la card si chiude in UNA riga (M4.3)
   if (status === 'installed' && connected === true) {
@@ -256,7 +260,7 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
         <p className="mt-3 text-small text-chart-2"><Trans>✓ Aggiunto — il bot ha ricevuto l'esito</Trans></p>
       ) : status === 'error' ? (
         <p className="mt-3 wrap-anywhere text-small text-destructive">
-          <X className="inline-block size-4 align-text-bottom" aria-hidden="true" /> {error} — <button className="underline" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}><Trans>chiudi</Trans></button>
+          <X className="inline-block size-4 align-text-bottom" aria-hidden="true" /> {motivo} — <button className="underline" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}><Trans>chiudi</Trans></button>
         </p>
       ) : (
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -410,7 +414,7 @@ export function PluginInstallProposal({ entry }: { entry: TranscriptEntry }) {
   const [status, setStatus] = useState<'pending' | 'installing' | 'installed' | 'error'>(
     entry.meta?.status === 'installed' ? 'installed' : entry.meta?.status === 'error' ? 'error' : 'pending'
   )
-  const [error, setError] = useState<string>('')
+  const [error, setError] = useState<string | null>(null)
   if (message.type !== 'plugin') return null
 
   // fase 17c (C5): fiducia dal codice official, fallback sul campo grezzo
@@ -436,6 +440,9 @@ export function PluginInstallProposal({ entry }: { entry: TranscriptEntry }) {
       setStatus('error')
     }
   }
+
+  // K2: il motivo dell'errore, come nella card del server (il click, o l'entry salvata)
+  const motivo = error ?? erroreOfMeta(entry.meta) ?? t`Non riuscito`
 
   return (
     <CardShell>
@@ -466,7 +473,7 @@ export function PluginInstallProposal({ entry }: { entry: TranscriptEntry }) {
         <p className="mt-3 text-small text-chart-2"><Trans>✓ Installato — il bot ha ricevuto l'esito</Trans></p>
       ) : status === 'error' ? (
         <p className="mt-3 wrap-anywhere text-small text-destructive">
-          <X className="inline-block size-4 align-text-bottom" aria-hidden="true" /> {error} — <button className="underline" onClick={() => void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined)}><Trans>chiudi</Trans></button>
+          <X className="inline-block size-4 align-text-bottom" aria-hidden="true" /> {motivo} — <button className="underline" onClick={() => void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined)}><Trans>chiudi</Trans></button>
         </p>
       ) : (
         <div className="mt-4 flex flex-wrap items-center gap-2">
