@@ -1,3 +1,137 @@
+# REPORT FASE MEMORIA-ENGRAMMA v0.6.20: chiusura — Homun passa da Engramma v0.4.3 a v0.6.20 (il lock al tag fase-v0.6.20), e prepare-engramma copia in vendor file coi modi normali
+
+Base: `main` al commit `fd494b8b` («CHANGELOG: beta.22», subito sopra il tag `fase-ci-percorso-temporanei`). Tag di chiusura: `fase-memoria-engramma-v0620`, annotato, sul commit di questo REPORT. Spec: `fase-memoria-engramma-v0619.md` — il nome della spec dice v0.6.19; la fase è poi arrivata al motore **v0.6.20** (tappa 6), e il tag segue il motore agganciato. Freeze 0.3.1002: si aggiorna solo il motore, nessuna funzione nuova. CHANGELOG invariato (la sezione la scrive Fabio al rilascio). Nessun push, nessun tag `v*`.
+
+## I commit della fase
+
+| punto | commit | cosa |
+|---|---|---|
+| E0 | `37ad4761`, `37742e75` | il lock al tag `fase-v0.6.19`; la copia del v0.4.3 per le prove; i pin della versione |
+| E1 | `8925a367`, `af68f76c`, `27b28fc4` | la copia prima della migrazione; lo schema letto senza aprire la cella; il ripristino; lo spazio (2 × la cartella + 256 MB) |
+| E2 | `9055555a3` | la migrazione uguale campo per campo; la nota external dal bot |
+| tappa 4 | `74546244` | la nota external confermata, riscritta dall'utente, resta attiva |
+| E3 | `ac3f89b7` | `SCHEMA_TOO_NEW` e gli errori del motore detti bene |
+| tappa 5 | `17f3d6bd` | le azioni dell'utente firmate `homun:user` |
+| tappa 6 | `4c50f4bd`, `8c0c3682` | il lock al tag `fase-v0.6.20`; dalla migrazione nessuna copia di conflitto |
+| tappa 7 | `f3dad1f9` | prepare-engramma: in vendor i modi normali (0644) |
+| REPORT | questo commit | la sezione in cima, coda byte-identica |
+
+In mezzo ci sono i commit di fase-conversione-chat (`087b2e3c`, `d54c228e` … `2723e315`): non sono di questa fase e non sono stati toccati. I dettagli di ogni commit stanno nel suo messaggio (`git log --format=%B -1 <hash>`).
+
+## La fase, in breve
+
+- **E0.** Il lock passa al tag `fase-v0.6.19` (versione `0.6.19-beta.1`, commit `9929f5a`: l'oggetto del tag annotato), a mano e mai con `--update-lock`; SHA e dimensioni dei tre file verificati col `SHA256SUMS` della cartella `aggancio-v0.6.19/`. `prepare-engramma` con `ENGRAMMA_NODE_DIR` su quella cartella: la prima corsa copia e verifica, la seconda non tocca nulla. Il `.node` v0.4.3 (con `index.js` e `index.d.ts`) copiato fuori dal repo PRIMA del cambio: non è in git, e serve a E2 a creare le celle vecchie e a vedere i rossi.
+- **E1.** La prima volta che il motore nuovo trova celle di uno schema più vecchio, Homun copia prima l'intera `memory/` in `memory-backup-schema<N>-<data>/` accanto (`.sqlite` e loro `-wal`/`-shm`), a motore chiuso, verificata file per file con l'hash, una volta sola per schema. Lo schema si legge SENZA il motore (sqlite in sola lettura sulla tabella `meta`: aprirla col motore la migrerebbe) e non nasce né `-wal` né `-shm`. Senza spazio — libero minore di **2 × `memory/` + 256 MB**, deciso dal revisore al posto dei 5 GB delle build (`27b28fc4`) — non migra: la memoria risulta non disponibile col motivo «Serve spazio sul disco per aggiornare la memoria in sicurezza: liberane N GB» e il resto dell'app funziona. Il ripristino è scritto in `docs/MEMORIA.md` e un test lo esegue: dopo il ripristino il v0.4.3 riapre le celle com'erano.
+- **E2.** La migrazione provata su celle vere della v0.4.3 (scritte col `.node` vecchio, con gli actor di Homun, la storia, le lapidi, una purgata, una dimenticata con `dropCell`, i vettori): `verify()` verde; `list`, `get`, `search` e `history` uguali campo per campo; `put`, `purge`, `dropCell` ed `embedPending` funzionano; una seconda apertura non rifà il backup. Rossi prima col v0.4.3: 7. **Il difetto del MOTORE 0.6.19** — dalla migrazione nasceva una copia di conflitto per ogni riscrittura precedente alla v0.6, perché quelle operazioni non hanno base — l'ha segnalato il revisore a Engramma, che l'ha corretto nella **0.6.20**: col motore nuovo il test è verde, senza `it.fails` (`8c0c3682`). Non sono gli actor di Homun.
+- **La nota external confermata** (`74546244`). Il motore nuovo rifiuta una riscrittura che la lascerebbe attiva (era attiva col v0.4.3). Una regola sola: **dal bot** la riscrittura (`update_memory`) la rimette in quarantena, external com'era, e l'utente la conferma dal bottone; **dall'utente**, dall'interfaccia della memoria, resta attiva col testo nuovo (patch + confirm, due operazioni firmate `homun:user`).
+- **E3.** `SCHEMA_TOO_NEW` — una cella scritta da un Engramma più recente del `.node`, per esempio la CLI o l'MCP — diventa il motivo «schema-too-new»: la memoria risulta non disponibile, la sezione Memoria dice «Questa memoria è stata aggiornata da una versione più recente di Engramma: aggiorna Homun» (catalogo it ed en) e la cella non si tocca, byte per byte (lo schema lo legge Homun, senza il motore, prima di copiare o aprire). Ogni punto in cui un errore del motore arriva all'interfaccia passa da `e.code` a una frase del catalogo (come già `CONFLICT`, `NOT_FOUND`, `INVALID_NOTE`); `MemoryPanel` mostra gli errori. L'elenco degli `e.code` di `index.d.ts` è nel messaggio di `ac3f89b7`.
+- **Tappa 5** (`17f3d6bd`). Le azioni dell'utente dall'interfaccia della memoria sono firmate `homun:user`.
+- **L'aggancio alla 0.6.20** (`4c50f4bd`, `8c0c3682`). Il lock passa al tag `fase-v0.6.20` (versione `0.6.20-beta.1`, commit `81530c03`, release `engramma-fase-v0.6.20`; `.node` `6c6ae78a`, 51 257 272 B; `index.js` `5c6b9b6a`; `index.d.ts` `b1807110`, uguale alla 0.6.19), sempre a mano.
+- **E4 (misura, nessun commit; solo col modello finto).** La RSS del demone a riposo va da 1251 a 986 MB. L'inserimento è 3× più lento (1000 note da 1,8 a 5,5 s): è una regressione del motore, che Engramma rintraccia — non un prezzo accettato.
+
+## Tappa 7, punto 1 — prepare-engramma copia in vendor file coi modi normali (`f3dad1f9`)
+
+**Il difetto, segnalato dal revisore.** `copyFileSync` porta con sé i modi della sorgente. Le sorgenti del motore sono le cartelle `aggancio-v*`, in sola lettura (`.node` 0555, `index.js` e `index.d.ts` 0444): il primo aggancio lasciava in `vendor/engramma/` tre file in sola lettura, e l'aggancio successivo (il lock cambia, il `.node` va riscritto sopra) cadeva con `EACCES: permission denied, copyfile`. Stesso buco dalla via dell'asset, quella della CI.
+
+**Visto ROSSO prima, due volte.**
+
+1. *Dal vero*, con la funzione dello script com'era a `8c0c3682` (letto da git, senza checkout), le sorgenti vere `aggancio-v0.6.19` e `aggancio-v0.6.20` e i lock veri delle due versioni, su un vendor FINTO in una temporanea (il `vendor/engramma/` del repo non si tocca; la temporanea si cancella a fine prova) — `node riproduzione.mjs prepare-engramma.prima.mjs lock-0.6.19.json lock-0.6.20.json`:
+
+   ```
+   sorgenti: 0555 / 0444 (0.6.19), 0555 / 0444 (0.6.20)
+   1. aggancio 0.6.19: copiati 3/3 — modi in vendor: engramma.darwin-arm64.node 0555, index.js 0444, index.d.ts 0444
+   ROSSO: EACCES EACCES: permission denied, copyfile '…/aggancio-v0.6.20/engramma.darwin-arm64.node' -> '…/vendor/engramma.darwin-arm64.node'
+   ```
+
+2. *Tre test nuovi*, rossi coi soli test aggiunti (`out/prepare-1-rosso.txt`: 2 file, 3 rossi e 24 verdi su 27). In `scripts/__tests__/prepare-engramma.test.ts`: «da una sorgente in SOLA LETTURA (aggancio-v*) i file copiati in vendor hanno modi normali (0644)» — `engramma.darwin-arm64.node: expected 365 to be 420` (0555 contro 0644) — e «l'aggancio SUCCESSIVO riesce anche se in vendor c'è una copia in sola lettura (prima: EACCES)» — `EACCES`. In `scripts/__tests__/prepare-engramma-release.test.ts`: «vendor con una copia in SOLA LETTURA: la via dell'asset la riscrive (prima: EACCES) e lascia 0644» — `EACCES`.
+
+**La correzione.** Una funzione sola, `copyIntoVendor(src, dst)`, al posto delle due `copyFileSync` che scrivono in vendor (via del crate e via dell'asset): se in vendor c'è già il file lo riapre alla scrittura (chmod: il proprietario può, anche su un file in sola lettura), copia, e mette i modi normali — 0644 fisso, non quelli della sorgente meno l'umask. La sorgente non si tocca. Il cammino veloce (vendor già coi tre hash del lock) non cambia: non tocca nulla. I file che saltano perché già giusti non si toccano.
+
+**Verdi dopo.** I due file 27/27 (`out/prepare-3-verde.txt`). La riproduzione dal vero con lo script di ORA (`out/prepare-5-verde-dal-vivo-dopo.txt`): aggancio 0.6.19 con i tre file a 0644; aggancio 0.6.20 che copia `.node` e `index.js` e verifica `index.d.ts` (3/3 a 0644); seconda corsa «vendor», 0 copie e 3/3 verificati. Typecheck verde. Suite intera prima del commit (vitest diretto, senza gli hook di `pretest`: `out/prepare-4-suite-prima-del-commit.txt`): 585 file passati e 1 saltato, 7124 test passati e 14 saltati.
+
+**Da sapere.** I tre file che ORA stanno in `vendor/engramma/` (la copia delle 20:29, fatta con lo script vecchio) sono ancora in sola lettura sul disco. Git non li traccia (nel repo c'è solo il lock) e non danno fastidio finché il cammino veloce li lascia stare; li porta a 0644 il prossimo aggancio. A mano non li ho toccati.
+
+## Tappa 7, punto 2 — le due sonde della memoria, da sole
+
+Lanciate una alla volta, uscita su file, dall'albero a `f3dad1f9`:
+
+| sonda | inizio → fine (CET) | controlli | verdi | rossi |
+|---|---|---|---|---|
+| `fase-memoria-engramma` | 20:54:54 → 20:56:28 | 23 | 22 | 1 (uscita 1) |
+| `fase-memoria-engramma-correzioni` | 20:56:33 → 20:57:10 | 31 | 31 | 0 (uscita 0) |
+
+**L'unico rosso, ed è DI PRIMA:** `KO modello: motore riaperto con l'embedder — [sandbotd] memoria Engramma: modello collegato (ricerca ibrida), incorporazione in coda`. La sonda aspetta che il motore venga RIAPERTO con l'embedder dopo il download (la riga «modello caricato (ibrida)» nel log); dalla v0.4.2 il motore collega il modello a caldo, senza riaprirsi, e il log lo dice così. È l'unico controllo che la sonda perde per conto suo, lo stesso «1 KO» che le contava l'inventario di isolamento-locale. **Di questa fase: nessuno.** Le due sonde fanno girare l'app IMPACCHETTATA di `dist-installers/` (del 10 novembre: dentro ha il motore «0.1.0-dev», come dice la sua riga «migrazione: motore attivo e senza modello — versione 0.1.0-dev») e gli script sono identici a quelli della base: di questa fase non esercitano niente. Sta qui come «non regrediscono», non come prova del motore 0.6.20.
+
+Le due sonde hanno riscritto 5 catture (`docs/catture/fase-memoria-engramma/` e `…-correzioni/`): riportate a HEAD con `git checkout -- docs/catture docs/misure` subito dopo (0 file diversi).
+
+**Da sapere, e lo dico com'è.** La sonda `fase-memoria-engramma` al passo 3 fa il download del modello DAL VIVO, dal click: lo dice la sua testa («l'unico download: parte dal click»), con la HOME vera. L'ho lanciata com'è, come chiesto. All'inizio il motore dell'impacchettata diceva «senza modello» e 14 s dopo il click «download completato e presente»: è il tempo di un trasferimento, non di una verifica di file già presenti (la sonda sorella, che lo prende da un server locale, impiega 12 s). Prima di lanciarla non ho potuto guardare la cache dei modelli (il comando è stato negato, sotto) e avevo letto in `index.d.ts` che i file già presenti si verificano e si saltano. Quindi questa corsa ha toccato la rete una volta, per il passo della sonda: non rientra in «nessun download vero», e la cache dei modelli sotto la HOME vera (non la cartella dati di Homun, che è rimasta temporanea ed è stata rimossa) può aver ricevuto il modello del motore vecchio.
+
+## Tappa 7, punto 3 — fatto.mjs, da solo, dopo l'ultimo commit di codice
+
+`node scripts/fatto.mjs --sonde fase-design,fase-plugin-pulita,fase-b20-bug,fase-centro,fase-squadra,fase-isolamento-locale`, da solo, sull'albero a `f3dad1f9` (l'ultimo commit di codice), uscita su file (`out/fatto.txt`; i log dei passi in `fatto-uscite/`): **VERDE**, **2026-11-27 20:57:49 → 21:24:03 CET** (26 min 14 s), uscita 0, nessun passo rosso.
+
+| passo | esito | durata |
+|---|---|---|
+| typecheck | OK | 1,1 s |
+| suite: `npm test` | OK | 54,5 s |
+| suite: ci-sim | OK | 55,9 s |
+| build (electron-vite diretto) | OK | 3,1 s |
+| galleria | OK | 6 min 5 s |
+| sonda fase-design | OK | 15 min 8 s |
+| sonda fase-plugin-pulita | OK | 18,6 s |
+| sonda fase-b20-bug | OK | 18,4 s |
+| sonda fase-centro | OK | 11,5 s |
+| sonda fase-squadra | OK | 2 min 13 s |
+| sonda fase-isolamento-locale | OK | 5 s |
+| processi del repo a 0 | OK | 0 Electron, 0 daemon |
+| nessuna temporanea nuova (del repo), radice vuota | OK | 0 nuove, 0 residui |
+
+La galleria: 160 scene, 160 uguali, 0 diverse, 0 rosse, 0 nuove senza approvata, 0 errori. Nella spec erano 118: sono cresciute con i commit di fase-conversione-chat, non di questa fase. Nessuna scena riapprovata (non ce n'è stato bisogno). Le sonde: 8/8, 114/114, 77/77, 56/56, 33/33, 28/28; I1 verde in tutte e sei (il registro delle connessioni ai servizi LLM locali veri è vuoto) e nessun tentativo verso 11434 e 1234 nei loro log.
+
+## Suite e ci-sim dopo l'ultimo commit di codice (dalla corsa di fatto.mjs)
+
+- `npm test`: 586 file, 585 passati e 1 saltato; 7138 test, 7124 passati e 14 saltati. Senza «Errors». Dentro ci sono i tre test di prepare-engramma.
+- `npm run test:ci-sim`: 586 file, 583 passati e 3 saltati; 7138 test, 7120 passati e 18 saltati. Senza «Errors». Docker Desktop non risponde, come sempre: la suite non lo dipende.
+- Le catture e le misure riscritte dalle sonde di fatto.mjs sono riportate a HEAD (`git checkout -- docs/catture docs/misure`): git pulito a parte `out-review/` e `scripts/vetrina/`.
+
+## Che cosa i controlli NON vedono
+
+- La correzione di prepare-engramma non è mai corsa sul `vendor/engramma/` vero: la prova vera è la riproduzione su un vendor finto; il primo aggancio vero la userà al prossimo cambio del motore.
+- Le due sonde della memoria dicono come sta l'impacchettata del 10 novembre, non il motore 0.6.20 (sopra).
+- In `T/` ci sono cinque cartelle di corse PRECEDENTI, non mie, che non ho toccato: `sandbot-v0619-tappa1-Col9xQ` e `sandbot-v0619-tappa6-verifica-{6xByiP,IBPHpB,Of8wIO,vi5OEJ}`.
+
+## Comandi negati dallo strumento
+
+- Un comando composto (tra le altre cose leggeva `git config` e scriveva il messaggio di commit con un heredoc, prima di `git add` e `git commit`): negato per intero. Non l'ho rifatto com'era: il messaggio l'ho scritto con lo strumento di scrittura dei file e il commit l'ho fatto da solo, in un comando a parte. Il commit è quello voluto, niente di più.
+- `ls` e `du` di `~/.cache/engramma/models` e una ricerca in `~/Projects/Bot/engramma` (volevo capire, prima delle sonde, se il pull del modello toccava la rete): negato. Non ho provato in un altro modo; la conseguenza sta nel «da sapere» delle sonde.
+- `rm -rf`: negato dalle regole. Le cartelle temporanee restano a terra e sono elencate in Chiusura.
+
+## Scelte fatte da me
+
+- `copyIntoVendor` riapre il file alla scrittura PRIMA di copiarci (chmod) invece di toglierlo e ricopiarlo: un passo solo, e vale anche per il file che non c'è. I modi sono 0644 fisso, come chiesto, non «quelli della sorgente meno l'umask».
+- Tre test, non uno: i due del crate (i modi; l'aggancio successivo) e uno della via dell'asset, perché il buco era in tutte e due le vie.
+- Prima del commit ho fatto girare la suite con vitest diretto, senza gli hook di `pretest` (non volevo che `prepare-engramma` scrivesse in `vendor/` prima del commit): la corsa che conta è quella di fatto.mjs.
+- Ho provato a chiudere la rete alle sonde con un recinto (`sandbox-exec`, rete solo sul loopback), per rispettare «nessun download vero». L'autotest non ha provato nulla (la connessione fuori dal loopback è andata in timeout, non rifiutata) e la sua prima versione è rimasta appesa: l'ho fermata e ho lasciato perdere. Le sonde sono girate senza recinto.
+- I modi dei tre file in `vendor/engramma/` non li ho cambiati a mano: `vendor/` non si tocca.
+- Le catture riscritte dalle sonde le ho riportate a HEAD prima di fatto.mjs e le riporto di nuovo dopo (le sonde di fatto.mjs ne riscrivono altre).
+
+## Domande aperte
+
+- La sonda `fase-memoria-engramma` fa ancora il download del modello dal vivo, con la HOME vera, e questa corsa l'ha fatto. Le faccio avere il server locale del modello come sua sorella (`ENGRAMMA_PULL_BASE`, la copia di `~/.cache/engramma/models`), così la prossima chiusura non tocca più la rete — oppure la lasciamo com'è e la lanciamo solo a mano, sapendolo?
+
+## Chiusura
+
+- fatto.mjs VERDE dopo l'ultimo commit di codice (sopra); suite e ci-sim senza «Errors».
+- Il tag `fase-memoria-engramma-v0620`, annotato, sul commit di questo REPORT. Nessun push, nessun tag `v*`, nessuna release. CHANGELOG invariato dalla base (`git diff --stat fd494b8b HEAD -- CHANGELOG.md` è vuoto).
+- `REPORT.md`: la sezione nuova in cima e la coda byte-identica — `cmp` della coda contro la copia di prima (2 527 824 byte).
+- git pulito a parte `out-review/` e `scripts/vetrina/`; processi Electron e `--homun-daemon` DEL REPO 0 (`ps -axo pid=,comm=`), dopo le due sonde della memoria e dopo fatto.mjs.
+- `vendor/`, `dist-installers/`, `out-review/` e `scripts/vetrina/` intatti: i tre file di `vendor/engramma/` hanno ancora modi e tempi delle 20:29 (l'hook di `pretest` di fatto.mjs è passato dal cammino veloce).
+- Niente Docker, npm vero, `open`, `osascript`, `sudo`; l'app e il demone mai avviati sulla cartella dati vera; catture solo via CDP; `--update-lock` mai.
+- **Temporanee residue in `T/`** — `rm -rf` è negato, restano a terra:
+  - la mia, la radice di corsa: `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/sandbot-chiusura-v0620.Rjqbg3` (circa 5 MB: due copie del REPORT — `REPORT.prima.md` e `REPORT.nuovo.md` — e in `out/` i log citati in questa sezione; più lo script di riproduzione e il profilo del recinto). Da buttare.
+  - cinque di corse PRECEDENTI, non mie e non toccate: `sandbot-v0619-tappa1-Col9xQ` e `sandbot-v0619-tappa6-verifica-6xByiP`, `-IBPHpB`, `-Of8wIO`, `-vi5OEJ`.
+  - Le due sonde della memoria e la corsa di fatto.mjs hanno tolto le loro (`sandbot-fase-memoria-engramma-EMnQXh`, `sandbot-fase-memoria-correzioni-uxEVmk`, `fatto-5OXjo7`); le cartelle dei test le toglie la suite.
+
 # REPORT FASE CI-PERCORSO-TEMPORANEI: la CI della beta.21 era rossa per un percorso del Mac scritto fisso — il censimento usa la base condivisa e una guardia non lo fa tornare
 
 Base: `main` al commit `3fa9142e` («CHANGELOG: beta.21», dove sta il tag `v0.3.1001-beta.21`), verificata: HEAD era esattamente lì, git pulito a parte `out-review/` e `scripts/vetrina/` (non toccate). Freeze 0.3.1002: solo i due punti della spec, niente altro. Due commit di codice, uno per punto: P1 `7e6f9bce`, P2 `f51f79fe`; più questo REPORT. CHANGELOG invariato.
