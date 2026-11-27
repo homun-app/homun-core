@@ -664,7 +664,7 @@ describe('DS4: il riquadro «+N altrove» in cima alle chat', () => {
     return renderHtml(createElement(ApprovalsBannerElsewhere, excludeBotId === undefined ? null : ({ excludeBotId } as never)))
   }
 
-  it('è una riga compatta (un Notice in text-body, dentro una scheda rounded-surface) alla larghezza della colonna di lettura, con un\'azione Button; dentro approvals-banner c\'è un bottone (la sonda lo apre da lì)', () => {
+  it('è una riga compatta (un Notice in text-body, dentro una Card: la superficie del catalogo) alla larghezza della colonna di lettura, con un\'azione Button; dentro approvals-banner c\'è un bottone (la sonda lo apre da lì)', () => {
     const root = parseHtml(renderRiquadro(altrove(2)))
     const riquadro = byTestid(root, 'approvals-banner')
     expectHasAll(riquadro, ['px-page-margin'])
@@ -672,8 +672,10 @@ describe('DS4: il riquadro «+N altrove» in cima alle chat', () => {
     const bottone = first(riquadro, (n) => n.tag === 'button')
     expect(textOf(bottone)).toBe('Apri «Da approvare»')
     expectHasAll(bottone, ['h-control-sm', 'bg-muted'])
+    // K3 (fase conversione-chat): la superficie è Card (il catalogo: raggio di superficie, bordo, fondo card, respiro 16); dentro, il Notice in corpo e in peso 600
     const avviso = first(riquadro, (n) => 'data-notice' in n.attrs)
-    expectHasAll(avviso, ['rounded-surface', 'border', 'bg-card', 'p-3', 'text-body', 'text-waiting'])
+    expectHasAll(avviso.parent!, ['rounded-surface', 'border', 'bg-card', 'p-4'])
+    expectHasAll(avviso, ['text-body', 'text-waiting', 'font-semibold'])
     expect(textOf(avviso)).toBe('+2 altroveApri «Da approvare»')
     // l'icona: 16 px, nello slot di Notice
     expect(has(first(avviso, (n) => n.tag === 'svg'), 'size-4')).toBe(true)

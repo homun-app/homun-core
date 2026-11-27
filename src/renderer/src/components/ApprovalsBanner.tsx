@@ -20,7 +20,11 @@ import { ShieldAlert } from 'lucide-react'
 import { useStore } from '../store'
 import type { ApprovalsCenterRow } from '../../../shared/types'
 import { visibleApprovalsRows } from '../lib/approvals-center'
+// K3 (fase conversione-chat): il riquadro è Card (la superficie del catalogo)
+// con dentro Notice (taglia corpo, peso 600: è un invito a decidere); lo
+// spazio in cima lo chiede alla colonna (sottoTestata).
 import { Button } from './ui/button'
+import { Card } from './ui/card'
 import { Notice } from './ui/notice'
 import { PageColumn } from './ui/page-shell'
 
@@ -43,20 +47,23 @@ export function ApprovalsBannerElsewhere({ excludeBotId }: { excludeBotId?: stri
   return (
     // il testid sta sul contenitore e DENTRO c'è il bottone: la sonda del
     // centro apre il riquadro con `[data-testid="approvals-banner"] button`
-    <PageColumn width="reading" testId="approvals-banner" className="mb-2 pt-16">
-      <Notice
-        // il tono dell'attesa (text-waiting): è un invito a decidere, non un avviso grigio
-        tone="warning"
-        icon={<ShieldAlert className="size-4" />}
-        action={
-          <Button variant="secondary" size="sm" onClick={() => setApprovalsOpen(true)}>
-            <Trans>Apri «Da approvare»</Trans>
-          </Button>
-        }
-        className="rounded-surface border border-border bg-card p-3 text-body"
-      >
-        <span className="font-semibold">+{elsewhere.length} {i18n.t(msg`altrove`)}</span>
-      </Notice>
+    <PageColumn width="reading" testId="approvals-banner" className="mb-2" sottoTestata>
+      <Card>
+        <Notice
+          // il tono dell'attesa (text-waiting): è un invito a decidere, non un avviso grigio
+          tone="warning"
+          size="body"
+          weight="semibold"
+          icon={<ShieldAlert className="size-4" />}
+          action={
+            <Button variant="secondary" size="sm" onClick={() => setApprovalsOpen(true)}>
+              <Trans>Apri «Da approvare»</Trans>
+            </Button>
+          }
+        >
+          +{elsewhere.length} {i18n.t(msg`altrove`)}
+        </Notice>
+      </Card>
     </PageColumn>
   )
 }
